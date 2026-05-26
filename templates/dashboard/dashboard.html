@@ -96,10 +96,12 @@
                 <a href="{% url 'ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action px-4 py-2 {% if ticket.is_sla_breached %}list-group-item-danger{% endif %}">
                     <div class="d-flex justify-content-between align-items-center">
                         <span class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</span>
-                        {% if ticket.status == 'Open' %}
-                            <span class="badge rounded-pill bg-danger" style="font-size:0.65rem;">Open</span>
+                        {% if ticket.status == 'NEW' %}
+                            <span class="badge rounded-pill bg-danger" style="font-size:0.65rem;">แจ้งใหม่</span>
+                        {% elif ticket.status == 'AWAITING_CONTAINMENT' %}
+                            <span class="badge rounded-pill bg-warning text-dark" style="font-size:0.65rem;">รอการจัดการ</span>
                         {% else %}
-                            <span class="badge rounded-pill" style="background:#0dcaf0;color:#000;font-size:0.65rem;">In Progress</span>
+                            <span class="badge rounded-pill bg-info text-dark" style="font-size:0.65rem;">{{ ticket.get_status_display }}</span>
                         {% endif %}
                     </div>
                     <div class="text-muted small text-truncate">{{ ticket.get_detailed_issue2_display }}</div>

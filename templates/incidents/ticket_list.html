@@ -58,12 +58,18 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if ticket.status == 'Open' %}
-                            <span class="badge rounded-pill" style="background:#dc3545;">รอดำเนินการ</span>
-                        {% elif ticket.status == 'In Progress' %}
-                            <span class="badge rounded-pill" style="background:#0dcaf0; color:#000;">กำลังแก้ไข</span>
+                        {% if ticket.status == 'NEW' %}
+                            <span class="badge rounded-pill bg-danger">แจ้งเหตุใหม่</span>
+                        {% elif ticket.status == 'AWAITING_CONTAINMENT' %}
+                            <span class="badge rounded-pill bg-warning text-dark">รอการจัดการ</span>
+                        {% elif ticket.status == 'CONTAINMENT_REPORTED' %}
+                            <span class="badge rounded-pill bg-info text-dark">รายงานแล้ว</span>
+                        {% elif ticket.status == 'UNDER_REVIEW' %}
+                            <span class="badge rounded-pill bg-primary">กำลังตรวจสอบ</span>
+                        {% elif ticket.status == 'VERIFIED' %}
+                            <span class="badge rounded-pill bg-success">ตรวจสอบแล้ว</span>
                         {% else %}
-                            <span class="badge rounded-pill bg-success">แก้ไขแล้ว</span>
+                            <span class="badge rounded-pill bg-secondary">{{ ticket.get_status_display }}</span>
                         {% endif %}
                     </td>
                     <td>

@@ -6,23 +6,51 @@ from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.db.models import Count
 
 from .forms import TicketForm
 from .models import Ticket, TicketLog
 
 
-def _valid_status_choices(ticket):
-    allowed = [ticket.status] + Ticket.ALLOWED_TRANSITIONS.get(ticket.status, [])
-    return [(code, label) for code, label in Ticket.STATUS_CHOICES if code in allowed]
+def _valid_soc_status_choices(ticket, user):
+    """
+    Return (code, label) choices for the SOC update-status dropdown.
+
+    Rules:
+    - Returns [] if the user is not SOC (staff or manager).
+    - Always includes the current status first (SOC note-only update).
+    - Includes each allowed next-state whose required permission is 'SOC'.
+    - Also includes 'MANAGER' states if the user is a SOC manager.
+    - Never includes 'ASSIGNED_ADMIN' transitions — those are handled by
+      the separate containment-report form.
+    """
+    profile = getattr(user, 'profile', None)
+    if profile is None or not profile.is_soc:
+        return []
+
+    status_map = dict(Ticket.STATUS_CHOICES)
+
+    # Current status first (allows note-only update without state change)
+    result = [(ticket.status, status_map.get(ticket.status, ticket.status))]
+
+    for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
+        perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
+        if perm == 'SOC':
+            result.append((next_status, status_map.get(next_status, next_status)))
+        elif perm == 'MANAGER' and profile.is_soc_manager:
+            result.append((next_status, status_map.get(next_status, next_status)))
+
+    return result
 
 
 @login_required
 def ticket_list(request):
-    tickets = Ticket.objects.exclude(status__in=['Resolved', 'Closed']).order_by('created_at')
-    sla_breach_count = Ticket.objects.filter(
+    visible = Ticket.objects.visible_to(request.user)
+    tickets = visible.exclude(
+        status__in=list(Ticket.TERMINAL_STATUSES)
+    ).order_by('created_at')
+    sla_breach_count = visible.filter(
         sla_deadline__lt=timezone.now()
-    ).exclude(status__in=['Resolved', 'Closed']).count()
+    ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
     return render(request, 'incidents/ticket_list.html', {
         'tickets': tickets,
         'sla_breach_count': sla_breach_count,
@@ -31,6 +59,11 @@ def ticket_list(request):
 
 @login_required
 def create_ticket(request):
+    profile = getattr(request.user, 'profile', None)
+    if profile is None or not profile.is_soc:
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเปิดเคสใหม่ได้')
+        return redirect('ticket_list')
+
     if request.method == 'POST':
         form = TicketForm(request.POST)
         if form.is_valid():
@@ -45,37 +78,83 @@ def create_ticket(request):
 
 @login_required
 def ticket_detail(request, pk):
-    ticket = get_object_or_404(Ticket, pk=pk)
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    is_terminal = ticket.status in Ticket.TERMINAL_STATUSES
+
+    # Only the exact assigned admin can submit the containment form, and
+    # only while the ticket is in AWAITING_CONTAINMENT.
+    can_submit_containment = (
+        not is_terminal
+        and ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT
+        and profile is not None
+        and profile.is_system_admin
+        and ticket.assigned_admin_id == request.user.pk
+    )
 
     if request.method == 'POST':
-        new_note = request.POST.get('update_notes', '').strip()
-        new_status = request.POST.get('status')
+        action = request.POST.get('action')
 
-        if new_note and new_status:
-            try:
-                ticket.transition_to(new_status, request.user, new_note)
-            except ValidationError as e:
-                messages.error(request, e.message)
-                logs = ticket.logs.all()
-                return render(request, 'incidents/ticket_detail.html', {
-                    'ticket': ticket,
-                    'logs': logs,
-                    'valid_status_choices': _valid_status_choices(ticket),
-                })
+        if action == 'containment':
+            if not can_submit_containment:
+                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
+            else:
+                report = request.POST.get('containment_report', '').strip()
+                disposition = request.POST.get('disposition', '').strip()
+                note = request.POST.get('note', '').strip()
+
+                if not report:
+                    messages.error(request, 'กรุณากรอกรายงานการควบคุม')
+                elif not disposition:
+                    messages.error(request, 'กรุณาระบุการวินิจฉัยเหตุการณ์ (True/False Positive)')
+                else:
+                    # Set fields on the instance BEFORE calling transition_to so
+                    # that transition_to's self.save() persists them atomically.
+                    ticket.disposition = disposition
+                    ticket.containment_report = report
+                    try:
+                        ticket.transition_to(
+                            Ticket.STATUS_CONTAINMENT_REPORTED,
+                            request.user,
+                            note or 'ส่งรายงานการควบคุมแล้ว',
+                        )
+                    except ValidationError as e:
+                        messages.error(request, e.message)
+
+        elif action == 'soc_update':
+            new_note = request.POST.get('update_notes', '').strip()
+            new_status = request.POST.get('status')
+
+            if not new_note:
+                messages.error(request, 'กรุณากรอกบันทึกการดำเนินการ')
+            elif new_status:
+                try:
+                    ticket.transition_to(new_status, request.user, new_note)
+                except ValidationError as e:
+                    messages.error(request, e.message)
 
         return redirect('ticket_detail', pk=pk)
 
     logs = ticket.logs.all()
+    valid_status_choices = _valid_soc_status_choices(ticket, request.user)
+
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         'logs': logs,
-        'valid_status_choices': _valid_status_choices(ticket),
+        'profile': profile,
+        'is_terminal': is_terminal,
+        'can_submit_containment': can_submit_containment,
+        'valid_status_choices': valid_status_choices,
+        'DISPOSITION_CHOICES': Ticket.DISPOSITION_CHOICES,
     })
 
 
 @login_required
 def edit_log(request, log_id):
     log = get_object_or_404(TicketLog, id=log_id)
+    # Enforce visibility on the parent ticket — 404 here means the user
+    # can reach the log URL but cannot see the ticket it belongs to.
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=log.ticket_id)
     ticket_id = log.ticket.id
 
     if request.method == 'POST':
@@ -88,7 +167,9 @@ def edit_log(request, log_id):
 
 @login_required
 def ticket_history(request):
-    query_set = Ticket.objects.filter(status__in=['Resolved', 'Closed'])
+    query_set = Ticket.objects.visible_to(request.user).filter(
+        status__in=list(Ticket.TERMINAL_STATUSES)
+    )
 
     search_ticket = request.GET.get('search_ticket')
     start_date = request.GET.get('start_date')
@@ -129,11 +210,13 @@ def export_tickets_excel(request):
     columns = ['Ticket', 'IP Source', 'รายละเอียด', 'การแก้ไข (ล่าสุด)', 'วันที่แจ้ง', 'วันที่แก้ไขเสร็จ']
     ws.append(columns)
 
-    tickets = Ticket.objects.filter(status__in=['Resolved', 'Closed']).distinct()
+    tickets = Ticket.objects.visible_to(request.user).filter(
+        status__in=list(Ticket.TERMINAL_STATUSES)
+    ).distinct()
 
     for ticket in tickets:
         last_log = ticket.logs.order_by('-created_at').first()
-        repair_detail = last_log.note if last_log else "ไม่มีข้อมูลบันทึก"
+        repair_detail = last_log.note if last_log else 'ไม่มีข้อมูลบันทึก'
         row = [
             ticket.ticket_id,
             ticket.device_name,
@@ -148,7 +231,9 @@ def export_tickets_excel(request):
         max_length = max((len(str(cell.value)) for cell in col if cell.value), default=0)
         ws.column_dimensions[col[0].column_letter].width = max_length + 2
 
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
     response['Content-Disposition'] = 'attachment; filename=ticket_history.xlsx'
     wb.save(response)
     return response

@@ -13,17 +13,19 @@ from apps.projects.models import Project, Task
 def dashboard(request):
     today = timezone.now()
 
+    terminal = list(Ticket.TERMINAL_STATUSES)
+
     # --- Ticket stats ---
-    all_active = Ticket.objects.exclude(status__in=['Resolved', 'Closed'])
+    all_active = Ticket.objects.exclude(status__in=terminal)
     sla_breached_qs = Ticket.objects.filter(
         sla_deadline__lt=today
-    ).exclude(status__in=['Resolved', 'Closed'])
+    ).exclude(status__in=terminal)
 
     stats = {
-        'open': all_active.filter(status='Open').count(),
-        'in_progress': all_active.filter(status='In Progress').count(),
+        'open': all_active.filter(status=Ticket.STATUS_NEW).count(),
+        'in_progress': all_active.exclude(status=Ticket.STATUS_NEW).count(),
         'resolved_month': Ticket.objects.filter(
-            status__in=['Resolved', 'Closed'],
+            status__in=terminal,
             updated_at__month=today.month,
             updated_at__year=today.year,
         ).count(),
@@ -62,7 +64,7 @@ def dashboard(request):
     monthly_data   = json.dumps([m['count'] for m in monthly])
 
     # --- Recent tickets & SLA breach list ---
-    recent_tickets = Ticket.objects.exclude(status__in=['Resolved', 'Closed']).order_by('-created_at')[:8]
+    recent_tickets = Ticket.objects.exclude(status__in=terminal).order_by('-created_at')[:8]
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
     # --- Recent tasks ---
