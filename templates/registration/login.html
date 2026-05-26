@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
+        <div class="col-md-5 col-lg-4">
+            <div class="text-center mb-4">
+                <div class="display-1 text-primary"><i class="bi bi-shield-lock-fill"></i></div>
+                <h2 class="fw-bold text-dark">SOC Support System</h2>
+                <p class="text-muted">กรุณาเข้าสู่ระบบเพื่อจัดการ Ticket</p>
+            </div>
+
+            <div class="card border-0 shadow-lg">
+                <div class="card-body p-5">
+                    <form method="post">
+                        {% csrf_token %}
+                        {% if form.errors %}
+                            <div class="alert alert-danger">Username หรือ Password ไม่ถูกต้อง</div>
+                        {% endif %}
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Username</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0"><i class="bi bi-person"></i></span>
+                                <input type="text" name="username" class="form-control bg-light border-start-0" placeholder="ชื่อผู้ใช้งาน" required>
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-end-0"><i class="bi bi-key"></i></span>
+                                <input type="password" name="password" class="form-control bg-light border-start-0" placeholder="รหัสผ่าน" required>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm">
+                            เข้าสู่ระบบ <i class="bi bi-box-arrow-in-right ms-2"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="text-center mt-4">
+                <p class="small text-muted">
+                    ลืมรหัสผ่านหรือขอเข้าใช้งาน? <br>
+                    <span class="text-primary">ติดต่อ Admin แผนก IT</span>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+    .form-control:focus { background-color: #fff !important; border-color: #0d6efd; box-shadow: none; }
+    .input-group-text { color: #6c757d; }
+</style>
+{% endblock %}

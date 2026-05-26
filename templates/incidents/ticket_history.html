@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-archive-fill"></i> ประวัติการแจ้งเสีย (Resolved/Closed)</h2>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body bg-light">
+            <form method="GET" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold">ค้นหาเลข Ticket</label>
+                    <input type="text" name="search_ticket" class="form-control" placeholder="เช่น SOC-..." value="{{ search_ticket|default:'' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">จากวันที่</label>
+                    <input type="date" name="start_date" class="form-control" value="{{ start_date|default:'' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">ถึงวันที่</label>
+                    <input type="date" name="end_date" class="form-control" value="{{ end_date|default:'' }}">
+                </div>
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary w-100">ค้นหา</button>
+                    <a href="{% url 'export_tickets_excel' %}?search_ticket={{ search_ticket }}&start_date={{ start_date }}&end_date={{ end_date }}"
+                       class="btn btn-success w-100">
+                        <i class="bi bi-file-earmark-excel"></i> Export
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>เลข Ticket</th>
+                        <th>IP Source</th>
+                        <th>อาการเสีย</th>
+                        <th>การแก้ไขล่าสุด</th>
+                        <th>วันที่แจ้ง</th>
+                        <th>สถานะ</th>
+                        <th style="width: 100px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ticket in tickets %}
+                    <tr>
+                        <td><strong>{{ ticket.ticket_id }}</strong></td>
+                        <td>{{ ticket.device_name }}</td>
+                        <td class="text-truncate" style="max-width: 150px;">{{ ticket.issue_description }}</td>
+                        <td class="text-truncate" style="max-width: 150px;">
+                            {% with last_log=ticket.logs.first %}
+                                {% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}
+                            {% endwith %}
+                        </td>
+                        <td>{{ ticket.created_at|date:"d/m/Y" }}</td>
+                        <td><span class="badge bg-success">สำเร็จ</span></td>
+                        <td>
+                            <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-info">รายละเอียด</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">ไม่พบข้อมูล</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

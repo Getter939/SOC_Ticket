@@ -1,0 +1,195 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOC Support System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --sidebar-width: 240px;
+            --header-height: 56px;
+            --sidebar-bg: #1a1a2e;
+            --sidebar-active: #e63946;
+            --sidebar-text: rgba(255,255,255,0.75);
+            --sidebar-text-active: #fff;
+        }
+        body { background: #f4f6f9; overflow-x: hidden; }
+
+        /* ── Header ── */
+        #topbar {
+            position: fixed; top: 0; left: 0; right: 0;
+            height: var(--header-height);
+            background: var(--sidebar-bg);
+            z-index: 1040;
+            display: flex; align-items: center;
+            padding: 0 1.25rem;
+            gap: 1rem;
+        }
+        #topbar .brand { color: #fff; font-weight: 700; font-size: 1rem; white-space: nowrap; }
+        #topbar .brand small { color: rgba(255,255,255,0.5); font-size: 0.7rem; display:block; font-weight:400; }
+        #topbar .sla-badge {
+            margin-left: auto;
+            background: #e63946; color: #fff;
+            font-size: 0.7rem; font-weight: 700;
+            padding: 3px 10px; border-radius: 20px;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+        #topbar .user-pill {
+            background: rgba(255,255,255,0.1); color: #fff;
+            font-size: 0.75rem; padding: 4px 12px;
+            border-radius: 20px; white-space: nowrap;
+        }
+
+        /* ── Sidebar ── */
+        #sidebar {
+            position: fixed; top: var(--header-height); left: 0; bottom: 0;
+            width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            overflow-y: auto; z-index: 1030;
+            padding-top: 0.5rem;
+        }
+        .nav-section-label {
+            color: rgba(255,255,255,0.3);
+            font-size: 0.62rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .1em;
+            padding: 1rem 1.25rem 0.3rem;
+        }
+        #sidebar .nav-link {
+            color: var(--sidebar-text);
+            padding: 0.6rem 1.25rem;
+            border-radius: 0;
+            font-size: 0.82rem;
+            display: flex; align-items: center; gap: 0.6rem;
+            transition: background 0.15s, color 0.15s;
+        }
+        #sidebar .nav-link:hover { background: rgba(255,255,255,0.07); color: #fff; }
+        #sidebar .nav-link.active {
+            background: var(--sidebar-active);
+            color: var(--sidebar-text-active);
+            font-weight: 600;
+        }
+        #sidebar .nav-link i { font-size: 1rem; width: 20px; text-align: center; }
+        #sidebar .sidebar-footer {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            padding: 0.75rem 1.25rem;
+            background: rgba(0,0,0,0.25);
+            font-size: 0.75rem; color: rgba(255,255,255,0.5);
+        }
+
+        /* ── Main content ── */
+        #main-content {
+            margin-left: var(--sidebar-width);
+            margin-top: var(--header-height);
+            padding: 1.5rem;
+            min-height: calc(100vh - var(--header-height));
+        }
+
+        /* ── Cards & misc ── */
+        .card { border-radius: 10px; }
+        .table thead th { font-size: 0.78rem; font-weight: 700; letter-spacing: .03em; }
+        .font-monospace { font-family: 'Courier New', monospace; }
+
+        /* ── Responsive ── */
+        @media (max-width: 768px) {
+            #sidebar { transform: translateX(-100%); transition: transform .25s; }
+            #sidebar.show { transform: translateX(0); }
+            #main-content { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Topbar ── -->
+<div id="topbar">
+    <button class="btn btn-sm text-white d-md-none me-1 p-0" id="sidebarToggle" style="background:none;border:none;font-size:1.3rem;">
+        <i class="bi bi-list"></i>
+    </button>
+    <img src="{% static 'Image/S25542658.jpg' %}" alt="Logo" style="height:36px;width:auto;object-fit:contain;">
+    <div class="brand">
+        SOC Support System
+        <small>ศูนย์ปฏิบัติการความปลอดภัย</small>
+    </div>
+
+    {% if user.is_authenticated %}
+    <a href="{% url 'create_ticket' %}" class="btn btn-sm btn-danger ms-3 d-none d-md-inline-flex align-items-center gap-1" style="font-size:0.75rem;">
+        <i class="bi bi-plus-circle"></i> เปิดเคสใหม่
+    </a>
+    <div class="ms-auto d-flex align-items-center gap-2">
+        <div class="user-pill">
+            <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
+        </div>
+        <form method="post" action="{% url 'logout' %}" id="logout-form">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:0.75rem;" title="ออกจากระบบ">
+                <i class="bi bi-box-arrow-right"></i>
+            </button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── Sidebar ── -->
+{% if user.is_authenticated %}
+<nav id="sidebar">
+    <div class="nav-section-label">หลัก</div>
+    <a href="{% url 'home' %}" class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+        <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+
+    <div class="nav-section-label">Incidents</div>
+    <a href="{% url 'ticket_list' %}" class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-shield-exclamation"></i> Active Incidents
+    </a>
+    <a href="{% url 'ticket_history' %}" class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
+        <i class="bi bi-clock-history"></i> ประวัติ
+    </a>
+    <a href="{% url 'create_ticket' %}" class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
+        <i class="bi bi-plus-square"></i> เปิดเคสใหม่
+    </a>
+
+    <div class="nav-section-label">CRM</div>
+    <a href="{% url 'customer_list' %}" class="nav-link {% if 'customer' in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-people-fill"></i> ลูกค้า
+    </a>
+    <a href="{% url 'project_list' %}" class="nav-link {% if 'project' in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-briefcase-fill"></i> โปรเจกต์
+    </a>
+
+    <div class="nav-section-label">ระบบ</div>
+    <a href="/admin/" class="nav-link">
+        <i class="bi bi-gear-fill"></i> Admin Panel
+    </a>
+
+    <div class="sidebar-footer">
+        &copy; 2026 NT SOC System
+    </div>
+</nav>
+{% endif %}
+
+<!-- ── Main ── -->
+<div id="main-content">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show py-2 mb-3" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    {% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Mobile sidebar toggle
+    document.getElementById('sidebarToggle')?.addEventListener('click', () => {
+        document.getElementById('sidebar')?.classList.toggle('show');
+    });
+</script>
+</body>
+</html>

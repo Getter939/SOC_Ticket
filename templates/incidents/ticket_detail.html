@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-7">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">ประวัติการติดตามงาน #{{ ticket.ticket_id }}</h5>
+            </div>
+            <div class="card-body">
+                <h6>IP Source : <strong>{{ ticket.device_name }}</strong> &nbsp; IP Destination : <strong>{{ ticket.ip_address }}</strong></h6>
+
+                <div class="category-info mt-2">
+                    <span class="badge bg-info text-dark">Category: {{ ticket.get_category_display }}</span>
+                    <span class="badge bg-warning text-dark">Type: {{ ticket.get_issue_type_display }}</span>
+                </div>
+                <hr>
+
+                <p class="text-muted mb-0">
+                    <i class="bi bi-calendar-check"></i>
+                    <strong>วันที่แจ้งเหตุ:</strong> {{ ticket.created_at|date:"d M Y" }} เวลา {{ ticket.created_at|date:"H:i" }} น.
+                    <br>
+                    <span class="ms-3">
+                        <i class="bi bi-tag"></i>
+                        <strong>เหตุการณ์ที่พบ:</strong> {{ ticket.get_detailed_issue_display }}
+                    </span>
+                    <br>
+                    <span class="ms-3">
+                        <i class="bi bi-tag"></i>
+                        <strong>เรื่องที่แจ้ง:</strong> {{ ticket.get_detailed_issue2_display }}
+                    </span>
+                    <br>
+                    <span class="badge rounded-pill bg-light text-danger border">
+                        <i class="bi bi-clock-history"></i> เวลาที่ใช้ไป: {{ ticket.created_at|timesince }}
+                    </span>
+                </p>
+                <hr>
+
+                <div class="mt-3">
+                    <h6 class="text-primary"><i class="bi bi-info-circle"></i> รายละเอียดเพิ่มเติม:</h6>
+                    <div class="p-3 bg-light rounded border">
+                        {{ ticket.issue_description|linebreaks }}
+                    </div>
+                </div>
+                <br>
+                <i class="bi bi-person-circle"></i>
+                <strong>ผู้เปิดงาน:</strong>
+                {% if ticket.created_by.first_name %}
+                    {{ ticket.created_by.first_name }}
+                {% else %}
+                    {{ ticket.created_by.username }}
+                {% endif %}
+                <hr>
+
+                <div class="timeline-wrapper" style="max-height: 500px; overflow-y: auto;">
+                    {% for log in logs %}
+                    <div class="border-start border-primary border-4 ps-3 mb-4 position-relative">
+                        <div class="d-flex justify-content-between">
+                            <span class="badge bg-secondary">{{ log.status_at_time }}</span>
+                            <div>
+                                <small class="text-muted">{{ log.created_at|date:"d M Y H:i" }}</small>
+                                <a href="{% url 'edit_log' log.id %}" class="ms-2 text-warning" title="แก้ไขบันทึก">
+                                    <i class="bi bi-pencil-square"></i>
+                                </a>
+                            </div>
+                        </div>
+                        <p class="mt-2 mb-1">{{ log.note }}</p>
+                        <div class="mt-2">
+                            <small class="text-muted fw-bold">ผู้ดำเนินการ:</small>
+                            <span class="badge rounded-pill bg-light text-dark border">
+                                <i class="bi bi-person-circle text-primary"></i>
+                                {% if log.author %}
+                                    {{ log.author.get_full_name|default:log.author.username }}
+                                {% elif ticket.assigned_to %}
+                                    {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted text-center">ยังไม่มีประวัติการติดตามงาน</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-5">
+        {% if ticket.status != 'Closed' %}
+        <div class="card shadow-sm border-primary">
+            <div class="card-header bg-primary text-white text-center">
+                <h5 class="mb-0">บันทึกความคืบหน้าใหม่</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">อัปเดตสถานะงาน</label>
+                        <select name="status" class="form-select">
+                            {% for code, name in valid_status_choices %}
+                            <option value="{{ code }}" {% if ticket.status == code %}selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">บันทึกสิ่งที่แก้ไข (ครั้งนี้)</label>
+                        <textarea name="update_notes" class="form-control" rows="4" placeholder="กรอกข้อมูลการดำเนินการล่าสุด..." required></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">ผู้ดำเนินการ</label>
+                        <div class="p-2 bg-light border rounded shadow-sm">
+                            <i class="bi bi-person-check-fill text-primary"></i>
+                            <span class="ms-1 fw-bold">{{ request.user.get_full_name|default:request.user.username }}</span>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">บันทึกความคืบหน้า</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-success text-center shadow-sm">
+            <h4><i class="bi bi-check-circle-fill"></i> ปิดงานแล้ว</h4>
+            <p class="mb-0">Ticket นี้ได้รับการแก้ไขเรียบร้อยแล้ว</p>
+        </div>
+        {% endif %}
+        <a href="{% url 'home' %}" class="btn btn-outline-secondary w-100 mt-3">กลับหน้าหลัก</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0 fw-bold">Dashboard</h4>
+    <span class="text-muted small"><i class="bi bi-clock me-1"></i>ข้อมูลเรียลไทม์ — อัปเดตทุกครั้งที่โหลดหน้า</span>
+</div>
+
+{% if stats.sla_breaches %}
+<div class="alert alert-danger d-flex align-items-center mb-4 py-2">
+    <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+    <strong>SLA BREACH ALERT: {{ stats.sla_breaches }} เคส</strong>&nbsp;เกินกำหนด SLA —
+    <a href="{% url 'ticket_list' %}" class="alert-link ms-1">ดูรายการ</a>
+</div>
+{% endif %}
+
+<!-- Stat cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">รอดำเนินการ</div>
+            <div class="fs-2 fw-bold text-danger">{{ stats.open }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Open</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">กำลังแก้ไข</div>
+            <div class="fs-2 fw-bold" style="color:#0dcaf0;">{{ stats.in_progress }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">In Progress</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">แก้ไขแล้วเดือนนี้</div>
+            <div class="fs-2 fw-bold text-success">{{ stats.resolved_month }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Resolved (this month)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">เกิน SLA</div>
+            <div class="fs-2 fw-bold text-danger">{{ stats.sla_breaches }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">SLA Breaches</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">ลูกค้า</div>
+            <div class="fs-2 fw-bold text-primary">{{ stats.total_customers }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Customers</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">โปรเจกต์ Active</div>
+            <div class="fs-2 fw-bold text-warning">{{ stats.active_projects }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Active Projects</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts row -->
+<div class="row g-3 mb-4">
+    <div class="col-md-5">
+        <div class="card border-0 shadow-sm p-4 h-100">
+            <div class="fw-bold mb-3 small text-uppercase text-muted">Tickets by Type</div>
+            <canvas id="chartByType" height="200"></canvas>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm p-4 h-100">
+            <div class="fw-bold mb-3 small text-uppercase text-muted">Category Distribution</div>
+            <canvas id="chartByCategory" height="200"></canvas>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm p-4 h-100">
+            <div class="fw-bold mb-3 small text-uppercase text-muted">Tickets per Month (6 เดือน)</div>
+            <canvas id="chartMonthly" height="200"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Bottom row -->
+<div class="row g-3">
+    <!-- Recent tickets -->
+    <div class="col-md-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between">
+                <span class="fw-bold small">เคสล่าสุด (Active)</span>
+                <a href="{% url 'ticket_list' %}" class="small text-primary">ดูทั้งหมด →</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for ticket in recent_tickets %}
+                <a href="{% url 'ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action px-4 py-2 {% if ticket.is_sla_breached %}list-group-item-danger{% endif %}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</span>
+                        {% if ticket.status == 'Open' %}
+                            <span class="badge rounded-pill bg-danger" style="font-size:0.65rem;">Open</span>
+                        {% else %}
+                            <span class="badge rounded-pill" style="background:#0dcaf0;color:#000;font-size:0.65rem;">In Progress</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-muted small text-truncate">{{ ticket.get_detailed_issue2_display }}</div>
+                </a>
+                {% empty %}
+                <div class="list-group-item text-center text-muted py-4 small">ไม่มีเคสที่รอดำเนินการ</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- SLA Breaches -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-danger text-white py-3">
+                <span class="fw-bold small"><i class="bi bi-alarm-fill me-1"></i>SLA Breach</span>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for ticket in breach_tickets %}
+                <a href="{% url 'ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action list-group-item-danger px-4 py-2">
+                    <div class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</div>
+                    <div class="small text-muted">{{ ticket.created_at|timesince }} ago</div>
+                </a>
+                {% empty %}
+                <div class="list-group-item text-center text-muted py-4 small">
+                    <i class="bi bi-check-circle text-success me-1"></i>ไม่มี SLA Breach
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent tasks -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between">
+                <span class="fw-bold small">Tasks ล่าสุด</span>
+                <a href="{% url 'project_list' %}" class="small text-primary">ดูโปรเจกต์ →</a>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for task in recent_tasks %}
+                <a href="{% url 'project_detail' task.project.pk %}" class="list-group-item list-group-item-action px-4 py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="small fw-semibold text-truncate" style="max-width:160px;">{{ task.title }}</span>
+                        {% if task.status == 'Done' %}
+                            <span class="badge bg-success" style="font-size:0.65rem;">Done</span>
+                        {% elif task.status == 'Doing' %}
+                            <span class="badge bg-warning text-dark" style="font-size:0.65rem;">Doing</span>
+                        {% else %}
+                            <span class="badge bg-secondary" style="font-size:0.65rem;">Todo</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-muted small">{{ task.project.name }}</div>
+                </a>
+                {% empty %}
+                <div class="list-group-item text-center text-muted py-4 small">ยังไม่มี Task</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const DARK = '#1a1a2e';
+const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
+
+// By Type bar chart
+new Chart(document.getElementById('chartByType'), {
+    type: 'bar',
+    data: {
+        labels: {{ by_type_labels|safe }},
+        datasets: [{ data: {{ by_type_data|safe }}, backgroundColor: COLORS, borderRadius: 4 }]
+    },
+    options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        responsive: true,
+    }
+});
+
+// By Category doughnut chart
+new Chart(document.getElementById('chartByCategory'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ by_category_labels|safe }},
+        datasets: [{ data: {{ by_category_data|safe }}, backgroundColor: COLORS, borderWidth: 2 }]
+    },
+    options: {
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+        responsive: true,
+        cutout: '60%',
+    }
+});
+
+// Monthly trend line chart
+new Chart(document.getElementById('chartMonthly'), {
+    type: 'line',
+    data: {
+        labels: {{ monthly_labels|safe }},
+        datasets: [{
+            label: 'Tickets',
+            data: {{ monthly_data|safe }},
+            borderColor: DARK,
+            backgroundColor: 'rgba(26,26,46,0.08)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+        }]
+    },
+    options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        responsive: true,
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,15 @@
+# Core framework
+Django==6.0.5
+asgiref==3.11.1      # Django async support (required by Django)
+sqlparse==0.5.5      # SQL formatting (required by Django)
+tzdata==2026.2       # IANA timezone data (required by Django with USE_TZ=True)
+
+# Database driver
+psycopg2-binary==2.9.12
+
+# Environment / config
+python-decouple==3.8
+
+# Excel export (incidents/views.py → export_tickets_excel)
+openpyxl==3.1.5
+et_xmlfile==2.0.0    # required by openpyxl

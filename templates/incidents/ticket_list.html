@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0 fw-bold">รายการแจ้งเหตุที่รอดำเนินการ</h4>
+    <a href="{% url 'create_ticket' %}" class="btn btn-danger btn-sm px-4">
+        <i class="bi bi-plus-circle me-1"></i> เปิดเคสใหม่
+    </a>
+</div>
+
+{% if sla_breach_count %}
+<div class="alert alert-danger d-flex align-items-center mb-4 py-2" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+    <strong>SLA BREACH: {{ sla_breach_count }} เคส</strong>&nbsp;เกินกำหนด SLA แล้ว — ดำเนินการทันที
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead style="background:#1a1a2e; color:#fff;">
+                <tr>
+                    <th class="ps-4">Ticket ID</th>
+                    <th>เรื่องที่แจ้ง</th>
+                    <th>Category / Type</th>
+                    <th>วันที่แจ้ง</th>
+                    <th>SLA</th>
+                    <th>สถานะ</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ticket in tickets %}
+                <tr {% if ticket.is_sla_breached %}class="table-danger"{% endif %}>
+                    <td class="ps-4">
+                        <span class="font-monospace fw-bold text-dark">#{{ ticket.ticket_id }}</span>
+                    </td>
+                    <td>
+                        <div class="fw-semibold small">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
+                        <div class="text-muted" style="font-size:0.75rem;">{{ ticket.device_name }} → {{ ticket.ip_address }}</div>
+                    </td>
+                    <td>
+                        <span class="badge bg-info text-dark me-1">{{ ticket.category }}</span>
+                        <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
+                    </td>
+                    <td class="small text-muted">{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
+                    <td>
+                        {% if ticket.is_sla_breached %}
+                            <span class="badge bg-danger">
+                                <i class="bi bi-alarm-fill me-1"></i>เกิน SLA
+                            </span>
+                        {% elif ticket.sla_deadline %}
+                            <span class="badge bg-warning text-dark small">
+                                <i class="bi bi-clock me-1"></i>{{ ticket.created_at|timesince }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted small">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if ticket.status == 'Open' %}
+                            <span class="badge rounded-pill" style="background:#dc3545;">รอดำเนินการ</span>
+                        {% elif ticket.status == 'In Progress' %}
+                            <span class="badge rounded-pill" style="background:#0dcaf0; color:#000;">กำลังแก้ไข</span>
+                        {% else %}
+                            <span class="badge rounded-pill bg-success">แก้ไขแล้ว</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3">ดูรายละเอียด</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="text-center py-5 text-muted">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>ไม่มีรายการแจ้งเหตุที่รอดำเนินการ
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

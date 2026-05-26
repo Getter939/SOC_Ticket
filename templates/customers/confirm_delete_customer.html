@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-5">
+    <div class="card border-danger mx-auto" style="max-width: 500px;">
+        <div class="card-body text-center">
+            <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+            <h4 class="mt-3">ยืนยันการลบข้อมูล?</h4>
+            <p>คุณต้องการลบข้อมูลของลูกค้า <strong>{{ customer.name }}</strong> ใช่หรือไม่?<br>
+            <span class="text-danger">** ข้อมูล Email และเบอร์โทรที่เกี่ยวข้องจะถูกลบทั้งหมด</span></p>
+            <form method="post">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger px-4">ยืนยันการลบ</button>
+                <a href="{% url 'customer_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

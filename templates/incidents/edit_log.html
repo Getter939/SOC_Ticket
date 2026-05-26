@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">แก้ไขบันทึกการติดตามงาน</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">ผู้บันทึก</label>
+                        <div class="p-2 bg-light border rounded">
+                            <i class="bi bi-person-circle text-primary"></i>
+                            {% if log.author %}
+                                {{ log.author.get_full_name|default:log.author.username }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">รายละเอียดบันทึก</label>
+                        <textarea name="note" class="form-control" rows="5">{{ log.note }}</textarea>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-warning">บันทึกการแก้ไข</button>
+                        <a href="{% url 'ticket_detail' log.ticket.id %}" class="btn btn-light">ยกเลิก</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
