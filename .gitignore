@@ -1,14 +1,14 @@
-# Environment variables — NEVER commit this
+# ── Secrets / environment ─────────────────────────────────────────────────
+# Never commit real credentials. Copy .env.example → .env and fill it in.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
-# Python
+# ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.pyc
 *.so
 *.egg
 *.egg-info/
@@ -16,18 +16,22 @@ dist/
 build/
 .eggs/
 
-# Virtual environment
+# ── Virtual environments ──────────────────────────────────────────────────
 venv/
 env/
 .venv/
 
-# Django
+# ── Django ────────────────────────────────────────────────────────────────
 *.sqlite3
 staticfiles/
 media/
 config/settings_local.py
 
-# IDE
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── IDE ───────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.suo
@@ -35,7 +39,7 @@ config/settings_local.py
 *.njsproj
 *.sln
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
