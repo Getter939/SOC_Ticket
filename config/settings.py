@@ -84,13 +84,27 @@ LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'   # → dashboard
 LOGOUT_REDIRECT_URL = 'login'
 
-# SMTP Email
-DEFAULT_FROM_EMAIL = config('EMAIL_HOST_USER', default='')
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='')
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+# ── Email / SMTP ──────────────────────────────────────────────────────────
+# Production: set EMAIL_* vars in .env (see .env.example).
+# Local dev:  settings_local.py overrides EMAIL_BACKEND to console so
+#             notifications print to the terminal instead of hitting SMTP.
+#
+# Port guide: 587 = STARTTLS submission (EMAIL_USE_TLS=True)  ← default
+#             465 = SMTPS / implicit SSL  (EMAIL_USE_SSL=True, TLS=False)
+#             25  = plain SMTP relay — do NOT use with EMAIL_USE_TLS=True
+EMAIL_BACKEND     = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST        = config('EMAIL_HOST',         default='')
+EMAIL_HOST_USER   = config('EMAIL_HOST_USER',    default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
-EMAIL_PORT = 25
-EMAIL_USE_TLS = True
+EMAIL_PORT        = config('EMAIL_PORT',         default=587,  cast=int)
+EMAIL_USE_TLS     = config('EMAIL_USE_TLS',      default=True, cast=bool)
+# DEFAULT_FROM_EMAIL falls back to EMAIL_HOST_USER when not set explicitly.
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL', default=config('EMAIL_HOST_USER', default='')
+)
+
+# ── Site URL (used in email notification links) ────────────────────────────
+# Set to your public hostname in production, e.g. https://soc.example.com
+SITE_URL = config('SITE_URL', default='http://localhost:8000')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

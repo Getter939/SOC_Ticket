@@ -8,9 +8,19 @@ Test classes
 3.  WorkflowTransitionTest        — Every legal state-machine edge, every illegal edge
 4.  WorkflowPermissionTest        — Per-transition role permissions (positive + negative)
 5.  SignOffFieldsTest              — verified_by/at and approved_by/at are write-once
+6.  NotificationEmailTest         — Email notifications on AWAITING_CONTAINMENT transitions
+
+Notes
+─────
+• Run with:  py manage.py test apps.incidents --settings=config.settings_local
+• Database:  SQLite (via settings_local)
+• Email:     Django's test runner calls setup_test_environment() before tests,
+             which replaces EMAIL_BACKEND with the in-memory locmem backend and
+             initialises django.core.mail.outbox — no real SMTP is needed.
 """
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
@@ -18,6 +28,7 @@ from django.utils import timezone
 
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketLog
+from apps.incidents.notifications import notify_containment_required
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -568,3 +579,153 @@ class SignOffFieldsTest(TestCase):
         t.refresh_from_db()
         self.assertIsNone(t.approved_by)
         self.assertIsNone(t.approved_at)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 6. Email notification tests                                                   #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class NotificationEmailTest(TestCase):
+    """
+    Tests for apps.incidents.notifications.notify_containment_required().
+
+    Django's test runner calls setup_test_environment() before the suite
+    begins, which replaces EMAIL_BACKEND with the locmem backend and
+    initialises django.core.mail.outbox — no real SMTP is needed and
+    settings_local.py's console backend does not interfere.
+
+    setUp() resets mail.outbox before each individual test so that one
+    test's mail cannot pollute another's count.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('ne_soc', UserProfile.ROLE_SOC_STAFF)
+        cls.mgr = _make_user('ne_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+        # Admin with a valid email address
+        cls.admin = _make_user('ne_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.admin.email = 'sysadmin@example.com'
+        cls.admin.save()
+
+        # Admin whose User record has no email (blank string, Django default)
+        cls.admin_no_email = _make_user('ne_admin_noemail', UserProfile.ROLE_SYSTEM_ADMIN)
+        # admin_no_email.email is '' by default — no save() needed
+
+    def setUp(self):
+        """Reset the in-memory outbox before every test."""
+        mail.outbox = []
+
+    # ── Helper ───────────────────────────────────────────────────────────── #
+
+    def _routed_ticket(self):
+        """Return a ticket that has been moved to AWAITING_CONTAINMENT."""
+        t = _make_ticket(assigned_admin=self.admin)
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.soc, 'routing')
+        return t
+
+    # ── Initial routing (NEW → AWAITING_CONTAINMENT) ─────────────────────── #
+
+    def test_routing_sends_exactly_one_email(self):
+        """Calling the notifier once produces exactly one outbox entry."""
+        t = self._routed_ticket()
+        notify_containment_required(t)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_routing_email_sent_to_assigned_admin(self):
+        """The email is addressed to the assigned admin's email."""
+        t = self._routed_ticket()
+        notify_containment_required(t)
+        self.assertIn(self.admin.email, mail.outbox[0].to)
+
+    def test_routing_email_subject_contains_ticket_id(self):
+        """The subject line contains the ticket ID so it can be filtered/searched."""
+        t = self._routed_ticket()
+        notify_containment_required(t)
+        self.assertIn(t.ticket_id, mail.outbox[0].subject)
+
+    def test_routing_email_subject_says_containment_required(self):
+        """Initial routing subject does NOT say 'resubmission'."""
+        t = self._routed_ticket()
+        notify_containment_required(t)
+        subject = mail.outbox[0].subject
+        self.assertIn('Containment required', subject)
+        self.assertNotIn('resubmission', subject.lower())
+
+    def test_routing_returns_true_on_success(self):
+        t = self._routed_ticket()
+        result = notify_containment_required(t)
+        self.assertTrue(result)
+
+    # ── Rejection loop (UNDER_REVIEW → AWAITING_CONTAINMENT) ─────────────── #
+
+    def test_rejection_loop_email_body_contains_reason(self):
+        """
+        When the analyst sends the ticket back, their rejection note must
+        appear verbatim in the email body so the admin knows what to fix.
+        """
+        t = _make_ticket(assigned_admin=self.admin)
+        _advance_to(t, Ticket.STATUS_UNDER_REVIEW, self.soc, self.admin)
+        reason = 'Patch description is missing — please include the CVE reference.'
+        notify_containment_required(t, reason=reason)
+        self.assertIn(reason, mail.outbox[0].body)
+
+    def test_rejection_loop_subject_contains_resubmission(self):
+        """Rejection loop subject must say 'resubmission' to distinguish it from initial routing."""
+        t = _make_ticket(assigned_admin=self.admin)
+        notify_containment_required(t, reason='needs more detail')
+        self.assertIn('resubmission', mail.outbox[0].subject.lower())
+
+    def test_rejection_loop_subject_contains_ticket_id(self):
+        """Rejection loop subject also contains the ticket ID."""
+        t = _make_ticket(assigned_admin=self.admin)
+        notify_containment_required(t, reason='incomplete')
+        self.assertIn(t.ticket_id, mail.outbox[0].subject)
+
+    # ── Missing admin / missing email ─────────────────────────────────────── #
+
+    def test_no_email_when_admin_has_no_email_address(self):
+        """notify_containment_required skips silently and returns False."""
+        t = _make_ticket(assigned_admin=self.admin_no_email)
+        result = notify_containment_required(t)
+        self.assertFalse(result)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_no_email_when_no_assigned_admin(self):
+        """Ticket with no assigned_admin — returns False, outbox stays empty."""
+        t = _make_ticket()  # no assigned_admin
+        result = notify_containment_required(t)
+        self.assertFalse(result)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_transition_still_succeeds_without_email(self):
+        """
+        The state machine must not depend on email working.
+        A ticket with no admin email still reaches AWAITING_CONTAINMENT.
+        """
+        t = _make_ticket(assigned_admin=self.admin_no_email)
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.soc, 'routing')
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        # Now send (or rather skip) the notification
+        notify_containment_required(t)
+        self.assertEqual(len(mail.outbox), 0)
+
+    # ── Other transitions send no email ───────────────────────────────────── #
+
+    def test_other_transitions_do_not_send_email(self):
+        """
+        Driving a ticket all the way to APPROVED via direct model calls
+        should produce zero emails — the notifier is only called from the
+        view, and only for AWAITING_CONTAINMENT transitions.
+        """
+        t = _make_ticket(assigned_admin=self.admin)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.soc, self.admin, mgr_user=self.mgr)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_verified_to_approved_sends_no_email(self):
+        """Spot-check: VERIFIED → APPROVED via transition_to sends no email."""
+        t = _make_ticket(assigned_admin=self.admin)
+        _advance_to(t, Ticket.STATUS_VERIFIED, self.soc, self.admin)
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(len(mail.outbox), 0)

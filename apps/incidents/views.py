@@ -9,7 +9,10 @@ from django.utils import timezone
 
 from .forms import TicketForm
 from .models import Ticket, TicketLog
+from .notifications import notify_containment_required
 
+
+# ── Private view helpers ─────────────────────────────────────────────────── #
 
 def _valid_soc_status_choices(ticket, user):
     """
@@ -41,6 +44,49 @@ def _valid_soc_status_choices(ticket, user):
 
     return result
 
+
+def _notify_containment(ticket, reason, request):
+    """
+    Non-fatal wrapper around notify_containment_required.
+
+    Sends the email after a successful transition to AWAITING_CONTAINMENT.
+    Attaches a messages.warning to the request if delivery is skipped or
+    fails — the transition has already been committed, so we never roll it
+    back over an email problem.
+
+    reason — None for initial routing (NEW → AWAITING_CONTAINMENT);
+             the analyst's note for the rejection loop
+             (UNDER_REVIEW → AWAITING_CONTAINMENT).
+    """
+    if not ticket.assigned_admin_id:
+        messages.warning(
+            request,
+            'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: '
+            'ยังไม่ได้กำหนดผู้ดูแลระบบ',
+        )
+        return
+
+    # Accessing .email requires a DB hit if the FK isn't cached; that's fine —
+    # we already know assigned_admin_id is set.
+    admin = ticket.assigned_admin
+    if not admin.email:
+        messages.warning(
+            request,
+            f'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: '
+            f'{admin.get_full_name() or admin.username} ไม่มีที่อยู่อีเมล',
+        )
+        return
+
+    sent = notify_containment_required(ticket, reason=reason)
+    if not sent:
+        messages.warning(
+            request,
+            'Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — '
+            'โปรดแจ้งผู้ดูแลระบบด้วยตนเอง',
+        )
+
+
+# ── Views ────────────────────────────────────────────────────────────────── #
 
 @login_required
 def ticket_list(request):
@@ -124,12 +170,29 @@ def ticket_detail(request, pk):
         elif action == 'soc_update':
             new_note = request.POST.get('update_notes', '').strip()
             new_status = request.POST.get('status')
+            # Capture before transition so we know which leg triggered the
+            # AWAITING_CONTAINMENT state (initial dispatch vs rejection loop).
+            prev_status = ticket.status
 
             if not new_note:
                 messages.error(request, 'กรุณากรอกบันทึกการดำเนินการ')
             elif new_status:
                 try:
                     ticket.transition_to(new_status, request.user, new_note)
+
+                    # ── Email notification ───────────────────────────────── #
+                    # Only triggered when the ticket lands on AWAITING_CONTAINMENT.
+                    # Rejection loop (UNDER_REVIEW → AWAITING_CONTAINMENT) passes
+                    # the analyst's note as 'reason' so the admin knows what to fix.
+                    # Email failure is non-fatal: transition is already committed.
+                    if new_status == Ticket.STATUS_AWAITING_CONTAINMENT:
+                        reason = (
+                            new_note
+                            if prev_status == Ticket.STATUS_UNDER_REVIEW
+                            else None
+                        )
+                        _notify_containment(ticket, reason, request)
+
                 except ValidationError as e:
                     messages.error(request, e.message)
 
