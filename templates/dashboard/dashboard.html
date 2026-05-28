@@ -14,27 +14,27 @@
 </div>
 {% endif %}
 
-<!-- Stat cards -->
+<!-- ── Stat cards ──────────────────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-2">
         <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">Tickets ทั้งหมด</div>
+            <div class="fs-2 fw-bold">{{ stats.total }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Total — Active {{ stats.active }} / Closed {{ stats.closed }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <div class="card border-0 shadow-sm h-100 p-3">
             <div class="text-muted small fw-bold mb-1">รอดำเนินการ</div>
-            <div class="fs-2 fw-bold text-danger">{{ stats.open }}</div>
-            <div class="text-muted" style="font-size:0.7rem;">Open</div>
+            <div class="fs-2 fw-bold text-danger">{{ stats.active }}</div>
+            <div class="text-muted" style="font-size:0.7rem;">Active (non-terminal)</div>
         </div>
     </div>
     <div class="col-6 col-md-2">
         <div class="card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted small fw-bold mb-1">กำลังแก้ไข</div>
-            <div class="fs-2 fw-bold" style="color:#0dcaf0;">{{ stats.in_progress }}</div>
-            <div class="text-muted" style="font-size:0.7rem;">In Progress</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-2">
-        <div class="card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted small fw-bold mb-1">แก้ไขแล้วเดือนนี้</div>
+            <div class="text-muted small fw-bold mb-1">ปิดเดือนนี้</div>
             <div class="fs-2 fw-bold text-success">{{ stats.resolved_month }}</div>
-            <div class="text-muted" style="font-size:0.7rem;">Resolved (this month)</div>
+            <div class="text-muted" style="font-size:0.7rem;">Closed (this month)</div>
         </div>
     </div>
     <div class="col-6 col-md-2">
@@ -60,7 +60,102 @@
     </div>
 </div>
 
-<!-- Charts row -->
+<!-- ══ ACTIONABLE BACKLOG + FP/TP RATIO — most operationally valuable ═════ -->
+<div class="row g-3 mb-4">
+
+    <!-- Who must act next -->
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm h-100 p-4">
+            <div class="fw-bold mb-3 small text-uppercase text-muted">
+                <i class="bi bi-person-check me-1"></i>คิวงานตามผู้รับผิดชอบ — Actionable Backlog
+            </div>
+            <div class="row g-3 text-center">
+
+                <div class="col-4">
+                    <div class="card border-0 h-100 p-3" style="background:rgba(255,193,7,0.12);">
+                        <div class="fw-bold text-warning mb-1" style="font-size:0.75rem;">
+                            <i class="bi bi-shield-exclamation me-1"></i>รอผู้ดูแลระบบ
+                        </div>
+                        <div class="display-5 fw-bold text-warning">{{ stats.awaiting_admin }}</div>
+                        <div class="text-muted mt-1" style="font-size:0.7rem;">Awaiting Admin</div>
+                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">AWAITING_CONTAINMENT</div>
+                    </div>
+                </div>
+
+                <div class="col-4">
+                    <div class="card border-0 h-100 p-3" style="background:rgba(13,202,240,0.12);">
+                        <div class="fw-bold mb-1" style="color:#0dcaf0; font-size:0.75rem;">
+                            <i class="bi bi-search me-1"></i>รอ SOC วิเคราะห์
+                        </div>
+                        <div class="display-5 fw-bold" style="color:#0dcaf0;">{{ stats.awaiting_soc }}</div>
+                        <div class="text-muted mt-1" style="font-size:0.7rem;">Awaiting SOC</div>
+                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">REPORTED + UNDER_REVIEW</div>
+                    </div>
+                </div>
+
+                <div class="col-4">
+                    <div class="card border-0 h-100 p-3" style="background:rgba(13,110,253,0.10);">
+                        <div class="fw-bold text-primary mb-1" style="font-size:0.75rem;">
+                            <i class="bi bi-check2-circle me-1"></i>รอผู้จัดการอนุมัติ
+                        </div>
+                        <div class="display-5 fw-bold text-primary">{{ stats.awaiting_manager }}</div>
+                        <div class="text-muted mt-1" style="font-size:0.7rem;">Awaiting Manager</div>
+                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">VERIFIED</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- FP/TP ratio -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100 p-4">
+            <div class="fw-bold mb-2 small text-uppercase text-muted">
+                <i class="bi bi-pie-chart me-1"></i>สัดส่วนการวินิจฉัย — FP / TP Ratio
+            </div>
+            {% if stats.tp_count or stats.fp_count %}
+            <canvas id="chartFpTp" height="160"></canvas>
+            <div class="d-flex justify-content-around mt-3">
+                <div class="text-center">
+                    <div class="fw-bold fs-5" style="color:#198754;">{{ stats.tp_count }}</div>
+                    <div class="text-muted" style="font-size:0.72rem;">
+                        True Positive&nbsp;<span class="badge bg-success">{{ stats.tp_pct }}%</span>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <div class="fw-bold fs-5" style="color:#e63946;">{{ stats.fp_count }}</div>
+                    <div class="text-muted" style="font-size:0.72rem;">
+                        False Positive&nbsp;<span class="badge bg-danger">{{ stats.fp_pct }}%</span>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="d-flex align-items-center justify-content-center h-75 text-center text-muted">
+                <div>
+                    <i class="bi bi-info-circle fs-3 d-block mb-2 opacity-50"></i>
+                    <span class="small">ยังไม่มีข้อมูลการวินิจฉัย<br>(FP/TP)</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Status Pipeline (full-width horizontal bar) ────────────────────────── -->
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm p-4">
+            <div class="fw-bold mb-3 small text-uppercase text-muted">
+                <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด — Pipeline View
+            </div>
+            <canvas id="chartPipeline" height="110"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ── Charts row ─────────────────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
     <div class="col-md-5">
         <div class="card border-0 shadow-sm p-4 h-100">
@@ -82,9 +177,10 @@
     </div>
 </div>
 
-<!-- Bottom row -->
+<!-- ── Bottom row ─────────────────────────────────────────────────────────── -->
 <div class="row g-3">
-    <!-- Recent tickets -->
+
+    <!-- Recent active tickets -->
     <div class="col-md-5">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white py-3 d-flex justify-content-between">
@@ -93,15 +189,22 @@
             </div>
             <div class="list-group list-group-flush">
                 {% for ticket in recent_tickets %}
-                <a href="{% url 'ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action px-4 py-2 {% if ticket.is_sla_breached %}list-group-item-danger{% endif %}">
+                <a href="{% url 'ticket_detail' ticket.pk %}"
+                   class="list-group-item list-group-item-action px-4 py-2 {% if ticket.is_sla_breached %}list-group-item-danger{% endif %}">
                     <div class="d-flex justify-content-between align-items-center">
                         <span class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</span>
                         {% if ticket.status == 'NEW' %}
                             <span class="badge rounded-pill bg-danger" style="font-size:0.65rem;">แจ้งใหม่</span>
                         {% elif ticket.status == 'AWAITING_CONTAINMENT' %}
                             <span class="badge rounded-pill bg-warning text-dark" style="font-size:0.65rem;">รอการจัดการ</span>
+                        {% elif ticket.status == 'CONTAINMENT_REPORTED' %}
+                            <span class="badge rounded-pill bg-info text-dark" style="font-size:0.65rem;">รายงานแล้ว</span>
+                        {% elif ticket.status == 'UNDER_REVIEW' %}
+                            <span class="badge rounded-pill bg-secondary" style="font-size:0.65rem;">กำลังตรวจสอบ</span>
+                        {% elif ticket.status == 'VERIFIED' %}
+                            <span class="badge rounded-pill bg-primary" style="font-size:0.65rem;">ตรวจสอบแล้ว</span>
                         {% else %}
-                            <span class="badge rounded-pill bg-info text-dark" style="font-size:0.65rem;">{{ ticket.get_status_display }}</span>
+                            <span class="badge rounded-pill bg-light text-dark" style="font-size:0.65rem;">{{ ticket.get_status_display }}</span>
                         {% endif %}
                     </div>
                     <div class="text-muted small text-truncate">{{ ticket.get_detailed_issue2_display }}</div>
@@ -121,7 +224,8 @@
             </div>
             <div class="list-group list-group-flush">
                 {% for ticket in breach_tickets %}
-                <a href="{% url 'ticket_detail' ticket.pk %}" class="list-group-item list-group-item-action list-group-item-danger px-4 py-2">
+                <a href="{% url 'ticket_detail' ticket.pk %}"
+                   class="list-group-item list-group-item-action list-group-item-danger px-4 py-2">
                     <div class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</div>
                     <div class="small text-muted">{{ ticket.created_at|timesince }} ago</div>
                 </a>
@@ -143,7 +247,8 @@
             </div>
             <div class="list-group list-group-flush">
                 {% for task in recent_tasks %}
-                <a href="{% url 'project_detail' task.project.pk %}" class="list-group-item list-group-item-action px-4 py-2">
+                <a href="{% url 'project_detail' task.project.pk %}"
+                   class="list-group-item list-group-item-action px-4 py-2">
                     <div class="d-flex justify-content-between align-items-center">
                         <span class="small fw-semibold text-truncate" style="max-width:160px;">{{ task.title }}</span>
                         {% if task.status == 'Done' %}
@@ -162,13 +267,67 @@
             </div>
         </div>
     </div>
+
 </div>
 
-<!-- Chart.js -->
+<!-- ── Chart.js ───────────────────────────────────────────────────────────── -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const DARK = '#1a1a2e';
+const DARK   = '#1a1a2e';
 const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
+
+// Colours aligned with the 7-state order in STATUS_CHOICES:
+// NEW, AWAITING_CONTAINMENT, CONTAINMENT_REPORTED, UNDER_REVIEW, VERIFIED, APPROVED, CLOSED_FP
+const PIPELINE_COLORS = [
+    '#e63946',  // NEW           — danger red
+    '#ffc107',  // AWAITING_CONTAINMENT — warning yellow
+    '#0dcaf0',  // CONTAINMENT_REPORTED — info cyan
+    '#17a2b8',  // UNDER_REVIEW  — teal
+    '#6f42c1',  // VERIFIED      — purple
+    '#198754',  // APPROVED      — success green
+    '#6c757d',  // CLOSED_FP     — muted grey
+];
+
+// Status Pipeline — horizontal bar (all 7 states)
+new Chart(document.getElementById('chartPipeline'), {
+    type: 'bar',
+    data: {
+        labels: {{ status_labels|safe }},
+        datasets: [{
+            data: {{ status_data|safe }},
+            backgroundColor: PIPELINE_COLORS,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        responsive: true,
+    }
+});
+
+// FP/TP doughnut
+{% if stats.tp_count or stats.fp_count %}
+new Chart(document.getElementById('chartFpTp'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ fp_tp_labels|safe }},
+        datasets: [{
+            data: {{ fp_tp_data|safe }},
+            backgroundColor: ['#198754', '#e63946'],
+            borderWidth: 2,
+        }]
+    },
+    options: {
+        plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 10 } } }
+        },
+        responsive: true,
+        cutout: '60%',
+    }
+});
+{% endif %}
 
 // By Type bar chart
 new Chart(document.getElementById('chartByType'), {
@@ -184,7 +343,7 @@ new Chart(document.getElementById('chartByType'), {
     }
 });
 
-// By Category doughnut chart
+// By Category doughnut
 new Chart(document.getElementById('chartByCategory'), {
     type: 'doughnut',
     data: {
@@ -198,7 +357,7 @@ new Chart(document.getElementById('chartByCategory'), {
     }
 });
 
-// Monthly trend line chart
+// Monthly trend line
 new Chart(document.getElementById('chartMonthly'), {
     type: 'line',
     data: {
