@@ -5,17 +5,11 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from apps.incidents.models import Ticket
-from apps.customers.models import Customer
-from apps.projects.models import Project, Task
 
 
 @login_required
 def dashboard(request):
-    # ── Change 1: SOC-only access ─────────────────────────────────────────── #
-    # System admins and users with no profile are redirected to the ticket list.
-    # They should not see org-wide aggregates — they only have visibility into
-    # tickets assigned to them, which the ticket list already enforces via
-    # Ticket.objects.visible_to().
+    # SOC-only: system admins and profileless users see the ticket list instead.
     profile = getattr(request.user, 'profile', None)
     if profile is None or not profile.is_soc:
         return redirect('ticket_list')
@@ -24,17 +18,15 @@ def dashboard(request):
     terminal = list(Ticket.TERMINAL_STATUSES)
 
     # ── Base querysets ────────────────────────────────────────────────────── #
-    # We confirmed is_soc above, so SOC sees all tickets — work on the full
-    # table directly (same result as visible_to(), but no extra filter/join).
+    # Confirmed is_soc above — SOC sees all tickets, so work the full table.
     all_tickets = Ticket.objects
     active_qs   = all_tickets.exclude(status__in=terminal)
     closed_qs   = all_tickets.filter(status__in=terminal)
 
-    # ── Change 2: SLA-breach counting — pure DB ───────────────────────────── #
-    # A breached ticket has sla_deadline in the past AND is not terminal.
+    # ── SLA-breach counting — pure DB ─────────────────────────────────────── #
     sla_breached_qs = active_qs.filter(sla_deadline__lt=today)
 
-    # ── Change 3: status distribution (one query, dict keyed by status) ──── #
+    # ── Status distribution (one query, dict keyed by status) ────────────── #
     status_counts: dict = dict(
         all_tickets.values('status')
                    .annotate(n=Count('id'))
@@ -61,16 +53,12 @@ def dashboard(request):
         'total':          all_tickets.count(),
         'active':         active_qs.count(),
         'closed':         closed_qs.count(),
-        # legacy keys kept so template partial logic still resolves
         'open':           status_counts.get(Ticket.STATUS_NEW, 0),
-        'in_progress':    active_qs.exclude(status=Ticket.STATUS_NEW).count(),
         'resolved_month': closed_qs.filter(
             updated_at__month=today.month,
             updated_at__year=today.year,
         ).count(),
         'sla_breaches':     sla_breached_qs.count(),
-        'total_customers':  Customer.objects.count(),
-        'active_projects':  Project.objects.filter(status='Active').count(),
         # actionable backlog
         'awaiting_admin':   awaiting_admin,
         'awaiting_soc':     awaiting_soc,
@@ -123,9 +111,6 @@ def dashboard(request):
     recent_tickets = active_qs.order_by('-created_at')[:8]
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
-    # ── Recent tasks ──────────────────────────────────────────────────────── #
-    recent_tasks = Task.objects.select_related('project', 'assignee').order_by('-created_at')[:5]
-
     return render(request, 'dashboard/dashboard.html', {
         'stats':              stats,
         'status_labels':      status_labels,
@@ -140,5 +125,4 @@ def dashboard(request):
         'monthly_data':       monthly_data,
         'recent_tickets':     recent_tickets,
         'breach_tickets':     breach_tickets,
-        'recent_tasks':       recent_tasks,
     })

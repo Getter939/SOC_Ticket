@@ -16,46 +16,32 @@
 
 <!-- ── Stat cards ──────────────────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-2">
+    <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100 p-3">
             <div class="text-muted small fw-bold mb-1">Tickets ทั้งหมด</div>
             <div class="fs-2 fw-bold">{{ stats.total }}</div>
             <div class="text-muted" style="font-size:0.7rem;">Total — Active {{ stats.active }} / Closed {{ stats.closed }}</div>
         </div>
     </div>
-    <div class="col-6 col-md-2">
+    <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100 p-3">
             <div class="text-muted small fw-bold mb-1">รอดำเนินการ</div>
             <div class="fs-2 fw-bold text-danger">{{ stats.active }}</div>
             <div class="text-muted" style="font-size:0.7rem;">Active (non-terminal)</div>
         </div>
     </div>
-    <div class="col-6 col-md-2">
+    <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100 p-3">
             <div class="text-muted small fw-bold mb-1">ปิดเดือนนี้</div>
             <div class="fs-2 fw-bold text-success">{{ stats.resolved_month }}</div>
             <div class="text-muted" style="font-size:0.7rem;">Closed (this month)</div>
         </div>
     </div>
-    <div class="col-6 col-md-2">
+    <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100 p-3">
             <div class="text-muted small fw-bold mb-1">เกิน SLA</div>
             <div class="fs-2 fw-bold text-danger">{{ stats.sla_breaches }}</div>
             <div class="text-muted" style="font-size:0.7rem;">SLA Breaches</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-2">
-        <div class="card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted small fw-bold mb-1">ลูกค้า</div>
-            <div class="fs-2 fw-bold text-primary">{{ stats.total_customers }}</div>
-            <div class="text-muted" style="font-size:0.7rem;">Customers</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-2">
-        <div class="card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted small fw-bold mb-1">โปรเจกต์ Active</div>
-            <div class="fs-2 fw-bold text-warning">{{ stats.active_projects }}</div>
-            <div class="text-muted" style="font-size:0.7rem;">Active Projects</div>
         </div>
     </div>
 </div>
@@ -181,7 +167,7 @@
 <div class="row g-3">
 
     <!-- Recent active tickets -->
-    <div class="col-md-5">
+    <div class="col-md-8">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white py-3 d-flex justify-content-between">
                 <span class="fw-bold small">เคสล่าสุด (Active)</span>
@@ -217,7 +203,7 @@
     </div>
 
     <!-- SLA Breaches -->
-    <div class="col-md-3">
+    <div class="col-md-4">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-danger text-white py-3">
                 <span class="fw-bold small"><i class="bi bi-alarm-fill me-1"></i>SLA Breach</span>
@@ -233,36 +219,6 @@
                 <div class="list-group-item text-center text-muted py-4 small">
                     <i class="bi bi-check-circle text-success me-1"></i>ไม่มี SLA Breach
                 </div>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
-    <!-- Recent tasks -->
-    <div class="col-md-4">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white py-3 d-flex justify-content-between">
-                <span class="fw-bold small">Tasks ล่าสุด</span>
-                <a href="{% url 'project_list' %}" class="small text-primary">ดูโปรเจกต์ →</a>
-            </div>
-            <div class="list-group list-group-flush">
-                {% for task in recent_tasks %}
-                <a href="{% url 'project_detail' task.project.pk %}"
-                   class="list-group-item list-group-item-action px-4 py-2">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span class="small fw-semibold text-truncate" style="max-width:160px;">{{ task.title }}</span>
-                        {% if task.status == 'Done' %}
-                            <span class="badge bg-success" style="font-size:0.65rem;">Done</span>
-                        {% elif task.status == 'Doing' %}
-                            <span class="badge bg-warning text-dark" style="font-size:0.65rem;">Doing</span>
-                        {% else %}
-                            <span class="badge bg-secondary" style="font-size:0.65rem;">Todo</span>
-                        {% endif %}
-                    </div>
-                    <div class="text-muted small">{{ task.project.name }}</div>
-                </a>
-                {% empty %}
-                <div class="list-group-item text-center text-muted py-4 small">ยังไม่มี Task</div>
                 {% endfor %}
             </div>
         </div>

@@ -151,14 +151,6 @@
         <i class="bi bi-plus-square"></i> เปิดเคสใหม่
     </a>
 
-    <div class="nav-section-label">CRM</div>
-    <a href="{% url 'customer_list' %}" class="nav-link {% if 'customer' in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-people-fill"></i> ลูกค้า
-    </a>
-    <a href="{% url 'project_list' %}" class="nav-link {% if 'project' in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-briefcase-fill"></i> โปรเจกต์
-    </a>
-
     <div class="nav-section-label">ระบบ</div>
     <a href="/admin/" class="nav-link">
         <i class="bi bi-gear-fill"></i> Admin Panel
