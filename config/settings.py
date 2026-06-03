@@ -7,7 +7,7 @@ SECRET_KEY = config('SECRET-KEY')
 
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['192.168.100.44', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['192.168.100.44', 'localhost', '127.0.0.1', 'web']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -76,7 +76,7 @@ TIME_ZONE = 'Asia/Bangkok'
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 

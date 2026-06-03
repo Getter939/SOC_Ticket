@@ -61,7 +61,10 @@ def reset_and_send_password(modeladmin, request, queryset):
                 f"Password ใหม่: {new_password}\n\n"
                 f"กรุณาเปลี่ยนรหัสผ่านหลังจากเข้าสู่ระบบ"
             )
-            send_mail(subject, message, settings.EMAIL_HOST_USER, [user.email])
+            try:
+                send_mail(subject, message, settings.EMAIL_HOST_USER, [user.email])
+            except Exception as e:
+                messages.error(request, f"รีเซ็ตรหัสผ่านสำเร็จแต่ส่งเมลล้มเหลวสำหรับ {user.email}: {e}")
     messages.success(request, "รีเซ็ตรหัสผ่านและส่งเมลเรียบร้อยแล้ว")
 
 
