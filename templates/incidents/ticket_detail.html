@@ -85,6 +85,16 @@
                 {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}
                 {% endif %}
 
+                {% if ticket.system_owner_name or ticket.system_owner_email %}
+                <br>
+                <i class="bi bi-building"></i>
+                <strong>เจ้าของระบบ:</strong>
+                {{ ticket.system_owner_name|default:"—" }}
+                {% if ticket.system_owner_email %}
+                <span class="text-muted small">({{ ticket.system_owner_email }})</span>
+                {% endif %}
+                {% endif %}
+
                 {% if ticket.verified_by %}
                 <br>
                 <i class="bi bi-patch-check"></i>

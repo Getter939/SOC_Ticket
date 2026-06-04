@@ -150,6 +150,9 @@
     <a href="{% url 'create_ticket' %}" class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> เปิดเคสใหม่
     </a>
+    <a href="{% url 'triage_list' %}" class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-clipboard2-pulse"></i> Triage
+    </a>
 
     <div class="nav-section-label">ระบบ</div>
     <a href="/admin/" class="nav-link">

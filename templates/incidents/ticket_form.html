@@ -10,6 +10,9 @@
             <div class="card-body p-4">
                 <form method="post">
                     {% csrf_token %}
+                    {% if triage_id %}
+                    <input type="hidden" name="triage_id" value="{{ triage_id }}">
+                    {% endif %}
                     {% for field in form %}
                         <div class="mb-3">
                             <label class="form-label fw-bold">{{ field.label }}</label>

@@ -14,11 +14,6 @@ class TicketQuerySet(models.QuerySet):
           - SOC staff / SOC manager  → all tickets
           - System admin             → only tickets where assigned_admin == user
           - No profile / unknown role→ empty queryset (safest default)
-
-        We reach the UserProfile via the reverse OneToOne accessor (related_name
-        'profile').  RelatedObjectDoesNotExist is a subclass of AttributeError,
-        so getattr(user, 'profile', None) cleanly returns None when no profile
-        row exists — no import of UserProfile needed, no circular import risk.
         """
         profile = getattr(user, 'profile', None)
         if profile is None:
@@ -75,7 +70,7 @@ class Ticket(models.Model):
         STATUS_NEW:                  [STATUS_AWAITING_CONTAINMENT],
         STATUS_AWAITING_CONTAINMENT: [STATUS_CONTAINMENT_REPORTED],
         STATUS_CONTAINMENT_REPORTED: [STATUS_UNDER_REVIEW],
-        STATUS_UNDER_REVIEW:         [STATUS_VERIFIED, STATUS_AWAITING_CONTAINMENT],
+        STATUS_UNDER_REVIEW:         [STATUS_VERIFIED, STATUS_AWAITING_CONTAINMENT, STATUS_CLOSED_FP],
         STATUS_VERIFIED:             [STATUS_APPROVED],
         STATUS_APPROVED:             [],
         STATUS_CLOSED_FP:            [],
@@ -83,9 +78,6 @@ class Ticket(models.Model):
 
     # ------------------------------------------------------------------ #
     # Permission map: (from, to) → required permission                   #
-    #   'SOC'           — is_soc (staff or manager)                      #
-    #   'MANAGER'       — is_soc_manager only                            #
-    #   'ASSIGNED_ADMIN'— must be exactly ticket.assigned_admin          #
     # ------------------------------------------------------------------ #
     TRANSITION_PERMISSIONS = {
         (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'SOC',
@@ -93,6 +85,7 @@ class Ticket(models.Model):
         (STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW):         'SOC',
         (STATUS_UNDER_REVIEW,         STATUS_VERIFIED):             'SOC',
         (STATUS_UNDER_REVIEW,         STATUS_AWAITING_CONTAINMENT): 'SOC',
+        (STATUS_UNDER_REVIEW,         STATUS_CLOSED_FP):            'SOC',
         (STATUS_VERIFIED,             STATUS_APPROVED):             'MANAGER',
     }
 
@@ -212,7 +205,6 @@ class Ticket(models.Model):
     ip_address = models.GenericIPAddressField(verbose_name='IP Destination')
     issue_description = models.TextField(verbose_name='รายละเอียด')
 
-    # max_length=30 covers the longest status code 'AWAITING_CONTAINMENT' (21 chars)
     status = models.CharField(
         max_length=30, choices=STATUS_CHOICES, default=STATUS_NEW,
     )
@@ -225,6 +217,16 @@ class Ticket(models.Model):
         verbose_name='รายงานการควบคุม',
     )
 
+    # ── System Owner ────────────────────────────────────────────────── #
+    system_owner_name = models.CharField(
+        max_length=100, blank=True, default='',
+        verbose_name='ชื่อเจ้าของระบบ / หน่วยงาน',
+    )
+    system_owner_email = models.EmailField(
+        blank=True, default='',
+        verbose_name='อีเมลเจ้าของระบบ',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -232,18 +234,11 @@ class Ticket(models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='assigned_tickets',
     )
-    # assigned_admin — the external System Admin this ticket is routed to.
-    # Scopes System Admin read-visibility; also the identity check for
-    # AWAITING_CONTAINMENT → CONTAINMENT_REPORTED.
-    # Do NOT reuse/rename assigned_to for this purpose.
     assigned_admin = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='admin_tickets',
         verbose_name='ผู้ดูแลระบบที่รับผิดชอบ',
     )
-
-    # Sign-off fields — write-once; never overwrite once set (including across
-    # the UNDER_REVIEW → AWAITING_CONTAINMENT rejection loop).
     verified_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='verified_tickets',
@@ -300,7 +295,6 @@ class Ticket(models.Model):
 
     @property
     def sla_remaining(self):
-        """Returns timedelta remaining, negative if breached."""
         if self.sla_deadline:
             return self.sla_deadline - timezone.now()
         return None
@@ -312,7 +306,7 @@ class Ticket(models.Model):
         return f'{self.ticket_id} - {self.device_name}'
 
     # ------------------------------------------------------------------ #
-    # Save — preserves SOC-#### generation logic                         #
+    # Save                                                                #
     # ------------------------------------------------------------------ #
 
     def save(self, *args, **kwargs):
@@ -346,42 +340,21 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
 
     def can_transition_to(self, new_status):
-        """Return True if new_status is a legal next state (ignores permissions)."""
-        if self.is_false_positive:
+        """Return True if new_status is a legal next state (ignores permissions).
+        Exception: FP tickets can only transition to CLOSED_FP, nothing else.
+        """
+        if self.is_false_positive and new_status != self.STATUS_CLOSED_FP:
             return False
         return new_status in self.ALLOWED_TRANSITIONS.get(self.status, [])
 
     def transition_to(self, new_status, user, note=''):
-        """
-        Attempt to move the ticket to new_status.
-
-        Raises ValidationError (with a Thai message) if:
-          - The ticket is a False Positive — terminal, all transitions rejected.
-          - new_status is not a recognised status code.
-          - The (current → new_status) pair is not in ALLOWED_TRANSITIONS
-            (same-status is accepted as a note-only update for SOC on TP tickets).
-          - The requesting user does not satisfy TRANSITION_PERMISSIONS for
-            that pair.
-
-        On success:
-          - Updates self.status.
-          - Sets verified_by/verified_at when reaching VERIFIED (write-once).
-          - Sets approved_by/approved_at when reaching APPROVED (write-once).
-          - Calls self.save() to persist all field changes made before this call
-            (e.g. containment_report set by the view).
-          - Creates a TicketLog entry.
-
-        Sign-off fields are never overwritten: the rejection loop
-        UNDER_REVIEW → AWAITING_CONTAINMENT does not clear an existing
-        verified_by even if VERIFIED had been previously reached.
-        """
         status_map = dict(self.STATUS_CHOICES)
 
-        # ── 1. FP gate ───────────────────────────────────────────────── #
-        if self.is_false_positive:
+        # ── 1. FP gate (allow CLOSED_FP transition through) ──────────── #
+        if self.is_false_positive and new_status != self.STATUS_CLOSED_FP:
             raise ValidationError(
-                'Ticket นี้เป็น False Positive (เหตุการณ์ปลอม) และถูกปิดแล้ว '
-                'ไม่สามารถเปลี่ยนสถานะได้'
+                'Ticket นี้เป็น False Positive (เหตุการณ์ปลอม) '
+                'ใช้ "ปิด (False Positive)" เพื่อปิด Ticket'
             )
 
         # ── 2. Validate new_status is a known code ────────────────────── #
@@ -433,7 +406,6 @@ class Ticket(models.Model):
         # ── 6. Apply transition ───────────────────────────────────────── #
         self.status = new_status
 
-        # Sign-off fields: write-once — never overwrite existing values
         now = timezone.now()
         if new_status == self.STATUS_VERIFIED and self.verified_by_id is None:
             self.verified_by = user
@@ -442,8 +414,6 @@ class Ticket(models.Model):
             self.approved_by = user
             self.approved_at = now
 
-        # self.save() also persists any fields set by the caller before this
-        # call (e.g. containment_report set by the view before transition_to).
         self.save()
         TicketLog.objects.create(
             ticket=self, note=note, status_at_time=new_status, author=user,
@@ -453,7 +423,6 @@ class Ticket(models.Model):
 class TicketLog(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='logs')
     note = models.TextField(verbose_name='บันทึกรายละเอียด')
-    # max_length=30 matches Ticket.status max_length
     status_at_time = models.CharField(max_length=30, verbose_name='สถานะขณะบันทึก')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -467,3 +436,85 @@ class TicketLog(models.Model):
 
     def __str__(self):
         return f'Log for {self.ticket.ticket_id} - {self.ticket.device_name}'
+
+
+# ======================================================================= #
+# Pre-ticket triage                                                        #
+# ======================================================================= #
+
+class TriageRecord(models.Model):
+    """
+    Logs a T1/T2 triage decision BEFORE a ticket is created.
+
+    Three outcomes:
+      FP         — False Positive, case closed, no ticket.
+      TP         — True Positive, ticket created (linked via .ticket FK).
+      ESCALATED  — T1 was unsure; case handed to T2 for final judgment.
+    """
+
+    DECISION_FP        = 'FP'
+    DECISION_TP        = 'TP'
+    DECISION_ESCALATED = 'ESCALATED'
+
+    T1_DECISION_CHOICES = [
+        (DECISION_FP,        'False Positive — ปิดทันที'),
+        (DECISION_TP,        'True Positive — สร้าง Ticket'),
+        (DECISION_ESCALATED, 'ไม่แน่ใจ — Escalate ไปยัง T2'),
+    ]
+
+    T2_DECISION_CHOICES = [
+        (DECISION_FP, 'False Positive — ปิด'),
+        (DECISION_TP, 'True Positive — สร้าง Ticket'),
+    ]
+
+    # ── T1 fields ──────────────────────────────────────────────────── #
+    analyst = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='triage_records', verbose_name='นักวิเคราะห์ T1',
+    )
+    alert_description = models.TextField(verbose_name='รายละเอียด Alert')
+    source_ip = models.CharField(
+        max_length=50, blank=True, default='', verbose_name='IP Source',
+    )
+    decision = models.CharField(
+        max_length=20, choices=T1_DECISION_CHOICES, verbose_name='การตัดสินใจ T1',
+    )
+    notes = models.TextField(blank=True, default='', verbose_name='บันทึก T1')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # ── T2 escalation fields ───────────────────────────────────────── #
+    escalated_to = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='escalated_triages', verbose_name='Escalate ไปยัง T2',
+    )
+    t2_decision = models.CharField(
+        max_length=20, choices=T2_DECISION_CHOICES,
+        blank=True, default='', verbose_name='การตัดสินใจ T2',
+    )
+    t2_notes = models.TextField(blank=True, default='', verbose_name='บันทึก T2')
+    t2_decided_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Linked ticket (if TP) ──────────────────────────────────────── #
+    ticket = models.OneToOneField(
+        Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='triage', verbose_name='Ticket ที่สร้าง',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        analyst_name = self.analyst.username if self.analyst else '?'
+        return f'Triage #{self.pk} by {analyst_name} — {self.decision}'
+
+    @property
+    def is_pending_t2(self):
+        """True if waiting for T2 to respond to an escalation."""
+        return self.decision == self.DECISION_ESCALATED and not self.t2_decision
+
+    @property
+    def final_decision(self):
+        """Resolved decision: T2's if escalated, else T1's."""
+        if self.decision == self.DECISION_ESCALATED:
+            return self.t2_decision or 'PENDING'
+        return self.decision

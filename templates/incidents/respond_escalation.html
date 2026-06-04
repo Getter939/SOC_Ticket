@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+
+        <div class="card shadow-sm border-warning mb-4">
+            <div class="card-header bg-warning text-dark py-3">
+                <h5 class="mb-0"><i class="bi bi-arrow-up-circle-fill me-2"></i>Escalated Triage — ตัดสินใจ T2</h5>
+            </div>
+            <div class="card-body p-4">
+                <div class="mb-3">
+                    <span class="text-muted small fw-bold">จาก T1:</span>
+                    <span class="ms-2">{{ triage.analyst.get_full_name|default:triage.analyst.username }}</span>
+                    <span class="text-muted small ms-3">{{ triage.created_at|date:"d M Y H:i" }}</span>
+                </div>
+                {% if triage.source_ip %}
+                <div class="mb-2">
+                    <span class="text-muted small fw-bold">IP Source:</span>
+                    <span class="badge bg-secondary font-monospace ms-2">{{ triage.source_ip }}</span>
+                </div>
+                {% endif %}
+                <div class="mb-3">
+                    <div class="text-muted small fw-bold mb-1">รายละเอียด Alert:</div>
+                    <div class="p-3 bg-light rounded border small">{{ triage.alert_description|linebreaks }}</div>
+                </div>
+                {% if triage.notes %}
+                <div class="mb-3">
+                    <div class="text-muted small fw-bold mb-1">บันทึก T1:</div>
+                    <div class="p-3 bg-light rounded border small">{{ triage.notes }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-dark text-white py-3">
+                <h6 class="mb-0">การตัดสินใจของ T2</h6>
+            </div>
+            <div class="card-body p-4">
+                {% if messages %}
+                {% for message in messages %}
+                <div class="alert alert-danger py-2 small">{{ message }}</div>
+                {% endfor %}
+                {% endif %}
+
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">การวินิจฉัย <span class="text-danger">*</span></label>
+                        <select name="t2_decision" class="form-select" required>
+                            <option value="">-- เลือกการตัดสินใจ --</option>
+                            <option value="FP">False Positive — ปิด Alert นี้</option>
+                            <option value="TP">True Positive — สร้าง Ticket</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">บันทึกเหตุผล</label>
+                        <textarea name="t2_notes" class="form-control" rows="3"
+                            placeholder="อธิบายเหตุผลประกอบการตัดสินใจของ T2..."></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-dark px-4">
+                            <i class="bi bi-check2-circle me-1"></i>ยืนยันการตัดสินใจ
+                        </button>
+                        <a href="{% url 'triage_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

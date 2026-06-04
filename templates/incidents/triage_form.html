@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-dark text-white py-3">
+                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse-fill me-2"></i>บันทึกผล Triage Alert</h5>
+                <small class="text-white-50">T1 ประเมิน Alert และตัดสินใจ — FP / TP / Escalate ไปยัง T2</small>
+            </div>
+            <div class="card-body p-4">
+                <form method="post">
+                    {% csrf_token %}
+                    {% if triage_id %}
+                    <input type="hidden" name="triage_id" value="{{ triage_id }}">
+                    {% endif %}
+
+                    {% for field in form %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            {{ field.label }}
+                            {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
+                        </label>
+                        {{ field }}
+                        {% if field.help_text %}
+                        <div class="form-text text-muted small">{{ field.help_text }}</div>
+                        {% endif %}
+                        {% if field.errors %}
+                        <div class="text-danger small mt-1">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+
+                    <div class="alert alert-info py-2 small mt-3">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>หมายเหตุ:</strong>
+                        เลือก <strong>False Positive</strong> เพื่อปิด Alert โดยไม่สร้าง Ticket |
+                        เลือก <strong>True Positive</strong> เพื่อสร้าง Ticket ต่อไป |
+                        เลือก <strong>Escalate</strong> เพื่อส่งให้ T2 ตัดสินใจ
+                    </div>
+
+                    <div class="mt-4 d-flex gap-2">
+                        <button type="submit" class="btn btn-dark px-4">
+                            <i class="bi bi-send-fill me-1"></i>บันทึกผล Triage
+                        </button>
+                        <a href="{% url 'triage_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

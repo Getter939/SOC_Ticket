@@ -5,32 +5,23 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from .forms import TicketForm
-from .models import Ticket, TicketLog
-from .notifications import notify_containment_required
+from .forms import TicketForm, TriageForm
+from .models import Ticket, TicketLog, TriageRecord
+from .notifications import (
+    notify_containment_required,
+    notify_system_owner_created,
+    notify_system_owner_closed,
+)
 
 
-# ── Private view helpers ─────────────────────────────────────────────────── #
+# ── Private helpers ──────────────────────────────────────────────────── #
 
 def _valid_soc_status_choices(ticket, user):
-    """
-    Return (code, label) choices for the SOC update-status dropdown.
-
-    Rules:
-    - Returns [] if the user is not SOC (staff or manager).
-    - Always includes the current status first (SOC note-only update).
-    - Includes each allowed next-state whose required permission is 'SOC'.
-    - Also includes 'MANAGER' states if the user is a SOC manager.
-    - Never includes 'ASSIGNED_ADMIN' transitions — those are handled by
-      the separate containment-report form.
-    """
     profile = getattr(user, 'profile', None)
     if profile is None or not profile.is_soc:
         return []
 
     status_map = dict(Ticket.STATUS_CHOICES)
-
-    # Current status first (allows note-only update without state change)
     result = [(ticket.status, status_map.get(ticket.status, ticket.status))]
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
@@ -44,54 +35,28 @@ def _valid_soc_status_choices(ticket, user):
 
 
 def _notify_containment(ticket, reason, request):
-    """
-    Non-fatal wrapper around notify_containment_required.
-
-    Sends the email after a successful transition to AWAITING_CONTAINMENT.
-    Attaches a messages.warning to the request if delivery is skipped or
-    fails — the transition has already been committed, so we never roll it
-    back over an email problem.
-
-    reason — None for initial routing (NEW → AWAITING_CONTAINMENT);
-             the analyst's note for the rejection loop
-             (UNDER_REVIEW → AWAITING_CONTAINMENT).
-    """
     if not ticket.assigned_admin_id:
-        messages.warning(
-            request,
-            'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: '
-            'ยังไม่ได้กำหนดผู้ดูแลระบบ',
-        )
+        messages.warning(request, 'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: ยังไม่ได้กำหนดผู้ดูแลระบบ')
         return
-
-    # Accessing .email requires a DB hit if the FK isn't cached; that's fine —
-    # we already know assigned_admin_id is set.
     admin = ticket.assigned_admin
     if not admin.email:
-        messages.warning(
-            request,
-            f'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: '
-            f'{admin.get_full_name() or admin.username} ไม่มีที่อยู่อีเมล',
-        )
+        messages.warning(request, f'Ticket routed — {admin.get_full_name() or admin.username} ไม่มีอีเมล')
         return
-
-    sent = notify_containment_required(ticket, reason=reason)
-    if not sent:
-        messages.warning(
-            request,
-            'Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — '
-            'โปรดแจ้งผู้ดูแลระบบด้วยตนเอง',
-        )
+    if not notify_containment_required(ticket, reason=reason):
+        messages.warning(request, 'Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — โปรดแจ้งผู้ดูแลระบบด้วยตนเอง')
 
 
-# ── Views ────────────────────────────────────────────────────────────────── #
+def _notify_owner_closed(ticket, request):
+    if ticket.system_owner_email and not notify_system_owner_closed(ticket):
+        messages.warning(request, 'Ticket ปิดแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
+
+
+# ── Ticket views ─────────────────────────────────────────────────────── #
 
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
-    tickets = visible.exclude(
-        status__in=list(Ticket.TERMINAL_STATUSES)
-    ).order_by('created_at')
+    tickets = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES)).order_by('created_at')
     sla_breach_count = visible.filter(
         sla_deadline__lt=timezone.now()
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
@@ -108,16 +73,44 @@ def create_ticket(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเปิดเคสใหม่ได้')
         return redirect('ticket_list')
 
+    # Pre-fill from triage if coming from a TP triage decision
+    triage = None
+    triage_id = request.GET.get('triage_id') or request.POST.get('triage_id')
+    if triage_id:
+        try:
+            triage = TriageRecord.objects.get(pk=triage_id)
+        except TriageRecord.DoesNotExist:
+            pass
+
     if request.method == 'POST':
         form = TicketForm(request.POST)
         if form.is_valid():
             ticket = form.save(commit=False)
             ticket.created_by = request.user
             ticket.save()
+
+            # Link triage record if present
+            if triage and not triage.ticket:
+                triage.ticket = ticket
+                triage.save(update_fields=['ticket'])
+
+            # Stage 5 — notify System Owner
+            if ticket.system_owner_email:
+                if not notify_system_owner_created(ticket):
+                    messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
+
             return redirect('ticket_detail', pk=ticket.pk)
     else:
-        form = TicketForm()
-    return render(request, 'incidents/ticket_form.html', {'form': form})
+        initial = {}
+        if triage:
+            initial['device_name'] = triage.source_ip
+            initial['issue_description'] = triage.alert_description
+        form = TicketForm(initial=initial)
+
+    return render(request, 'incidents/ticket_form.html', {
+        'form': form,
+        'triage_id': triage_id or '',
+    })
 
 
 @login_required
@@ -126,8 +119,6 @@ def ticket_detail(request, pk):
     profile = getattr(request.user, 'profile', None)
     is_terminal = ticket.status in Ticket.TERMINAL_STATUSES
 
-    # Only the exact assigned admin can submit the containment form, and
-    # only while the ticket is in AWAITING_CONTAINMENT.
     can_submit_containment = (
         not is_terminal
         and ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT
@@ -152,8 +143,6 @@ def ticket_detail(request, pk):
                 elif not disposition:
                     messages.error(request, 'กรุณาระบุการวินิจฉัยเหตุการณ์ (True/False Positive)')
                 else:
-                    # Set fields on the instance BEFORE calling transition_to so
-                    # that transition_to's self.save() persists them atomically.
                     ticket.disposition = disposition
                     ticket.containment_report = report
                     try:
@@ -168,8 +157,6 @@ def ticket_detail(request, pk):
         elif action == 'soc_update':
             new_note = request.POST.get('update_notes', '').strip()
             new_status = request.POST.get('status')
-            # Capture before transition so we know which leg triggered the
-            # AWAITING_CONTAINMENT state (initial dispatch vs rejection loop).
             prev_status = ticket.status
 
             if not new_note:
@@ -178,18 +165,14 @@ def ticket_detail(request, pk):
                 try:
                     ticket.transition_to(new_status, request.user, new_note)
 
-                    # ── Email notification ───────────────────────────────── #
-                    # Only triggered when the ticket lands on AWAITING_CONTAINMENT.
-                    # Rejection loop (UNDER_REVIEW → AWAITING_CONTAINMENT) passes
-                    # the analyst's note as 'reason' so the admin knows what to fix.
-                    # Email failure is non-fatal: transition is already committed.
+                    # Notify Security Admin when routed to AWAITING_CONTAINMENT
                     if new_status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                        reason = (
-                            new_note
-                            if prev_status == Ticket.STATUS_UNDER_REVIEW
-                            else None
-                        )
+                        reason = new_note if prev_status == Ticket.STATUS_UNDER_REVIEW else None
                         _notify_containment(ticket, reason, request)
+
+                    # Stage 11 — notify System Owner on closure
+                    if new_status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_FP):
+                        _notify_owner_closed(ticket, request)
 
                 except ValidationError as e:
                     messages.error(request, e.message)
@@ -213,8 +196,6 @@ def ticket_detail(request, pk):
 @login_required
 def edit_log(request, log_id):
     log = get_object_or_404(TicketLog, id=log_id)
-    # Enforce visibility on the parent ticket — 404 here means the user
-    # can reach the log URL but cannot see the ticket it belongs to.
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=log.ticket_id)
     ticket_id = log.ticket.id
 
@@ -253,12 +234,89 @@ def ticket_history(request):
 
     tickets = query_set.prefetch_related('logs').order_by('-updated_at')
 
-    context = {
+    return render(request, 'incidents/ticket_history.html', {
         'tickets': tickets,
         'search_ticket': search_ticket,
         'start_date': start_date,
         'end_date': end_date,
-    }
-    return render(request, 'incidents/ticket_history.html', context)
+    })
 
 
+# ── Triage views ─────────────────────────────────────────────────────── #
+
+@login_required
+def triage_list(request):
+    profile = getattr(request.user, 'profile', None)
+    if profile is None or not profile.is_soc:
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่เข้าถึงหน้านี้ได้')
+        return redirect('home')
+
+    my_triages = TriageRecord.objects.filter(analyst=request.user).order_by('-created_at')
+    pending_escalations = TriageRecord.objects.filter(
+        escalated_to=request.user, t2_decision=''
+    ).order_by('-created_at')
+
+    return render(request, 'incidents/triage_list.html', {
+        'my_triages': my_triages,
+        'pending_escalations': pending_escalations,
+    })
+
+
+@login_required
+def create_triage(request):
+    profile = getattr(request.user, 'profile', None)
+    if profile is None or not profile.is_soc:
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถ Triage ได้')
+        return redirect('home')
+
+    if request.method == 'POST':
+        form = TriageForm(request.POST)
+        if form.is_valid():
+            triage = form.save(commit=False)
+            triage.analyst = request.user
+            triage.save()
+
+            if triage.decision == TriageRecord.DECISION_TP:
+                messages.success(request, 'บันทึก True Positive แล้ว — กรุณาสร้าง Ticket สำหรับกรณีนี้')
+                return redirect(f"{__import__('django.urls', fromlist=['reverse']).reverse('create_ticket')}?triage_id={triage.pk}")
+            elif triage.decision == TriageRecord.DECISION_FP:
+                messages.success(request, 'บันทึก False Positive เรียบร้อยแล้ว — ไม่จำเป็นต้องสร้าง Ticket')
+                return redirect('triage_list')
+            else:
+                messages.success(request, f'Escalate ไปยัง T2 เรียบร้อยแล้ว')
+                return redirect('triage_list')
+    else:
+        form = TriageForm()
+
+    return render(request, 'incidents/triage_form.html', {'form': form})
+
+
+@login_required
+def respond_escalation(request, triage_id):
+    profile = getattr(request.user, 'profile', None)
+    if profile is None or not profile.is_soc:
+        return redirect('home')
+
+    triage = get_object_or_404(TriageRecord, pk=triage_id, escalated_to=request.user)
+
+    if request.method == 'POST':
+        t2_decision = request.POST.get('t2_decision')
+        t2_notes = request.POST.get('t2_notes', '').strip()
+
+        if t2_decision not in [TriageRecord.DECISION_FP, TriageRecord.DECISION_TP]:
+            messages.error(request, 'กรุณาเลือกการตัดสินใจ')
+        else:
+            triage.t2_decision = t2_decision
+            triage.t2_notes = t2_notes
+            triage.t2_decided_at = timezone.now()
+            triage.save()
+
+            if t2_decision == TriageRecord.DECISION_TP:
+                messages.success(request, 'T2 ยืนยัน True Positive — กรุณาสร้าง Ticket')
+                from django.urls import reverse
+                return redirect(f"{reverse('create_ticket')}?triage_id={triage.pk}")
+            else:
+                messages.success(request, 'T2 ยืนยัน False Positive — บันทึกเรียบร้อย ไม่จำเป็นต้องสร้าง Ticket')
+                return redirect('triage_list')
+
+    return render(request, 'incidents/respond_escalation.html', {'triage': triage})

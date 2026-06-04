@@ -3,12 +3,9 @@ Email notifications for the SOC ticketing workflow.
 
 Rules
 ─────
-• This module is intentionally decoupled from Ticket.transition_to so that
-  the model stays pure (no email side-effects, no dependency on Django mail
-  or URL reversing), and the existing tests never send real mail.
-• Every public function here returns a bool: True = sent, False = skipped or
-  failed.  They never raise — SMTP errors are caught, logged, and surfaced
-  to callers so they can show a warning without rolling back any DB state.
+• Decoupled from model logic — no email side-effects in transition_to.
+• Every public function returns bool: True = sent, False = skipped/failed.
+• Never raises — SMTP errors are caught, logged, and returned as False.
 """
 
 import logging
@@ -20,51 +17,60 @@ from django.urls import reverse
 logger = logging.getLogger(__name__)
 
 
+# ──────────────────────────────────────────────────────────────────────── #
+# Internal helper                                                           #
+# ──────────────────────────────────────────────────────────────────────── #
+
+def _ticket_url(ticket):
+    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8000').rstrip('/')
+    try:
+        path = reverse('ticket_detail', kwargs={'pk': ticket.pk})
+    except Exception:
+        path = f'/incidents/ticket/{ticket.pk}/'
+    return f'{site_url}{path}'
+
+
+def _send(subject, body, recipient_email, ticket_id):
+    """Shared send wrapper with logging."""
+    try:
+        send_mail(
+            subject=subject,
+            message=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[recipient_email],
+            fail_silently=False,
+        )
+        logger.info('%s: sent to %s for ticket %s.', subject[:40], recipient_email, ticket_id)
+        return True
+    except Exception as exc:
+        logger.error('SMTP failure for ticket %s — %s', ticket_id, exc)
+        return False
+
+
+# ──────────────────────────────────────────────────────────────────────── #
+# Security Admin notifications                                             #
+# ──────────────────────────────────────────────────────────────────────── #
+
 def notify_containment_required(ticket, reason=None):
     """
     Email the assigned admin that a ticket needs containment action.
-
-    Parameters
-    ──────────
-    ticket  — a Ticket instance whose status is AWAITING_CONTAINMENT.
-    reason  — optional str; when provided (rejection loop), included in the
-              body so the admin knows what to fix.  When None (initial
-              routing), the email is a plain dispatch notice.
-
-    Returns True if the email was sent, False if skipped or if SMTP failed.
-    Never raises.
-
-    Subject examples
-    ────────────────
-    [SOC-0001] Containment required
-    [SOC-0001] Containment resubmission required
+    reason — when provided (rejection loop), tells the admin what to fix.
     """
     admin = ticket.assigned_admin
     if not admin or not admin.email:
         logger.warning(
-            'notify_containment_required: ticket %s — no assigned admin or '
-            'admin has no email address; notification skipped.',
+            'notify_containment_required: ticket %s — no assigned admin or no email.',
             ticket.ticket_id,
         )
         return False
 
-    if reason:
-        subject = f'[{ticket.ticket_id}] Containment resubmission required'
-    else:
-        subject = f'[{ticket.ticket_id}] Containment required'
+    subject = (
+        f'[{ticket.ticket_id}] Containment resubmission required'
+        if reason else
+        f'[{ticket.ticket_id}] Containment required'
+    )
 
-    # Build an absolute URL to the ticket so the admin can click straight in.
-    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8000').rstrip('/')
-    try:
-        ticket_path = reverse('ticket_detail', kwargs={'pk': ticket.pk})
-    except Exception:
-        ticket_path = f'/incidents/ticket/{ticket.pk}/'
-    ticket_url = f'{site_url}{ticket_path}'
-
-    # ── Body ─────────────────────────────────────────────────────────────── #
-    # Keep incident details out of the email body — the recipient is directed
-    # to the portal.  Include only what they need to identify the ticket and
-    # understand the urgency.
+    ticket_url = _ticket_url(ticket)
     summary = ticket.issue_description[:100]
     if len(ticket.issue_description) > 100:
         summary += '…'
@@ -83,43 +89,97 @@ def notify_containment_required(ticket, reason=None):
             'The SOC analyst has returned this ticket for re-containment.',
             f'  Analyst note: {reason}',
             '',
-            'Please review the analyst\'s feedback, then log in and submit an',
-            'updated containment report.',
+            'Please review the feedback, then log in and submit an updated containment report.',
             '',
         ]
     else:
-        lines += [
-            'Please log in and submit your containment report as soon as possible.',
-            '',
-        ]
+        lines += ['Please log in and submit your containment report as soon as possible.', '']
 
-    lines += [
-        'View the ticket here (login required):',
-        f'  {ticket_url}',
+    lines += ['View the ticket here (login required):', f'  {ticket_url}', '', 'Do not reply to this email.']
+
+    return _send(subject, '\n'.join(lines), admin.email, ticket.ticket_id)
+
+
+# ──────────────────────────────────────────────────────────────────────── #
+# System Owner notifications                                               #
+# ──────────────────────────────────────────────────────────────────────── #
+
+def notify_system_owner_created(ticket):
+    """
+    Stage 5 — Email System Owner when a ticket is first created.
+    Best-effort: returns False without raising if SMTP fails or email is blank.
+    """
+    if not ticket.system_owner_email:
+        return False
+
+    owner_name = ticket.system_owner_name or 'เจ้าของระบบ'
+    subject = f'[{ticket.ticket_id}] แจ้งเหตุความปลอดภัยบนระบบของท่าน'
+
+    summary = ticket.issue_description[:150]
+    if len(ticket.issue_description) > 150:
+        summary += '...'
+
+    lines = [
+        f'เรียน {owner_name},',
         '',
-        'Do not reply to this email.',
+        f'ทีม SOC ของ NT ตรวจพบเหตุการณ์ความปลอดภัยที่เกี่ยวข้องกับระบบของท่าน',
+        'และได้เปิด Ticket เพื่อดำเนินการแก้ไขแล้ว',
+        '',
+        f'  Ticket ID      : {ticket.ticket_id}',
+        f'  ประเภทเหตุการณ์ : {ticket.get_category_display()} / {ticket.get_issue_type_display()}',
+        f'  IP Source       : {ticket.device_name}',
+        f'  สรุปเหตุการณ์   : {summary}',
+        '',
+        'ทีม SOC กำลังดำเนินการควบคุมและแก้ไขเหตุการณ์ดังกล่าว',
+        'ท่านไม่จำเป็นต้องดำเนินการใดๆ — ทีม SOC จะแจ้งผลให้ทราบเมื่อเสร็จสิ้น',
+        '',
+        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
     ]
 
-    body = '\n'.join(lines)
+    return _send(subject, '\n'.join(lines), ticket.system_owner_email, ticket.ticket_id)
 
-    try:
-        send_mail(
-            subject=subject,
-            message=body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[admin.email],
-            fail_silently=False,
-        )
-        logger.info(
-            'notify_containment_required: sent to %s for ticket %s.',
-            admin.email,
-            ticket.ticket_id,
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            'notify_containment_required: SMTP failure for ticket %s — %s',
-            ticket.ticket_id,
-            exc,
-        )
+
+def notify_system_owner_closed(ticket):
+    """
+    Stage 11 — Email System Owner when a ticket is APPROVED or CLOSED_FP.
+    """
+    if not ticket.system_owner_email:
         return False
+
+    owner_name = ticket.system_owner_name or 'เจ้าของระบบ'
+    is_fp = ticket.status == ticket.STATUS_CLOSED_FP
+
+    subject = f'[{ticket.ticket_id}] แจ้งผลการแก้ไขเหตุการณ์ความปลอดภัย'
+
+    if is_fp:
+        outcome_lines = [
+            'ผลการตรวจสอบ: เหตุการณ์ดังกล่าวได้รับการวินิจฉัยว่าเป็น False Positive',
+            '(ไม่ใช่ภัยคุกคามจริง) และปิดเคสเรียบร้อยแล้ว',
+        ]
+    else:
+        closed_by = ''
+        if ticket.approved_by:
+            closed_by = ticket.approved_by.get_full_name() or ticket.approved_by.username
+        closed_at = ticket.approved_at.strftime('%d/%m/%Y %H:%M') if ticket.approved_at else '-'
+        outcome_lines = [
+            'เหตุการณ์ดังกล่าวได้รับการควบคุม ตรวจสอบ และอนุมัติปิดเคสเรียบร้อยแล้ว',
+            f'  ผู้อนุมัติ : {closed_by}',
+            f'  ปิดเมื่อ   : {closed_at}',
+        ]
+
+    lines = [
+        f'เรียน {owner_name},',
+        '',
+        f'Ticket ความปลอดภัย [{ticket.ticket_id}] ที่แจ้งเกี่ยวกับระบบของท่านได้รับการปิดแล้ว',
+        '',
+        f'  Ticket ID      : {ticket.ticket_id}',
+        f'  ประเภทเหตุการณ์ : {ticket.get_category_display()} / {ticket.get_issue_type_display()}',
+        f'  IP Source       : {ticket.device_name}',
+        '',
+    ] + outcome_lines + [
+        '',
+        'บันทึกเหตุการณ์ฉบับสมบูรณ์ถูกเก็บรักษาไว้ในระบบ SOC',
+        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
+    ]
+
+    return _send(subject, '\n'.join(lines), ticket.system_owner_email, ticket.ticket_id)
