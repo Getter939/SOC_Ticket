@@ -1,9 +1,7 @@
 import calendar
-import openpyxl
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -264,39 +262,3 @@ def ticket_history(request):
     return render(request, 'incidents/ticket_history.html', context)
 
 
-@login_required
-def export_tickets_excel(request):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Ticket History"
-
-    columns = ['Ticket', 'IP Source', 'รายละเอียด', 'การแก้ไข (ล่าสุด)', 'วันที่แจ้ง', 'วันที่แก้ไขเสร็จ']
-    ws.append(columns)
-
-    tickets = Ticket.objects.visible_to(request.user).filter(
-        status__in=list(Ticket.TERMINAL_STATUSES)
-    ).distinct()
-
-    for ticket in tickets:
-        last_log = ticket.logs.order_by('-created_at').first()
-        repair_detail = last_log.note if last_log else 'ไม่มีข้อมูลบันทึก'
-        row = [
-            ticket.ticket_id,
-            ticket.device_name,
-            ticket.issue_description,
-            repair_detail,
-            ticket.created_at.strftime('%d/%m/%Y %H:%M'),
-            ticket.updated_at.strftime('%d/%m/%Y %H:%M'),
-        ]
-        ws.append(row)
-
-    for col in ws.columns:
-        max_length = max((len(str(cell.value)) for cell in col if cell.value), default=0)
-        ws.column_dimensions[col[0].column_letter].width = max_length + 2
-
-    response = HttpResponse(
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
-    response['Content-Disposition'] = 'attachment; filename=ticket_history.xlsx'
-    wb.save(response)
-    return response
