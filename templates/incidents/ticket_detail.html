@@ -113,6 +113,46 @@
 
                 <hr>
 
+                {# ── Attachments ── #}
+                <hr>
+                <h6 class="text-secondary"><i class="bi bi-paperclip"></i> ไฟล์แนบ</h6>
+                {% if attachments %}
+                <ul class="list-group list-group-flush mb-2">
+                    {% for att in attachments %}
+                    <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-center">
+                        <a href="{{ att.file.url }}" target="_blank" class="small text-decoration-none">
+                            <i class="bi bi-file-earmark me-1"></i>{{ att.original_name }}
+                            {% if att.description %}<span class="text-muted">({{ att.description }})</span>{% endif %}
+                        </a>
+                        {% if profile and profile.is_soc or att.uploaded_by == request.user %}
+                        <form method="post" action="{% url 'delete_attachment' att.pk %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-link btn-sm text-danger p-0" title="ลบ"
+                                onclick="return confirm('ลบไฟล์นี้?')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted small">ยังไม่มีไฟล์แนบ</p>
+                {% endif %}
+
+                {# Upload form — visible to SOC, System Admin, and System Owner #}
+                {% if not is_terminal %}
+                <form method="post" action="{% url 'upload_attachment' ticket.pk %}"
+                      enctype="multipart/form-data" class="d-flex gap-2 align-items-start mt-1">
+                    {% csrf_token %}
+                    <div class="flex-grow-1">{{ attachment_form.file }}</div>
+                    <div style="min-width:160px;">{{ attachment_form.description }}</div>
+                    <button type="submit" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-upload me-1"></i>อัพโหลด
+                    </button>
+                </form>
+                {% endif %}
+
                 <div class="timeline-wrapper" style="max-height: 500px; overflow-y: auto;">
                     {% for log in logs %}
                     <div class="border-start border-primary border-4 ps-3 mb-4 position-relative">

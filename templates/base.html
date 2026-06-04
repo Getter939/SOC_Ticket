@@ -135,11 +135,22 @@
 <!-- ── Sidebar ── -->
 {% if user.is_authenticated %}
 <nav id="sidebar">
+    {% with profile=request.user.profile %}
+
     <div class="nav-section-label">หลัก</div>
     <a href="{% url 'home' %}" class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
         <i class="bi bi-speedometer2"></i> Dashboard
     </a>
 
+    {% if profile.is_system_owner %}
+    {# ── System Owner menu ── #}
+    <div class="nav-section-label">ระบบของฉัน</div>
+    <a href="{% url 'system_owner_dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'system_owner_dashboard' %}active{% endif %}">
+        <i class="bi bi-building"></i> My Tickets
+    </a>
+
+    {% else %}
+    {# ── SOC / Admin menu ── #}
     <div class="nav-section-label">Incidents</div>
     <a href="{% url 'ticket_list' %}" class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> Active Incidents
@@ -147,12 +158,17 @@
     <a href="{% url 'ticket_history' %}" class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
         <i class="bi bi-clock-history"></i> ประวัติ
     </a>
+    {% if profile.is_soc %}
     <a href="{% url 'create_ticket' %}" class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> เปิดเคสใหม่
     </a>
     <a href="{% url 'triage_list' %}" class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
         <i class="bi bi-clipboard2-pulse"></i> Triage
     </a>
+    {% endif %}
+    {% endif %}
+
+    {% endwith %}
 
     <div class="nav-section-label">ระบบ</div>
     <a href="/admin/" class="nav-link">

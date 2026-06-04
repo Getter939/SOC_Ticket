@@ -11,7 +11,7 @@ Rules
 import logging
 
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.urls import reverse
 
 logger = logging.getLogger(__name__)
@@ -30,17 +30,23 @@ def _ticket_url(ticket):
     return f'{site_url}{path}'
 
 
-def _send(subject, body, recipient_email, ticket_id):
-    """Shared send wrapper with logging."""
+def _send(subject, body, recipient_email, ticket_id, attachments=None):
+    """Shared send wrapper with optional file attachments."""
     try:
-        send_mail(
+        email = EmailMessage(
             subject=subject,
-            message=body,
+            body=body,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient_email],
-            fail_silently=False,
+            to=[recipient_email],
         )
-        logger.info('%s: sent to %s for ticket %s.', subject[:40], recipient_email, ticket_id)
+        for att in (attachments or []):
+            try:
+                with att.file.open('rb') as f:
+                    email.attach(att.original_name, f.read(), 'application/octet-stream')
+            except Exception as att_exc:
+                logger.warning('Could not attach %s: %s', att.original_name, att_exc)
+        email.send(fail_silently=False)
+        logger.info('Email sent to %s for ticket %s.', recipient_email, ticket_id)
         return True
     except Exception as exc:
         logger.error('SMTP failure for ticket %s — %s', ticket_id, exc)
@@ -104,15 +110,17 @@ def notify_containment_required(ticket, reason=None):
 # System Owner notifications                                               #
 # ──────────────────────────────────────────────────────────────────────── #
 
-def notify_system_owner_created(ticket):
+def notify_system_owner_created(ticket, attachments=None):
     """
     Stage 5 — Email System Owner when a ticket is first created.
-    Best-effort: returns False without raising if SMTP fails or email is blank.
+    attachments — optional list of TicketAttachment objects to include.
     """
-    if not ticket.system_owner_email:
+    if not ticket.system_owner or not ticket.system_owner.email:
         return False
 
-    owner_name = ticket.system_owner_name or 'เจ้าของระบบ'
+    owner = ticket.system_owner
+    owner_name = owner.get_full_name() or owner.username
+    dept = getattr(getattr(owner, 'profile', None), 'department', '')
     subject = f'[{ticket.ticket_id}] แจ้งเหตุความปลอดภัยบนระบบของท่าน'
 
     summary = ticket.issue_description[:150]
@@ -120,7 +128,7 @@ def notify_system_owner_created(ticket):
         summary += '...'
 
     lines = [
-        f'เรียน {owner_name},',
+        f'เรียน {owner_name}{f" ({dept})" if dept else ""},',
         '',
         f'ทีม SOC ของ NT ตรวจพบเหตุการณ์ความปลอดภัยที่เกี่ยวข้องกับระบบของท่าน',
         'และได้เปิด Ticket เพื่อดำเนินการแก้ไขแล้ว',
@@ -136,17 +144,20 @@ def notify_system_owner_created(ticket):
         'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
     ]
 
-    return _send(subject, '\n'.join(lines), ticket.system_owner_email, ticket.ticket_id)
+    return _send(subject, '\n'.join(lines), owner.email, ticket.ticket_id, attachments)
 
 
-def notify_system_owner_closed(ticket):
+def notify_system_owner_closed(ticket, attachments=None):
     """
     Stage 11 — Email System Owner when a ticket is APPROVED or CLOSED_FP.
+    attachments — optional list of TicketAttachment objects to include.
     """
-    if not ticket.system_owner_email:
+    if not ticket.system_owner or not ticket.system_owner.email:
         return False
 
-    owner_name = ticket.system_owner_name or 'เจ้าของระบบ'
+    owner = ticket.system_owner
+    owner_name = owner.get_full_name() or owner.username
+    dept = getattr(getattr(owner, 'profile', None), 'department', '')
     is_fp = ticket.status == ticket.STATUS_CLOSED_FP
 
     subject = f'[{ticket.ticket_id}] แจ้งผลการแก้ไขเหตุการณ์ความปลอดภัย'
@@ -168,7 +179,7 @@ def notify_system_owner_closed(ticket):
         ]
 
     lines = [
-        f'เรียน {owner_name},',
+        f'เรียน {owner_name}{f" ({dept})" if dept else ""},',
         '',
         f'Ticket ความปลอดภัย [{ticket.ticket_id}] ที่แจ้งเกี่ยวกับระบบของท่านได้รับการปิดแล้ว',
         '',
@@ -182,4 +193,4 @@ def notify_system_owner_closed(ticket):
         'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
     ]
 
-    return _send(subject, '\n'.join(lines), ticket.system_owner_email, ticket.ticket_id)
+    return _send(subject, '\n'.join(lines), owner.email, ticket.ticket_id, attachments)

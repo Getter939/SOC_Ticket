@@ -5,8 +5,8 @@ from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from .forms import TicketForm, TriageForm
-from .models import Ticket, TicketLog, TriageRecord
+from .forms import AttachmentForm, TicketForm, TriageForm
+from .models import Ticket, TicketAttachment, TicketLog, TriageRecord
 from .notifications import (
     notify_containment_required,
     notify_system_owner_created,
@@ -47,8 +47,10 @@ def _notify_containment(ticket, reason, request):
 
 
 def _notify_owner_closed(ticket, request):
-    if ticket.system_owner_email and not notify_system_owner_closed(ticket):
-        messages.warning(request, 'Ticket ปิดแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
+    if ticket.system_owner and ticket.system_owner.email:
+        attachments = list(ticket.attachments.all())
+        if not notify_system_owner_closed(ticket, attachments=attachments):
+            messages.warning(request, 'Ticket ปิดแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
 
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
@@ -95,7 +97,7 @@ def create_ticket(request):
                 triage.save(update_fields=['ticket'])
 
             # Stage 5 — notify System Owner
-            if ticket.system_owner_email:
+            if ticket.system_owner and ticket.system_owner.email:
                 if not notify_system_owner_created(ticket):
                     messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
 
@@ -180,11 +182,15 @@ def ticket_detail(request, pk):
         return redirect('ticket_detail', pk=pk)
 
     logs = ticket.logs.all()
+    attachments = ticket.attachments.all()
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
+    attachment_form = AttachmentForm()
 
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         'logs': logs,
+        'attachments': attachments,
+        'attachment_form': attachment_form,
         'profile': profile,
         'is_terminal': is_terminal,
         'can_submit_containment': can_submit_containment,
@@ -289,6 +295,70 @@ def create_triage(request):
         form = TriageForm()
 
     return render(request, 'incidents/triage_form.html', {'form': form})
+
+
+# ── Attachment views ─────────────────────────────────────────────────── #
+
+@login_required
+def upload_attachment(request, pk):
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    if request.method == 'POST':
+        form = AttachmentForm(request.POST, request.FILES)
+        if form.is_valid():
+            att = form.save(commit=False)
+            att.ticket = ticket
+            att.original_name = request.FILES['file'].name
+            att.uploaded_by = request.user
+            att.save()
+            messages.success(request, f'อัพโหลด "{att.original_name}" เรียบร้อยแล้ว')
+        else:
+            messages.error(request, 'ไม่สามารถอัพโหลดไฟล์ได้ — กรุณาตรวจสอบไฟล์อีกครั้ง')
+    return redirect('ticket_detail', pk=pk)
+
+
+@login_required
+def delete_attachment(request, attachment_id):
+    att = get_object_or_404(TicketAttachment, pk=attachment_id)
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
+    profile = getattr(request.user, 'profile', None)
+    # Only SOC or the original uploader may delete
+    can_delete = (profile and profile.is_soc) or (att.uploaded_by == request.user)
+    if request.method == 'POST' and can_delete:
+        att.file.delete(save=False)
+        att.delete()
+        messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว')
+    return redirect('ticket_detail', pk=ticket.pk)
+
+
+# ── System Owner dashboard ────────────────────────────────────────────── #
+
+@login_required
+def system_owner_dashboard(request):
+    profile = getattr(request.user, 'profile', None)
+    if profile is None or not profile.is_system_owner:
+        return redirect('home')
+
+    my_tickets = Ticket.objects.filter(system_owner=request.user)
+    terminal   = list(Ticket.TERMINAL_STATUSES)
+    active_qs  = my_tickets.exclude(status__in=terminal)
+    closed_qs  = my_tickets.filter(status__in=terminal)
+
+    stats = {
+        'total':          my_tickets.count(),
+        'active':         active_qs.count(),
+        'closed':         closed_qs.count(),
+        'sla_breaches':   active_qs.filter(sla_deadline__lt=timezone.now()).count(),
+    }
+
+    recent_tickets = active_qs.order_by('-created_at')[:10]
+    closed_tickets = closed_qs.order_by('-updated_at')[:10]
+
+    return render(request, 'incidents/system_owner_dashboard.html', {
+        'stats':          stats,
+        'recent_tickets': recent_tickets,
+        'closed_tickets': closed_tickets,
+        'profile':        profile,
+    })
 
 
 @login_required

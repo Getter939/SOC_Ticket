@@ -9,6 +9,12 @@ from apps.incidents.models import Ticket
 
 @login_required
 def dashboard(request):
+    # System Owners see their own portal, not the SOC dashboard
+    profile = getattr(request.user, 'profile', None)
+    if profile and profile.is_system_owner:
+        from django.shortcuts import redirect
+        return redirect('system_owner_dashboard')
+
     today = timezone.now()
     terminal = list(Ticket.TERMINAL_STATUSES)
 

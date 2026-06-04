@@ -22,6 +22,8 @@ class TicketQuerySet(models.QuerySet):
             return self
         if profile.is_system_admin:
             return self.filter(assigned_admin=user)
+        if profile.is_system_owner:
+            return self.filter(system_owner=user)
         return self.none()
 
 
@@ -217,14 +219,13 @@ class Ticket(models.Model):
         verbose_name='รายงานการควบคุม',
     )
 
-    # ── System Owner ────────────────────────────────────────────────── #
-    system_owner_name = models.CharField(
-        max_length=100, blank=True, default='',
-        verbose_name='ชื่อเจ้าของระบบ / หน่วยงาน',
-    )
-    system_owner_email = models.EmailField(
-        blank=True, default='',
-        verbose_name='อีเมลเจ้าของระบบ',
+    # ── System Owner ─────────────────────────────────────────────────── #
+    # FK to the registered System Owner user account.  Their email and
+    # department are read from their User / UserProfile at notification time.
+    system_owner = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='owned_tickets',
+        verbose_name='เจ้าของระบบ / หน่วยงาน',
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -518,3 +519,31 @@ class TriageRecord(models.Model):
         if self.decision == self.DECISION_ESCALATED:
             return self.t2_decision or 'PENDING'
         return self.decision
+
+
+# ======================================================================= #
+# File attachments                                                         #
+# ======================================================================= #
+
+def attachment_upload_path(instance, filename):
+    return f'ticket_attachments/{instance.ticket.ticket_id}/{filename}'
+
+
+class TicketAttachment(models.Model):
+    """File attached to a ticket — evidence, reports, screenshots, etc."""
+
+    ticket       = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='attachments')
+    file         = models.FileField(upload_to=attachment_upload_path)
+    original_name = models.CharField(max_length=255)
+    description  = models.CharField(max_length=255, blank=True, default='')
+    uploaded_by  = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='uploaded_attachments',
+    )
+    uploaded_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
+
+    def __str__(self):
+        return f'{self.original_name} → {self.ticket.ticket_id}'

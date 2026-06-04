@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth.models import User
 
 from apps.accounts.models import UserProfile
-from .models import Ticket, TriageRecord
+from .models import Ticket, TicketAttachment, TriageRecord
 
 
 class TicketForm(forms.ModelForm):
@@ -24,6 +24,25 @@ class TicketForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-control'}),
     )
 
+    system_owner = forms.ModelChoiceField(
+        queryset=User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_OWNER,
+            is_active=True,
+        ).order_by('profile__department', 'first_name', 'username'),
+        required=False,
+        label='เจ้าของระบบ / หน่วยงาน',
+        empty_label='-- ยังไม่ระบุ --',
+        widget=forms.Select(attrs={'class': 'form-control'}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Show "Department — Full Name" in the system_owner dropdown
+        self.fields['system_owner'].label_from_instance = lambda u: (
+            f"{u.profile.department} — {u.get_full_name() or u.username}"
+            if hasattr(u, 'profile') else u.username
+        )
+
     class Meta:
         model = Ticket
         fields = [
@@ -36,8 +55,7 @@ class TicketForm(forms.ModelForm):
             'issue_description',
             'assigned_to',
             'assigned_admin',
-            'system_owner_name',
-            'system_owner_email',
+            'system_owner',
         ]
         widgets = {
             'device_name':        forms.TextInput(attrs={'class': 'form-control'}),
@@ -47,8 +65,6 @@ class TicketForm(forms.ModelForm):
             'detailed_issue':     forms.Select(attrs={'class': 'form-control'}),
             'detailed_issue2':    forms.Select(attrs={'class': 'form-control'}),
             'issue_description':  forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
-            'system_owner_name':  forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'ชื่อหน่วยงาน / เจ้าของระบบ'}),
-            'system_owner_email': forms.EmailInput(attrs={'class': 'form-control', 'placeholder': 'email@example.com'}),
         }
 
 
@@ -87,3 +103,16 @@ class TriageForm(forms.ModelForm):
         if decision == TriageRecord.DECISION_ESCALATED and not escalated_to:
             self.add_error('escalated_to', 'กรุณาเลือก T2 ที่จะรับช่วงต่อ')
         return cleaned
+
+
+class AttachmentForm(forms.ModelForm):
+    class Meta:
+        model = TicketAttachment
+        fields = ['file', 'description']
+        widgets = {
+            'file':        forms.ClearableFileInput(attrs={'class': 'form-control'}),
+            'description': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'คำอธิบายไฟล์ (ไม่บังคับ)',
+            }),
+        }

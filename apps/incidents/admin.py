@@ -8,20 +8,20 @@ class TicketAdmin(admin.ModelAdmin):
         'ticket_id', 'device_name', 'status', 'disposition',
         'category', 'issue_type',
         'assigned_to', 'assigned_admin', 'created_by', 'created_at',
-        'system_owner_name',
+        'system_owner',
     )
     list_filter = ('status', 'disposition', 'category', 'issue_type', 'created_at')
     search_fields = (
         'ticket_id', 'device_name', 'ip_address',
         'assigned_to__username', 'assigned_admin__username',
-        'system_owner_name', 'system_owner_email',
+        'system_owner__username', 'system_owner__first_name',
     )
     readonly_fields = (
         'ticket_id', 'created_at', 'updated_at',
         'verified_by', 'verified_at',
         'approved_by', 'approved_at',
     )
-    raw_id_fields = ('assigned_to', 'assigned_admin', 'created_by')
+    raw_id_fields = ('assigned_to', 'assigned_admin', 'created_by', 'system_owner')
 
     fieldsets = (
         ('ข้อมูลทั่วไป', {
@@ -32,7 +32,7 @@ class TicketAdmin(admin.ModelAdmin):
             ),
         }),
         ('เจ้าของระบบ', {
-            'fields': ('system_owner_name', 'system_owner_email'),
+            'fields': ('system_owner',),
         }),
         ('สถานะและการวินิจฉัย', {
             'fields': ('status', 'disposition', 'containment_report'),

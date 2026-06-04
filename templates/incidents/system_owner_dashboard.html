@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-0 fw-bold"><i class="bi bi-building me-2"></i>My Tickets</h4>
+        <div class="text-muted small">
+            {{ profile.department }} —
+            {{ request.user.get_full_name|default:request.user.username }}
+        </div>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">Tickets ทั้งหมด</div>
+            <div class="fs-2 fw-bold">{{ stats.total }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">กำลังดำเนินการ</div>
+            <div class="fs-2 fw-bold text-warning">{{ stats.active }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">ปิดแล้ว</div>
+            <div class="fs-2 fw-bold text-success">{{ stats.closed }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">เกิน SLA</div>
+            <div class="fs-2 fw-bold text-danger">{{ stats.sla_breaches }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Active tickets -->
+    <div class="col-md-7">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
+                <i class="bi bi-shield-exclamation me-1"></i>Tickets ที่กำลังดำเนินการ
+            </div>
+            {% if recent_tickets %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Ticket ID</th>
+                            <th>เหตุการณ์</th>
+                            <th>สถานะ</th>
+                            <th>วันที่แจ้ง</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in recent_tickets %}
+                        <tr class="{% if t.is_sla_breached %}table-danger{% endif %}">
+                            <td>
+                                <a href="{% url 'ticket_detail' t.pk %}" class="font-monospace fw-bold text-primary">
+                                    #{{ t.ticket_id }}
+                                </a>
+                            </td>
+                            <td>{{ t.get_detailed_issue2_display|truncatechars:45 }}</td>
+                            <td>
+                                {% if t.status == 'NEW' %}
+                                <span class="badge bg-danger" style="font-size:0.65rem;">แจ้งใหม่</span>
+                                {% elif t.status == 'AWAITING_CONTAINMENT' %}
+                                <span class="badge bg-warning text-dark" style="font-size:0.65rem;">รอการจัดการ</span>
+                                {% elif t.status == 'CONTAINMENT_REPORTED' %}
+                                <span class="badge bg-info text-dark" style="font-size:0.65rem;">รายงานแล้ว</span>
+                                {% elif t.status == 'UNDER_REVIEW' %}
+                                <span class="badge bg-secondary" style="font-size:0.65rem;">กำลังตรวจสอบ</span>
+                                {% elif t.status == 'VERIFIED' %}
+                                <span class="badge bg-primary" style="font-size:0.65rem;">ตรวจสอบแล้ว</span>
+                                {% else %}
+                                <span class="badge bg-light text-dark border" style="font-size:0.65rem;">{{ t.get_status_display }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-muted">{{ t.created_at|date:"d M Y" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5 small">
+                <i class="bi bi-check-circle fs-3 d-block mb-2 opacity-50 text-success"></i>
+                ไม่มี Ticket ที่กำลังดำเนินการ
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Closed tickets -->
+    <div class="col-md-5">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
+                <i class="bi bi-archive me-1"></i>Tickets ที่ปิดแล้ว (ล่าสุด)
+            </div>
+            {% if closed_tickets %}
+            <div class="list-group list-group-flush">
+                {% for t in closed_tickets %}
+                <a href="{% url 'ticket_detail' t.pk %}"
+                   class="list-group-item list-group-item-action px-4 py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="font-monospace fw-bold small">#{{ t.ticket_id }}</span>
+                        {% if t.status == 'APPROVED' %}
+                        <span class="badge bg-success" style="font-size:0.6rem;">อนุมัติแล้ว</span>
+                        {% else %}
+                        <span class="badge bg-secondary" style="font-size:0.6rem;">ปิด (FP)</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-muted small text-truncate">{{ t.get_detailed_issue2_display }}</div>
+                    <div class="text-muted" style="font-size:0.68rem;">{{ t.updated_at|date:"d M Y" }}</div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5 small">
+                <i class="bi bi-inbox fs-3 d-block mb-2 opacity-50"></i>
+                ยังไม่มี Ticket ที่ปิดแล้ว
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
