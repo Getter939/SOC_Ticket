@@ -14,6 +14,9 @@ def dashboard(request):
     if profile and profile.is_system_owner:
         from django.shortcuts import redirect
         return redirect('system_owner_dashboard')
+    if profile and profile.is_system_admin:
+        from django.shortcuts import redirect
+        return redirect('ticket_list')
 
     today = timezone.now()
     terminal = list(Ticket.TERMINAL_STATUSES)
