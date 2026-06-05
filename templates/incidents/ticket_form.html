@@ -53,26 +53,16 @@
       <div class="row g-3">
 
         <div class="col-md-6">
-          <label class="form-label fw-semibold">เลขที่รายงาน</label>
-          <input class="form-control bg-light" value="(ออกให้อัตโนมัติเมื่อบันทึก)" disabled>
-        </div>
-
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Reference</label>
-          {{ form.reference_id }}
-          {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
-        </div>
-
-        <div class="col-md-6">
           <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
           {{ form.incident_datetime }}
           {% if form.incident_datetime.errors %}<div class="text-danger small">{{ form.incident_datetime.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ผู้รายงาน</label>
-          <input class="form-control bg-light" value="{{ request.user.get_full_name|default:request.user.username }} ({{ request.user.email }})" disabled>
-          <div class="field-hint">ผู้รายงานคือผู้ใช้งานที่ล็อกอินอยู่</div>
+          <label class="form-label fw-semibold">Reference ID</label>
+          {{ form.reference_id }}
+          <div class="field-hint">รหัสอ้างอิงจากแหล่ง Log ต้นทาง เพื่อให้สามารถสืบค้นกลับไปยัง Log ได้</div>
+          {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">

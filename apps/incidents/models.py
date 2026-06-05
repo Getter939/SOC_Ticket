@@ -380,24 +380,25 @@ class Ticket(models.Model):
             self.sla_deadline = timezone.now() + timedelta(hours=self.SLA_HOURS)
 
         if not self.ticket_id or self.ticket_id.strip() == '':
-            last_ticket = (
-                Ticket.objects.filter(ticket_id__startswith='SOC-')
+            now = timezone.now()
+            prefix = f'{now.year % 100:02d}{now.month:02d}'  # e.g. '2606' for June 2026
+            last = (
+                Ticket.objects.filter(ticket_id__startswith=prefix)
                 .order_by('-ticket_id')
                 .first()
             )
-            if last_ticket:
+            if last:
                 try:
-                    last_no = int(last_ticket.ticket_id.split('-')[-1])
-                    new_no = last_no + 1
+                    seq = int(last.ticket_id[4:]) + 1
                 except (ValueError, IndexError):
-                    new_no = 1
+                    seq = 1
             else:
-                new_no = 1
+                seq = 1
 
-            self.ticket_id = f'SOC-{new_no:04d}'
+            self.ticket_id = f'{prefix}{seq:02d}'
             while Ticket.objects.filter(ticket_id=self.ticket_id).exists():
-                new_no += 1
-                self.ticket_id = f'SOC-{new_no:04d}'
+                seq += 1
+                self.ticket_id = f'{prefix}{seq:02d}'
 
         super().save(*args, **kwargs)
 
