@@ -94,6 +94,19 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
     # Other choice sets                                                   #
     # ------------------------------------------------------------------ #
+    SEVERITY_CHOICES = [
+        ('Critical', 'Critical'),
+        ('High',     'High'),
+        ('Medium',   'Medium'),
+        ('Low',      'Low'),
+    ]
+
+    ASSET_TYPE_CHOICES = [
+        ('Computer',       'Computer'),
+        ('Server',         'Server'),
+        ('Network Device', 'Network Device'),
+    ]
+
     CATEGORY_CHOICES = [
         ('Cyber Event', 'Cyber Event'),
         ('Incident', 'Incident'),
@@ -203,9 +216,61 @@ class Ticket(models.Model):
     # Fields                                                              #
     # ------------------------------------------------------------------ #
     ticket_id = models.CharField(max_length=20, unique=True, editable=False, blank=True)
-    device_name = models.CharField(max_length=100, verbose_name='IP Source')
-    ip_address = models.GenericIPAddressField(verbose_name='IP Destination')
-    issue_description = models.TextField(verbose_name='รายละเอียด')
+
+    # ── Section 1: General Information ──────────────────────────────── #
+    severity = models.CharField(
+        max_length=10, choices=SEVERITY_CHOICES, default='High',
+        verbose_name='ระดับความรุนแรง',
+    )
+    incident_datetime = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='วันและเวลาที่ตรวจพบเหตุการณ์',
+    )
+    reference_id = models.CharField(
+        max_length=50, blank=True, default='',
+        verbose_name='Reference',
+    )
+
+    # ── Section 3: Description ───────────────────────────────────────── #
+    device_name = models.CharField(max_length=100, verbose_name='ระบบ / บริการ (System/Service)')
+    issue_description = models.TextField(verbose_name='รายละเอียดเหตุการณ์')
+
+    # ── Section 4: Scope / Affected Asset ───────────────────────────── #
+    ip_address = models.GenericIPAddressField(verbose_name='IP Address ของทรัพย์สิน')
+    mac_address = models.CharField(
+        max_length=50, blank=True, default='',
+        verbose_name='MAC Address',
+    )
+    asset_type = models.CharField(
+        max_length=20, choices=ASSET_TYPE_CHOICES, blank=True, default='',
+        verbose_name='ประเภทของทรัพย์สิน',
+    )
+    spread_to_others = models.BooleanField(
+        null=True, blank=True,
+        verbose_name='มีการกระจายไปยังจุดอื่น',
+    )
+
+    # ── Section 5: IoC ──────────────────────────────────────────────── #
+    destination_ip = models.CharField(
+        max_length=100, blank=True, default='',
+        verbose_name='IP Address ปลายทางที่น่าสงสัย',
+    )
+    ioc_details = models.TextField(
+        blank=True, default='',
+        verbose_name='Indicators of Compromise (IoC)',
+    )
+
+    # ── Section 6: MITRE ATT&CK ─────────────────────────────────────── #
+    mitre_phase = models.CharField(
+        max_length=200, blank=True, default='',
+        verbose_name='Phase การโจมตีตาม MITRE ATT&CK',
+    )
+
+    # ── Section 9: Remediation ──────────────────────────────────────── #
+    remediation_summary = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปผลการดำเนินการแก้ไข',
+    )
 
     status = models.CharField(
         max_length=30, choices=STATUS_CHOICES, default=STATUS_NEW,

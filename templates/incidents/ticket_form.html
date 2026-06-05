@@ -1,34 +1,263 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<style>
+  .section-header {
+    background: #1a1a2e; color: #fff;
+    padding: .6rem 1rem; border-radius: 6px;
+    font-size: .82rem; font-weight: 700;
+    letter-spacing: .04em; margin-bottom: 1rem;
+  }
+  .section-header small { color: rgba(255,255,255,.55); font-weight: 400; margin-left: .5rem; }
+  .form-section { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+
+  /* Severity radio pills */
+  .severity-radio { display: none; }
+  .severity-group { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .severity-group label { cursor: pointer; padding: .35rem .9rem; border-radius: 20px; font-size: .8rem; font-weight: 600; border: 2px solid transparent; transition: all .15s; }
+  input[value="Critical"] + label, label[for*="Critical"] { border-color: #dc3545; color: #dc3545; }
+  input[value="Critical"]:checked + label, label[for*="Critical"].selected { background: #dc3545; color: #fff; }
+  input[value="High"] + label, label[for*="High"] { border-color: #fd7e14; color: #fd7e14; }
+  input[value="High"]:checked + label, label[for*="High"].selected { background: #fd7e14; color: #fff; }
+  input[value="Medium"] + label, label[for*="Medium"] { border-color: #ffc107; color: #856404; }
+  input[value="Medium"]:checked + label, label[for*="Medium"].selected { background: #ffc107; color: #856404; }
+  input[value="Low"] + label, label[for*="Low"] { border-color: #198754; color: #198754; }
+  input[value="Low"]:checked + label, label[for*="Low"].selected { background: #198754; color: #fff; }
+
+  /* Asset type radio */
+  .asset-type-radio { display: none; }
+  .asset-type-group { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .asset-type-group label { cursor: pointer; padding: .35rem .9rem; border-radius: 6px; font-size: .82rem; border: 1px solid #ced4da; transition: all .15s; }
+  .asset-type-group input:checked + label { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+  .asset-type-group input.selected + label { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+
+  .field-hint { font-size: .75rem; color: #6c757d; margin-top: .25rem; }
+  .required-star { color: #dc3545; }
+</style>
+
 <div class="row justify-content-center">
-    <div class="col-md-10 col-lg-11">
-        <div class="card shadow-sm border-0">
-            <div class="card-header bg-primary text-white py-3">
-                <h5 class="mb-0"><i class="bi bi-plus-circle-fill me-2"></i>แจ้งเหตุเสีย</h5>
-            </div>
-            <div class="card-body p-4">
-                <form method="post">
-                    {% csrf_token %}
-                    {% if triage_id %}
-                    <input type="hidden" name="triage_id" value="{{ triage_id }}">
-                    {% endif %}
-                    {% for field in form %}
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">{{ field.label }}</label>
-                            {{ field }}
-                            {% if field.errors %}
-                                <div class="text-danger small">{{ field.errors }}</div>
-                            {% endif %}
-                        </div>
-                    {% endfor %}
-                    <div class="mt-4">
-                        <button type="submit" class="btn btn-primary px-4">บันทึกและออกเลข Ticket</button>
-                        <a href="{% url 'home' %}" class="btn btn-light px-4 border ms-2">ยกเลิก</a>
-                    </div>
-                </form>
-            </div>
+<div class="col-xl-10 col-lg-11">
+
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-medical-fill text-danger me-2"></i>INCIDENT REPORT</h4>
+    <span class="text-muted" style="font-size:.8rem;">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</span>
+  </div>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
+
+    <!-- ── Section 1: General Information ── -->
+    <div class="form-section">
+      <div class="section-header">1. ข้อมูลทั่วไป <small>General Information</small></div>
+      <div class="row g-3">
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">เลขที่รายงาน</label>
+          <input class="form-control bg-light" value="(ออกให้อัตโนมัติเมื่อบันทึก)" disabled>
         </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Reference</label>
+          {{ form.reference_id }}
+          {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
+          {{ form.incident_datetime }}
+          {% if form.incident_datetime.errors %}<div class="text-danger small">{{ form.incident_datetime.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ผู้รายงาน</label>
+          <input class="form-control bg-light" value="{{ request.user.get_full_name|default:request.user.username }} ({{ request.user.email }})" disabled>
+          <div class="field-hint">ผู้รายงานคือผู้ใช้งานที่ล็อกอินอยู่</div>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label fw-semibold">ระดับความรุนแรง <span class="required-star">*</span></label>
+          <div class="severity-group" id="severity-group">
+            {% for radio in form.severity %}
+              {{ radio.tag }}
+              <label for="{{ radio.id_for_label }}"
+                     class="severity-pill {% if radio.data.selected %}selected{% endif %}">
+                {{ radio.choice_label }}
+              </label>
+            {% endfor %}
+          </div>
+          {% if form.severity.errors %}<div class="text-danger small mt-1">{{ form.severity.errors }}</div>{% endif %}
+        </div>
+
+      </div>
     </div>
+
+    <!-- ── Section 2: Threat Category ── -->
+    <div class="form-section">
+      <div class="section-header">2. ประเภทภัยคุกคาม <small>Category</small></div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Category</label>
+          {{ form.category }}
+          {% if form.category.errors %}<div class="text-danger small">{{ form.category.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">แหล่งที่มา (Source Type)</label>
+          {{ form.issue_type }}
+          {% if form.issue_type.errors %}<div class="text-danger small">{{ form.issue_type.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ประเภทภัยคุกคาม (Detailed)</label>
+          {{ form.detailed_issue }}
+          {% if form.detailed_issue.errors %}<div class="text-danger small">{{ form.detailed_issue.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">เรื่องที่แจ้ง</label>
+          {{ form.detailed_issue2 }}
+          {% if form.detailed_issue2.errors %}<div class="text-danger small">{{ form.detailed_issue2.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 3: Incident Description ── -->
+    <div class="form-section">
+      <div class="section-header">3. รายละเอียดเหตุการณ์ <small>Incident Description</small></div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ระบบ / บริการ <span class="required-star">*</span></label>
+          {{ form.device_name }}
+          {% if form.device_name.errors %}<div class="text-danger small">{{ form.device_name.errors }}</div>{% endif %}
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">สรุปรายละเอียดเหตุการณ์ <span class="required-star">*</span></label>
+          {{ form.issue_description }}
+          <div class="field-hint">ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น</div>
+          {% if form.issue_description.errors %}<div class="text-danger small">{{ form.issue_description.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 4: Scope / Affected Asset ── -->
+    <div class="form-section">
+      <div class="section-header">4. Scope ทรัพย์สินที่ได้รับผลกระทบ</div>
+      <div class="row g-3">
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">IP Address <span class="required-star">*</span></label>
+          {{ form.ip_address }}
+          {% if form.ip_address.errors %}<div class="text-danger small">{{ form.ip_address.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">MAC Address</label>
+          {{ form.mac_address }}
+          {% if form.mac_address.errors %}<div class="text-danger small">{{ form.mac_address.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">หน่วยงานเจ้าของทรัพย์สิน</label>
+          {{ form.system_owner }}
+          {% if form.system_owner.errors %}<div class="text-danger small">{{ form.system_owner.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold d-block">ประเภทของทรัพย์สิน</label>
+          <div class="asset-type-group" id="asset-type-group">
+            {% for radio in form.asset_type %}
+              {% if radio.data.value %}
+                {{ radio.tag }}
+                <label for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% if form.asset_type.errors %}<div class="text-danger small mt-1">{{ form.asset_type.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">มีการกระจายไปยังจุดอื่น</label>
+          {{ form.spread_to_others }}
+          {% if form.spread_to_others.errors %}<div class="text-danger small">{{ form.spread_to_others.errors }}</div>{% endif %}
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Section 5: IoC ── -->
+    <div class="form-section">
+      <div class="section-header">5. Indicators of Compromise <small>หลักฐานที่พบ</small></div>
+      <div class="row g-3">
+        <div class="col-md-5">
+          <label class="form-label fw-semibold">IP Address ปลายทางที่น่าสงสัย</label>
+          {{ form.destination_ip }}
+          <div class="field-hint">รองรับรูปแบบ defanged เช่น 79[.]124[.]59[.]146</div>
+          {% if form.destination_ip.errors %}<div class="text-danger small">{{ form.destination_ip.errors }}</div>{% endif %}
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
+          {{ form.ioc_details }}
+          {% if form.ioc_details.errors %}<div class="text-danger small">{{ form.ioc_details.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 6: MITRE ATT&CK ── -->
+    <div class="form-section">
+      <div class="section-header">6. Evidence / Log <small>MITRE ATT&CK</small></div>
+      <div class="row g-3">
+        <div class="col-12">
+          <label class="form-label fw-semibold">Phase การโจมตีตาม MITRE ATT&CK</label>
+          {{ form.mitre_phase }}
+          <div class="field-hint">เช่น T1059.001 — Command and Scripting Interpreter: PowerShell</div>
+          {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Assignment ── -->
+    <div class="form-section">
+      <div class="section-header"><i class="bi bi-people-fill me-1"></i>การมอบหมายงาน</div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">ผู้รับผิดชอบ (SOC)</label>
+          {{ form.assigned_to }}
+          {% if form.assigned_to.errors %}<div class="text-danger small">{{ form.assigned_to.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">ผู้ดูแลระบบที่รับผิดชอบ (System Admin)</label>
+          {{ form.assigned_admin }}
+          {% if form.assigned_admin.errors %}<div class="text-danger small">{{ form.assigned_admin.errors }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-2 mb-4">
+      <button type="submit" class="btn btn-danger px-4 fw-semibold">
+        <i class="bi bi-save me-1"></i>บันทึกและออกเลข Ticket
+      </button>
+      <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+    </div>
+
+  </form>
 </div>
+</div>
+
+<script>
+// Severity pills — highlight selected on click
+document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('#severity-group label').forEach(l => l.classList.remove('selected'));
+    radio.nextElementSibling.classList.add('selected');
+  });
+  if (radio.checked) radio.nextElementSibling.classList.add('selected');
+});
+
+// Asset type pills — highlight selected on click
+document.querySelectorAll('#asset-type-group input[type=radio]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.querySelectorAll('#asset-type-group label').forEach(l => l.classList.remove('selected'));
+    radio.nextElementSibling.classList.add('selected');
+  });
+  if (radio.checked) radio.nextElementSibling.classList.add('selected');
+});
+</script>
 {% endblock %}

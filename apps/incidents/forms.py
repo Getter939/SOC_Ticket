@@ -35,37 +35,72 @@ class TicketForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-control'}),
     )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Show "Department — Full Name" in the system_owner dropdown
-        self.fields['system_owner'].label_from_instance = lambda u: (
-            f"{u.profile.department} — {u.get_full_name() or u.username}"
-            if hasattr(u, 'profile') else u.username
-        )
-
     class Meta:
         model = Ticket
         fields = [
-            'device_name',
-            'ip_address',
+            # Section 1
+            'severity',
+            'incident_datetime',
+            'reference_id',
+            # Section 2
             'category',
             'issue_type',
             'detailed_issue',
             'detailed_issue2',
+            # Section 3
+            'device_name',
             'issue_description',
+            # Section 4
+            'ip_address',
+            'mac_address',
+            'asset_type',
+            'spread_to_others',
+            # Section 5
+            'destination_ip',
+            'ioc_details',
+            # Section 6
+            'mitre_phase',
+            # Assignment
             'assigned_to',
             'assigned_admin',
             'system_owner',
         ]
         widgets = {
-            'device_name':        forms.TextInput(attrs={'class': 'form-control'}),
-            'ip_address':         forms.TextInput(attrs={'class': 'form-control'}),
-            'category':           forms.Select(attrs={'class': 'form-control'}),
-            'issue_type':         forms.Select(attrs={'class': 'form-control'}),
-            'detailed_issue':     forms.Select(attrs={'class': 'form-control'}),
-            'detailed_issue2':    forms.Select(attrs={'class': 'form-control'}),
-            'issue_description':  forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
+            'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
+            'incident_datetime':  forms.DateTimeInput(
+                attrs={'class': 'form-control', 'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M',
+            ),
+            'reference_id':       forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น INC-2026-0001'}),
+            'category':           forms.Select(attrs={'class': 'form-select'}),
+            'issue_type':         forms.Select(attrs={'class': 'form-select'}),
+            'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
+            'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
+            'device_name':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น NTHQ-WS-047 / ระบบ HR Portal'}),
+            'issue_description':  forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 5,
+                'placeholder': 'สรุปรายละเอียดเหตุการณ์ที่ตรวจพบ เช่น ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบเหตุการณ์ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น',
+            }),
+            'ip_address':         forms.TextInput(attrs={'class': 'form-control', 'placeholder': '0.0.0.0'}),
+            'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
+            'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
+            'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
+            'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
+            'ioc_details':        forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
+            }),
+            'mitre_phase':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น T1059.001 — Command and Scripting Interpreter: PowerShell'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk and self.instance.incident_datetime:
+            self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+        self.fields['system_owner'].label_from_instance = lambda u: (
+            f"{u.profile.department} — {u.get_full_name() or u.username}"
+            if hasattr(u, 'profile') else u.username
+        )
 
 
 class TriageForm(forms.ModelForm):

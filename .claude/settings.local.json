@@ -4,7 +4,9 @@
       "Bash(Get-ChildItem -Recurse -Depth 2)",
       "Bash(Select-Object FullName)",
       "Bash(ls -la \"C:\\\\Users\\\\NT\\\\Documents\\\\soc-crm\" 2>/dev/null | head -50)",
-      "Bash(python manage.py test apps.dashboard.tests.DashboardAccessTest --verbosity=2)"
+      "Bash(python manage.py test apps.dashboard.tests.DashboardAccessTest --verbosity=2)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__Claude_in_Chrome__list_connected_browsers"
     ]
   }
 }

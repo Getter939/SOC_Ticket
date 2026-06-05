@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "SOC Ticket",
+      "runtimeExecutable": "C:\\Users\\NT\\Documents\\SOC_Ticket\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["manage.py", "runserver", "--settings=config.settings_local"],
+      "port": 8000,
+      "autoPort": false
+    }
+  ]
+}

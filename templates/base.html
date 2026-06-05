@@ -10,11 +10,13 @@
     <style>
         :root {
             --sidebar-width: 240px;
+            --sidebar-collapsed-width: 56px;
             --header-height: 56px;
             --sidebar-bg: #1a1a2e;
             --sidebar-active: #e63946;
             --sidebar-text: rgba(255,255,255,0.75);
             --sidebar-text-active: #fff;
+            --sidebar-transition: 0.22s ease;
         }
         body { background: #f4f6f9; overflow-x: hidden; }
 
@@ -28,7 +30,7 @@
             padding: 0 1.25rem;
             gap: 1rem;
         }
-        #topbar .brand { color: #fff; font-weight: 700; font-size: 1rem; white-space: nowrap; }
+        #topbar .brand { color: #fff; font-weight: 700; font-size: 1rem; white-space: nowrap; overflow: hidden; transition: opacity var(--sidebar-transition), max-width var(--sidebar-transition); max-width: 300px; }
         #topbar .brand small { color: rgba(255,255,255,0.5); font-size: 0.7rem; display:block; font-weight:400; }
         #topbar .sla-badge {
             margin-left: auto;
@@ -44,19 +46,34 @@
             border-radius: 20px; white-space: nowrap;
         }
 
+        /* ── Sidebar toggle button ── */
+        #sidebarToggle {
+            background: none; border: none;
+            color: rgba(255,255,255,0.75);
+            font-size: 1.3rem;
+            padding: 0; flex-shrink: 0;
+            line-height: 1;
+            cursor: pointer;
+        }
+        #sidebarToggle:hover { color: #fff; }
+
         /* ── Sidebar ── */
         #sidebar {
             position: fixed; top: var(--header-height); left: 0; bottom: 0;
             width: var(--sidebar-width);
             background: var(--sidebar-bg);
-            overflow-y: auto; z-index: 1030;
+            overflow-y: auto; overflow-x: hidden;
+            z-index: 1030;
             padding-top: 0.5rem;
+            transition: width var(--sidebar-transition);
         }
         .nav-section-label {
             color: rgba(255,255,255,0.3);
             font-size: 0.62rem; font-weight: 700;
             text-transform: uppercase; letter-spacing: .1em;
             padding: 1rem 1.25rem 0.3rem;
+            white-space: nowrap;
+            transition: opacity var(--sidebar-transition);
         }
         #sidebar .nav-link {
             color: var(--sidebar-text);
@@ -64,7 +81,8 @@
             border-radius: 0;
             font-size: 0.82rem;
             display: flex; align-items: center; gap: 0.6rem;
-            transition: background 0.15s, color 0.15s;
+            transition: background 0.15s, color 0.15s, padding var(--sidebar-transition);
+            white-space: nowrap;
         }
         #sidebar .nav-link:hover { background: rgba(255,255,255,0.07); color: #fff; }
         #sidebar .nav-link.active {
@@ -72,12 +90,15 @@
             color: var(--sidebar-text-active);
             font-weight: 600;
         }
-        #sidebar .nav-link i { font-size: 1rem; width: 20px; text-align: center; }
+        #sidebar .nav-link i { font-size: 1rem; width: 20px; text-align: center; flex-shrink: 0; }
+        .nav-label { transition: opacity var(--sidebar-transition); }
         #sidebar .sidebar-footer {
             position: absolute; bottom: 0; left: 0; right: 0;
             padding: 0.75rem 1.25rem;
             background: rgba(0,0,0,0.25);
             font-size: 0.75rem; color: rgba(255,255,255,0.5);
+            white-space: nowrap;
+            transition: opacity var(--sidebar-transition);
         }
 
         /* ── Main content ── */
@@ -86,6 +107,45 @@
             margin-top: var(--header-height);
             padding: 1.5rem;
             min-height: calc(100vh - var(--header-height));
+            transition: margin-left var(--sidebar-transition);
+        }
+
+        /* ── Collapsed state (desktop) ── */
+        body.sidebar-collapsed #sidebar {
+            width: var(--sidebar-collapsed-width);
+        }
+        body.sidebar-collapsed #main-content {
+            margin-left: var(--sidebar-collapsed-width);
+        }
+        /* Hide text — use display:none so they don't take flex space */
+        body.sidebar-collapsed .nav-section-label,
+        body.sidebar-collapsed .nav-label,
+        body.sidebar-collapsed #sidebar .sidebar-footer {
+            display: none;
+        }
+        body.sidebar-collapsed #sidebar .nav-link {
+            padding: 0.65rem 0;
+            justify-content: center;
+            gap: 0;
+        }
+        body.sidebar-collapsed #sidebar .nav-link i {
+            width: auto;
+            font-size: 1.1rem;
+        }
+        /* Tooltip on hover when collapsed */
+        body.sidebar-collapsed #sidebar .nav-link {
+            position: relative;
+        }
+        body.sidebar-collapsed #sidebar .nav-link[data-label]:hover::after {
+            content: attr(data-label);
+            position: absolute;
+            left: calc(var(--sidebar-collapsed-width) + 6px);
+            top: 50%; transform: translateY(-50%);
+            background: #2c2c3e; color: #fff;
+            font-size: 0.75rem; padding: 4px 12px;
+            border-radius: 6px; white-space: nowrap;
+            z-index: 2000; pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
 
         /* ── Cards & misc ── */
@@ -93,19 +153,32 @@
         .table thead th { font-size: 0.78rem; font-weight: 700; letter-spacing: .03em; }
         .font-monospace { font-family: 'Courier New', monospace; }
 
-        /* ── Responsive ── */
+        /* ── Mobile ── */
         @media (max-width: 768px) {
-            #sidebar { transform: translateX(-100%); transition: transform .25s; }
+            #sidebar { transform: translateX(-100%); transition: transform .25s; width: var(--sidebar-width) !important; }
             #sidebar.show { transform: translateX(0); }
-            #main-content { margin-left: 0; }
+            #main-content { margin-left: 0 !important; }
+            body.sidebar-collapsed #sidebar { transform: translateX(-100%); }
+            body.sidebar-collapsed #sidebar.show { transform: translateX(0); width: var(--sidebar-width) !important; }
         }
+    </style>
+    {# Apply saved state before first paint to avoid flash #}
+    <script>
+        if (window.innerWidth > 768 && localStorage.getItem('sidebar-collapsed') === 'true') {
+            document.documentElement.classList.add('sidebar-pre-collapsed');
+        }
+    </script>
+    <style>
+        html.sidebar-pre-collapsed body { }
+        html.sidebar-pre-collapsed #sidebar { width: 56px; }
+        html.sidebar-pre-collapsed #main-content { margin-left: 56px; }
     </style>
 </head>
 <body>
 
 <!-- ── Topbar ── -->
 <div id="topbar">
-    <button class="btn btn-sm text-white d-md-none me-1 p-0" id="sidebarToggle" style="background:none;border:none;font-size:1.3rem;">
+    <button id="sidebarToggle" title="Toggle sidebar">
         <i class="bi bi-list"></i>
     </button>
     <img src="{% static 'Image/S25542658.jpg' %}" alt="Logo" style="height:36px;width:auto;object-fit:contain;">
@@ -138,32 +211,36 @@
     {% with profile=request.user.profile %}
 
     <div class="nav-section-label">หลัก</div>
-    <a href="{% url 'home' %}" class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
-        <i class="bi bi-speedometer2"></i> Dashboard
+    <a href="{% url 'home' %}" data-label="Dashboard"
+       class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+        <i class="bi bi-speedometer2"></i> <span class="nav-label">Dashboard</span>
     </a>
 
     {% if profile.is_system_owner %}
-    {# ── System Owner menu ── #}
     <div class="nav-section-label">ระบบของฉัน</div>
-    <a href="{% url 'system_owner_dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'system_owner_dashboard' %}active{% endif %}">
-        <i class="bi bi-building"></i> My Tickets
+    <a href="{% url 'system_owner_dashboard' %}" data-label="My Tickets"
+       class="nav-link {% if request.resolver_match.url_name == 'system_owner_dashboard' %}active{% endif %}">
+        <i class="bi bi-building"></i> <span class="nav-label">My Tickets</span>
     </a>
 
     {% else %}
-    {# ── SOC / Admin menu ── #}
     <div class="nav-section-label">Incidents</div>
-    <a href="{% url 'ticket_list' %}" class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-shield-exclamation"></i> Active Incidents
+    <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
+       class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
     </a>
-    <a href="{% url 'ticket_history' %}" class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
-        <i class="bi bi-clock-history"></i> ประวัติ
+    <a href="{% url 'ticket_history' %}" data-label="ประวัติ"
+       class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
+        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
     </a>
     {% if profile.is_soc %}
-    <a href="{% url 'create_ticket' %}" class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
-        <i class="bi bi-plus-square"></i> เปิดเคสใหม่
+    <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
+       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
+        <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
     </a>
-    <a href="{% url 'triage_list' %}" class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-clipboard2-pulse"></i> Triage
+    <a href="{% url 'triage_list' %}" data-label="Triage"
+       class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
+        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Triage</span>
     </a>
     {% endif %}
     {% endif %}
@@ -171,8 +248,8 @@
     {% endwith %}
 
     <div class="nav-section-label">ระบบ</div>
-    <a href="/admin/" class="nav-link">
-        <i class="bi bi-gear-fill"></i> Admin Panel
+    <a href="/admin/" data-label="Admin Panel" class="nav-link">
+        <i class="bi bi-gear-fill"></i> <span class="nav-label">Admin Panel</span>
     </a>
 
     <div class="sidebar-footer">
@@ -197,9 +274,24 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // Mobile sidebar toggle
-    document.getElementById('sidebarToggle')?.addEventListener('click', () => {
-        document.getElementById('sidebar')?.classList.toggle('show');
+    const sidebar   = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebarToggle');
+
+    // Sync body class with the pre-collapsed hint applied before paint
+    if (window.innerWidth > 768 && localStorage.getItem('sidebar-collapsed') === 'true') {
+        document.body.classList.add('sidebar-collapsed');
+    }
+    document.documentElement.classList.remove('sidebar-pre-collapsed');
+
+    toggleBtn?.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+            // Mobile: slide full sidebar in/out
+            sidebar?.classList.toggle('show');
+        } else {
+            // Desktop: collapse to icon rail
+            document.body.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('sidebar-collapsed', document.body.classList.contains('sidebar-collapsed'));
+        }
     });
 </script>
 </body>
