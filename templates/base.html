@@ -188,9 +188,6 @@
     </div>
 
     {% if user.is_authenticated %}
-    <a href="{% url 'create_ticket' %}" class="btn btn-sm btn-danger ms-3 d-none d-md-inline-flex align-items-center gap-1" style="font-size:0.75rem;">
-        <i class="bi bi-plus-circle"></i> เปิดเคสใหม่
-    </a>
     <div class="ms-auto d-flex align-items-center gap-2">
         <div class="user-pill">
             <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
@@ -226,29 +223,17 @@
     {% endif %}
     {% if request.user.is_superuser or not profile.is_system_owner %}
     <div class="nav-section-label">Incidents</div>
-    <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
-       class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
-    </a>
-    <a href="{% url 'ticket_history' %}" data-label="ประวัติ"
-       class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
-        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
-    </a>
     {% if request.user.is_superuser or profile.is_soc %}
-    <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
-       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
-        <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
-    </a>
-    <a href="{% url 'triage_list' %}" data-label="Manual Triage"
-       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,respond_escalation' %}active{% endif %}">
-        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
-    </a>
     <a href="{% url 'triage_queue' %}" data-label="Wazuh Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
         <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Triage</span>
         {% if pending_triage_count %}
         <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
         {% endif %}
+    </a>
+    <a href="{% url 'triage_list' %}" data-label="Manual Triage"
+       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,respond_escalation' %}active{% endif %}">
+        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
     <a href="{% url 'escalation_queue' %}" data-label="Escalation Queue"
        class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
@@ -258,6 +243,20 @@
         {% endif %}
     </a>
     {% endif %}
+    <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
+       class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
+        <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
+    </a>
+    {% if request.user.is_superuser or profile.is_soc %}
+    <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
+       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
+        <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
+    </a>
+    {% endif %}
+    <a href="{% url 'ticket_history' %}" data-label="ประวัติ"
+       class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
+        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
+    </a>
     {% endif %}
 
     {% endwith %}
