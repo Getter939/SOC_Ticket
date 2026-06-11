@@ -41,9 +41,10 @@
   <div class="d-flex align-items-center gap-3 mb-3">
     <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-medical-fill text-danger me-2"></i>INCIDENT REPORT</h4>
     <span class="text-muted" style="font-size:.8rem;">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</span>
+    <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
   </div>
 
-  <form method="post" novalidate>
+  <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
     {% if form.non_field_errors %}
@@ -222,6 +223,29 @@
           <div class="field-hint">เช่น T1059.001 — Command and Scripting Interpreter: PowerShell</div>
           {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
         </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)</label>
+          <input type="file" name="evidence_files" class="form-control" multiple
+                 accept="image/*,.pdf,.txt,.log,.csv,.doc,.docx,.xls,.xlsx,.zip">
+          <div class="field-hint">สามารถแนบได้หลายไฟล์ เช่น ภาพหน้าจอ, log, หรือเอกสารประกอบ</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 7: Recommended Actions ── -->
+    <div class="form-section">
+      <div class="section-header">7. แนวทางการดำเนินการ <small>Recommended Actions</small></div>
+      <div class="row g-3">
+        <div class="col-12">
+          <label class="form-label fw-semibold">สิ่งที่ต้องดำเนินการ</label>
+          {{ form.action_required }}
+          {% if form.action_required.errors %}<div class="text-danger small">{{ form.action_required.errors }}</div>{% endif %}
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">ข้อควรระวังในการดำเนินการ</label>
+          {{ form.action_precautions }}
+          {% if form.action_precautions.errors %}<div class="text-danger small">{{ form.action_precautions.errors }}</div>{% endif %}
+        </div>
       </div>
     </div>
 
@@ -271,6 +295,75 @@ document.querySelectorAll('#asset-type-group input[type=radio]').forEach(radio =
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
 });
+
+// ── Draft autosave (localStorage) ──
+// Saves text/select/radio/checkbox field values as the user types so the
+// form can be restored if they accidentally close the tab. File inputs
+// cannot be restored for security reasons and are intentionally skipped.
+(function () {
+  const DRAFT_KEY = 'ticket_form_draft{% if triage_id %}_triage_{{ triage_id }}{% endif %}';
+  const form = document.querySelector('form[enctype="multipart/form-data"]');
+  const statusEl = document.getElementById('draft-status');
+  if (!form) return;
+
+  function isRestorable(field) {
+    return field.name && field.type !== 'file' && field.type !== 'hidden'
+      && field.name !== 'csrfmiddlewaretoken';
+  }
+
+  function saveDraft() {
+    const data = {};
+    form.querySelectorAll('input, select, textarea').forEach(field => {
+      if (!isRestorable(field)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        if (field.checked) data[field.name] = field.value;
+      } else {
+        data[field.name] = field.value;
+      }
+    });
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+    if (statusEl) {
+      statusEl.textContent = 'ร่างถูกบันทึกไว้ในเครื่องเมื่อ ' + new Date().toLocaleTimeString('th-TH');
+    }
+  }
+
+  function restoreDraft() {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    let data;
+    try { data = JSON.parse(raw); } catch (e) { return; }
+
+    form.querySelectorAll('input, select, textarea').forEach(field => {
+      if (!isRestorable(field)) return;
+      if (!(field.name in data)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        field.checked = (field.value === data[field.name]);
+        if (field.checked) field.dispatchEvent(new Event('change'));
+      } else {
+        field.value = data[field.name];
+      }
+    });
+
+    if (statusEl) statusEl.textContent = 'กู้คืนข้อมูลที่กรอกไว้ก่อนหน้านี้แล้ว';
+  }
+
+  // Only offer to restore on a fresh (GET) form load, not after a failed
+  // submit where Django already re-renders the posted values.
+  {% if not form.is_bound %}
+  restoreDraft();
+  {% endif %}
+
+  let saveTimer;
+  form.addEventListener('input', () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 500);
+  });
+  form.addEventListener('change', saveDraft);
+
+  form.addEventListener('submit', () => {
+    localStorage.removeItem(DRAFT_KEY);
+  });
+})();
 
 // Wazuh alert — auto-fill description and severity from the selected alert
 // (only fills fields that are still empty / untouched)

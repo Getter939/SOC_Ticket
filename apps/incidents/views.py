@@ -126,7 +126,7 @@ def create_ticket(request):
             return redirect('triage_list')
 
     if request.method == 'POST':
-        form = TicketForm(request.POST, user=request.user)
+        form = TicketForm(request.POST, request.FILES, user=request.user)
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -168,6 +168,14 @@ def create_ticket(request):
                             'triage_status', 'triaged_by', 'triaged_at',
                             'escalated_to_tier', 'claimed_by', 'claimed_at',
                         ])
+
+                    for evidence_file in request.FILES.getlist('evidence_files'):
+                        TicketAttachment.objects.create(
+                            ticket=ticket,
+                            file=evidence_file,
+                            original_name=evidence_file.name,
+                            uploaded_by=request.user,
+                        )
             except ValidationError as exc:
                 form.add_error(None, exc.message)
                 ticket = None

@@ -70,6 +70,9 @@ class TicketForm(forms.ModelForm):
             'ioc_details',
             # Section 6
             'mitre_phase',
+            # Section 7
+            'action_required',
+            'action_precautions',
             # Assignment
             'assigned_to',
             'assigned_admin',
@@ -101,6 +104,14 @@ class TicketForm(forms.ModelForm):
                 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
             }),
             'mitre_phase':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น T1059.001 — Command and Scripting Interpreter: PowerShell'}),
+            'action_required':    forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'ขั้นตอน/มาตรการที่ผู้เกี่ยวข้องต้องดำเนินการเพื่อจัดการเหตุการณ์นี้',
+            }),
+            'action_precautions': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'ข้อควรระวังหรือผลกระทบที่อาจเกิดขึ้นระหว่างการดำเนินการ',
+            }),
         }
 
     def __init__(self, *args, **kwargs):

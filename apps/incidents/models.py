@@ -268,6 +268,16 @@ class Ticket(models.Model):
         verbose_name='Phase การโจมตีตาม MITRE ATT&CK',
     )
 
+    # ── Section 7: Recommended Actions ──────────────────────────────── #
+    action_required = models.TextField(
+        blank=True, default='',
+        verbose_name='สิ่งที่ต้องดำเนินการ',
+    )
+    action_precautions = models.TextField(
+        blank=True, default='',
+        verbose_name='ข้อควรระวังในการดำเนินการ',
+    )
+
     # ── Section 9: Remediation ──────────────────────────────────────── #
     remediation_summary = models.TextField(
         blank=True, default='',
