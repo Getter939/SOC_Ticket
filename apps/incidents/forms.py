@@ -104,13 +104,24 @@ class TicketForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        recent_alert_ids = list(
-            WazuhAlert.objects.filter(rule_level__gte=10)
-            .order_by('-timestamp')
-            .values_list('pk', flat=True)[:100]
-        )
-        alert_qs = WazuhAlert.objects.filter(pk__in=recent_alert_ids).order_by('-timestamp')
+        alert_qs = WazuhAlert.objects.none()
+        if user is not None and user.is_authenticated:
+            recent_alert_ids = list(
+                WazuhAlert.objects.filter(
+                    rule_level__gte=10,
+                    claimed_by=user,
+                    triage_status__in=[
+                        WazuhAlert.TRIAGE_TRIAGING,
+                        WazuhAlert.TRIAGE_ESCALATED,
+                    ],
+                    ticket__isnull=True,
+                )
+                .order_by('-timestamp')
+                .values_list('pk', flat=True)[:100]
+            )
+            alert_qs = WazuhAlert.objects.filter(pk__in=recent_alert_ids).order_by('-timestamp')
         if self.instance and self.instance.pk and self.instance.wazuh_alert_id:
             alert_qs = alert_qs | WazuhAlert.objects.filter(pk=self.instance.wazuh_alert_id)
         self.fields['wazuh_alert'].queryset = alert_qs
@@ -123,11 +134,16 @@ class TicketForm(forms.ModelForm):
 
 
 class TriageForm(forms.ModelForm):
+    notes = forms.CharField(
+        required=True,
+        label='บันทึกเหตุผล',
+        widget=forms.Textarea(attrs={
+            'class': 'form-control', 'rows': 3,
+            'placeholder': 'บันทึกเหตุผลประกอบการตัดสินใจ...',
+        }),
+    )
     escalated_to = forms.ModelChoiceField(
-        queryset=User.objects.filter(
-            profile__role__in=[UserProfile.ROLE_SOC_STAFF, UserProfile.ROLE_SOC_MANAGER],
-            is_active=True,
-        ).order_by('first_name', 'username'),
+        queryset=User.objects.none(),
         required=False,
         label='Escalate ไปยัง T2',
         empty_label='-- เลือก T2 (เฉพาะกรณี Escalate) --',
@@ -136,19 +152,35 @@ class TriageForm(forms.ModelForm):
 
     class Meta:
         model = TriageRecord
-        fields = ['alert_description', 'source_ip', 'decision', 'notes', 'escalated_to']
+        fields = [
+            'source', 'source_reference', 'alert_description', 'source_ip',
+            'decision', 'notes', 'escalated_to',
+        ]
         widgets = {
+            'source': forms.Select(attrs={'class': 'form-select'}),
+            'source_reference': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'เช่น Email subject, external case ID หรือหมายเลขอ้างอิง',
+            }),
             'alert_description': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 4,
-                'placeholder': 'อธิบายรายละเอียด Alert จาก Wazuh — rule, severity, affected asset...',
+                'placeholder': 'อธิบายรายละเอียด Alert จากแหล่งข้อมูล — severity, affected asset, evidence...',
             }),
             'source_ip': forms.TextInput(attrs={'class': 'form-control', 'placeholder': '0.0.0.0'}),
             'decision':  forms.Select(attrs={'class': 'form-select'}),
-            'notes':     forms.Textarea(attrs={
-                'class': 'form-control', 'rows': 3,
-                'placeholder': 'บันทึกเหตุผลประกอบการตัดสินใจ...',
-            }),
         }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        recipients = User.objects.filter(
+            profile__role=UserProfile.ROLE_SOC_STAFF,
+            profile__tier=UserProfile.TIER_T2,
+            is_active=True,
+        )
+        if user is not None:
+            recipients = recipients.exclude(pk=user.pk)
+        self.fields['escalated_to'].queryset = recipients.order_by('first_name', 'username')
 
     def clean(self):
         cleaned = super().clean()
@@ -156,6 +188,8 @@ class TriageForm(forms.ModelForm):
         escalated_to = cleaned.get('escalated_to')
         if decision == TriageRecord.DECISION_ESCALATED and not escalated_to:
             self.add_error('escalated_to', 'กรุณาเลือก T2 ที่จะรับช่วงต่อ')
+        elif decision != TriageRecord.DECISION_ESCALATED:
+            cleaned['escalated_to'] = None
         return cleaned
 
 

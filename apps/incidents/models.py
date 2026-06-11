@@ -342,9 +342,9 @@ class Ticket(models.Model):
     )
 
     # ── Source Wazuh alert (optional) ────────────────────────────────── #
-    wazuh_alert = models.ForeignKey(
+    wazuh_alert = models.OneToOneField(
         'wazuh_ingest.WazuhAlert', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='tickets', verbose_name='Wazuh Alert',
+        related_name='ticket', verbose_name='Wazuh Alert',
     )
 
     SLA_HOURS = 48
@@ -529,6 +529,20 @@ class TriageRecord(models.Model):
     DECISION_TP        = 'TP'
     DECISION_ESCALATED = 'ESCALATED'
 
+    SOURCE_EMAIL = 'EMAIL'
+    SOURCE_PHONE = 'PHONE'
+    SOURCE_USER_REPORT = 'USER_REPORT'
+    SOURCE_EXTERNAL = 'EXTERNAL'
+    SOURCE_OTHER = 'OTHER'
+
+    SOURCE_CHOICES = [
+        (SOURCE_EMAIL, 'Email'),
+        (SOURCE_PHONE, 'Phone / Hotline'),
+        (SOURCE_USER_REPORT, 'User / Internal Report'),
+        (SOURCE_EXTERNAL, 'External Organization'),
+        (SOURCE_OTHER, 'Other'),
+    ]
+
     T1_DECISION_CHOICES = [
         (DECISION_FP,        'False Positive — ปิดทันที'),
         (DECISION_TP,        'True Positive — สร้าง Ticket'),
@@ -541,6 +555,14 @@ class TriageRecord(models.Model):
     ]
 
     # ── T1 fields ──────────────────────────────────────────────────── #
+    source = models.CharField(
+        max_length=20, choices=SOURCE_CHOICES, default=SOURCE_OTHER,
+        verbose_name='แหล่งที่มาของ Alert',
+    )
+    source_reference = models.CharField(
+        max_length=100, blank=True, default='',
+        verbose_name='รหัสอ้างอิงจากแหล่งที่มา',
+    )
     analyst = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True,
         related_name='triage_records', verbose_name='นักวิเคราะห์ T1',
