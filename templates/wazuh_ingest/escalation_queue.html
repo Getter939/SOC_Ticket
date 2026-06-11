@@ -11,36 +11,16 @@
     display: inline-block; font-size: .7rem; background: #eef0f4; color: #495057;
     border-radius: 4px; padding: .15rem .5rem; margin: .1rem .15rem .1rem 0;
   }
-  .level-pill {
-    display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .6rem;
-    border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
-  }
-  .level-pill.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-  .status-badge { font-size: .7rem; font-weight: 700; padding: .25rem .6rem; border-radius: 20px; }
-  .status-badge.pending { background: #e2e3e5; color: #495057; }
-  .status-badge.triaging { background: #cfe2ff; color: #084298; }
 </style>
 
 <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
-  <h4 class="mb-0 fw-bold"><i class="bi bi-shield-fill-exclamation text-danger me-2"></i>Wazuh Triage Queue</h4>
-  <span class="badge bg-danger" style="font-size:.85rem;">{{ pending_count }} Pending</span>
-  <span class="badge bg-primary" style="font-size:.85rem;">{{ triaging_count }} Triaging</span>
+  <h4 class="mb-0 fw-bold"><i class="bi bi-arrow-up-circle-fill text-warning me-2"></i>Escalation Queue</h4>
+  <span class="badge bg-warning text-dark" style="font-size:.85rem;">{{ escalated_count }} Escalated to {{ tier }}</span>
 </div>
 
-<div class="form-section bg-white border rounded-3 p-3 mb-3">
-  <div class="d-flex align-items-center gap-2 flex-wrap">
-    <span class="fw-semibold" style="font-size:.85rem;">กรองตาม Rule Level:</span>
-    <a href="{% url 'triage_queue' %}" class="level-pill {% if not rule_level_filter %}active{% endif %}">All</a>
-    <a href="?rule_level_filter=10" class="level-pill {% if rule_level_filter == '10' %}active{% endif %}">Level 10+</a>
-    <a href="?rule_level_filter=13" class="level-pill {% if rule_level_filter == '13' %}active{% endif %}">Level 13+ (Critical)</a>
-
-    <span class="ms-auto d-flex align-items-center gap-2 flex-wrap">
-      {% for row in level_summary %}
-        <span class="mitre-tag">Level {{ row.rule_level }}: {{ row.count }}</span>
-      {% endfor %}
-    </span>
-  </div>
-</div>
+{% if not tier %}
+<div class="alert alert-secondary">บัญชีของคุณไม่ได้กำหนด Tier (T1/T2) หรือบทบาท Manager จึงไม่มี Alert ที่ Escalate มาถึงคุณ</div>
+{% endif %}
 
 <div class="form-section bg-white border rounded-3 p-0">
   <div class="table-responsive">
@@ -52,8 +32,8 @@
           <th>Rule Level</th>
           <th>Rule Description</th>
           <th>MITRE Tactics</th>
-          <th>Status</th>
-          <th>ผู้รับผิดชอบ</th>
+          <th>Escalated By</th>
+          <th>เหตุผลในการ Escalate</th>
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -73,7 +53,7 @@
               <span class="severity-badge low">{{ alert.rule_level }} Low</span>
             {% endif %}
           </td>
-          <td style="max-width:340px;">{{ alert.rule_description }}</td>
+          <td style="max-width:300px;">{{ alert.rule_description }}</td>
           <td>
             {% for tactic in alert.mitre_tactics %}
               <span class="mitre-tag">{{ tactic }}</span>
@@ -82,55 +62,30 @@
             {% endfor %}
           </td>
           <td>
-            {% if alert.triage_status == 'TRIAGING' %}
-              <span class="status-badge triaging">Triaging</span>
-            {% else %}
-              <span class="status-badge pending">Pending</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if alert.claimed_by %}
-              {{ alert.claimed_by.get_full_name|default:alert.claimed_by.username }}
+            {% if alert.triaged_by %}
+              {{ alert.triaged_by.get_full_name|default:alert.triaged_by.username }}
             {% else %}
               <span class="text-muted">—</span>
             {% endif %}
           </td>
+          <td style="max-width:240px;">{{ alert.triage_note|default:"—" }}</td>
           <td class="text-end">
             <div class="d-flex gap-1 justify-content-end flex-wrap">
-              {% if alert.triage_status == 'PENDING' %}
-                <form method="post" action="{% url 'claim_alert' %}" class="d-inline">
-                  {% csrf_token %}
-                  <input type="hidden" name="alert_id" value="{{ alert.pk }}">
-                  <button type="submit" class="btn btn-sm btn-primary">
-                    <i class="bi bi-hand-index-thumb"></i> Claim
-                  </button>
-                </form>
-              {% elif alert.triage_status == 'TRIAGING' and alert.claimed_by_id == request.user.id %}
-                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createTicketModal{{ alert.pk }}">
-                  <i class="bi bi-ticket-perforated"></i> Create Ticket
-                </button>
-                <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#closeFpModal{{ alert.pk }}">
-                  <i class="bi bi-x-circle"></i> Close FP
-                </button>
-                <button type="button" class="btn btn-sm btn-warning text-white" data-bs-toggle="modal" data-bs-target="#escalateModal{{ alert.pk }}">
-                  <i class="bi bi-arrow-up-circle"></i> Escalate
-                </button>
-                <form method="post" action="{% url 'release_alert' %}" class="d-inline">
-                  {% csrf_token %}
-                  <input type="hidden" name="alert_id" value="{{ alert.pk }}">
-                  <button type="submit" class="btn btn-sm btn-light border" title="คืน Alert กลับเข้า Queue">
-                    <i class="bi bi-arrow-counterclockwise"></i> Release
-                  </button>
-                </form>
-              {% else %}
-                <span class="text-muted small">กำลังถูก Triage โดยผู้อื่น</span>
-              {% endif %}
+              <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createTicketModal{{ alert.pk }}">
+                <i class="bi bi-ticket-perforated"></i> Create Ticket
+              </button>
+              <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#closeFpModal{{ alert.pk }}">
+                <i class="bi bi-x-circle"></i> Close FP
+              </button>
+              <button type="button" class="btn btn-sm btn-warning text-white" data-bs-toggle="modal" data-bs-target="#escalateModal{{ alert.pk }}">
+                <i class="bi bi-arrow-up-circle"></i> Escalate
+              </button>
             </div>
           </td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">ไม่มี Alert ที่รอการ Triage</td>
+          <td colspan="8" class="text-center text-muted py-4">ไม่มี Alert ที่ Escalate มาถึงคุณ</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -140,7 +95,6 @@
 
 <!-- Action modals (rendered outside the table — divs are not valid <tbody> children) -->
 {% for alert in alerts %}
-{% if alert.triage_status == 'TRIAGING' and alert.claimed_by_id == request.user.id %}
 
 <!-- Create Ticket modal -->
 <div class="modal fade" id="createTicketModal{{ alert.pk }}" tabindex="-1" aria-hidden="true">
@@ -150,7 +104,7 @@
         {% csrf_token %}
         <input type="hidden" name="alert_id" value="{{ alert.pk }}">
         <input type="hidden" name="action" value="create_ticket">
-        <input type="hidden" name="source" value="triage_queue">
+        <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
           <h5 class="modal-title">สร้าง Ticket (True Positive)</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -184,7 +138,7 @@
         {% csrf_token %}
         <input type="hidden" name="alert_id" value="{{ alert.pk }}">
         <input type="hidden" name="action" value="close_fp">
-        <input type="hidden" name="source" value="triage_queue">
+        <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
           <h5 class="modal-title">ปิดเป็น False Positive</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -211,9 +165,9 @@
         {% csrf_token %}
         <input type="hidden" name="alert_id" value="{{ alert.pk }}">
         <input type="hidden" name="action" value="escalate">
-        <input type="hidden" name="source" value="triage_queue">
+        <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
-          <h5 class="modal-title">Escalate Alert</h5>
+          <h5 class="modal-title">Escalate Alert ต่อ</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
@@ -233,7 +187,7 @@
             {% endfor %}
           </select>
           <label class="form-label fw-semibold">หมายเหตุ <span class="text-danger">*</span></label>
-          <textarea name="note" class="form-control" rows="3" required placeholder="เหตุผลในการ Escalate"></textarea>
+          <textarea name="note" class="form-control" rows="3" required placeholder="เหตุผลในการ Escalate ต่อ"></textarea>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
@@ -244,18 +198,17 @@
   </div>
 </div>
 
-{% endif %}
 {% endfor %}
 
 {% if page_obj.paginator.num_pages > 1 %}
 <nav class="mt-3">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if rule_level_filter %}&rule_level_filter={{ rule_level_filter }}{% endif %}">«</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">«</a></li>
     {% endif %}
     <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if rule_level_filter %}&rule_level_filter={{ rule_level_filter }}{% endif %}">»</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">»</a></li>
     {% endif %}
   </ul>
 </nav>

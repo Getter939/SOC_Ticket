@@ -7,11 +7,12 @@ from .models import IngestWatermark, WazuhAlert
 class WazuhAlertAdmin(admin.ModelAdmin):
     list_display = [
         'opensearch_id', 'agent_name', 'rule_level', 'rule_description', 'timestamp',
-        'triage_status', 'triaged_by', 'triaged_at', 'escalated_to_tier',
+        'triage_status', 'claimed_by', 'claimed_at', 'triaged_by', 'triaged_at',
+        'incident_category', 'escalated_to_tier',
     ]
-    list_filter = ['rule_level', 'agent_name', 'triage_status']
+    list_filter = ['rule_level', 'agent_name', 'triage_status', 'incident_category']
     search_fields = ['opensearch_id', 'alert_id', 'rule_id', 'rule_description', 'agent_name']
-    readonly_fields = ['ingested_at', 'triaged_by', 'triaged_at']
+    readonly_fields = ['ingested_at', 'claimed_by', 'claimed_at', 'triaged_by', 'triaged_at']
 
 
 @admin.register(IngestWatermark)

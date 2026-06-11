@@ -5,4 +5,7 @@ from . import views
 urlpatterns = [
     path('triage_queue/', views.triage_queue, name='triage_queue'),
     path('triage_action/', views.triage_action, name='triage_action'),
+    path('claim_alert/', views.claim_alert, name='claim_alert'),
+    path('release_alert/', views.release_alert, name='release_alert'),
+    path('escalation_queue/', views.escalation_queue, name='escalation_queue'),
 ]

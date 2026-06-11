@@ -113,6 +113,8 @@ def create_ticket(request):
             initial['issue_description'] = request.GET['issue_description']
         if request.GET.get('severity'):
             initial['severity'] = request.GET['severity']
+        if request.GET.get('detailed_issue2') in dict(Ticket.DETAILED_ISSUE_CHOICES2):
+            initial['detailed_issue2'] = request.GET['detailed_issue2']
         form = TicketForm(initial=initial)
 
     return render(request, 'incidents/ticket_form.html', {

@@ -6,11 +6,13 @@ class WazuhAlert(models.Model):
     """A single Wazuh alert pulled from the OpenSearch `wazuh-alerts-*` indices."""
 
     TRIAGE_PENDING = 'PENDING'
+    TRIAGE_TRIAGING = 'TRIAGING'
     TRIAGE_TRUE_POSITIVE = 'TRUE_POSITIVE'
     TRIAGE_FALSE_POSITIVE = 'FALSE_POSITIVE'
     TRIAGE_ESCALATED = 'ESCALATED'
     TRIAGE_STATUS_CHOICES = [
         (TRIAGE_PENDING, 'Pending'),
+        (TRIAGE_TRIAGING, 'Triaging'),
         (TRIAGE_TRUE_POSITIVE, 'True Positive'),
         (TRIAGE_FALSE_POSITIVE, 'False Positive'),
         (TRIAGE_ESCALATED, 'Escalated'),
@@ -23,6 +25,25 @@ class WazuhAlert(models.Model):
         (TIER_T1, 'T1'),
         (TIER_T2, 'T2'),
         (TIER_MANAGER, 'Manager'),
+    ]
+
+    CATEGORY_MALWARE = 'Malware'
+    CATEGORY_PHISHING = 'Phishing'
+    CATEGORY_UNAUTHORIZED_ACCESS = 'Unauthorized Access'
+    CATEGORY_DATA_EXFILTRATION = 'Data Exfiltration'
+    CATEGORY_DOS = 'Denial of Service'
+    CATEGORY_RECONNAISSANCE = 'Reconnaissance'
+    CATEGORY_POLICY_VIOLATION = 'Policy Violation'
+    CATEGORY_OTHER = 'Other'
+    CATEGORY_CHOICES = [
+        (CATEGORY_MALWARE, 'Malware'),
+        (CATEGORY_PHISHING, 'Phishing'),
+        (CATEGORY_UNAUTHORIZED_ACCESS, 'Unauthorized Access'),
+        (CATEGORY_DATA_EXFILTRATION, 'Data Exfiltration'),
+        (CATEGORY_DOS, 'Denial of Service'),
+        (CATEGORY_RECONNAISSANCE, 'Reconnaissance'),
+        (CATEGORY_POLICY_VIOLATION, 'Policy Violation'),
+        (CATEGORY_OTHER, 'Other'),
     ]
 
     opensearch_id = models.CharField(
@@ -63,6 +84,16 @@ class WazuhAlert(models.Model):
     escalated_to_tier = models.CharField(
         max_length=10, choices=TIER_CHOICES, null=True, blank=True,
     )
+    incident_category = models.CharField(
+        max_length=32, choices=CATEGORY_CHOICES, null=True, blank=True,
+    )
+
+    # ── Claim (in-progress work tracking) ───────────────────────────── #
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='claimed_alerts',
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-timestamp']

@@ -238,15 +238,22 @@
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
     </a>
-    <a href="{% url 'triage_list' %}" data-label="Triage"
-       class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
-        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Triage</span>
+    <a href="{% url 'triage_list' %}" data-label="Manual Triage"
+       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,respond_escalation' %}active{% endif %}">
+        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
-    <a href="{% url 'triage_queue' %}" data-label="Triage Queue"
+    <a href="{% url 'triage_queue' %}" data-label="Wazuh Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
-        <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Triage Queue</span>
+        <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Triage</span>
         {% if pending_triage_count %}
         <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
+        {% endif %}
+    </a>
+    <a href="{% url 'escalation_queue' %}" data-label="Escalation Queue"
+       class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
+        <i class="bi bi-arrow-up-circle-fill"></i> <span class="nav-label">Escalation Queue</span>
+        {% if escalation_queue_count %}
+        <span class="badge bg-warning text-dark ms-auto">{{ escalation_queue_count }}</span>
         {% endif %}
     </a>
     {% endif %}
