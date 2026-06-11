@@ -6,7 +6,16 @@
       "Bash(ls -la \"C:\\\\Users\\\\NT\\\\Documents\\\\soc-crm\" 2>/dev/null | head -50)",
       "Bash(python manage.py test apps.dashboard.tests.DashboardAccessTest --verbosity=2)",
       "mcp__Claude_Preview__preview_start",
-      "mcp__Claude_in_Chrome__list_connected_browsers"
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(\"C:\\\\Users\\\\NT\\\\Documents\\\\SOC_Ticket\\\\venv\\\\Scripts\\\\python.exe\" -c \"import django; print\\(django.VERSION\\)\")",
+      "Bash(\"C:\\\\Users\\\\NT\\\\Documents\\\\SOC_Ticket\\\\venv\\\\Scripts\\\\python.exe\" -m pip show requests)",
+      "Bash(\"C:\\\\Users\\\\NT\\\\Documents\\\\SOC_Ticket\\\\venv\\\\Scripts\\\\python.exe\" -m pip install requests)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py makemigrations wazuh_ingest)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py check --settings=config.settings_local)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py test apps.wazuh_ingest --settings=config.settings_local)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py test --settings=config.settings_local)"
     ]
   }
 }

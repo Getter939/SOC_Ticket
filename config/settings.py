@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     'apps.incidents',
     'apps.accounts',
     'apps.dashboard',
+    'apps.wazuh_ingest',
 ]
 
 MIDDLEWARE = [
@@ -109,5 +110,12 @@ DEFAULT_FROM_EMAIL = config(
 # ── Site URL (used in email notification links) ────────────────────────────
 # Set to your public hostname in production, e.g. https://soc.example.com
 SITE_URL = config('SITE_URL', default='http://localhost:8000')
+
+# ── Wazuh / OpenSearch alert ingestion ─────────────────────────────────────
+OPENSEARCH_HOST        = config('OPENSEARCH_HOST', default='')
+OPENSEARCH_PORT        = config('OPENSEARCH_PORT', default=9200, cast=int)
+OPENSEARCH_USER        = config('OPENSEARCH_USER', default='')
+OPENSEARCH_PASSWORD    = config('OPENSEARCH_PASSWORD', default='')
+OPENSEARCH_VERIFY_SSL  = config('OPENSEARCH_VERIFY_SSL', default=False, cast=bool)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

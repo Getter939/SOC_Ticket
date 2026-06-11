@@ -16,3 +16,6 @@ whitenoise==6.9.0
 # Excel export (incidents/views.py → export_tickets_excel)
 openpyxl==3.1.5
 et_xmlfile==2.0.0    # required by openpyxl
+
+# HTTP client (apps/wazuh_ingest/ingest.py → OpenSearch alert ingestion)
+requests==2.34.2
