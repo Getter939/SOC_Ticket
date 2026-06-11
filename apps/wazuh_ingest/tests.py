@@ -1,7 +1,9 @@
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -149,6 +151,47 @@ class FetchAndStoreAlertsTest(TestCase):
         self.assertEqual(watermark.last_timestamp.year, 2025)
         self.assertEqual(watermark.last_timestamp.month, 9)
         self.assertEqual(watermark.last_timestamp.day, 9)
+
+
+class OfflineFixtureIngestionTest(TestCase):
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_bundled_fixture_loads_without_http_or_watermark(self, mock_post):
+        output = StringIO()
+
+        call_command('ingest_wazuh_alerts', '--fixture', stdout=output)
+
+        mock_post.assert_not_called()
+        self.assertEqual(WazuhAlert.objects.count(), 4)
+        self.assertFalse(IngestWatermark.objects.exists())
+        self.assertIn("'created': 4", output.getvalue())
+
+    def test_bundled_fixture_is_idempotent(self):
+        call_command('ingest_wazuh_alerts', '--fixture', stdout=StringIO())
+        output = StringIO()
+
+        call_command('ingest_wazuh_alerts', '--fixture', stdout=output)
+
+        self.assertEqual(WazuhAlert.objects.count(), 4)
+        self.assertIn("'created': 0", output.getvalue())
+        self.assertIn("'skipped': 4", output.getvalue())
+
+    def test_fixture_respects_minimum_rule_level(self):
+        output = StringIO()
+
+        call_command(
+            'ingest_wazuh_alerts',
+            '--fixture',
+            '--min-level',
+            '13',
+            stdout=output,
+        )
+
+        self.assertEqual(WazuhAlert.objects.count(), 2)
+        self.assertEqual(
+            set(WazuhAlert.objects.values_list('rule_level', flat=True)),
+            {14, 15},
+        )
+        self.assertIn("'skipped': 2", output.getvalue())
 
 
 class TriageQueueTest(TestCase):

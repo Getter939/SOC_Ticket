@@ -1,0 +1,129 @@
+{
+  "hits": {
+    "hits": [
+      {
+        "_id": "offline-demo-auth-001",
+        "_source": {
+          "@timestamp": "2026-06-11T01:05:00.000Z",
+          "agent": {
+            "id": "001",
+            "name": "OFFLINE-WORKSTATION-01",
+            "ip": "10.20.1.15"
+          },
+          "rule": {
+            "id": "5712",
+            "level": 10,
+            "description": "Multiple failed SSH authentication attempts",
+            "groups": ["syslog", "sshd", "authentication_failed"],
+            "mitre": {
+              "technique": ["Brute Force"],
+              "tactic": ["Credential Access"],
+              "id": ["T1110"]
+            }
+          },
+          "data": {
+            "srcip": "203.0.113.45",
+            "srcuser": "administrator",
+            "dstuser": "root"
+          },
+          "decoder": {"name": "sshd"},
+          "id": "offline.1001"
+        }
+      },
+      {
+        "_id": "offline-demo-powershell-001",
+        "_source": {
+          "@timestamp": "2026-06-11T01:10:00.000Z",
+          "agent": {
+            "id": "002",
+            "name": "OFFLINE-WORKSTATION-02",
+            "ip": "10.20.1.26"
+          },
+          "rule": {
+            "id": "91843",
+            "level": 12,
+            "description": "Suspicious encoded PowerShell command executed",
+            "groups": ["windows", "powershell"],
+            "mitre": {
+              "technique": ["PowerShell", "Obfuscated Files or Information"],
+              "tactic": ["Execution", "Defense Evasion"],
+              "id": ["T1059.001", "T1027"]
+            }
+          },
+          "data": {
+            "win": {
+              "eventdata": {
+                "commandLine": "powershell.exe -EncodedCommand <redacted>",
+                "user": "TESTLAB\\analyst"
+              },
+              "system": {"eventID": "4688"}
+            }
+          },
+          "decoder": {"name": "windows_eventchannel"},
+          "id": "offline.1002"
+        }
+      },
+      {
+        "_id": "offline-demo-malware-001",
+        "_source": {
+          "@timestamp": "2026-06-11T01:15:00.000Z",
+          "agent": {
+            "id": "003",
+            "name": "OFFLINE-FILESERVER-01",
+            "ip": "10.20.2.10"
+          },
+          "rule": {
+            "id": "87105",
+            "level": 14,
+            "description": "Malware detected in a shared directory",
+            "groups": ["malware", "file_integrity"],
+            "mitre": {
+              "technique": ["Malware"],
+              "tactic": ["Execution", "Impact"],
+              "id": ["T1204", "T1486"]
+            }
+          },
+          "data": {
+            "file": {
+              "path": "C:\\Shares\\Finance\\invoice.exe",
+              "sha256": "offline-demo-sha256-not-a-real-malware-sample"
+            }
+          },
+          "decoder": {"name": "syscheck"},
+          "id": "offline.1003"
+        }
+      },
+      {
+        "_id": "offline-demo-exfil-001",
+        "_source": {
+          "@timestamp": "2026-06-11T01:20:00.000Z",
+          "agent": {
+            "id": "004",
+            "name": "OFFLINE-DATABASE-01",
+            "ip": "10.20.3.12"
+          },
+          "rule": {
+            "id": "100501",
+            "level": 15,
+            "description": "Unusually large outbound data transfer detected",
+            "groups": ["network", "data_exfiltration"],
+            "mitre": {
+              "technique": ["Exfiltration Over Web Service"],
+              "tactic": ["Exfiltration"],
+              "id": ["T1567"]
+            }
+          },
+          "data": {
+            "network": {
+              "destination_ip": "198.51.100.80",
+              "bytes_sent": 734003200,
+              "protocol": "https"
+            }
+          },
+          "decoder": {"name": "json"},
+          "id": "offline.1004"
+        }
+      }
+    ]
+  }
+}

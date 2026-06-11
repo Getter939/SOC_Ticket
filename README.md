@@ -61,3 +61,37 @@ python manage.py runserver
 
 The app is then available at <http://127.0.0.1:8000/>.
 Admin panel: <http://127.0.0.1:8000/admin/>
+
+## Offline Wazuh testing
+
+Testers whose IP address cannot reach the Wazuh/OpenSearch API can load the
+bundled OpenSearch-shaped demo alerts:
+
+```bash
+python manage.py ingest_wazuh_alerts --fixture
+python manage.py runserver
+```
+
+The command creates four pending alerts at rule levels 10, 12, 14, and 15.
+They can be claimed and processed through **Wazuh Triage**, **Escalation
+Queue**, and ticket creation exactly like API-ingested alerts.
+
+The fixture is idempotent: running the command again skips existing alerts
+using their OpenSearch IDs. Fixture mode makes no HTTP request, needs no
+OpenSearch credentials, and does not advance the production ingest watermark.
+
+To test with an exported OpenSearch response instead:
+
+```bash
+python manage.py ingest_wazuh_alerts --fixture C:\path\to\opensearch-response.json
+```
+
+The JSON file may contain either a list of hit objects or a normal OpenSearch
+response with alerts under `hits.hits`.
+
+Automated Wazuh tests also require no API access because all HTTP requests are
+mocked:
+
+```bash
+python manage.py test apps.wazuh_ingest
+```

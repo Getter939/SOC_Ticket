@@ -87,6 +87,58 @@ def _parse_hit(hit):
     )
 
 
+def store_alert_hits(hits, min_level=10, advance_watermark=True):
+    """
+    Parse and store OpenSearch hit dictionaries.
+
+    Offline fixtures disable watermark updates so demo timestamps cannot
+    affect the next production OpenSearch fetch.
+    """
+    result = {'fetched': len(hits), 'created': 0, 'skipped': 0, 'errors': []}
+    new_alerts = []
+    newest_timestamp = None
+
+    for hit in hits:
+        try:
+            source = hit['_source']
+            rule_level = int(source.get('rule', {}).get('level', 0))
+            if rule_level < min_level:
+                result['skipped'] += 1
+                continue
+
+            opensearch_id = hit['_id']
+            if WazuhAlert.objects.filter(opensearch_id=opensearch_id).exists():
+                result['skipped'] += 1
+                continue
+
+            kwargs = _parse_hit(hit)
+            new_alerts.append(WazuhAlert(**kwargs))
+            if newest_timestamp is None or kwargs['timestamp'] > newest_timestamp:
+                newest_timestamp = kwargs['timestamp']
+        except Exception as exc:
+            msg = f"Failed to parse alert {hit.get('_id', '?')}: {exc}"
+            logger.error(msg)
+            result['errors'].append(msg)
+
+    if new_alerts:
+        try:
+            created = WazuhAlert.objects.bulk_create(new_alerts, ignore_conflicts=True)
+            result['created'] = len(created)
+        except Exception as exc:
+            msg = f'Bulk create failed: {exc}'
+            logger.error(msg)
+            result['errors'].append(msg)
+            return result
+
+    if advance_watermark and newest_timestamp is not None:
+        watermark = _get_watermark()
+        if watermark.last_timestamp is None or newest_timestamp > watermark.last_timestamp:
+            watermark.last_timestamp = newest_timestamp
+            watermark.save(update_fields=['last_timestamp', 'updated_at'])
+
+    return result
+
+
 def fetch_and_store_alerts(min_level=10, batch_size=500):
     """
     Fetch new Wazuh alerts (rule.level >= min_level) from OpenSearch and
@@ -125,41 +177,4 @@ def fetch_and_store_alerts(min_level=10, batch_size=500):
     if not hits:
         return result
 
-    new_alerts = []
-    newest_timestamp = None
-
-    for hit in hits:
-        try:
-            opensearch_id = hit['_id']
-            if WazuhAlert.objects.filter(opensearch_id=opensearch_id).exists():
-                result['skipped'] += 1
-                continue
-
-            kwargs = _parse_hit(hit)
-            new_alerts.append(WazuhAlert(**kwargs))
-            if newest_timestamp is None or kwargs['timestamp'] > newest_timestamp:
-                newest_timestamp = kwargs['timestamp']
-        except Exception as exc:
-            msg = f"Failed to parse alert {hit.get('_id', '?')}: {exc}"
-            logger.error(msg)
-            result['errors'].append(msg)
-
-    if new_alerts:
-        try:
-            created = WazuhAlert.objects.bulk_create(new_alerts, ignore_conflicts=True)
-            result['created'] = len(created)
-        except Exception as exc:
-            msg = f'Bulk create failed: {exc}'
-            logger.error(msg)
-            result['errors'].append(msg)
-            return result
-
-    # Only advance the watermark after a successful write, and only if we
-    # actually saw a newer alert (otherwise leave it as-is).
-    if newest_timestamp is not None and (
-        watermark.last_timestamp is None or newest_timestamp > watermark.last_timestamp
-    ):
-        watermark.last_timestamp = newest_timestamp
-        watermark.save(update_fields=['last_timestamp', 'updated_at'])
-
-    return result
+    return store_alert_hits(hits, min_level=min_level, advance_watermark=True)
