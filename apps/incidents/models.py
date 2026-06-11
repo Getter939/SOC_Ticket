@@ -341,6 +341,12 @@ class Ticket(models.Model):
         verbose_name='ผู้เปิดงาน',
     )
 
+    # ── Source Wazuh alert (optional) ────────────────────────────────── #
+    wazuh_alert = models.ForeignKey(
+        'wazuh_ingest.WazuhAlert', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets', verbose_name='Wazuh Alert',
+    )
+
     SLA_HOURS = 48
 
     # ------------------------------------------------------------------ #

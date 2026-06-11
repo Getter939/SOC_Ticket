@@ -242,6 +242,13 @@
        class="nav-link {% if 'triage' in request.resolver_match.url_name %}active{% endif %}">
         <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Triage</span>
     </a>
+    <a href="{% url 'triage_queue' %}" data-label="Triage Queue"
+       class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
+        <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Triage Queue</span>
+        {% if pending_triage_count %}
+        <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
+        {% endif %}
+    </a>
     {% endif %}
     {% endif %}
 

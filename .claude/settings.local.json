@@ -15,7 +15,9 @@
       "Bash(\"venv/Scripts/python.exe\" manage.py makemigrations wazuh_ingest)",
       "Bash(\"venv/Scripts/python.exe\" manage.py check --settings=config.settings_local)",
       "Bash(\"venv/Scripts/python.exe\" manage.py test apps.wazuh_ingest --settings=config.settings_local)",
-      "Bash(\"venv/Scripts/python.exe\" manage.py test --settings=config.settings_local)"
+      "Bash(\"venv/Scripts/python.exe\" manage.py test --settings=config.settings_local)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py makemigrations incidents)",
+      "Bash(\"venv/Scripts/python.exe\" manage.py migrate incidents --settings=config.settings_local)"
     ]
   }
 }

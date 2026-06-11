@@ -1,8 +1,29 @@
+from django.conf import settings
 from django.db import models
 
 
 class WazuhAlert(models.Model):
     """A single Wazuh alert pulled from the OpenSearch `wazuh-alerts-*` indices."""
+
+    TRIAGE_PENDING = 'PENDING'
+    TRIAGE_TRUE_POSITIVE = 'TRUE_POSITIVE'
+    TRIAGE_FALSE_POSITIVE = 'FALSE_POSITIVE'
+    TRIAGE_ESCALATED = 'ESCALATED'
+    TRIAGE_STATUS_CHOICES = [
+        (TRIAGE_PENDING, 'Pending'),
+        (TRIAGE_TRUE_POSITIVE, 'True Positive'),
+        (TRIAGE_FALSE_POSITIVE, 'False Positive'),
+        (TRIAGE_ESCALATED, 'Escalated'),
+    ]
+
+    TIER_T1 = 'T1'
+    TIER_T2 = 'T2'
+    TIER_MANAGER = 'MANAGER'
+    TIER_CHOICES = [
+        (TIER_T1, 'T1'),
+        (TIER_T2, 'T2'),
+        (TIER_MANAGER, 'Manager'),
+    ]
 
     opensearch_id = models.CharField(
         max_length=64, unique=True, db_index=True,
@@ -28,6 +49,20 @@ class WazuhAlert(models.Model):
     decoder_name = models.CharField(max_length=64, blank=True, default='')
 
     ingested_at = models.DateTimeField(auto_now_add=True)
+
+    # ── Triage state ─────────────────────────────────────────────────── #
+    triage_status = models.CharField(
+        max_length=16, choices=TRIAGE_STATUS_CHOICES, default=TRIAGE_PENDING,
+    )
+    triaged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='triaged_alerts',
+    )
+    triaged_at = models.DateTimeField(null=True, blank=True)
+    triage_note = models.TextField(blank=True, default='')
+    escalated_to_tier = models.CharField(
+        max_length=10, choices=TIER_CHOICES, null=True, blank=True,
+    )
 
     class Meta:
         ordering = ['-timestamp']

@@ -52,6 +52,23 @@
       <div class="section-header">1. ข้อมูลทั่วไป <small>General Information</small></div>
       <div class="row g-3">
 
+        <div class="col-12">
+          <label class="form-label fw-semibold">{{ form.wazuh_alert.label }}</label>
+          <select name="wazuh_alert" id="id_wazuh_alert" class="form-select">
+            <option value="">{{ form.fields.wazuh_alert.empty_label }}</option>
+            {% for alert in form.fields.wazuh_alert.queryset %}
+              <option value="{{ alert.pk }}"
+                      data-rule-description="{{ alert.rule_description }}"
+                      data-rule-level="{{ alert.rule_level }}"
+                      {% if form.wazuh_alert.value|stringformat:"s" == alert.pk|stringformat:"s" %}selected{% endif %}>
+                [{{ alert.rule_level }}] {{ alert.rule_description }} — {{ alert.agent_name }} ({{ alert.timestamp|date:"Y-m-d H:i" }})
+              </option>
+            {% endfor %}
+          </select>
+          <div class="field-hint">เลือก Alert จาก Wazuh เพื่อดึงข้อมูลมาเติมในฟอร์มอัตโนมัติ (ถ้าช่องยังว่างอยู่)</div>
+          {% if form.wazuh_alert.errors %}<div class="text-danger small">{{ form.wazuh_alert.errors }}</div>{% endif %}
+        </div>
+
         <div class="col-md-6">
           <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
           {{ form.incident_datetime }}
@@ -248,6 +265,38 @@ document.querySelectorAll('#asset-type-group input[type=radio]').forEach(radio =
     radio.nextElementSibling.classList.add('selected');
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
+});
+
+// Wazuh alert — auto-fill description and severity from the selected alert
+// (only fills fields that are still empty / untouched)
+document.getElementById('id_wazuh_alert')?.addEventListener('change', function () {
+  const opt = this.options[this.selectedIndex];
+  const ruleDescription = opt.dataset.ruleDescription || '';
+  const ruleLevel = parseInt(opt.dataset.ruleLevel || '', 10);
+  if (!ruleDescription && !ruleLevel) return;
+
+  // Auto-fill incident description if empty
+  const issueDescField = document.getElementById('id_issue_description');
+  if (issueDescField && !issueDescField.value.trim() && ruleDescription) {
+    issueDescField.value = ruleDescription;
+  }
+
+  // Auto-fill severity if nothing has been selected yet
+  // Mapping: rule.level 10–12 → High, 13–15 (and above) → Critical
+  const severityChecked = document.querySelector('#severity-group input[type=radio]:checked');
+  if (!severityChecked && !isNaN(ruleLevel)) {
+    let targetSeverity = null;
+    if (ruleLevel >= 13) targetSeverity = 'Critical';
+    else if (ruleLevel >= 10) targetSeverity = 'High';
+
+    if (targetSeverity) {
+      const radio = document.querySelector(`#severity-group input[value="${targetSeverity}"]`);
+      if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+      }
+    }
+  }
 });
 </script>
 {% endblock %}

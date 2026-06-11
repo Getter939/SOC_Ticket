@@ -107,6 +107,12 @@ def create_ticket(request):
         if triage:
             initial['device_name'] = triage.source_ip
             initial['issue_description'] = triage.alert_description
+        if request.GET.get('wazuh_alert'):
+            initial['wazuh_alert'] = request.GET['wazuh_alert']
+        if request.GET.get('issue_description'):
+            initial['issue_description'] = request.GET['issue_description']
+        if request.GET.get('severity'):
+            initial['severity'] = request.GET['severity']
         form = TicketForm(initial=initial)
 
     return render(request, 'incidents/ticket_form.html', {

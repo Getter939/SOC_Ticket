@@ -2,10 +2,19 @@ from django import forms
 from django.contrib.auth.models import User
 
 from apps.accounts.models import UserProfile
+from apps.wazuh_ingest.models import WazuhAlert
 from .models import Ticket, TicketAttachment, TriageRecord
 
 
 class TicketForm(forms.ModelForm):
+    wazuh_alert = forms.ModelChoiceField(
+        queryset=WazuhAlert.objects.none(),
+        required=False,
+        label='Wazuh Alert (optional)',
+        empty_label='None — manual ticket',
+        widget=forms.Select(attrs={'class': 'form-select', 'id': 'id_wazuh_alert'}),
+    )
+
     assigned_to = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True).order_by('first_name', 'username'),
         required=False,
@@ -39,6 +48,7 @@ class TicketForm(forms.ModelForm):
         model = Ticket
         fields = [
             # Section 1
+            'wazuh_alert',
             'severity',
             'incident_datetime',
             'reference_id',
@@ -95,6 +105,15 @@ class TicketForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        recent_alert_ids = list(
+            WazuhAlert.objects.filter(rule_level__gte=10)
+            .order_by('-timestamp')
+            .values_list('pk', flat=True)[:100]
+        )
+        alert_qs = WazuhAlert.objects.filter(pk__in=recent_alert_ids).order_by('-timestamp')
+        if self.instance and self.instance.pk and self.instance.wazuh_alert_id:
+            alert_qs = alert_qs | WazuhAlert.objects.filter(pk=self.instance.wazuh_alert_id)
+        self.fields['wazuh_alert'].queryset = alert_qs
         if self.instance and self.instance.pk and self.instance.incident_datetime:
             self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
         self.fields['system_owner'].label_from_instance = lambda u: (
