@@ -11,7 +11,13 @@
             <div class="card-body p-4">
                 <div class="mb-3">
                     <span class="text-muted small fw-bold">จาก T1:</span>
-                    <span class="ms-2">{{ triage.analyst.get_full_name|default:triage.analyst.username }}</span>
+                    <span class="ms-2">
+                        {% if triage.analyst %}
+                            {{ triage.analyst.get_full_name|default:triage.analyst.username }}
+                        {% else %}
+                            <span class="text-muted">Unknown user</span>
+                        {% endif %}
+                    </span>
                     <span class="text-muted small ms-3">{{ triage.created_at|date:"d M Y H:i" }}</span>
                 </div>
                 {% if triage.source_ip %}

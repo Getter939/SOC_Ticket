@@ -6,7 +6,7 @@
     <h4 class="mb-1 fw-bold"><i class="bi bi-clipboard2-pulse me-2"></i>Manual Triage</h4>
     <div class="text-muted small">Alerts reported by email, phone, users, or external organizations.</div>
   </div>
-  {% if request.user.profile.is_soc_staff and request.user.profile.tier == 'T1' %}
+  {% if request.user.is_superuser or request.user.profile.is_soc_staff and request.user.profile.tier == 'T1' %}
   <a href="{% url 'create_triage' %}" class="btn btn-dark btn-sm">
     <i class="bi bi-plus-circle me-1"></i>Record Manual Alert
   </a>
@@ -30,7 +30,12 @@
           </div>
           <div class="text-muted small mt-1">{{ triage.alert_description|truncatechars:140 }}</div>
           <div class="small mt-2">
-            From {{ triage.analyst.get_full_name|default:triage.analyst.username }}
+            From
+            {% if triage.analyst %}
+              {{ triage.analyst.get_full_name|default:triage.analyst.username }}
+            {% else %}
+              <span class="text-muted">Unknown user</span>
+            {% endif %}
             {% if triage.source_ip %}<span class="badge bg-secondary font-monospace ms-2">{{ triage.source_ip }}</span>{% endif %}
           </div>
           {% if triage.notes %}

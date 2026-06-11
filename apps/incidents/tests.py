@@ -854,3 +854,171 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
         self.assertEqual(alert.claimed_by, self.t1)
         self.assertFalse(Ticket.objects.filter(wazuh_alert=alert).exists())
+
+
+class SuperuserAccessTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.superuser = User.objects.create_superuser(
+            username='all_access_superuser',
+            email='superuser@example.com',
+            password='testpass123',
+        )
+        cls.system_admin = _make_user(
+            'superuser_target_admin', UserProfile.ROLE_SYSTEM_ADMIN,
+        )
+        cls.t1 = _make_user(
+            'superuser_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
+        )
+        cls.t2 = _make_user(
+            'superuser_t2', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.superuser)
+
+    def test_superuser_without_profile_sees_all_tickets(self):
+        first = _make_ticket(issue_description='First ticket')
+        second = _make_ticket(
+            issue_description='Second ticket',
+            assigned_admin=self.system_admin,
+        )
+
+        self.assertFalse(hasattr(self.superuser, 'profile'))
+        self.assertQuerySetEqual(
+            Ticket.objects.visible_to(self.superuser).order_by('pk'),
+            [first, second],
+        )
+
+    def test_superuser_can_access_every_role_page(self):
+        ticket = _make_ticket()
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL,
+            analyst=self.t1,
+            alert_description='Manual escalation for superuser review.',
+            decision=TriageRecord.DECISION_ESCALATED,
+            notes='Needs review.',
+            escalated_to=self.t2,
+        )
+
+        urls = [
+            reverse('home'),
+            reverse('ticket_list'),
+            reverse('create_ticket'),
+            reverse('ticket_detail', args=[ticket.pk]),
+            reverse('ticket_history'),
+            reverse('triage_list'),
+            reverse('create_triage'),
+            reverse('respond_escalation', args=[triage.pk]),
+            reverse('system_owner_dashboard'),
+        ]
+
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+
+        sidebar = self.client.get(reverse('home')).content.decode()
+        self.assertIn('Manual Triage', sidebar)
+        self.assertIn('Wazuh Triage', sidebar)
+        self.assertIn('Escalation Queue', sidebar)
+        self.assertIn('Admin Panel', sidebar)
+
+    def test_superuser_can_perform_every_ticket_role_transition(self):
+        ticket = _make_ticket(assigned_admin=self.system_admin)
+
+        ticket.transition_to(
+            Ticket.STATUS_AWAITING_CONTAINMENT,
+            self.superuser,
+            'Superuser acting as SOC.',
+        )
+        ticket.disposition = Ticket.DISP_TRUE_POSITIVE
+        ticket.containment_report = 'Contained by superuser.'
+        ticket.transition_to(
+            Ticket.STATUS_CONTAINMENT_REPORTED,
+            self.superuser,
+            'Superuser acting as system admin.',
+        )
+        ticket.transition_to(
+            Ticket.STATUS_UNDER_REVIEW,
+            self.superuser,
+            'Superuser reviewing.',
+        )
+        ticket.transition_to(
+            Ticket.STATUS_VERIFIED,
+            self.superuser,
+            'Superuser verifying.',
+        )
+        ticket.transition_to(
+            Ticket.STATUS_APPROVED,
+            self.superuser,
+            'Superuser acting as manager.',
+        )
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(ticket.verified_by, self.superuser)
+        self.assertEqual(ticket.approved_by, self.superuser)
+
+    def test_superuser_can_submit_containment_for_any_ticket(self):
+        ticket = _make_ticket(
+            assigned_admin=self.system_admin,
+            status=Ticket.STATUS_AWAITING_CONTAINMENT,
+        )
+
+        response = self.client.post(
+            reverse('ticket_detail', args=[ticket.pk]),
+            {
+                'action': 'containment',
+                'disposition': Ticket.DISP_TRUE_POSITIVE,
+                'containment_report': 'Superuser containment report.',
+                'note': 'Completed with all-role access.',
+            },
+        )
+
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+
+    def test_superuser_can_decide_any_manual_escalation(self):
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE,
+            analyst=self.t1,
+            alert_description='Phone report requiring T2 review.',
+            decision=TriageRecord.DECISION_ESCALATED,
+            notes='Escalated by T1.',
+            escalated_to=self.t2,
+        )
+
+        response = self.client.post(
+            reverse('respond_escalation', args=[triage.pk]),
+            {
+                't2_decision': TriageRecord.DECISION_TP,
+                't2_notes': 'Superuser confirmed the incident.',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('create_ticket'), response.url)
+        triage.refresh_from_db()
+        self.assertEqual(triage.t2_decision, TriageRecord.DECISION_TP)
+
+    def test_manual_triage_pages_handle_deleted_analyst(self):
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EXTERNAL,
+            analyst=None,
+            alert_description='Historical alert whose analyst account was deleted.',
+            decision=TriageRecord.DECISION_ESCALATED,
+            notes='Historical escalation.',
+            escalated_to=self.t2,
+        )
+
+        list_response = self.client.get(reverse('triage_list'))
+        detail_response = self.client.get(
+            reverse('respond_escalation', args=[triage.pk]),
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertContains(list_response, 'Unknown user')
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, 'Unknown user')

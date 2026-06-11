@@ -48,8 +48,15 @@ def _user_tier(profile):
     return None
 
 
-def _allowed_escalation_tiers(profile):
+def _has_soc_access(user):
+    profile = getattr(user, 'profile', None)
+    return user.is_superuser or (profile is not None and profile.is_soc)
+
+
+def _allowed_escalation_tiers(profile, user=None):
     """Return only tiers higher than the current analyst's tier."""
+    if user is not None and user.is_superuser:
+        return list(WazuhAlert.TIER_CHOICES)
     tier = _user_tier(profile)
     if tier == WazuhAlert.TIER_T1:
         allowed = (WazuhAlert.TIER_T2, WazuhAlert.TIER_MANAGER)
@@ -63,7 +70,7 @@ def _allowed_escalation_tiers(profile):
 @login_required
 def triage_queue(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not _has_soc_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเข้าถึง Triage Queue ได้')
         return redirect('ticket_list')
 
@@ -99,7 +106,7 @@ def triage_queue(request):
         'triaging_count': queue.filter(triage_status=WazuhAlert.TRIAGE_TRIAGING).count(),
         'level_summary': level_summary,
         'rule_level_filter': rule_level_filter,
-        'tier_choices': _allowed_escalation_tiers(profile),
+        'tier_choices': _allowed_escalation_tiers(profile, request.user),
         'category_choices': WazuhAlert.CATEGORY_CHOICES,
     })
 
@@ -110,7 +117,7 @@ def claim_alert(request):
         return redirect('triage_queue')
 
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not _has_soc_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
         return redirect('ticket_list')
 
@@ -138,7 +145,7 @@ def release_alert(request):
         return redirect('triage_queue')
 
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not _has_soc_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
         return redirect('ticket_list')
 
@@ -167,17 +174,19 @@ def claim_escalation(request):
 
     profile = getattr(request.user, 'profile', None)
     tier = _user_tier(profile) if profile and profile.is_soc else None
-    if tier is None:
+    if not request.user.is_superuser and tier is None:
         messages.error(request, 'บัญชีของคุณไม่มีสิทธิ์รับงานจาก Escalation Queue')
         return redirect('ticket_list')
 
     alert_id = request.POST.get('alert_id')
-    updated = WazuhAlert.objects.filter(
+    claimable = WazuhAlert.objects.filter(
         pk=alert_id,
         triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        escalated_to_tier=tier,
         claimed_by__isnull=True,
-    ).update(claimed_by=request.user, claimed_at=timezone.now())
+    )
+    if not request.user.is_superuser:
+        claimable = claimable.filter(escalated_to_tier=tier)
+    updated = claimable.update(claimed_by=request.user, claimed_at=timezone.now())
     if not updated:
         messages.error(request, 'Alert นี้ถูกเจ้าหน้าที่คนอื่นรับไปแล้ว หรือไม่อยู่ใน Queue ของ Tier คุณ')
         return redirect('escalation_queue')
@@ -193,17 +202,19 @@ def release_escalation(request):
 
     profile = getattr(request.user, 'profile', None)
     tier = _user_tier(profile) if profile and profile.is_soc else None
-    if tier is None:
+    if not request.user.is_superuser and tier is None:
         messages.error(request, 'บัญชีของคุณไม่มีสิทธิ์ดำเนินการนี้')
         return redirect('ticket_list')
 
     alert_id = request.POST.get('alert_id')
-    updated = WazuhAlert.objects.filter(
+    releasable = WazuhAlert.objects.filter(
         pk=alert_id,
         triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        escalated_to_tier=tier,
         claimed_by=request.user,
-    ).update(claimed_by=None, claimed_at=None)
+    )
+    if not request.user.is_superuser:
+        releasable = releasable.filter(escalated_to_tier=tier)
+    updated = releasable.update(claimed_by=None, claimed_at=None)
     if not updated:
         messages.error(request, 'Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
         return redirect('escalation_queue')
@@ -215,17 +226,24 @@ def release_escalation(request):
 @login_required
 def escalation_queue(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not _has_soc_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเข้าถึง Escalation Queue ได้')
         return redirect('ticket_list')
 
-    tier = _user_tier(profile)
-    if tier is None:
+    tier = _user_tier(profile) if profile else None
+    if request.user.is_superuser:
+        alerts_qs = WazuhAlert.objects.filter(
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+        )
+        tier_label = 'All tiers'
+    elif tier is None:
         alerts_qs = WazuhAlert.objects.none()
+        tier_label = None
     else:
         alerts_qs = WazuhAlert.objects.filter(
             triage_status=WazuhAlert.TRIAGE_ESCALATED, escalated_to_tier=tier,
         )
+        tier_label = tier
 
     alerts_qs = alerts_qs.select_related('triaged_by', 'claimed_by').order_by('-rule_level', 'timestamp')
 
@@ -236,8 +254,8 @@ def escalation_queue(request):
         'page_obj': page_obj,
         'alerts': page_obj,
         'escalated_count': alerts_qs.count(),
-        'tier': tier,
-        'tier_choices': _allowed_escalation_tiers(profile),
+        'tier': tier_label,
+        'tier_choices': _allowed_escalation_tiers(profile, request.user),
         'category_choices': WazuhAlert.CATEGORY_CHOICES,
     })
 
@@ -248,7 +266,7 @@ def triage_action(request):
         return redirect('triage_queue')
 
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not _has_soc_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
         return redirect('ticket_list')
 
@@ -271,7 +289,9 @@ def triage_action(request):
         messages.error(request, 'กรุณาเลือกประเภทของเหตุการณ์ (Incident Category)')
         return redirect(redirect_to)
 
-    allowed_escalation_tiers = dict(_allowed_escalation_tiers(profile))
+    allowed_escalation_tiers = dict(
+        _allowed_escalation_tiers(profile, request.user)
+    )
     if action == 'escalate' and escalate_to not in allowed_escalation_tiers:
         messages.error(request, 'สามารถ Escalate ได้เฉพาะ Tier ที่สูงกว่าปัจจุบันเท่านั้น')
         return redirect(redirect_to)
@@ -287,7 +307,10 @@ def triage_action(request):
         )
         owns_escalation = (
             alert.triage_status == WazuhAlert.TRIAGE_ESCALATED
-            and alert.escalated_to_tier == _user_tier(profile)
+            and (
+                request.user.is_superuser
+                or alert.escalated_to_tier == _user_tier(profile)
+            )
             and alert.claimed_by_id == request.user.id
         )
         if not (owns_triage or owns_escalation):

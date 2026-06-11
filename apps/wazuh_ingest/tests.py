@@ -526,3 +526,105 @@ class EscalationQueueTest(TestCase):
         self.assertRedirects(response, reverse('escalation_queue'))
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.escalated_to_tier, WazuhAlert.TIER_MANAGER)
+
+
+class SuperuserWazuhAccessTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.superuser = User.objects.create_superuser(
+            username='wazuh_superuser',
+            email='wazuh-super@example.com',
+            password='testpass123',
+        )
+
+    def setUp(self):
+        self.client.force_login(self.superuser)
+
+    def test_superuser_without_profile_can_claim_and_triage_alert(self):
+        alert = _make_alert(
+            opensearch_id='superuser-pending-alert',
+            rule_level=14,
+        )
+
+        queue_response = self.client.get(reverse('triage_queue'))
+        self.assertEqual(queue_response.status_code, 200)
+        self.assertContains(queue_response, alert.rule_description)
+
+        claim_response = self.client.post(
+            reverse('claim_alert'),
+            {'alert_id': alert.pk},
+        )
+        self.assertRedirects(claim_response, reverse('triage_queue'))
+
+        alert.refresh_from_db()
+        self.assertEqual(alert.claimed_by, self.superuser)
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+
+        action_response = self.client.post(reverse('triage_action'), {
+            'alert_id': alert.pk,
+            'action': 'close_fp',
+            'note': 'Superuser confirmed benign.',
+        })
+        self.assertRedirects(action_response, reverse('triage_queue'))
+
+        alert.refresh_from_db()
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertEqual(alert.triaged_by, self.superuser)
+
+    def test_superuser_sees_and_can_claim_escalations_for_all_tiers(self):
+        t1_alert = _make_alert(
+            opensearch_id='superuser-t1-escalation',
+            rule_level=11,
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+            escalated_to_tier=WazuhAlert.TIER_T1,
+        )
+        t2_alert = _make_alert(
+            opensearch_id='superuser-t2-escalation',
+            rule_level=12,
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+            escalated_to_tier=WazuhAlert.TIER_T2,
+        )
+        manager_alert = _make_alert(
+            opensearch_id='superuser-manager-escalation',
+            rule_level=15,
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+            escalated_to_tier=WazuhAlert.TIER_MANAGER,
+        )
+
+        response = self.client.get(reverse('escalation_queue'))
+        self.assertEqual(response.status_code, 200)
+        visible_alerts = list(response.context['alerts'])
+        for alert in (t1_alert, t2_alert, manager_alert):
+            self.assertIn(alert, visible_alerts)
+
+        claim_response = self.client.post(
+            reverse('claim_escalation'),
+            {'alert_id': t2_alert.pk},
+        )
+        self.assertRedirects(claim_response, reverse('escalation_queue'))
+        t2_alert.refresh_from_db()
+        self.assertEqual(t2_alert.claimed_by, self.superuser)
+
+    def test_superuser_can_escalate_to_any_tier(self):
+        alert = _make_alert(
+            opensearch_id='superuser-reassign-escalation',
+            rule_level=13,
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+            escalated_to_tier=WazuhAlert.TIER_MANAGER,
+            claimed_by=self.superuser,
+            claimed_at=timezone.now(),
+        )
+
+        response = self.client.post(reverse('triage_action'), {
+            'alert_id': alert.pk,
+            'action': 'escalate',
+            'escalate_to': WazuhAlert.TIER_T1,
+            'category': WazuhAlert.CATEGORY_OTHER,
+            'note': 'Superuser reassigned for operational review.',
+            'source': 'escalation_queue',
+        })
+
+        self.assertRedirects(response, reverse('escalation_queue'))
+        alert.refresh_from_db()
+        self.assertEqual(alert.escalated_to_tier, WazuhAlert.TIER_T1)
+        self.assertIsNone(alert.claimed_by)

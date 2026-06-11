@@ -9,7 +9,7 @@ def pending_triage_count(request):
         return {}
 
     profile = getattr(user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not user.is_superuser and (profile is None or not profile.is_soc):
         return {}
 
     context = {
@@ -18,8 +18,12 @@ def pending_triage_count(request):
         ).count(),
     }
 
-    tier = _user_tier(profile)
-    if tier:
+    tier = _user_tier(profile) if profile else None
+    if user.is_superuser:
+        context['escalation_queue_count'] = WazuhAlert.objects.filter(
+            triage_status=WazuhAlert.TRIAGE_ESCALATED,
+        ).count()
+    elif tier:
         context['escalation_queue_count'] = WazuhAlert.objects.filter(
             triage_status=WazuhAlert.TRIAGE_ESCALATED, escalated_to_tier=tier,
         ).count()

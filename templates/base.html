@@ -216,14 +216,15 @@
         <i class="bi bi-speedometer2"></i> <span class="nav-label">Dashboard</span>
     </a>
 
-    {% if profile.is_system_owner %}
+    {% if request.user.is_superuser or profile.is_system_owner %}
     <div class="nav-section-label">ระบบของฉัน</div>
     <a href="{% url 'system_owner_dashboard' %}" data-label="My Tickets"
        class="nav-link {% if request.resolver_match.url_name == 'system_owner_dashboard' %}active{% endif %}">
         <i class="bi bi-building"></i> <span class="nav-label">My Tickets</span>
     </a>
 
-    {% else %}
+    {% endif %}
+    {% if request.user.is_superuser or not profile.is_system_owner %}
     <div class="nav-section-label">Incidents</div>
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if 'ticket' in request.resolver_match.url_name and 'history' not in request.resolver_match.url_name %}active{% endif %}">
@@ -233,7 +234,7 @@
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
         <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
     </a>
-    {% if profile.is_soc %}
+    {% if request.user.is_superuser or profile.is_soc %}
     <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>

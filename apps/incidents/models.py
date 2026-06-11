@@ -15,6 +15,8 @@ class TicketQuerySet(models.QuerySet):
           - System admin             → only tickets where assigned_admin == user
           - No profile / unknown role→ empty queryset (safest default)
         """
+        if user.is_superuser:
+            return self
         profile = getattr(user, 'profile', None)
         if profile is None:
             return self.none()
@@ -437,7 +439,7 @@ class Ticket(models.Model):
         # ── 3. Same-status = note-only update (SOC only, TP tickets) ──── #
         if new_status == self.status:
             profile = getattr(user, 'profile', None)
-            if profile is None or not profile.is_soc:
+            if not user.is_superuser and (profile is None or not profile.is_soc):
                 raise ValidationError(
                     'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเพิ่มบันทึกได้'
                 )
@@ -459,7 +461,9 @@ class Ticket(models.Model):
         required_perm = self.TRANSITION_PERMISSIONS.get((self.status, new_status))
         profile = getattr(user, 'profile', None)
 
-        if required_perm == 'SOC':
+        if user.is_superuser:
+            pass
+        elif required_perm == 'SOC':
             if profile is None or not profile.is_soc:
                 raise ValidationError(
                     'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้'

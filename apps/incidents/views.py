@@ -21,7 +21,7 @@ from .notifications import (
 
 def _valid_soc_status_choices(ticket, user):
     profile = getattr(user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not user.is_superuser and (profile is None or not profile.is_soc):
         return []
 
     status_map = dict(Ticket.STATUS_CHOICES)
@@ -29,9 +29,13 @@ def _valid_soc_status_choices(ticket, user):
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
-        if perm == 'SOC':
+        if user.is_superuser:
             result.append((next_status, status_map.get(next_status, next_status)))
-        elif perm == 'MANAGER' and profile.is_soc_manager:
+        elif perm == 'SOC':
+            result.append((next_status, status_map.get(next_status, next_status)))
+        elif perm == 'MANAGER' and (
+            user.is_superuser or (profile and profile.is_soc_manager)
+        ):
             result.append((next_status, status_map.get(next_status, next_status)))
 
     return result
@@ -61,6 +65,8 @@ def _notify_owner_closed(ticket, request):
 def _can_create_ticket_from_triage(triage, user):
     if triage.ticket_id:
         return False
+    if user.is_superuser:
+        return triage.final_decision == TriageRecord.DECISION_TP
     if triage.decision == TriageRecord.DECISION_TP:
         return triage.analyst_id == user.id
     return (
@@ -74,6 +80,11 @@ def _can_create_ticket_from_wazuh(alert, user):
     profile = getattr(user, 'profile', None)
     if alert.claimed_by_id != user.id or hasattr(alert, 'ticket'):
         return False
+    if user.is_superuser:
+        return alert.triage_status in (
+            WazuhAlert.TRIAGE_TRIAGING,
+            WazuhAlert.TRIAGE_ESCALATED,
+        )
     if alert.triage_status == WazuhAlert.TRIAGE_TRIAGING:
         return True
     if alert.triage_status != WazuhAlert.TRIAGE_ESCALATED or profile is None:
@@ -98,7 +109,7 @@ def ticket_list(request):
 @login_required
 def create_ticket(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not request.user.is_superuser and (profile is None or not profile.is_soc):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเปิดเคสใหม่ได้')
         return redirect('ticket_list')
 
@@ -198,9 +209,14 @@ def ticket_detail(request, pk):
     can_submit_containment = (
         not is_terminal
         and ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT
-        and profile is not None
-        and profile.is_system_admin
-        and ticket.assigned_admin_id == request.user.pk
+        and (
+            request.user.is_superuser
+            or (
+                profile is not None
+                and profile.is_system_admin
+                and ticket.assigned_admin_id == request.user.pk
+            )
+        )
     )
 
     if request.method == 'POST':
@@ -327,16 +343,24 @@ def ticket_history(request):
 @login_required
 def triage_list(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if not request.user.is_superuser and (profile is None or not profile.is_soc):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่เข้าถึงหน้านี้ได้')
         return redirect('home')
 
-    my_triages = TriageRecord.objects.filter(analyst=request.user).order_by('-created_at')
-    assigned_escalations = TriageRecord.objects.filter(
-        escalated_to=request.user,
-        ticket__isnull=True,
-        t2_decision__in=['', TriageRecord.DECISION_TP],
-    ).order_by('-created_at')
+    if request.user.is_superuser:
+        my_triages = TriageRecord.objects.all().order_by('-created_at')
+        assigned_escalations = TriageRecord.objects.filter(
+            decision=TriageRecord.DECISION_ESCALATED,
+            ticket__isnull=True,
+            t2_decision__in=['', TriageRecord.DECISION_TP],
+        ).order_by('-created_at')
+    else:
+        my_triages = TriageRecord.objects.filter(analyst=request.user).order_by('-created_at')
+        assigned_escalations = TriageRecord.objects.filter(
+            escalated_to=request.user,
+            ticket__isnull=True,
+            t2_decision__in=['', TriageRecord.DECISION_TP],
+        ).order_by('-created_at')
 
     return render(request, 'incidents/triage_list.html', {
         'my_triages': my_triages,
@@ -347,7 +371,7 @@ def triage_list(request):
 @login_required
 def create_triage(request):
     profile = getattr(request.user, 'profile', None)
-    if (
+    if not request.user.is_superuser and (
         profile is None
         or not profile.is_soc_staff
         or profile.tier != profile.TIER_T1
@@ -402,7 +426,11 @@ def delete_attachment(request, attachment_id):
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
     profile = getattr(request.user, 'profile', None)
     # Only SOC or the original uploader may delete
-    can_delete = (profile and profile.is_soc) or (att.uploaded_by == request.user)
+    can_delete = (
+        request.user.is_superuser
+        or (profile and profile.is_soc)
+        or att.uploaded_by == request.user
+    )
     if request.method == 'POST' and can_delete:
         att.file.delete(save=False)
         att.delete()
@@ -415,10 +443,16 @@ def delete_attachment(request, attachment_id):
 @login_required
 def system_owner_dashboard(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_system_owner:
+    if not request.user.is_superuser and (
+        profile is None or not profile.is_system_owner
+    ):
         return redirect('home')
 
-    my_tickets = Ticket.objects.filter(system_owner=request.user)
+    my_tickets = (
+        Ticket.objects.all()
+        if request.user.is_superuser
+        else Ticket.objects.filter(system_owner=request.user)
+    )
     terminal   = list(Ticket.TERMINAL_STATUSES)
     active_qs  = my_tickets.exclude(status__in=terminal)
     closed_qs  = my_tickets.filter(status__in=terminal)
@@ -438,20 +472,24 @@ def system_owner_dashboard(request):
         'recent_tickets': recent_tickets,
         'closed_tickets': closed_tickets,
         'profile':        profile,
+        'is_superuser_view': request.user.is_superuser,
     })
 
 
 @login_required
 def respond_escalation(request, triage_id):
     profile = getattr(request.user, 'profile', None)
-    if (
+    if not request.user.is_superuser and (
         profile is None
         or not profile.is_soc_staff
         or profile.tier != profile.TIER_T2
     ):
         return redirect('home')
 
-    triage = get_object_or_404(TriageRecord, pk=triage_id, escalated_to=request.user)
+    triage_qs = TriageRecord.objects.all()
+    if not request.user.is_superuser:
+        triage_qs = triage_qs.filter(escalated_to=request.user)
+    triage = get_object_or_404(triage_qs, pk=triage_id)
     if triage.t2_decision:
         messages.error(request, 'This escalation has already been decided.')
         return redirect('triage_list')
@@ -466,12 +504,12 @@ def respond_escalation(request, triage_id):
             messages.error(request, 'A decision note is required.')
         else:
             with transaction.atomic():
-                triage = get_object_or_404(
-                    TriageRecord.objects.select_for_update(),
-                    pk=triage_id,
-                    escalated_to=request.user,
-                    t2_decision='',
+                locked_qs = TriageRecord.objects.select_for_update().filter(
+                    pk=triage_id, t2_decision='',
                 )
+                if not request.user.is_superuser:
+                    locked_qs = locked_qs.filter(escalated_to=request.user)
+                triage = get_object_or_404(locked_qs)
                 triage.t2_decision = t2_decision
                 triage.t2_notes = t2_notes
                 triage.t2_decided_at = timezone.now()

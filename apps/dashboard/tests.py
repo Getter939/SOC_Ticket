@@ -98,6 +98,20 @@ class DashboardAccessTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn('/login', response['Location'])
 
+    def test_superuser_without_profile_sees_dashboard(self):
+        from django.contrib.auth.models import User
+        superuser = User.objects.create_superuser(
+            username='dashboard_superuser',
+            email='dashboard-super@example.com',
+            password='pw',
+        )
+        self.client.force_login(superuser)
+
+        response = self.client.get(DASHBOARD_URL)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard/dashboard.html')
+
 
 # ── SLA-breach counting tests ────────────────────────────────────────────── #
 

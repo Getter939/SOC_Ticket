@@ -11,10 +11,10 @@ from apps.incidents.models import Ticket
 def dashboard(request):
     # System Owners see their own portal, not the SOC dashboard
     profile = getattr(request.user, 'profile', None)
-    if profile and profile.is_system_owner:
+    if not request.user.is_superuser and profile and profile.is_system_owner:
         from django.shortcuts import redirect
         return redirect('system_owner_dashboard')
-    if profile and profile.is_system_admin:
+    if not request.user.is_superuser and profile and profile.is_system_admin:
         from django.shortcuts import redirect
         return redirect('ticket_list')
 
