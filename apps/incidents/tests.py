@@ -27,8 +27,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
-from apps.incidents.models import Ticket, TicketLog
+from apps.incidents.forms import TriageForm
+from apps.incidents.models import Ticket, TicketLog, TriageRecord
 from apps.incidents.notifications import notify_containment_required
+from apps.wazuh_ingest.models import WazuhAlert
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -729,3 +731,126 @@ class NotificationEmailTest(TestCase):
         _advance_to(t, Ticket.STATUS_VERIFIED, self.soc, self.admin)
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(len(mail.outbox), 0)
+class TriageWorkflowIntegrityTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_user(
+            'manual_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
+        )
+        cls.other_t1 = _make_user(
+            'manual_t1_other', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
+        )
+        cls.t2 = _make_user(
+            'manual_t2', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2,
+        )
+        cls.manager = _make_user('manual_manager', UserProfile.ROLE_SOC_MANAGER)
+
+    def _ticket_data(self, **overrides):
+        data = {
+            'severity': 'High',
+            'category': 'Cyber Event',
+            'issue_type': 'SIEM',
+            'detailed_issue': 'Investigating',
+            'detailed_issue2': 'Investigating Other',
+            'device_name': 'TEST-ENDPOINT-01',
+            'issue_description': 'Confirmed suspicious activity.',
+            'ip_address': '192.0.2.10',
+        }
+        data.update(overrides)
+        return data
+
+    def test_manual_triage_form_only_lists_active_t2_staff(self):
+        form = TriageForm(user=self.t1)
+        self.assertQuerySetEqual(form.fields['escalated_to'].queryset, [self.t2])
+
+    def test_manual_triage_requires_decision_note(self):
+        form = TriageForm(data={
+            'source': TriageRecord.SOURCE_EMAIL,
+            'source_reference': 'MSG-1001',
+            'alert_description': 'Suspicious email reported by a user.',
+            'source_ip': '192.0.2.20',
+            'decision': TriageRecord.DECISION_FP,
+            'notes': '',
+        }, user=self.t1)
+        self.assertFalse(form.is_valid())
+        self.assertIn('notes', form.errors)
+
+    def test_non_owner_cannot_create_ticket_from_manual_triage(self):
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE,
+            source_reference='HOTLINE-22',
+            analyst=self.t1,
+            alert_description='Reported suspicious login.',
+            decision=TriageRecord.DECISION_TP,
+            notes='Confirmed by T1.',
+        )
+        self.client.login(username='manual_t1_other', password='testpass123')
+        response = self.client.get(reverse('create_ticket'), {'triage_id': triage.pk})
+        self.assertRedirects(response, reverse('triage_list'))
+        self.assertFalse(Ticket.objects.exists())
+
+    def test_t2_cannot_overwrite_existing_manual_decision(self):
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EXTERNAL,
+            analyst=self.t1,
+            alert_description='External organization report.',
+            decision=TriageRecord.DECISION_ESCALATED,
+            notes='Needs T2 review.',
+            escalated_to=self.t2,
+            t2_decision=TriageRecord.DECISION_FP,
+            t2_notes='Previously reviewed.',
+            t2_decided_at=timezone.now(),
+        )
+        self.client.login(username='manual_t2', password='testpass123')
+        response = self.client.post(
+            reverse('respond_escalation', args=[triage.pk]),
+            {'t2_decision': TriageRecord.DECISION_TP, 't2_notes': 'Overwrite attempt.'},
+        )
+        self.assertRedirects(response, reverse('triage_list'))
+        triage.refresh_from_db()
+        self.assertEqual(triage.t2_decision, TriageRecord.DECISION_FP)
+        self.assertEqual(triage.t2_notes, 'Previously reviewed.')
+
+    def test_wazuh_alert_becomes_true_positive_only_after_ticket_save(self):
+        alert = WazuhAlert.objects.create(
+            opensearch_id='ticket-finalize-alert',
+            timestamp=timezone.now(),
+            rule_level=14,
+            rule_description='Confirmed ransomware behavior',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1,
+            claimed_at=timezone.now(),
+            triage_note='Confirmed malicious.',
+            incident_category=WazuhAlert.CATEGORY_MALWARE,
+        )
+        self.client.login(username='manual_t1', password='testpass123')
+        response = self.client.post(
+            reverse('create_ticket'),
+            self._ticket_data(wazuh_alert=alert.pk),
+        )
+        self.assertEqual(response.status_code, 302)
+        ticket = Ticket.objects.get(wazuh_alert=alert)
+        alert.refresh_from_db()
+        self.assertEqual(ticket.created_by, self.t1)
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
+        self.assertEqual(alert.triaged_by, self.t1)
+        self.assertIsNotNone(alert.triaged_at)
+        self.assertIsNone(alert.claimed_by)
+
+    def test_invalid_ticket_form_keeps_wazuh_alert_in_progress(self):
+        alert = WazuhAlert.objects.create(
+            opensearch_id='invalid-ticket-alert',
+            timestamp=timezone.now(),
+            rule_level=12,
+            rule_description='Suspicious command execution',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1,
+            claimed_at=timezone.now(),
+        )
+        self.client.login(username='manual_t1', password='testpass123')
+        response = self.client.post(reverse('create_ticket'), {'wazuh_alert': alert.pk})
+        self.assertEqual(response.status_code, 200)
+        alert.refresh_from_db()
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+        self.assertEqual(alert.claimed_by, self.t1)
+        self.assertFalse(Ticket.objects.filter(wazuh_alert=alert).exists())

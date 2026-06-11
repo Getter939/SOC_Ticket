@@ -112,9 +112,11 @@
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#closeFpModal{{ alert.pk }}">
                   <i class="bi bi-x-circle"></i> Close FP
                 </button>
+                {% if tier_choices %}
                 <button type="button" class="btn btn-sm btn-warning text-white" data-bs-toggle="modal" data-bs-target="#escalateModal{{ alert.pk }}">
                   <i class="bi bi-arrow-up-circle"></i> Escalate
                 </button>
+                {% endif %}
                 <form method="post" action="{% url 'release_alert' %}" class="d-inline">
                   {% csrf_token %}
                   <input type="hidden" name="alert_id" value="{{ alert.pk }}">
@@ -204,6 +206,7 @@
 </div>
 
 <!-- Escalate modal -->
+{% if tier_choices %}
 <div class="modal fade" id="escalateModal{{ alert.pk }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -243,6 +246,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 {% endif %}
 {% endfor %}

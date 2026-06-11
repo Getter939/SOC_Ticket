@@ -14,12 +14,18 @@
 </style>
 
 <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
-  <h4 class="mb-0 fw-bold"><i class="bi bi-arrow-up-circle-fill text-warning me-2"></i>Escalation Queue</h4>
-  <span class="badge bg-warning text-dark" style="font-size:.85rem;">{{ escalated_count }} Escalated to {{ tier }}</span>
+  <h4 class="mb-0 fw-bold">
+    <i class="bi bi-arrow-up-circle-fill text-warning me-2"></i>Escalation Queue
+  </h4>
+  <span class="badge bg-warning text-dark" style="font-size:.85rem;">
+    {{ escalated_count }} assigned to {{ tier|default:"no tier" }}
+  </span>
 </div>
 
 {% if not tier %}
-<div class="alert alert-secondary">บัญชีของคุณไม่ได้กำหนด Tier (T1/T2) หรือบทบาท Manager จึงไม่มี Alert ที่ Escalate มาถึงคุณ</div>
+<div class="alert alert-secondary">
+  Your account does not have a T1, T2, or Manager escalation tier.
+</div>
 {% endif %}
 
 <div class="form-section bg-white border rounded-3 p-0">
@@ -33,7 +39,8 @@
           <th>Rule Description</th>
           <th>MITRE Tactics</th>
           <th>Escalated By</th>
-          <th>เหตุผลในการ Escalate</th>
+          <th>Assigned To</th>
+          <th>Escalation Note</th>
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -41,7 +48,7 @@
         {% for alert in alerts %}
         <tr>
           <td class="font-monospace" style="font-size:.8rem;">{{ alert.timestamp|date:"Y-m-d H:i" }}</td>
-          <td>{{ alert.agent_name|default:"—" }}</td>
+          <td>{{ alert.agent_name|default:"-" }}</td>
           <td>
             {% if alert.rule_level >= 13 %}
               <span class="severity-badge critical">{{ alert.rule_level }} Critical</span>
@@ -58,34 +65,67 @@
             {% for tactic in alert.mitre_tactics %}
               <span class="mitre-tag">{{ tactic }}</span>
             {% empty %}
-              <span class="text-muted">—</span>
+              <span class="text-muted">-</span>
             {% endfor %}
           </td>
           <td>
             {% if alert.triaged_by %}
               {{ alert.triaged_by.get_full_name|default:alert.triaged_by.username }}
             {% else %}
-              <span class="text-muted">—</span>
+              <span class="text-muted">-</span>
             {% endif %}
           </td>
-          <td style="max-width:240px;">{{ alert.triage_note|default:"—" }}</td>
+          <td>
+            {% if alert.claimed_by %}
+              {{ alert.claimed_by.get_full_name|default:alert.claimed_by.username }}
+            {% else %}
+              <span class="text-muted">Unassigned</span>
+            {% endif %}
+          </td>
+          <td style="max-width:240px;">{{ alert.triage_note|default:"-" }}</td>
           <td class="text-end">
             <div class="d-flex gap-1 justify-content-end flex-wrap">
-              <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createTicketModal{{ alert.pk }}">
-                <i class="bi bi-ticket-perforated"></i> Create Ticket
-              </button>
-              <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="modal" data-bs-target="#closeFpModal{{ alert.pk }}">
-                <i class="bi bi-x-circle"></i> Close FP
-              </button>
-              <button type="button" class="btn btn-sm btn-warning text-white" data-bs-toggle="modal" data-bs-target="#escalateModal{{ alert.pk }}">
-                <i class="bi bi-arrow-up-circle"></i> Escalate
-              </button>
+              {% if not alert.claimed_by %}
+                <form method="post" action="{% url 'claim_escalation' %}" class="d-inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="alert_id" value="{{ alert.pk }}">
+                  <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-hand-index-thumb"></i> Claim
+                  </button>
+                </form>
+              {% elif alert.claimed_by_id == request.user.id %}
+                <button type="button" class="btn btn-sm btn-success"
+                        data-bs-toggle="modal" data-bs-target="#createTicketModal{{ alert.pk }}">
+                  <i class="bi bi-ticket-perforated"></i> Create Ticket
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary"
+                        data-bs-toggle="modal" data-bs-target="#closeFpModal{{ alert.pk }}">
+                  <i class="bi bi-x-circle"></i> Close FP
+                </button>
+                {% if tier_choices %}
+                <button type="button" class="btn btn-sm btn-warning text-white"
+                        data-bs-toggle="modal" data-bs-target="#escalateModal{{ alert.pk }}">
+                  <i class="bi bi-arrow-up-circle"></i> Escalate
+                </button>
+                {% endif %}
+                <form method="post" action="{% url 'release_escalation' %}" class="d-inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="alert_id" value="{{ alert.pk }}">
+                  <button type="submit" class="btn btn-sm btn-light border">
+                    <i class="bi bi-arrow-counterclockwise"></i> Release
+                  </button>
+                </form>
+              {% else %}
+                <span class="text-muted small">In progress by another analyst</span>
+              {% endif %}
             </div>
           </td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">ไม่มี Alert ที่ Escalate มาถึงคุณ</td>
+          <td colspan="9" class="text-center text-muted py-4">
+            No alerts are escalated to your tier.
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -93,10 +133,8 @@
   </div>
 </div>
 
-<!-- Action modals (rendered outside the table — divs are not valid <tbody> children) -->
 {% for alert in alerts %}
-
-<!-- Create Ticket modal -->
+{% if alert.claimed_by_id == request.user.id %}
 <div class="modal fade" id="createTicketModal{{ alert.pk }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -106,31 +144,30 @@
         <input type="hidden" name="action" value="create_ticket">
         <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
-          <h5 class="modal-title">สร้าง Ticket (True Positive)</h5>
+          <h5 class="modal-title">Create Ticket (True Positive)</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <p class="text-muted small">{{ alert.rule_description }}</p>
-          <label class="form-label fw-semibold">ประเภทเหตุการณ์ (Category) <span class="text-danger">*</span></label>
-          <select name="category" class="form-select mb-2" required>
-            <option value="">-- เลือกประเภทเหตุการณ์ --</option>
+          <label class="form-label fw-semibold">Incident Category <span class="text-danger">*</span></label>
+          <select name="category" class="form-select mb-3" required>
+            <option value="">-- Select category --</option>
             {% for value, label in category_choices %}
               <option value="{{ value }}">{{ label }}</option>
             {% endfor %}
           </select>
-          <label class="form-label fw-semibold">หมายเหตุ <span class="text-danger">*</span></label>
+          <label class="form-label fw-semibold">Decision Note <span class="text-danger">*</span></label>
           <textarea name="note" class="form-control" rows="3" required></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
-          <button type="submit" class="btn btn-success">สร้าง Ticket</button>
+          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Continue to Ticket</button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- Close FP modal -->
 <div class="modal fade" id="closeFpModal{{ alert.pk }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -140,24 +177,24 @@
         <input type="hidden" name="action" value="close_fp">
         <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
-          <h5 class="modal-title">ปิดเป็น False Positive</h5>
+          <h5 class="modal-title">Close as False Positive</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <p class="text-muted small">{{ alert.rule_description }}</p>
-          <label class="form-label fw-semibold">หมายเหตุ <span class="text-danger">*</span></label>
-          <textarea name="note" class="form-control" rows="3" required placeholder="เหตุผลที่ระบุว่าเป็น False Positive"></textarea>
+          <label class="form-label fw-semibold">Decision Note <span class="text-danger">*</span></label>
+          <textarea name="note" class="form-control" rows="3" required></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
-          <button type="submit" class="btn btn-secondary">ปิด Alert</button>
+          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-secondary">Close Alert</button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- Escalate modal -->
+{% if tier_choices %}
 <div class="modal fade" id="escalateModal{{ alert.pk }}" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -167,48 +204,51 @@
         <input type="hidden" name="action" value="escalate">
         <input type="hidden" name="source" value="escalation_queue">
         <div class="modal-header">
-          <h5 class="modal-title">Escalate Alert ต่อ</h5>
+          <h5 class="modal-title">Escalate Alert</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <p class="text-muted small">{{ alert.rule_description }}</p>
-          <label class="form-label fw-semibold">ประเภทเหตุการณ์ (Category) <span class="text-danger">*</span></label>
-          <select name="category" class="form-select mb-2" required>
-            <option value="">-- เลือกประเภทเหตุการณ์ --</option>
+          <label class="form-label fw-semibold">Incident Category <span class="text-danger">*</span></label>
+          <select name="category" class="form-select mb-3" required>
+            <option value="">-- Select category --</option>
             {% for value, label in category_choices %}
               <option value="{{ value }}">{{ label }}</option>
             {% endfor %}
           </select>
-          <label class="form-label fw-semibold">Escalate ไปยัง <span class="text-danger">*</span></label>
-          <select name="escalate_to" class="form-select mb-2" required>
-            <option value="">-- เลือก Tier --</option>
+          <label class="form-label fw-semibold">Escalate To <span class="text-danger">*</span></label>
+          <select name="escalate_to" class="form-select mb-3" required>
+            <option value="">-- Select tier --</option>
             {% for value, label in tier_choices %}
               <option value="{{ value }}">{{ label }}</option>
             {% endfor %}
           </select>
-          <label class="form-label fw-semibold">หมายเหตุ <span class="text-danger">*</span></label>
-          <textarea name="note" class="form-control" rows="3" required placeholder="เหตุผลในการ Escalate ต่อ"></textarea>
+          <label class="form-label fw-semibold">Escalation Note <span class="text-danger">*</span></label>
+          <textarea name="note" class="form-control" rows="3" required></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
+          <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-warning text-white">Escalate</button>
         </div>
       </form>
     </div>
   </div>
 </div>
-
+{% endif %}
+{% endif %}
 {% endfor %}
 
 {% if page_obj.paginator.num_pages > 1 %}
 <nav class="mt-3">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">«</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a></li>
     {% endif %}
-    <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+    <li class="page-item disabled">
+      <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+    </li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">»</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a></li>
     {% endif %}
   </ul>
 </nav>

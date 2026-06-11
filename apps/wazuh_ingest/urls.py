@@ -8,4 +8,6 @@ urlpatterns = [
     path('claim_alert/', views.claim_alert, name='claim_alert'),
     path('release_alert/', views.release_alert, name='release_alert'),
     path('escalation_queue/', views.escalation_queue, name='escalation_queue'),
+    path('claim_escalation/', views.claim_escalation, name='claim_escalation'),
+    path('release_escalation/', views.release_escalation, name='release_escalation'),
 ]

@@ -46,6 +46,11 @@
   <form method="post" novalidate>
     {% csrf_token %}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger">
+      {{ form.non_field_errors }}
+    </div>
+    {% endif %}
 
     <!-- ── Section 1: General Information ── -->
     <div class="form-section">

@@ -2,9 +2,12 @@ import calendar
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
+from apps.wazuh_ingest.models import WazuhAlert
 from .forms import AttachmentForm, TicketForm, TriageForm
 from .models import Ticket, TicketAttachment, TicketLog, TriageRecord
 from .notifications import (
@@ -55,6 +58,30 @@ def _notify_owner_closed(ticket, request):
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
 
+def _can_create_ticket_from_triage(triage, user):
+    if triage.ticket_id:
+        return False
+    if triage.decision == TriageRecord.DECISION_TP:
+        return triage.analyst_id == user.id
+    return (
+        triage.decision == TriageRecord.DECISION_ESCALATED
+        and triage.t2_decision == TriageRecord.DECISION_TP
+        and triage.escalated_to_id == user.id
+    )
+
+
+def _can_create_ticket_from_wazuh(alert, user):
+    profile = getattr(user, 'profile', None)
+    if alert.claimed_by_id != user.id or hasattr(alert, 'ticket'):
+        return False
+    if alert.triage_status == WazuhAlert.TRIAGE_TRIAGING:
+        return True
+    if alert.triage_status != WazuhAlert.TRIAGE_ESCALATED or profile is None:
+        return False
+    user_tier = WazuhAlert.TIER_MANAGER if profile.is_soc_manager else profile.tier
+    return alert.escalated_to_tier == user_tier
+
+
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
@@ -79,29 +106,68 @@ def create_ticket(request):
     triage = None
     triage_id = request.GET.get('triage_id') or request.POST.get('triage_id')
     if triage_id:
-        try:
-            triage = TriageRecord.objects.get(pk=triage_id)
-        except TriageRecord.DoesNotExist:
-            pass
+        triage = get_object_or_404(TriageRecord, pk=triage_id)
+        if triage.ticket_id:
+            messages.info(request, 'This triage record already has a ticket.')
+            return redirect('ticket_detail', pk=triage.ticket_id)
+        if not _can_create_ticket_from_triage(triage, request.user):
+            messages.error(request, 'You are not authorized to create a ticket from this triage record.')
+            return redirect('triage_list')
 
     if request.method == 'POST':
-        form = TicketForm(request.POST)
+        form = TicketForm(request.POST, user=request.user)
         if form.is_valid():
-            ticket = form.save(commit=False)
-            ticket.created_by = request.user
-            ticket.save()
+            try:
+                with transaction.atomic():
+                    locked_triage = None
+                    if triage:
+                        locked_triage = TriageRecord.objects.select_for_update().get(pk=triage.pk)
+                        if not _can_create_ticket_from_triage(locked_triage, request.user):
+                            raise ValidationError(
+                                'This triage record is no longer available for ticket creation.'
+                            )
 
-            # Link triage record if present
-            if triage and not triage.ticket:
-                triage.ticket = ticket
-                triage.save(update_fields=['ticket'])
+                    ticket = form.save(commit=False)
+                    ticket.created_by = request.user
+
+                    locked_alert = None
+                    if ticket.wazuh_alert_id:
+                        locked_alert = WazuhAlert.objects.select_for_update().get(
+                            pk=ticket.wazuh_alert_id
+                        )
+                        if not _can_create_ticket_from_wazuh(locked_alert, request.user):
+                            raise ValidationError(
+                                'This Wazuh alert is not assigned to you or already has a ticket.'
+                            )
+
+                    ticket.save()
+
+                    if locked_triage:
+                        locked_triage.ticket = ticket
+                        locked_triage.save(update_fields=['ticket'])
+
+                    if locked_alert:
+                        locked_alert.triage_status = WazuhAlert.TRIAGE_TRUE_POSITIVE
+                        locked_alert.triaged_by = request.user
+                        locked_alert.triaged_at = timezone.now()
+                        locked_alert.escalated_to_tier = None
+                        locked_alert.claimed_by = None
+                        locked_alert.claimed_at = None
+                        locked_alert.save(update_fields=[
+                            'triage_status', 'triaged_by', 'triaged_at',
+                            'escalated_to_tier', 'claimed_by', 'claimed_at',
+                        ])
+            except ValidationError as exc:
+                form.add_error(None, exc.message)
+                ticket = None
 
             # Stage 5 — notify System Owner
-            if ticket.system_owner and ticket.system_owner.email:
+            if ticket and ticket.system_owner and ticket.system_owner.email:
                 if not notify_system_owner_created(ticket):
                     messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
 
-            return redirect('ticket_detail', pk=ticket.pk)
+            if ticket:
+                return redirect('ticket_detail', pk=ticket.pk)
     else:
         initial = {}
         if triage:
@@ -115,7 +181,7 @@ def create_ticket(request):
             initial['severity'] = request.GET['severity']
         if request.GET.get('detailed_issue2') in dict(Ticket.DETAILED_ISSUE_CHOICES2):
             initial['detailed_issue2'] = request.GET['detailed_issue2']
-        form = TicketForm(initial=initial)
+        form = TicketForm(initial=initial, user=request.user)
 
     return render(request, 'incidents/ticket_form.html', {
         'form': form,
@@ -266,25 +332,31 @@ def triage_list(request):
         return redirect('home')
 
     my_triages = TriageRecord.objects.filter(analyst=request.user).order_by('-created_at')
-    pending_escalations = TriageRecord.objects.filter(
-        escalated_to=request.user, t2_decision=''
+    assigned_escalations = TriageRecord.objects.filter(
+        escalated_to=request.user,
+        ticket__isnull=True,
+        t2_decision__in=['', TriageRecord.DECISION_TP],
     ).order_by('-created_at')
 
     return render(request, 'incidents/triage_list.html', {
         'my_triages': my_triages,
-        'pending_escalations': pending_escalations,
+        'assigned_escalations': assigned_escalations,
     })
 
 
 @login_required
 def create_triage(request):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if (
+        profile is None
+        or not profile.is_soc_staff
+        or profile.tier != profile.TIER_T1
+    ):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถ Triage ได้')
         return redirect('home')
 
     if request.method == 'POST':
-        form = TriageForm(request.POST)
+        form = TriageForm(request.POST, user=request.user)
         if form.is_valid():
             triage = form.save(commit=False)
             triage.analyst = request.user
@@ -292,7 +364,7 @@ def create_triage(request):
 
             if triage.decision == TriageRecord.DECISION_TP:
                 messages.success(request, 'บันทึก True Positive แล้ว — กรุณาสร้าง Ticket สำหรับกรณีนี้')
-                return redirect(f"{__import__('django.urls', fromlist=['reverse']).reverse('create_ticket')}?triage_id={triage.pk}")
+                return redirect(f"{reverse('create_ticket')}?triage_id={triage.pk}")
             elif triage.decision == TriageRecord.DECISION_FP:
                 messages.success(request, 'บันทึก False Positive เรียบร้อยแล้ว — ไม่จำเป็นต้องสร้าง Ticket')
                 return redirect('triage_list')
@@ -300,7 +372,7 @@ def create_triage(request):
                 messages.success(request, f'Escalate ไปยัง T2 เรียบร้อยแล้ว')
                 return redirect('triage_list')
     else:
-        form = TriageForm()
+        form = TriageForm(user=request.user)
 
     return render(request, 'incidents/triage_form.html', {'form': form})
 
@@ -372,10 +444,17 @@ def system_owner_dashboard(request):
 @login_required
 def respond_escalation(request, triage_id):
     profile = getattr(request.user, 'profile', None)
-    if profile is None or not profile.is_soc:
+    if (
+        profile is None
+        or not profile.is_soc_staff
+        or profile.tier != profile.TIER_T2
+    ):
         return redirect('home')
 
     triage = get_object_or_404(TriageRecord, pk=triage_id, escalated_to=request.user)
+    if triage.t2_decision:
+        messages.error(request, 'This escalation has already been decided.')
+        return redirect('triage_list')
 
     if request.method == 'POST':
         t2_decision = request.POST.get('t2_decision')
@@ -383,15 +462,23 @@ def respond_escalation(request, triage_id):
 
         if t2_decision not in [TriageRecord.DECISION_FP, TriageRecord.DECISION_TP]:
             messages.error(request, 'กรุณาเลือกการตัดสินใจ')
+        elif not t2_notes:
+            messages.error(request, 'A decision note is required.')
         else:
-            triage.t2_decision = t2_decision
-            triage.t2_notes = t2_notes
-            triage.t2_decided_at = timezone.now()
-            triage.save()
+            with transaction.atomic():
+                triage = get_object_or_404(
+                    TriageRecord.objects.select_for_update(),
+                    pk=triage_id,
+                    escalated_to=request.user,
+                    t2_decision='',
+                )
+                triage.t2_decision = t2_decision
+                triage.t2_notes = t2_notes
+                triage.t2_decided_at = timezone.now()
+                triage.save(update_fields=['t2_decision', 't2_notes', 't2_decided_at'])
 
             if t2_decision == TriageRecord.DECISION_TP:
                 messages.success(request, 'T2 ยืนยัน True Positive — กรุณาสร้าง Ticket')
-                from django.urls import reverse
                 return redirect(f"{reverse('create_ticket')}?triage_id={triage.pk}")
             else:
                 messages.success(request, 'T2 ยืนยัน False Positive — บันทึกเรียบร้อย ไม่จำเป็นต้องสร้าง Ticket')

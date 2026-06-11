@@ -2,105 +2,128 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h4 class="mb-0 fw-bold"><i class="bi bi-clipboard2-pulse me-2"></i>Triage Records</h4>
-    <a href="{% url 'create_triage' %}" class="btn btn-dark btn-sm">
-        <i class="bi bi-plus-circle me-1"></i>Triage Alert ใหม่
-    </a>
+  <div>
+    <h4 class="mb-1 fw-bold"><i class="bi bi-clipboard2-pulse me-2"></i>Manual Triage</h4>
+    <div class="text-muted small">Alerts reported by email, phone, users, or external organizations.</div>
+  </div>
+  {% if request.user.profile.is_soc_staff and request.user.profile.tier == 'T1' %}
+  <a href="{% url 'create_triage' %}" class="btn btn-dark btn-sm">
+    <i class="bi bi-plus-circle me-1"></i>Record Manual Alert
+  </a>
+  {% endif %}
 </div>
 
-{% if pending_escalations %}
+{% if assigned_escalations %}
 <div class="card border-warning shadow-sm mb-4">
-    <div class="card-header bg-warning text-dark fw-bold">
-        <i class="bi bi-arrow-up-circle-fill me-2"></i>
-        Escalated ที่รอการตัดสินใจจากคุณ ({{ pending_escalations|length }})
-    </div>
-    <div class="list-group list-group-flush">
-        {% for triage in pending_escalations %}
-        <div class="list-group-item px-4 py-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div>
-                    <div class="fw-bold small">จาก: {{ triage.analyst.get_full_name|default:triage.analyst.username }}</div>
-                    <div class="text-muted small mt-1">{{ triage.alert_description|truncatechars:120 }}</div>
-                    {% if triage.source_ip %}
-                    <div class="mt-1"><span class="badge bg-secondary font-monospace">{{ triage.source_ip }}</span></div>
-                    {% endif %}
-                    {% if triage.notes %}
-                    <div class="text-muted small mt-1"><i class="bi bi-sticky me-1"></i>{{ triage.notes }}</div>
-                    {% endif %}
-                </div>
-                <div class="text-end ms-3 flex-shrink-0">
-                    <div class="text-muted small">{{ triage.created_at|date:"d M Y H:i" }}</div>
-                    <a href="{% url 'respond_escalation' triage.pk %}" class="btn btn-warning btn-sm mt-2">
-                        <i class="bi bi-reply-fill me-1"></i>ตัดสินใจ
-                    </a>
-                </div>
-            </div>
+  <div class="card-header bg-warning text-dark fw-bold">
+    <i class="bi bi-arrow-up-circle-fill me-2"></i>
+    Manual escalations assigned to you ({{ assigned_escalations|length }})
+  </div>
+  <div class="list-group list-group-flush">
+    {% for triage in assigned_escalations %}
+    <div class="list-group-item px-4 py-3">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <div class="fw-bold small">
+            {{ triage.get_source_display }}
+            {% if triage.source_reference %}- {{ triage.source_reference }}{% endif %}
+          </div>
+          <div class="text-muted small mt-1">{{ triage.alert_description|truncatechars:140 }}</div>
+          <div class="small mt-2">
+            From {{ triage.analyst.get_full_name|default:triage.analyst.username }}
+            {% if triage.source_ip %}<span class="badge bg-secondary font-monospace ms-2">{{ triage.source_ip }}</span>{% endif %}
+          </div>
+          {% if triage.notes %}
+          <div class="text-muted small mt-1"><i class="bi bi-sticky me-1"></i>{{ triage.notes }}</div>
+          {% endif %}
         </div>
-        {% endfor %}
+        <div class="text-end flex-shrink-0">
+          <div class="text-muted small">{{ triage.created_at|date:"d M Y H:i" }}</div>
+          {% if triage.t2_decision == 'TP' %}
+          <a href="{% url 'create_ticket' %}?triage_id={{ triage.pk }}" class="btn btn-success btn-sm mt-2">
+            <i class="bi bi-ticket-perforated me-1"></i>Create Ticket
+          </a>
+          {% else %}
+          <a href="{% url 'respond_escalation' triage.pk %}" class="btn btn-warning btn-sm mt-2">
+            <i class="bi bi-reply-fill me-1"></i>Review
+          </a>
+          {% endif %}
+        </div>
+      </div>
     </div>
+    {% endfor %}
+  </div>
 </div>
 {% endif %}
 
 <div class="card shadow-sm border-0">
-    <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
-        <i class="bi bi-clock-history me-1"></i>Triage ของฉัน
-    </div>
-    {% if my_triages %}
-    <div class="table-responsive">
-        <table class="table table-hover mb-0 small">
-            <thead class="table-light">
-                <tr>
-                    <th>วันที่</th>
-                    <th>IP Source</th>
-                    <th>รายละเอียด Alert</th>
-                    <th>การตัดสินใจ T1</th>
-                    <th>T2</th>
-                    <th>Ticket</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for triage in my_triages %}
-                <tr>
-                    <td class="text-muted">{{ triage.created_at|date:"d M Y H:i" }}</td>
-                    <td class="font-monospace">{{ triage.source_ip|default:"—" }}</td>
-                    <td>{{ triage.alert_description|truncatechars:80 }}</td>
-                    <td>
-                        {% if triage.decision == 'FP' %}
-                        <span class="badge bg-secondary">False Positive</span>
-                        {% elif triage.decision == 'TP' %}
-                        <span class="badge bg-success">True Positive</span>
-                        {% else %}
-                        <span class="badge bg-warning text-dark">Escalated</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if triage.decision == 'ESCALATED' %}
-                            {% if triage.t2_decision == 'FP' %}
-                            <span class="badge bg-secondary">FP</span>
-                            {% elif triage.t2_decision == 'TP' %}
-                            <span class="badge bg-success">TP</span>
-                            {% else %}
-                            <span class="badge bg-light text-dark border">รอ T2</span>
-                            {% endif %}
-                        {% else %}—{% endif %}
-                    </td>
-                    <td>
-                        {% if triage.ticket %}
-                        <a href="{% url 'ticket_detail' triage.ticket.pk %}" class="font-monospace text-primary small">
-                            #{{ triage.ticket.ticket_id }}
-                        </a>
-                        {% else %}—{% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="text-center text-muted py-5 small">
-        <i class="bi bi-inbox fs-3 d-block mb-2 opacity-50"></i>
-        ยังไม่มีบันทึก Triage
-    </div>
-    {% endif %}
+  <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
+    <i class="bi bi-clock-history me-1"></i>My manual triage records
+  </div>
+  {% if my_triages %}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 small align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Data Source</th>
+          <th>Source IP</th>
+          <th>Alert Description</th>
+          <th>T1 Decision</th>
+          <th>T2 Decision</th>
+          <th>Ticket</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for triage in my_triages %}
+        <tr>
+          <td class="text-muted">{{ triage.created_at|date:"d M Y H:i" }}</td>
+          <td>
+            {{ triage.get_source_display }}
+            {% if triage.source_reference %}<div class="text-muted">{{ triage.source_reference }}</div>{% endif %}
+          </td>
+          <td class="font-monospace">{{ triage.source_ip|default:"-" }}</td>
+          <td>{{ triage.alert_description|truncatechars:90 }}</td>
+          <td>
+            {% if triage.decision == 'FP' %}
+              <span class="badge bg-secondary">False Positive</span>
+            {% elif triage.decision == 'TP' %}
+              <span class="badge bg-success">True Positive</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Escalated</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if triage.decision == 'ESCALATED' %}
+              {% if triage.t2_decision == 'FP' %}
+                <span class="badge bg-secondary">False Positive</span>
+              {% elif triage.t2_decision == 'TP' %}
+                <span class="badge bg-success">True Positive</span>
+              {% else %}
+                <span class="badge bg-light text-dark border">Waiting for T2</span>
+              {% endif %}
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            {% if triage.ticket %}
+              <a href="{% url 'ticket_detail' triage.ticket.pk %}" class="font-monospace text-primary">
+                #{{ triage.ticket.ticket_id }}
+              </a>
+            {% elif triage.decision == 'TP' %}
+              <a href="{% url 'create_ticket' %}?triage_id={{ triage.pk }}" class="btn btn-success btn-sm">
+                Create Ticket
+              </a>
+            {% else %}-{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center text-muted py-5 small">
+    <i class="bi bi-inbox fs-3 d-block mb-2 opacity-50"></i>No manual triage records yet.
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

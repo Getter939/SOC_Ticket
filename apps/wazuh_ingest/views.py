@@ -18,7 +18,7 @@ CATEGORY_CHOICES = dict(WazuhAlert.CATEGORY_CHOICES)
 # Ticket.DETAILED_ISSUE_CHOICES2 value, used to pre-fill the ticket form.
 CATEGORY_TO_DETAILED_ISSUE2 = {
     WazuhAlert.CATEGORY_MALWARE: 'Malware EDR',
-    WazuhAlert.CATEGORY_PHISHING: 'Phishing Email',
+    WazuhAlert.CATEGORY_PHISHING: 'SIEM Other Detail',
     WazuhAlert.CATEGORY_UNAUTHORIZED_ACCESS: 'Unauthorized Admin',
     WazuhAlert.CATEGORY_DATA_EXFILTRATION: 'Data Exfiltration',
     WazuhAlert.CATEGORY_DOS: 'DDoS',
