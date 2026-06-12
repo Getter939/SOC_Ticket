@@ -37,13 +37,23 @@ def _valid_soc_status_choices(ticket, user):
         return []
 
     status_map = dict(Ticket.STATUS_CHOICES)
-    result = [(ticket.status, status_map.get(ticket.status, ticket.status))]
+    result = []
+    if (
+        not user.is_superuser
+        and ticket.status in Ticket.CREATOR_REVIEW_STATUSES
+        and user.pk != ticket.created_by_id
+    ):
+        pass  # not this ticket's creator — can't even add a note in this stage
+    else:
+        result.append((ticket.status, status_map.get(ticket.status, ticket.status)))
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
         if user.is_superuser:
             result.append((next_status, status_map.get(next_status, next_status)))
         elif perm == 'SOC':
+            result.append((next_status, status_map.get(next_status, next_status)))
+        elif perm == 'ASSIGNED_CREATOR' and user.pk == ticket.created_by_id:
             result.append((next_status, status_map.get(next_status, next_status)))
         elif perm == 'MANAGER' and (
             user.is_superuser or (profile and profile.is_soc_manager)

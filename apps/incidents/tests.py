@@ -70,6 +70,9 @@ def _advance_to(ticket, target_status, soc_user, admin_user=None, mgr_user=None)
                 ValidationError if soc_user is not a manager.
     """
     approver = mgr_user or soc_user
+    if ticket.created_by_id is None:
+        ticket.created_by = soc_user
+        ticket.save(update_fields=['created_by'])
     path = [
         Ticket.STATUS_NEW,
         Ticket.STATUS_AWAITING_CONTAINMENT,
@@ -354,16 +357,18 @@ class WorkflowPermissionTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.soc_staff = _make_user('pm_soc_staff', UserProfile.ROLE_SOC_STAFF)
+        cls.soc_staff2 = _make_user('pm_soc_staff2', UserProfile.ROLE_SOC_STAFF)
         cls.soc_mgr   = _make_user('pm_soc_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin_a   = _make_user('pm_admin_a',   UserProfile.ROLE_SYSTEM_ADMIN)
         cls.admin_b   = _make_user('pm_admin_b',   UserProfile.ROLE_SYSTEM_ADMIN)
         cls.no_profile = User.objects.create_user(username='pm_noprofile', password='x')
 
-    def _ticket_at(self, status, assigned_admin=None):
+    def _ticket_at(self, status, assigned_admin=None, created_by=None):
         """Build a ticket pre-set to the requested status (bypassing transition guards)."""
         t = _make_ticket(
             status=status,
             assigned_admin=assigned_admin or self.admin_a,
+            created_by=created_by or self.soc_staff,
         )
         return t
 
@@ -421,6 +426,12 @@ class WorkflowPermissionTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_UNDER_REVIEW, self.admin_a, 'denied')
 
+    def test_other_soc_staff_cannot_start_review(self):
+        """Only the ticket's creator (soc_staff) may review — soc_staff2 must be denied."""
+        t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_UNDER_REVIEW, self.soc_staff2, 'denied')
+
     # UNDER_REVIEW → VERIFIED  requires SOC ──────────────────────────────
 
     def test_soc_staff_can_verify(self):
@@ -433,6 +444,12 @@ class WorkflowPermissionTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_VERIFIED, self.admin_a, 'denied')
 
+    def test_other_soc_staff_cannot_verify(self):
+        """Only the ticket's creator (soc_staff) may verify — soc_staff2 must be denied."""
+        t = self._ticket_at(Ticket.STATUS_UNDER_REVIEW)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_VERIFIED, self.soc_staff2, 'denied')
+
     # UNDER_REVIEW → AWAITING_CONTAINMENT (rejection loop)  requires SOC ─
 
     def test_soc_can_reject_back_to_awaiting(self):
@@ -444,6 +461,12 @@ class WorkflowPermissionTest(TestCase):
         t = self._ticket_at(Ticket.STATUS_UNDER_REVIEW)
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.admin_a, 'denied')
+
+    def test_other_soc_staff_cannot_reject_back_to_awaiting(self):
+        """Only the ticket's creator (soc_staff) may reject back — soc_staff2 must be denied."""
+        t = self._ticket_at(Ticket.STATUS_UNDER_REVIEW)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.soc_staff2, 'denied')
 
     # VERIFIED → APPROVED  requires MANAGER only ─────────────────────────
 
@@ -537,8 +560,11 @@ class SignOffFieldsTest(TestCase):
         self.assertEqual(t.verified_by, self.soc1)
 
         # Force status back to UNDER_REVIEW at the DB level (bypass the state machine)
-        # so we can call transition_to(VERIFIED) a second time.
-        Ticket.objects.filter(pk=t.pk).update(status=Ticket.STATUS_UNDER_REVIEW)
+        # so we can call transition_to(VERIFIED) a second time. Reassign created_by
+        # to soc2 so the ASSIGNED_CREATOR check allows soc2 to perform this transition.
+        Ticket.objects.filter(pk=t.pk).update(
+            status=Ticket.STATUS_UNDER_REVIEW, created_by=self.soc2,
+        )
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_UNDER_REVIEW)
 

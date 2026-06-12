@@ -86,12 +86,19 @@ class Ticket(models.Model):
     TRANSITION_PERMISSIONS = {
         (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'SOC',
         (STATUS_AWAITING_CONTAINMENT, STATUS_CONTAINMENT_REPORTED): 'ASSIGNED_ADMIN',
-        (STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW):         'SOC',
-        (STATUS_UNDER_REVIEW,         STATUS_VERIFIED):             'SOC',
-        (STATUS_UNDER_REVIEW,         STATUS_AWAITING_CONTAINMENT): 'SOC',
-        (STATUS_UNDER_REVIEW,         STATUS_CLOSED_FP):            'SOC',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW):         'ASSIGNED_CREATOR',
+        (STATUS_UNDER_REVIEW,         STATUS_VERIFIED):             'ASSIGNED_CREATOR',
+        (STATUS_UNDER_REVIEW,         STATUS_AWAITING_CONTAINMENT): 'ASSIGNED_CREATOR',
+        (STATUS_UNDER_REVIEW,         STATUS_CLOSED_FP):            'ASSIGNED_CREATOR',
         (STATUS_VERIFIED,             STATUS_APPROVED):             'MANAGER',
     }
+
+    # Statuses where review is gated to the ticket's original creator
+    # (the analyst who triaged the alert and opened the ticket) — see
+    # ASSIGNED_CREATOR permission below.
+    CREATOR_REVIEW_STATUSES = frozenset({
+        STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW, STATUS_VERIFIED,
+    })
 
     # ------------------------------------------------------------------ #
     # Other choice sets                                                   #
@@ -486,6 +493,14 @@ class Ticket(models.Model):
                 raise ValidationError(
                     'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเพิ่มบันทึกได้'
                 )
+            if (
+                not user.is_superuser
+                and self.status in self.CREATOR_REVIEW_STATUSES
+                and user.pk != self.created_by_id
+            ):
+                raise ValidationError(
+                    'เฉพาะผู้เปิด Ticket นี้เท่านั้นที่สามารถตรวจสอบ/เพิ่มบันทึกในขั้นตอนนี้ได้'
+                )
             self.save()
             TicketLog.objects.create(
                 ticket=self, note=note, status_at_time=self.status, author=user,
@@ -515,6 +530,15 @@ class Ticket(models.Model):
             if profile is None or not profile.is_soc_manager:
                 raise ValidationError(
                     'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถอนุมัติได้'
+                )
+        elif required_perm == 'ASSIGNED_CREATOR':
+            if profile is None or not profile.is_soc:
+                raise ValidationError(
+                    'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้'
+                )
+            if user.pk != self.created_by_id:
+                raise ValidationError(
+                    'เฉพาะผู้เปิด Ticket นี้เท่านั้นที่สามารถตรวจสอบและดำเนินการต่อได้'
                 )
         elif required_perm == 'ASSIGNED_ADMIN':
             if self.assigned_admin_id is None or user.pk != self.assigned_admin_id:
