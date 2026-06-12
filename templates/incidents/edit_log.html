@@ -1,11 +1,14 @@
 {% extends 'base.html' %}
 
+{% block title %}แก้ไขบันทึก #{{ log.ticket.ticket_id }} — SOC Support System{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6">
         <div class="card shadow">
             <div class="card-header bg-warning text-dark">
-                <h5 class="mb-0">แก้ไขบันทึกการติดตามงาน</h5>
+                <h5 class="mb-0">แก้ไขบันทึกการติดตามงาน <span class="font-monospace">#{{ log.ticket.ticket_id }}</span></h5>
+                <small class="text-muted">บันทึกเมื่อ {{ log.created_at|date:"d M Y H:i" }}</small>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -22,8 +25,8 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">รายละเอียดบันทึก</label>
-                        <textarea name="note" class="form-control" rows="5">{{ log.note }}</textarea>
+                        <label class="form-label">รายละเอียดบันทึก <span class="text-danger">*</span></label>
+                        <textarea name="note" class="form-control" rows="5" required>{{ log.note }}</textarea>
                     </div>
                     <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-warning">บันทึกการแก้ไข</button>

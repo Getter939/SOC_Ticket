@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 
+{% block title %}My Tickets — SOC Support System{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -66,21 +68,7 @@
                                 </a>
                             </td>
                             <td>{{ t.get_detailed_issue2_display|truncatechars:45 }}</td>
-                            <td>
-                                {% if t.status == 'NEW' %}
-                                <span class="badge bg-danger" style="font-size:0.65rem;">แจ้งใหม่</span>
-                                {% elif t.status == 'AWAITING_CONTAINMENT' %}
-                                <span class="badge bg-warning text-dark" style="font-size:0.65rem;">รอการจัดการ</span>
-                                {% elif t.status == 'CONTAINMENT_REPORTED' %}
-                                <span class="badge bg-info text-dark" style="font-size:0.65rem;">รายงานแล้ว</span>
-                                {% elif t.status == 'UNDER_REVIEW' %}
-                                <span class="badge bg-secondary" style="font-size:0.65rem;">กำลังตรวจสอบ</span>
-                                {% elif t.status == 'VERIFIED' %}
-                                <span class="badge bg-primary" style="font-size:0.65rem;">ตรวจสอบแล้ว</span>
-                                {% else %}
-                                <span class="badge bg-light text-dark border" style="font-size:0.65rem;">{{ t.get_status_display }}</span>
-                                {% endif %}
-                            </td>
+                            <td style="font-size:0.8rem;">{% include 'incidents/_status_badge.html' with ticket=t %}</td>
                             <td class="text-muted">{{ t.created_at|date:"d M Y" }}</td>
                         </tr>
                         {% endfor %}
@@ -109,11 +97,7 @@
                    class="list-group-item list-group-item-action px-4 py-2">
                     <div class="d-flex justify-content-between align-items-center">
                         <span class="font-monospace fw-bold small">#{{ t.ticket_id }}</span>
-                        {% if t.status == 'APPROVED' %}
-                        <span class="badge bg-success" style="font-size:0.6rem;">อนุมัติแล้ว</span>
-                        {% else %}
-                        <span class="badge bg-secondary" style="font-size:0.6rem;">ปิด (FP)</span>
-                        {% endif %}
+                        <span style="font-size:0.65rem;">{% include 'incidents/_status_badge.html' with ticket=t %}</span>
                     </div>
                     <div class="text-muted small text-truncate">{{ t.get_detailed_issue2_display }}</div>
                     <div class="text-muted" style="font-size:0.68rem;">{{ t.updated_at|date:"d M Y" }}</div>

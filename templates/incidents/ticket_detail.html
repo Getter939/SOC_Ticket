@@ -1,140 +1,210 @@
 {% extends 'base.html' %}
 
+{% block title %}Ticket #{{ ticket.ticket_id }} — SOC Support System{% endblock %}
+
 {% block content %}
-<div class="row">
-    {# ── Left column: ticket info + timeline ── #}
-    <div class="col-md-7">
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-dark text-white">
-                <h5 class="mb-0">ประวัติการติดตามงาน #{{ ticket.ticket_id }}</h5>
+<style>
+  .meta-grid { display: grid; grid-template-columns: 150px 1fr; row-gap: .45rem; column-gap: .75rem; font-size: .875rem; }
+  .meta-grid dt { color: #6c757d; font-weight: 600; margin: 0; }
+  .meta-grid dd { margin: 0; word-break: break-word; }
+  @media (max-width: 576px) { .meta-grid { grid-template-columns: 1fr; row-gap: .15rem; } .meta-grid dd { margin-bottom: .4rem; } }
+</style>
+
+<div class="row g-4">
+    {# ════ Left column: ticket info + attachments + timeline ════ #}
+    <div class="col-lg-7">
+
+        {# ── Ticket info ── #}
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0 font-monospace">Ticket #{{ ticket.ticket_id }}</h5>
+                <div class="d-flex gap-2 align-items-center">
+                    {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
+                    {% include 'incidents/_status_badge.html' with ticket=ticket %}
+                </div>
             </div>
             <div class="card-body">
-                <h6>
-                    IP Source : <strong>{{ ticket.device_name }}</strong> &nbsp; IP Destination : <strong>{{ ticket.ip_address }}</strong>
-                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1 ioc-lookup-btn" data-ip="{{ ticket.ip_address }}" title="WHOIS lookup">
-                        <i class="bi bi-search"></i> WHOIS
-                    </button>
-                    {% if ticket.destination_ip %}
-                    &nbsp; Destination IoC : <strong>{{ ticket.destination_ip }}</strong>
-                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1 ioc-lookup-btn" data-ip="{{ ticket.destination_ip }}" title="WHOIS lookup">
-                        <i class="bi bi-search"></i> WHOIS
-                    </button>
-                    {% endif %}
-                </h6>
-                <div id="ioc-lookup-result" class="alert alert-light border d-none small mt-2 mb-2"></div>
 
-                <div class="category-info mt-2">
+                <div class="mb-3">
                     <span class="badge bg-info text-dark">Category: {{ ticket.get_category_display }}</span>
                     <span class="badge bg-warning text-dark">Type: {{ ticket.get_issue_type_display }}</span>
-                    <span class="badge
-                        {% if ticket.status == 'NEW' %}bg-danger
-                        {% elif ticket.status == 'AWAITING_CONTAINMENT' %}bg-warning text-dark
-                        {% elif ticket.status == 'CONTAINMENT_REPORTED' %}bg-info text-dark
-                        {% elif ticket.status == 'UNDER_REVIEW' %}bg-primary
-                        {% elif ticket.status == 'VERIFIED' %}bg-success
-                        {% elif ticket.status == 'APPROVED' %}bg-success
-                        {% elif ticket.status == 'CLOSED_FP' %}bg-secondary
-                        {% else %}bg-secondary{% endif %}">
-                        {{ ticket.get_status_display }}
-                    </span>
                     {% if ticket.disposition %}
                     <span class="badge {% if ticket.is_false_positive %}bg-secondary{% else %}bg-danger{% endif %}">
                         {{ ticket.get_disposition_display }}
                     </span>
                     {% endif %}
+                    {% if ticket.is_sla_breached %}
+                    <span class="badge bg-danger"><i class="bi bi-alarm-fill me-1"></i>เกิน SLA {{ ticket.sla_deadline|timesince }}</span>
+                    {% elif not is_terminal and ticket.sla_deadline %}
+                    <span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>SLA เหลือ {{ ticket.sla_deadline|timeuntil }}</span>
+                    {% endif %}
                 </div>
+
+                <dl class="meta-grid mb-0">
+                    <dt>วันที่แจ้งเหตุ</dt>
+                    <dd>{{ ticket.created_at|date:"d M Y H:i" }} น. <span class="text-muted small">({{ ticket.created_at|timesince }} ที่แล้ว)</span></dd>
+
+                    {% if ticket.incident_datetime %}
+                    <dt>วันที่ตรวจพบ</dt>
+                    <dd>{{ ticket.incident_datetime|date:"d M Y H:i" }} น.</dd>
+                    {% endif %}
+
+                    {% if ticket.sla_deadline %}
+                    <dt>SLA Deadline</dt>
+                    <dd>{{ ticket.sla_deadline|date:"d M Y H:i" }} น.</dd>
+                    {% endif %}
+
+                    {% if ticket.reference_id %}
+                    <dt>Reference ID</dt>
+                    <dd class="font-monospace">{{ ticket.reference_id }}</dd>
+                    {% endif %}
+
+                    <dt>เหตุการณ์ที่พบ</dt>
+                    <dd>{{ ticket.get_detailed_issue_display }}</dd>
+
+                    <dt>เรื่องที่แจ้ง</dt>
+                    <dd>{{ ticket.get_detailed_issue2_display }}</dd>
+
+                    <dt>ระบบ / บริการ</dt>
+                    <dd>{{ ticket.device_name }}</dd>
+
+                    <dt>IP Address</dt>
+                    <dd>
+                        <span class="font-monospace">{{ ticket.ip_address }}</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1 py-0 ioc-lookup-btn" data-ip="{{ ticket.ip_address }}" title="WHOIS lookup">
+                            <i class="bi bi-search"></i> WHOIS
+                        </button>
+                    </dd>
+
+                    {% if ticket.destination_ip %}
+                    <dt>Destination IoC</dt>
+                    <dd>
+                        <span class="font-monospace">{{ ticket.destination_ip }}</span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1 py-0 ioc-lookup-btn" data-ip="{{ ticket.destination_ip }}" title="WHOIS lookup">
+                            <i class="bi bi-search"></i> WHOIS
+                        </button>
+                    </dd>
+                    {% endif %}
+
+                    {% if ticket.mac_address %}
+                    <dt>MAC Address</dt>
+                    <dd class="font-monospace">{{ ticket.mac_address }}</dd>
+                    {% endif %}
+
+                    {% if ticket.asset_type %}
+                    <dt>ประเภททรัพย์สิน</dt>
+                    <dd>{{ ticket.get_asset_type_display }}</dd>
+                    {% endif %}
+
+                    {% if ticket.spread_to_others is not None %}
+                    <dt>การกระจายตัว</dt>
+                    <dd>
+                        {% if ticket.spread_to_others %}
+                            <span class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>พบการกระจายไปยังจุดอื่น</span>
+                        {% else %}
+                            ไม่พบการกระจายไปยังจุดอื่น
+                        {% endif %}
+                    </dd>
+                    {% endif %}
+
+                    {% if ticket.mitre_phase %}
+                    <dt>MITRE ATT&CK</dt>
+                    <dd class="font-monospace">{{ ticket.mitre_phase }}</dd>
+                    {% endif %}
+                </dl>
+
+                <div id="ioc-lookup-result" class="alert alert-light border d-none small mt-3 mb-0"></div>
+
                 <hr>
 
-                <p class="text-muted mb-0">
-                    <i class="bi bi-calendar-check"></i>
-                    <strong>วันที่แจ้งเหตุ:</strong> {{ ticket.created_at|date:"d M Y" }} เวลา {{ ticket.created_at|date:"H:i" }} น.
-                    <br>
-                    <span class="ms-3">
-                        <i class="bi bi-tag"></i>
-                        <strong>เหตุการณ์ที่พบ:</strong> {{ ticket.get_detailed_issue_display }}
-                    </span>
-                    <br>
-                    <span class="ms-3">
-                        <i class="bi bi-tag"></i>
-                        <strong>เรื่องที่แจ้ง:</strong> {{ ticket.get_detailed_issue2_display }}
-                    </span>
-                    <br>
-                    <span class="badge rounded-pill bg-light text-danger border">
-                        <i class="bi bi-clock-history"></i> เวลาที่ใช้ไป: {{ ticket.created_at|timesince }}
-                    </span>
-                </p>
-                <hr>
-
-                <div class="mt-3">
-                    <h6 class="text-primary"><i class="bi bi-info-circle"></i> รายละเอียดเพิ่มเติม:</h6>
-                    <div class="p-3 bg-light rounded border">
-                        {{ ticket.issue_description|linebreaks }}
-                    </div>
+                <h6 class="text-primary"><i class="bi bi-info-circle"></i> รายละเอียดเหตุการณ์</h6>
+                <div class="p-3 bg-light rounded border">
+                    {{ ticket.issue_description|linebreaks }}
                 </div>
+
+                {% if ticket.ioc_details %}
+                <h6 class="text-primary mt-3"><i class="bi bi-fingerprint"></i> Indicators of Compromise (IoC)</h6>
+                <div class="p-3 bg-light rounded border font-monospace small">
+                    {{ ticket.ioc_details|linebreaks }}
+                </div>
+                {% endif %}
+
+                {% if ticket.action_required %}
+                <h6 class="text-primary mt-3"><i class="bi bi-list-check"></i> สิ่งที่ต้องดำเนินการ</h6>
+                <div class="p-3 bg-light rounded border">
+                    {{ ticket.action_required|linebreaks }}
+                </div>
+                {% endif %}
+
+                {% if ticket.action_precautions %}
+                <h6 class="text-warning mt-3"><i class="bi bi-cone-striped"></i> ข้อควรระวังในการดำเนินการ</h6>
+                <div class="p-3 bg-light rounded border">
+                    {{ ticket.action_precautions|linebreaks }}
+                </div>
+                {% endif %}
 
                 {% if ticket.containment_report %}
-                <div class="mt-3">
-                    <h6 class="text-success"><i class="bi bi-shield-check"></i> รายงานการควบคุม:</h6>
-                    <div class="p-3 bg-light rounded border">
-                        {{ ticket.containment_report|linebreaks }}
-                    </div>
+                <h6 class="text-success mt-3"><i class="bi bi-shield-check"></i> รายงานการควบคุม</h6>
+                <div class="p-3 bg-light rounded border">
+                    {{ ticket.containment_report|linebreaks }}
                 </div>
                 {% endif %}
 
-                <br>
-                <i class="bi bi-person-circle"></i>
-                <strong>ผู้เปิดงาน:</strong>
-                {% if not ticket.created_by %}
-                    <span class="text-muted">Unknown user</span>
-                {% elif ticket.created_by.first_name %}
-                    {{ ticket.created_by.first_name }}
-                {% else %}
-                    {{ ticket.created_by.username }}
-                {% endif %}
-
-                {% if ticket.assigned_admin %}
-                <br>
-                <i class="bi bi-person-badge"></i>
-                <strong>ผู้ดูแลระบบที่รับผิดชอบ:</strong>
-                {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}
-                {% endif %}
-
-                {% if ticket.system_owner_name or ticket.system_owner_email %}
-                <br>
-                <i class="bi bi-building"></i>
-                <strong>เจ้าของระบบ:</strong>
-                {{ ticket.system_owner_name|default:"—" }}
-                {% if ticket.system_owner_email %}
-                <span class="text-muted small">({{ ticket.system_owner_email }})</span>
-                {% endif %}
-                {% endif %}
-
-                {% if ticket.verified_by %}
-                <br>
-                <i class="bi bi-patch-check"></i>
-                <strong>ผู้ตรวจสอบ:</strong>
-                {{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}
-                {% if ticket.verified_at %} เมื่อ {{ ticket.verified_at|date:"d M Y H:i" }}{% endif %}
-                {% endif %}
-
-                {% if ticket.approved_by %}
-                <br>
-                <i class="bi bi-award"></i>
-                <strong>ผู้อนุมัติ:</strong>
-                {{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}
-                {% if ticket.approved_at %} เมื่อ {{ ticket.approved_at|date:"d M Y H:i" }}{% endif %}
-                {% endif %}
-
                 <hr>
 
-                {# ── Attachments ── #}
-                <hr>
-                <h6 class="text-secondary"><i class="bi bi-paperclip"></i> ไฟล์แนบ</h6>
+                <dl class="meta-grid mb-0">
+                    <dt>ผู้เปิดงาน</dt>
+                    <dd>
+                        {% if not ticket.created_by %}
+                            <span class="text-muted">Unknown user</span>
+                        {% else %}
+                            {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}
+                        {% endif %}
+                    </dd>
+
+                    {% if ticket.assigned_admin %}
+                    <dt>ผู้ดูแลระบบ</dt>
+                    <dd>{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}</dd>
+                    {% endif %}
+
+                    {% if ticket.system_owner %}
+                    <dt>เจ้าของระบบ</dt>
+                    <dd>
+                        {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}
+                        {% if ticket.system_owner.email %}<span class="text-muted small">({{ ticket.system_owner.email }})</span>{% endif %}
+                    </dd>
+                    {% endif %}
+
+                    {% if ticket.verified_by %}
+                    <dt>ผู้ตรวจสอบ</dt>
+                    <dd>
+                        {{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}
+                        {% if ticket.verified_at %}<span class="text-muted small">เมื่อ {{ ticket.verified_at|date:"d M Y H:i" }}</span>{% endif %}
+                    </dd>
+                    {% endif %}
+
+                    {% if ticket.approved_by %}
+                    <dt>ผู้อนุมัติ</dt>
+                    <dd>
+                        {{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}
+                        {% if ticket.approved_at %}<span class="text-muted small">เมื่อ {{ ticket.approved_at|date:"d M Y H:i" }}</span>{% endif %}
+                    </dd>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+
+        {# ── Attachments ── #}
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white fw-bold small text-uppercase text-muted">
+                <i class="bi bi-paperclip me-1"></i>ไฟล์แนบ {% if attachments %}({{ attachments|length }}){% endif %}
+            </div>
+            <div class="card-body">
                 {% if attachments %}
                 <ul class="list-group list-group-flush mb-2">
                     {% for att in attachments %}
                     <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-center">
-                        <a href="{{ att.file.url }}" target="_blank" class="small text-decoration-none">
+                        <a href="{{ att.file.url }}" target="_blank" rel="noopener" class="small text-decoration-none">
                             <i class="bi bi-file-earmark me-1"></i>{{ att.original_name }}
                             {% if att.description %}<span class="text-muted">({{ att.description }})</span>{% endif %}
                         </a>
@@ -151,134 +221,66 @@
                     {% endfor %}
                 </ul>
                 {% else %}
-                <p class="text-muted small">ยังไม่มีไฟล์แนบ</p>
+                <p class="text-muted small mb-2">ยังไม่มีไฟล์แนบ</p>
                 {% endif %}
 
-                {# Upload form — visible to SOC, System Admin, and System Owner #}
                 {% if not is_terminal %}
                 <form method="post" action="{% url 'upload_attachment' ticket.pk %}"
-                      enctype="multipart/form-data" class="d-flex gap-2 align-items-start mt-1">
+                      enctype="multipart/form-data" class="d-flex gap-2 align-items-start mt-1 flex-wrap">
                     {% csrf_token %}
-                    <div class="flex-grow-1">{{ attachment_form.file }}</div>
+                    <div class="flex-grow-1" style="min-width:200px;">{{ attachment_form.file }}</div>
                     <div style="min-width:160px;">{{ attachment_form.description }}</div>
                     <button type="submit" class="btn btn-outline-secondary btn-sm">
                         <i class="bi bi-upload me-1"></i>อัพโหลด
                     </button>
                 </form>
                 {% endif %}
+            </div>
+        </div>
 
-                <div class="timeline-wrapper" style="max-height: 500px; overflow-y: auto;">
-                    {% for log in logs %}
-                    <div class="border-start border-primary border-4 ps-3 mb-4 position-relative">
-                        <div class="d-flex justify-content-between">
-                            <span class="badge bg-secondary">{{ log.status_at_time }}</span>
-                            <div>
-                                <small class="text-muted">{{ log.created_at|date:"d M Y H:i" }}</small>
-                                <a href="{% url 'edit_log' log.id %}" class="ms-2 text-warning" title="แก้ไขบันทึก">
-                                    <i class="bi bi-pencil-square"></i>
-                                </a>
-                            </div>
-                        </div>
-                        <p class="mt-2 mb-1">{{ log.note }}</p>
-                        <div class="mt-2">
-                            <small class="text-muted fw-bold">ผู้ดำเนินการ:</small>
-                            <span class="badge rounded-pill bg-light text-dark border">
-                                <i class="bi bi-person-circle text-primary"></i>
-                                {% if log.author %}
-                                    {{ log.author.get_full_name|default:log.author.username }}
-                                {% elif ticket.assigned_to %}
-                                    {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </span>
+        {# ── Timeline ── #}
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-white fw-bold small text-uppercase text-muted">
+                <i class="bi bi-clock-history me-1"></i>ประวัติการติดตามงาน {% if logs %}({{ logs|length }}){% endif %}
+            </div>
+            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                {% for log in logs %}
+                <div class="border-start border-primary border-4 ps-3 mb-4 position-relative">
+                    <div class="d-flex justify-content-between">
+                        <span class="badge bg-secondary">{{ log.status_display }}</span>
+                        <div>
+                            <small class="text-muted">{{ log.created_at|date:"d M Y H:i" }}</small>
+                            {% if request.user.is_superuser or log.author_id == request.user.pk or profile and profile.is_soc_manager %}
+                            <a href="{% url 'edit_log' log.id %}" class="ms-2 text-warning" title="แก้ไขบันทึก">
+                                <i class="bi bi-pencil-square"></i>
+                            </a>
+                            {% endif %}
                         </div>
                     </div>
-                    {% empty %}
-                    <p class="text-muted text-center">ยังไม่มีประวัติการติดตามงาน</p>
-                    {% endfor %}
+                    <p class="mt-2 mb-1">{{ log.note }}</p>
+                    <div class="mt-2">
+                        <small class="text-muted fw-bold">ผู้ดำเนินการ:</small>
+                        <span class="badge rounded-pill bg-light text-dark border">
+                            <i class="bi bi-person-circle text-primary"></i>
+                            {% if log.author %}
+                                {{ log.author.get_full_name|default:log.author.username }}
+                            {% elif ticket.assigned_to %}
+                                {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </span>
+                    </div>
                 </div>
+                {% empty %}
+                <p class="text-muted text-center mb-0">ยังไม่มีประวัติการติดตามงาน</p>
+                {% endfor %}
             </div>
         </div>
     </div>
 
-    {# ── Sub-tasks: Investigations / Countermeasures (full width) ── #}
-    <div class="col-12">
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-list-task"></i> งานย่อย (Investigation / Countermeasure)</h5>
-            </div>
-            <div class="card-body">
-                {% if subtasks %}
-                <ul class="list-group mb-3">
-                    {% for subtask in subtasks %}
-                    <li class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <span class="badge {% if subtask.subtask_type == 'INVESTIGATION' %}bg-info text-dark{% else %}bg-danger{% endif %}">
-                                    {{ subtask.get_subtask_type_display }}
-                                </span>
-                                <span class="badge {% if subtask.status == 'OPEN' %}bg-secondary{% elif subtask.status == 'IN_PROGRESS' %}bg-primary{% else %}bg-success{% endif %}">
-                                    {{ subtask.get_status_display }}
-                                </span>
-                                <strong class="ms-1">{{ subtask.title }}</strong>
-                                {% if subtask.description %}
-                                <div class="text-muted small mt-1">{{ subtask.description|linebreaks }}</div>
-                                {% endif %}
-                                {% if subtask.result_notes %}
-                                <div class="small mt-1"><strong>ผล:</strong> {{ subtask.result_notes|linebreaks }}</div>
-                                {% endif %}
-                                <div class="small text-muted mt-1">
-                                    ผู้รับผิดชอบ: {{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username|default:"-" }}
-                                </div>
-                            </div>
-                        </div>
-                        {% if not subtask.is_done and not is_terminal and request.user.is_superuser or profile and profile.is_soc or subtask.assigned_to == request.user %}
-                        <form method="post" action="{% url 'update_subtask' subtask.pk %}" class="row g-2 mt-2 align-items-end">
-                            {% csrf_token %}
-                            <div class="col-auto">
-                                <select name="status" class="form-select form-select-sm">
-                                    {% for code, label in subtask_update_form.fields.status.choices %}
-                                    <option value="{{ code }}" {% if subtask.status == code %}selected{% endif %}>{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col">
-                                <input type="text" name="result_notes" class="form-control form-control-sm"
-                                    placeholder="บันทึกผลการดำเนินการ..." value="{{ subtask.result_notes }}">
-                            </div>
-                            <div class="col-auto">
-                                <button type="submit" class="btn btn-sm btn-outline-primary">บันทึก</button>
-                            </div>
-                        </form>
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-muted small">ยังไม่มีงานย่อย</p>
-                {% endif %}
-
-                {% if can_create_subtask and not is_terminal %}
-                <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="border-top pt-3">
-                    {% csrf_token %}
-                    <div class="row g-2">
-                        <div class="col-md-3">{{ subtask_form.subtask_type }}</div>
-                        <div class="col-md-4">{{ subtask_form.title }}</div>
-                        <div class="col-md-3">{{ subtask_form.assigned_to }}</div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-secondary w-100">+ เพิ่มงานย่อย</button>
-                        </div>
-                        <div class="col-12">{{ subtask_form.description }}</div>
-                    </div>
-                </form>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-    {# ── Right column: role-based action panel ── #}
-    <div class="col-md-5">
+    {# ════ Right column: role-based action panel ════ #}
+    <div class="col-lg-5">
 
         {# ── Terminal state: ticket is closed ── #}
         {% if is_terminal %}
@@ -301,11 +303,6 @@
                     <h5 class="mb-0"><i class="bi bi-shield-fill-exclamation"></i> ส่งรายงานการควบคุม</h5>
                 </div>
                 <div class="card-body">
-                    {% if messages %}
-                    {% for message in messages %}
-                    <div class="alert alert-danger py-2">{{ message }}</div>
-                    {% endfor %}
-                    {% endif %}
                     <form method="post">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="containment">
@@ -354,11 +351,6 @@
                     <h5 class="mb-0">บันทึกความคืบหน้าใหม่</h5>
                 </div>
                 <div class="card-body">
-                    {% if messages %}
-                    {% for message in messages %}
-                    <div class="alert alert-danger py-2">{{ message }}</div>
-                    {% endfor %}
-                    {% endif %}
                     <form method="post">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="soc_update">
@@ -400,7 +392,90 @@
             </div>
         {% endif %}
 
-        <a href="{% url 'home' %}" class="btn btn-outline-secondary w-100 mt-3">กลับหน้าหลัก</a>
+        <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary w-100 mt-3">
+            <i class="bi bi-arrow-left me-1"></i>กลับรายการแจ้งเหตุ
+        </a>
+    </div>
+
+    {# ════ Sub-tasks: Investigations / Countermeasures (full width) ════ #}
+    <div class="col-12">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-task"></i> งานย่อย (Investigation / Countermeasure)</h5>
+                {% if subtasks %}<span class="badge bg-light text-dark">{{ subtasks|length }}</span>{% endif %}
+            </div>
+            <div class="card-body">
+                {% if subtasks %}
+                <ul class="list-group mb-3">
+                    {% for subtask in subtasks %}
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="badge {% if subtask.subtask_type == 'INVESTIGATION' %}bg-info text-dark{% else %}bg-danger{% endif %}">
+                                    {{ subtask.get_subtask_type_display }}
+                                </span>
+                                <span class="badge {% if subtask.status == 'OPEN' %}bg-secondary{% elif subtask.status == 'IN_PROGRESS' %}bg-primary{% else %}bg-success{% endif %}">
+                                    {{ subtask.get_status_display }}
+                                </span>
+                                <strong class="ms-1">{{ subtask.title }}</strong>
+                                {% if subtask.description %}
+                                <div class="text-muted small mt-1">{{ subtask.description|linebreaks }}</div>
+                                {% endif %}
+                                {% if subtask.result_notes %}
+                                <div class="small mt-1"><strong>ผล:</strong> {{ subtask.result_notes|linebreaks }}</div>
+                                {% endif %}
+                                <div class="small text-muted mt-1">
+                                    ผู้รับผิดชอบ:
+                                    {% if subtask.assigned_to %}
+                                        {{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}
+                                    {% else %}-{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% if not subtask.is_done and not is_terminal %}
+                        {% if request.user.is_superuser or profile and profile.is_soc or subtask.assigned_to_id == request.user.pk %}
+                        <form method="post" action="{% url 'update_subtask' subtask.pk %}" class="row g-2 mt-2 align-items-end">
+                            {% csrf_token %}
+                            <div class="col-auto">
+                                <select name="status" class="form-select form-select-sm">
+                                    {% for code, label in subtask_update_form.fields.status.choices %}
+                                    <option value="{{ code }}" {% if subtask.status == code %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col">
+                                <input type="text" name="result_notes" class="form-control form-control-sm"
+                                    placeholder="บันทึกผลการดำเนินการ..." value="{{ subtask.result_notes }}">
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">บันทึก</button>
+                            </div>
+                        </form>
+                        {% endif %}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted small">ยังไม่มีงานย่อย</p>
+                {% endif %}
+
+                {% if can_create_subtask and not is_terminal %}
+                <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="border-top pt-3">
+                    {% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-md-3">{{ subtask_form.subtask_type }}</div>
+                        <div class="col-md-4">{{ subtask_form.title }}</div>
+                        <div class="col-md-3">{{ subtask_form.assigned_to }}</div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-secondary w-100">+ เพิ่มงานย่อย</button>
+                        </div>
+                        <div class="col-12">{{ subtask_form.description }}</div>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
     </div>
 </div>
 

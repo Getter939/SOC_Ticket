@@ -383,6 +383,14 @@ class Ticket(models.Model):
             return self.sla_deadline - timezone.now()
         return None
 
+    @property
+    def is_sla_urgent(self):
+        """Not yet breached, but less than 8 hours left on the SLA clock."""
+        if self.status in self.TERMINAL_STATUSES or not self.sla_deadline:
+            return False
+        remaining = self.sla_deadline - timezone.now()
+        return timedelta() < remaining <= timedelta(hours=8)
+
     class Meta:
         ordering = ['-created_at']
 
@@ -523,6 +531,11 @@ class TicketLog(models.Model):
 
     def __str__(self):
         return f'Log for {self.ticket.ticket_id} - {self.ticket.device_name}'
+
+    @property
+    def status_display(self):
+        """Human label for the status code recorded at log time."""
+        return dict(Ticket.STATUS_CHOICES).get(self.status_at_time, self.status_at_time)
 
 
 # ======================================================================= #

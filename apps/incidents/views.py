@@ -10,6 +10,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -106,13 +107,63 @@ def _can_create_ticket_from_wazuh(alert, user):
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
-    tickets = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES)).order_by('created_at')
+    tickets_qs = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES))
+
+    search = request.GET.get('q', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    severity_filter = request.GET.get('severity', '').strip()
+    sort = request.GET.get('sort', 'sla').strip()
+
+    if search:
+        tickets_qs = tickets_qs.filter(
+            Q(ticket_id__icontains=search)
+            | Q(device_name__icontains=search)
+            | Q(ip_address__icontains=search)
+            | Q(issue_description__icontains=search)
+            | Q(destination_ip__icontains=search)
+        )
+
+    active_status_choices = [
+        (code, label) for code, label in Ticket.STATUS_CHOICES
+        if code not in Ticket.TERMINAL_STATUSES
+    ]
+    if status_filter in dict(active_status_choices):
+        tickets_qs = tickets_qs.filter(status=status_filter)
+    else:
+        status_filter = ''
+
+    if severity_filter in dict(Ticket.SEVERITY_CHOICES):
+        tickets_qs = tickets_qs.filter(severity=severity_filter)
+    else:
+        severity_filter = ''
+
+    sort_map = {
+        'sla':    'sla_deadline',   # most urgent deadline first
+        'newest': '-created_at',
+        'oldest': 'created_at',
+    }
+    if sort not in sort_map:
+        sort = 'sla'
+    tickets_qs = tickets_qs.order_by(sort_map[sort])
+
+    paginator = Paginator(tickets_qs, 25)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     sla_breach_count = visible.filter(
         sla_deadline__lt=timezone.now()
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
+
     return render(request, 'incidents/ticket_list.html', {
-        'tickets': tickets,
+        'tickets': page_obj,
+        'page_obj': page_obj,
+        'result_count': paginator.count,
         'sla_breach_count': sla_breach_count,
+        'search': search,
+        'status_filter': status_filter,
+        'severity_filter': severity_filter,
+        'sort': sort,
+        'active_status_choices': active_status_choices,
+        'severity_choices': Ticket.SEVERITY_CHOICES,
     })
 
 
@@ -323,10 +374,27 @@ def edit_log(request, log_id):
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=log.ticket_id)
     ticket_id = log.ticket.id
 
-    if request.method == 'POST':
-        log.note = request.POST.get('note')
-        log.save()
+    # Only the original author, a SOC manager, or a superuser may rewrite
+    # a timeline entry — it is part of the audit trail.
+    profile = getattr(request.user, 'profile', None)
+    can_edit = (
+        request.user.is_superuser
+        or log.author_id == request.user.pk
+        or (profile is not None and profile.is_soc_manager)
+    )
+    if not can_edit:
+        messages.error(request, 'แก้ไขได้เฉพาะผู้บันทึกเดิมหรือผู้จัดการ SOC เท่านั้น')
         return redirect('ticket_detail', pk=ticket_id)
+
+    if request.method == 'POST':
+        note = (request.POST.get('note') or '').strip()
+        if not note:
+            messages.error(request, 'บันทึกต้องไม่เว้นว่าง')
+        else:
+            log.note = note
+            log.save(update_fields=['note', 'updated_at'])
+            messages.success(request, 'แก้ไขบันทึกเรียบร้อยแล้ว')
+            return redirect('ticket_detail', pk=ticket_id)
 
     return render(request, 'incidents/edit_log.html', {'log': log})
 

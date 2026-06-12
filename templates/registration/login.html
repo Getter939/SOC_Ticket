@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 
+{% block title %}เข้าสู่ระบบ — SOC Support System{% endblock %}
+
 {% block content %}
 <div class="container">
     <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
@@ -21,14 +23,14 @@
                             <label class="form-label fw-bold">Username</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-end-0"><i class="bi bi-person"></i></span>
-                                <input type="text" name="username" class="form-control bg-light border-start-0" placeholder="ชื่อผู้ใช้งาน" required>
+                                <input type="text" name="username" class="form-control bg-light border-start-0" placeholder="ชื่อผู้ใช้งาน" autocomplete="username" autofocus required>
                             </div>
                         </div>
                         <div class="mb-4">
                             <label class="form-label fw-bold">Password</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-end-0"><i class="bi bi-key"></i></span>
-                                <input type="password" name="password" class="form-control bg-light border-start-0" placeholder="รหัสผ่าน" required>
+                                <input type="password" name="password" class="form-control bg-light border-start-0" placeholder="รหัสผ่าน" autocomplete="current-password" required>
                             </div>
                         </div>
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm">
