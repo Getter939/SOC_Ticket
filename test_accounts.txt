@@ -1,0 +1,36 @@
+SOC Ticketing System - Test Accounts
+====================================
+
+Shared password: Test1234!
+
+1. SOC Analyst T1
+   Username: analyst_t1
+   Password: Test1234!
+   Role: SOC Staff
+   Tier: T1
+
+2. SOC Analyst T2
+   Username: analyst_t2
+   Password: Test1234!
+   Role: SOC Staff
+   Tier: T2
+
+3. SOC Manager
+   Username: soc_manager
+   Password: Test1234!
+   Role: SOC Manager
+   Tier: N/A
+
+4. System Admin
+   Username: system_admin
+   Password: Test1234!
+   Role: System Admin
+   Tier: N/A
+
+5. System Owner
+   Username: system_owner
+   Password: Test1234!
+   Role: System Owner
+   Tier: N/A
+
+Testing use only. Do not use these credentials in production.
