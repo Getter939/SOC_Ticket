@@ -254,11 +254,6 @@
       <div class="section-header"><i class="bi bi-people-fill me-1"></i>การมอบหมายงาน</div>
       <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label fw-semibold">ผู้รับผิดชอบ (SOC)</label>
-          {{ form.assigned_to }}
-          {% if form.assigned_to.errors %}<div class="text-danger small">{{ form.assigned_to.errors }}</div>{% endif %}
-        </div>
-        <div class="col-md-4">
           <label class="form-label fw-semibold">ผู้ดูแลระบบที่รับผิดชอบ (System Admin)</label>
           {{ form.assigned_admin }}
           {% if form.assigned_admin.errors %}<div class="text-danger small">{{ form.assigned_admin.errors }}</div>{% endif %}

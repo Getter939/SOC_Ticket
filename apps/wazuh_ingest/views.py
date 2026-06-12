@@ -2,12 +2,14 @@ from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from .models import WazuhAlert
 
@@ -268,16 +270,52 @@ def triage_history(request):
         return redirect('ticket_list')
 
     status_filter = request.GET.get('status', '').strip()
+    rule_level_filter = request.GET.get('rule_level_filter', '').strip()
+    triaged_by_filter = request.GET.get('triaged_by', '').strip()
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
+
     alerts_qs = WazuhAlert.objects.filter(
         triage_status__in=[WazuhAlert.TRIAGE_TRUE_POSITIVE, WazuhAlert.TRIAGE_FALSE_POSITIVE],
+        triaged_by__isnull=False,
     )
     if status_filter in (WazuhAlert.TRIAGE_TRUE_POSITIVE, WazuhAlert.TRIAGE_FALSE_POSITIVE):
         alerts_qs = alerts_qs.filter(triage_status=status_filter)
+
+    if rule_level_filter:
+        try:
+            alerts_qs = alerts_qs.filter(rule_level__gte=int(rule_level_filter))
+        except ValueError:
+            rule_level_filter = ''
+
+    if triaged_by_filter:
+        try:
+            alerts_qs = alerts_qs.filter(triaged_by_id=int(triaged_by_filter))
+        except ValueError:
+            triaged_by_filter = ''
+
+    parsed_date_from = parse_date(date_from)
+    if parsed_date_from:
+        alerts_qs = alerts_qs.filter(triaged_at__date__gte=parsed_date_from)
+    else:
+        date_from = ''
+
+    parsed_date_to = parse_date(date_to)
+    if parsed_date_to:
+        alerts_qs = alerts_qs.filter(triaged_at__date__lte=parsed_date_to)
+    else:
+        date_to = ''
 
     alerts_qs = alerts_qs.select_related('triaged_by').order_by('-triaged_at', '-timestamp')
 
     paginator = Paginator(alerts_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
+
+    triager_choices = (
+        User.objects.filter(triaged_alerts__isnull=False)
+        .distinct()
+        .order_by('first_name', 'username')
+    )
 
     # For closed False Positives, flag whether a new alert with the same
     # agent/rule has since come in — a hint that it may be worth reopening.
@@ -294,6 +332,11 @@ def triage_history(request):
         'page_obj': page_obj,
         'alerts': page_obj,
         'status_filter': status_filter,
+        'rule_level_filter': rule_level_filter,
+        'triaged_by_filter': triaged_by_filter,
+        'date_from': date_from,
+        'date_to': date_to,
+        'triager_choices': triager_choices,
         'fp_count': WazuhAlert.objects.filter(triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE).count(),
         'tp_count': WazuhAlert.objects.filter(triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE).count(),
     })

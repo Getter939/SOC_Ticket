@@ -15,13 +15,6 @@ class TicketForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-select', 'id': 'id_wazuh_alert'}),
     )
 
-    assigned_to = forms.ModelChoiceField(
-        queryset=User.objects.filter(is_active=True).order_by('first_name', 'username'),
-        required=False,
-        label='ผู้รับผิดชอบ (SOC)',
-        empty_label='-- ยังไม่ระบุ --',
-        widget=forms.Select(attrs={'class': 'form-control'}),
-    )
     assigned_admin = forms.ModelChoiceField(
         queryset=User.objects.filter(
             profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
@@ -74,7 +67,6 @@ class TicketForm(forms.ModelForm):
             'action_required',
             'action_precautions',
             # Assignment
-            'assigned_to',
             'assigned_admin',
             'system_owner',
         ]

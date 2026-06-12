@@ -148,6 +148,7 @@ def create_ticket(request):
 
                     ticket = form.save(commit=False)
                     ticket.created_by = request.user
+                    ticket.assigned_to = request.user
 
                     locked_alert = None
                     if ticket.wazuh_alert_id:
