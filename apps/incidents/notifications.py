@@ -139,6 +139,66 @@ def notify_containment_required(ticket, reason=None):
     return _send(subject, body, admin.email, ticket.ticket_id)
 
 
+def notify_containment_submitted(ticket):
+    """
+    Email the SOC analyst (assigned_to) that the assigned admin has
+    submitted a containment report and the ticket is ready for review.
+    """
+    analyst = ticket.assigned_to
+    if not analyst or not analyst.email:
+        logger.warning(
+            'notify_containment_submitted: ticket %s — no assigned analyst or no email.',
+            ticket.ticket_id,
+        )
+        return False
+
+    ticket_url = _ticket_url(ticket)
+    summary = ticket.issue_description[:100]
+    if len(ticket.issue_description) > 100:
+        summary += '…'
+
+    admin = ticket.assigned_admin
+    admin_name = (admin.get_full_name() or admin.username) if admin else '-'
+    disposition = ticket.get_disposition_display() if ticket.disposition else '-'
+
+    default_subject = '[{ticket_id}] Containment report submitted — review required'
+    default_body = (
+        'The assigned admin has submitted a containment report for ticket {ticket_id}.\n'
+        '\n'
+        '  Ticket ID    : {ticket_id}\n'
+        '  Category     : {category} / {issue_type}\n'
+        '  Summary      : {summary}\n'
+        '  Submitted by : {admin_name}\n'
+        '  Disposition  : {disposition}\n'
+        '\n'
+        'Containment report:\n'
+        '{containment_report}\n'
+        '\n'
+        'Please review the result and verify whether the incident has been contained.\n'
+        '\n'
+        'View the ticket here (login required):\n'
+        '  {ticket_url}\n'
+        '\n'
+        'Do not reply to this email.'
+    )
+
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': ticket_url,
+        'category': ticket.get_category_display(),
+        'issue_type': ticket.get_issue_type_display(),
+        'summary': summary,
+        'admin_name': admin_name,
+        'disposition': disposition,
+        'containment_report': ticket.containment_report,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_CONTAINMENT_SUBMITTED, context, default_subject, default_body,
+    )
+    return _send(subject, body, analyst.email, ticket.ticket_id)
+
+
 # ──────────────────────────────────────────────────────────────────────── #
 # System Owner notifications                                               #
 # ──────────────────────────────────────────────────────────────────────── #

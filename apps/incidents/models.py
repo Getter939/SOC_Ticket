@@ -722,11 +722,13 @@ class NotificationTemplate(models.Model):
     """
 
     KEY_CONTAINMENT_REQUIRED = 'CONTAINMENT_REQUIRED'
+    KEY_CONTAINMENT_SUBMITTED = 'CONTAINMENT_SUBMITTED'
     KEY_OWNER_CREATED = 'OWNER_CREATED'
     KEY_OWNER_CLOSED = 'OWNER_CLOSED'
 
     KEY_CHOICES = [
         (KEY_CONTAINMENT_REQUIRED, 'แจ้งผู้ดูแลระบบ — ต้องดำเนินการควบคุม (Containment required)'),
+        (KEY_CONTAINMENT_SUBMITTED, 'แจ้งเจ้าหน้าที่ SOC — ผู้ดูแลระบบส่งรายงานการควบคุมแล้ว'),
         (KEY_OWNER_CREATED, 'แจ้งเจ้าของระบบ — เปิด Ticket ใหม่'),
         (KEY_OWNER_CLOSED, 'แจ้งเจ้าของระบบ — ปิด Ticket แล้ว'),
     ]
@@ -735,6 +737,10 @@ class NotificationTemplate(models.Model):
     PLACEHOLDERS = {
         KEY_CONTAINMENT_REQUIRED: [
             'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary', 'reason_block',
+        ],
+        KEY_CONTAINMENT_SUBMITTED: [
+            'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary',
+            'admin_name', 'disposition', 'containment_report',
         ],
         KEY_OWNER_CREATED: [
             'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',

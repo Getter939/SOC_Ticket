@@ -23,6 +23,7 @@ from .forms import AttachmentForm, SubtaskForm, SubtaskUpdateForm, TicketForm, T
 from .models import Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord
 from .notifications import (
     notify_containment_required,
+    notify_containment_submitted,
     notify_system_owner_created,
     notify_system_owner_closed,
 )
@@ -215,6 +216,16 @@ def create_ticket(request):
 
                     ticket.save()
 
+                    # Triage was already done at creation — if an admin was
+                    # assigned, route straight to AWAITING_CONTAINMENT
+                    # instead of leaving the ticket parked at NEW.
+                    if ticket.assigned_admin_id:
+                        ticket.transition_to(
+                            Ticket.STATUS_AWAITING_CONTAINMENT,
+                            request.user,
+                            'เปิด Ticket และส่งต่อให้ผู้ดูแลระบบโดยอัตโนมัติ',
+                        )
+
                     if locked_triage:
                         locked_triage.ticket = ticket
                         locked_triage.save(update_fields=['ticket'])
@@ -246,6 +257,11 @@ def create_ticket(request):
             if ticket and ticket.system_owner and ticket.system_owner.email:
                 if not notify_system_owner_created(ticket):
                     messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
+
+            # Notify the assigned admin immediately if the ticket was
+            # auto-routed to AWAITING_CONTAINMENT above
+            if ticket and ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
+                _notify_containment(ticket, None, request)
 
             if ticket:
                 return redirect('ticket_detail', pk=ticket.pk)
@@ -313,6 +329,11 @@ def ticket_detail(request, pk):
                             request.user,
                             note or 'ส่งรายงานการควบคุมแล้ว',
                         )
+                        if not notify_containment_submitted(ticket):
+                            messages.warning(
+                                request,
+                                'ส่งรายงานการควบคุมแล้ว แต่ส่งอีเมลแจ้งเจ้าหน้าที่ SOC ไม่สำเร็จ',
+                            )
                     except ValidationError as e:
                         messages.error(request, e.message)
 
