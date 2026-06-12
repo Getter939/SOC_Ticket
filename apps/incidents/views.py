@@ -5,8 +5,10 @@ import logging
 import requests
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -335,11 +337,15 @@ def ticket_history(request):
         status__in=list(Ticket.TERMINAL_STATUSES)
     )
 
-    search_ticket = request.GET.get('search_ticket')
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
+    search_ticket = request.GET.get('search_ticket', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    severity_filter = request.GET.get('severity', '').strip()
+    approved_by_filter = request.GET.get('approved_by', '').strip()
+    start_date = request.GET.get('start_date', '').strip()
+    end_date = request.GET.get('end_date', '').strip()
+    all_time = request.GET.get('all_time', '').strip()
 
-    if not start_date and not end_date:
+    if not start_date and not end_date and not all_time:
         today = timezone.now()
         start_date_obj = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         last_day = calendar.monthrange(today.year, today.month)[1]
@@ -347,20 +353,49 @@ def ticket_history(request):
         query_set = query_set.filter(created_at__range=[start_date_obj, end_date_obj])
         start_date = start_date_obj.strftime('%Y-%m-%d')
         end_date = end_date_obj.strftime('%Y-%m-%d')
-    else:
-        if start_date and end_date:
-            query_set = query_set.filter(created_at__date__range=[start_date, end_date])
+    elif start_date and end_date:
+        query_set = query_set.filter(created_at__date__range=[start_date, end_date])
 
     if search_ticket:
         query_set = query_set.filter(ticket_id__icontains=search_ticket)
 
-    tickets = query_set.prefetch_related('logs').order_by('-updated_at')
+    if status_filter in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_FP):
+        query_set = query_set.filter(status=status_filter)
+
+    if severity_filter:
+        query_set = query_set.filter(severity=severity_filter)
+
+    if approved_by_filter:
+        try:
+            query_set = query_set.filter(approved_by_id=int(approved_by_filter))
+        except ValueError:
+            approved_by_filter = ''
+
+    tickets_qs = query_set.prefetch_related('logs').order_by('-updated_at')
+
+    paginator = Paginator(tickets_qs, 25)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    approver_choices = (
+        User.objects.filter(approved_tickets__isnull=False)
+        .distinct()
+        .order_by('first_name', 'username')
+    )
 
     return render(request, 'incidents/ticket_history.html', {
-        'tickets': tickets,
+        'page_obj': page_obj,
+        'tickets': page_obj,
         'search_ticket': search_ticket,
+        'status_filter': status_filter,
+        'severity_filter': severity_filter,
+        'approved_by_filter': approved_by_filter,
+        'approver_choices': approver_choices,
         'start_date': start_date,
         'end_date': end_date,
+        'all_time': all_time,
+        'severity_choices': Ticket.SEVERITY_CHOICES,
+        'approved_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_APPROVED).count(),
+        'fp_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_FP).count(),
     })
 
 
