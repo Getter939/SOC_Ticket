@@ -108,7 +108,13 @@
                                 <span class="badge bg-success">อนุมัติแล้ว</span>
                             {% endif %}
                         </td>
-                        <td>{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username|default:"-" }}</td>
+                        <td>
+                            {% if ticket.approved_by %}
+                                {{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
                         <td>
                             <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-info">รายละเอียด</a>
                         </td>
