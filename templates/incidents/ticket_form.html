@@ -222,7 +222,7 @@
         <div class="col-12">
           <label class="form-label fw-semibold">Phase การโจมตีตาม MITRE ATT&CK</label>
           {{ form.mitre_phase }}
-          <div class="field-hint">เช่น T1059.001 — Command and Scripting Interpreter: PowerShell</div>
+          <div class="field-hint">เลือก Tactic ตามขั้นตอนการโจมตีของ MITRE ATT&CK</div>
           {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
         </div>
         <div class="col-12">

@@ -263,8 +263,25 @@ class Ticket(models.Model):
     )
 
     # ── Section 6: MITRE ATT&CK ─────────────────────────────────────── #
+    MITRE_PHASE_CHOICES = [
+        ('Reconnaissance',       'Reconnaissance'),
+        ('Resource Development', 'Resource Development'),
+        ('Initial Access',       'Initial Access'),
+        ('Execution',            'Execution'),
+        ('Persistence',          'Persistence'),
+        ('Privilege Escalation', 'Privilege Escalation'),
+        ('Defense Evasion',      'Defense Evasion'),
+        ('Credential Access',    'Credential Access'),
+        ('Discovery',            'Discovery'),
+        ('Lateral Movement',     'Lateral Movement'),
+        ('Collection',           'Collection'),
+        ('Command and Control',  'Command and Control'),
+        ('Exfiltration',         'Exfiltration'),
+        ('Impact',               'Impact'),
+    ]
     mitre_phase = models.CharField(
         max_length=200, blank=True, default='',
+        choices=MITRE_PHASE_CHOICES,
         verbose_name='Phase การโจมตีตาม MITRE ATT&CK',
     )
 

@@ -95,7 +95,7 @@ class TicketForm(forms.ModelForm):
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
             }),
-            'mitre_phase':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น T1059.001 — Command and Scripting Interpreter: PowerShell'}),
+            'mitre_phase':        forms.Select(attrs={'class': 'form-select'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ขั้นตอน/มาตรการที่ผู้เกี่ยวข้องต้องดำเนินการเพื่อจัดการเหตุการณ์นี้',
