@@ -258,9 +258,9 @@
         <span class="badge bg-warning text-dark ms-auto">{{ escalation_queue_count }}</span>
         {% endif %}
     </a>
-    <a href="{% url 'triage_history' %}" data-label="ประวัติ Triage"
+    <a href="{% url 'triage_history' %}" data-label="ประวัติการ Triage Alert"
        class="nav-link {% if request.resolver_match.url_name == 'triage_history' %}active{% endif %}">
-        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ Triage</span>
+        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติการ Triage Alert</span>
     </a>
     {% endif %}
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
@@ -273,9 +273,9 @@
         <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
     </a>
     {% endif %}
-    <a href="{% url 'ticket_history' %}" data-label="ประวัติ"
+    <a href="{% url 'ticket_history' %}" data-label="ประวัติ Ticket"
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
-        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
+        <i class="bi bi-archive-fill"></i> <span class="nav-label">ประวัติ Ticket</span>
     </a>
     <a href="{% url 'global_search' %}" data-label="ค้นหา IOC"
        class="nav-link {% if request.resolver_match.url_name == 'global_search' %}active{% endif %}">
