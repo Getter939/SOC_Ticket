@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 
 from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
-from .models import Ticket, TicketAttachment, TriageRecord
+from .models import Ticket, TicketAttachment, TicketSubtask, TriageRecord
 
 
 class TicketForm(forms.ModelForm):
@@ -202,6 +202,44 @@ class TriageForm(forms.ModelForm):
         elif decision != TriageRecord.DECISION_ESCALATED:
             cleaned['escalated_to'] = None
         return cleaned
+
+
+class SubtaskForm(forms.ModelForm):
+    assigned_to = forms.ModelChoiceField(
+        queryset=User.objects.filter(is_active=True).order_by('first_name', 'username'),
+        required=False,
+        label='ผู้รับผิดชอบ',
+        empty_label='-- ยังไม่ระบุ --',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    class Meta:
+        model = TicketSubtask
+        fields = ['subtask_type', 'title', 'description', 'assigned_to']
+        widgets = {
+            'subtask_type': forms.Select(attrs={'class': 'form-select'}),
+            'title': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'เช่น ตรวจสอบ log การเข้าถึง / บล็อก IP ที่ปลายทาง Firewall',
+            }),
+            'description': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'รายละเอียดงานที่ต้องดำเนินการ...',
+            }),
+        }
+
+
+class SubtaskUpdateForm(forms.ModelForm):
+    class Meta:
+        model = TicketSubtask
+        fields = ['status', 'result_notes']
+        widgets = {
+            'status': forms.Select(attrs={'class': 'form-select'}),
+            'result_notes': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'บันทึกผลการดำเนินการ...',
+            }),
+        }
 
 
 class AttachmentForm(forms.ModelForm):

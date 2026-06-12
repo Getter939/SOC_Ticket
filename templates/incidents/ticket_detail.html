@@ -9,7 +9,19 @@
                 <h5 class="mb-0">ประวัติการติดตามงาน #{{ ticket.ticket_id }}</h5>
             </div>
             <div class="card-body">
-                <h6>IP Source : <strong>{{ ticket.device_name }}</strong> &nbsp; IP Destination : <strong>{{ ticket.ip_address }}</strong></h6>
+                <h6>
+                    IP Source : <strong>{{ ticket.device_name }}</strong> &nbsp; IP Destination : <strong>{{ ticket.ip_address }}</strong>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1 ioc-lookup-btn" data-ip="{{ ticket.ip_address }}" title="WHOIS lookup">
+                        <i class="bi bi-search"></i> WHOIS
+                    </button>
+                    {% if ticket.destination_ip %}
+                    &nbsp; Destination IoC : <strong>{{ ticket.destination_ip }}</strong>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1 ioc-lookup-btn" data-ip="{{ ticket.destination_ip }}" title="WHOIS lookup">
+                        <i class="bi bi-search"></i> WHOIS
+                    </button>
+                    {% endif %}
+                </h6>
+                <div id="ioc-lookup-result" class="alert alert-light border d-none small mt-2 mb-2"></div>
 
                 <div class="category-info mt-2">
                     <span class="badge bg-info text-dark">Category: {{ ticket.get_category_display }}</span>
@@ -190,6 +202,81 @@
         </div>
     </div>
 
+    {# ── Sub-tasks: Investigations / Countermeasures (full width) ── #}
+    <div class="col-12">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-task"></i> งานย่อย (Investigation / Countermeasure)</h5>
+            </div>
+            <div class="card-body">
+                {% if subtasks %}
+                <ul class="list-group mb-3">
+                    {% for subtask in subtasks %}
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="badge {% if subtask.subtask_type == 'INVESTIGATION' %}bg-info text-dark{% else %}bg-danger{% endif %}">
+                                    {{ subtask.get_subtask_type_display }}
+                                </span>
+                                <span class="badge {% if subtask.status == 'OPEN' %}bg-secondary{% elif subtask.status == 'IN_PROGRESS' %}bg-primary{% else %}bg-success{% endif %}">
+                                    {{ subtask.get_status_display }}
+                                </span>
+                                <strong class="ms-1">{{ subtask.title }}</strong>
+                                {% if subtask.description %}
+                                <div class="text-muted small mt-1">{{ subtask.description|linebreaks }}</div>
+                                {% endif %}
+                                {% if subtask.result_notes %}
+                                <div class="small mt-1"><strong>ผล:</strong> {{ subtask.result_notes|linebreaks }}</div>
+                                {% endif %}
+                                <div class="small text-muted mt-1">
+                                    ผู้รับผิดชอบ: {{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username|default:"-" }}
+                                </div>
+                            </div>
+                        </div>
+                        {% if not subtask.is_done and not is_terminal and request.user.is_superuser or profile and profile.is_soc or subtask.assigned_to == request.user %}
+                        <form method="post" action="{% url 'update_subtask' subtask.pk %}" class="row g-2 mt-2 align-items-end">
+                            {% csrf_token %}
+                            <div class="col-auto">
+                                <select name="status" class="form-select form-select-sm">
+                                    {% for code, label in subtask_update_form.fields.status.choices %}
+                                    <option value="{{ code }}" {% if subtask.status == code %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col">
+                                <input type="text" name="result_notes" class="form-control form-control-sm"
+                                    placeholder="บันทึกผลการดำเนินการ..." value="{{ subtask.result_notes }}">
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">บันทึก</button>
+                            </div>
+                        </form>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted small">ยังไม่มีงานย่อย</p>
+                {% endif %}
+
+                {% if can_create_subtask and not is_terminal %}
+                <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="border-top pt-3">
+                    {% csrf_token %}
+                    <div class="row g-2">
+                        <div class="col-md-3">{{ subtask_form.subtask_type }}</div>
+                        <div class="col-md-4">{{ subtask_form.title }}</div>
+                        <div class="col-md-3">{{ subtask_form.assigned_to }}</div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-secondary w-100">+ เพิ่มงานย่อย</button>
+                        </div>
+                        <div class="col-12">{{ subtask_form.description }}</div>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     {# ── Right column: role-based action panel ── #}
     <div class="col-md-5">
 
@@ -316,4 +403,38 @@
         <a href="{% url 'home' %}" class="btn btn-outline-secondary w-100 mt-3">กลับหน้าหลัก</a>
     </div>
 </div>
+
+<script>
+document.querySelectorAll('.ioc-lookup-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var ip = btn.dataset.ip;
+        var resultBox = document.getElementById('ioc-lookup-result');
+        resultBox.classList.remove('d-none', 'alert-danger', 'alert-light');
+        resultBox.classList.add('alert-light');
+        resultBox.textContent = 'กำลังค้นหา WHOIS สำหรับ ' + ip + ' ...';
+
+        fetch('{% url "ip_lookup" %}?ip=' + encodeURIComponent(ip))
+            .then(function (resp) { return resp.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    resultBox.classList.remove('alert-light');
+                    resultBox.classList.add('alert-danger');
+                    resultBox.textContent = data.error;
+                    return;
+                }
+                resultBox.innerHTML =
+                    '<strong>WHOIS ' + data.ip + ':</strong> ' +
+                    (data.org ? 'Org: ' + data.org + ' | ' : '') +
+                    (data.network_name ? 'Network: ' + data.network_name + ' | ' : '') +
+                    (data.country ? 'Country: ' + data.country + ' | ' : '') +
+                    (data.cidr ? 'Range: ' + data.cidr : '');
+            })
+            .catch(function () {
+                resultBox.classList.remove('alert-light');
+                resultBox.classList.add('alert-danger');
+                resultBox.textContent = 'เกิดข้อผิดพลาดในการเรียก WHOIS';
+            });
+    });
+});
+</script>
 {% endblock %}

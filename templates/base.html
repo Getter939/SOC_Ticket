@@ -257,6 +257,10 @@
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
         <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ</span>
     </a>
+    <a href="{% url 'global_search' %}" data-label="ค้นหา IOC"
+       class="nav-link {% if request.resolver_match.url_name == 'global_search' %}active{% endif %}">
+        <i class="bi bi-search"></i> <span class="nav-label">ค้นหา IOC</span>
+    </a>
     {% endif %}
 
     {% endwith %}

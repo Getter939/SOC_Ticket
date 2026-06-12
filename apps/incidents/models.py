@@ -630,6 +630,122 @@ class TriageRecord(models.Model):
 
 
 # ======================================================================= #
+# Sub-tasks (Investigation / Countermeasure)                               #
+# ======================================================================= #
+
+class TicketSubtask(models.Model):
+    """
+    A linked sub-task spawned from an Incident ticket, modelled after RTIR's
+    Investigation / Countermeasure linked tickets — lets parallel work
+    streams (e.g. "block this IP" and "dig into the logs") be tracked
+    independently of the parent ticket's main status.
+    """
+
+    TYPE_INVESTIGATION = 'INVESTIGATION'
+    TYPE_COUNTERMEASURE = 'COUNTERMEASURE'
+
+    TYPE_CHOICES = [
+        (TYPE_INVESTIGATION, 'Investigation'),
+        (TYPE_COUNTERMEASURE, 'Countermeasure'),
+    ]
+
+    STATUS_OPEN = 'OPEN'
+    STATUS_IN_PROGRESS = 'IN_PROGRESS'
+    STATUS_DONE = 'DONE'
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, 'เปิด'),
+        (STATUS_IN_PROGRESS, 'กำลังดำเนินการ'),
+        (STATUS_DONE, 'เสร็จสิ้น'),
+    ]
+
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name='subtasks',
+        verbose_name='Ticket หลัก',
+    )
+    subtask_type = models.CharField(
+        max_length=20, choices=TYPE_CHOICES, verbose_name='ประเภท',
+    )
+    title = models.CharField(max_length=255, verbose_name='หัวข้อ')
+    description = models.TextField(blank=True, default='', verbose_name='รายละเอียด')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN, verbose_name='สถานะ',
+    )
+    assigned_to = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ticket_subtasks', verbose_name='ผู้รับผิดชอบ',
+    )
+    result_notes = models.TextField(blank=True, default='', verbose_name='ผลการดำเนินการ')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_subtasks', verbose_name='ผู้สร้าง',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'[{self.get_subtask_type_display()}] {self.title} ({self.ticket.ticket_id})'
+
+    @property
+    def is_done(self):
+        return self.status == self.STATUS_DONE
+
+
+# ======================================================================= #
+# Notification templates                                                   #
+# ======================================================================= #
+
+class NotificationTemplate(models.Model):
+    """
+    Editable email subject/body for the automated SOC notifications.
+
+    The body and subject are plain strings using Python ``str.format()``
+    placeholders — see ``PLACEHOLDERS`` for what each key supports.  If no
+    template row exists for a key, the calling code falls back to its
+    built-in default text.
+    """
+
+    KEY_CONTAINMENT_REQUIRED = 'CONTAINMENT_REQUIRED'
+    KEY_OWNER_CREATED = 'OWNER_CREATED'
+    KEY_OWNER_CLOSED = 'OWNER_CLOSED'
+
+    KEY_CHOICES = [
+        (KEY_CONTAINMENT_REQUIRED, 'แจ้งผู้ดูแลระบบ — ต้องดำเนินการควบคุม (Containment required)'),
+        (KEY_OWNER_CREATED, 'แจ้งเจ้าของระบบ — เปิด Ticket ใหม่'),
+        (KEY_OWNER_CLOSED, 'แจ้งเจ้าของระบบ — ปิด Ticket แล้ว'),
+    ]
+
+    # Placeholders available to each template key, shown to admins as a hint.
+    PLACEHOLDERS = {
+        KEY_CONTAINMENT_REQUIRED: [
+            'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary', 'reason_block',
+        ],
+        KEY_OWNER_CREATED: [
+            'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',
+            'category', 'issue_type', 'device_name', 'summary',
+        ],
+        KEY_OWNER_CLOSED: [
+            'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',
+            'category', 'issue_type', 'device_name', 'outcome',
+        ],
+    }
+
+    key = models.CharField(max_length=50, choices=KEY_CHOICES, unique=True, verbose_name='ประเภทการแจ้งเตือน')
+    subject = models.CharField(max_length=255, verbose_name='หัวข้ออีเมล')
+    body = models.TextField(verbose_name='เนื้อหาอีเมล')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['key']
+
+    def __str__(self):
+        return self.get_key_display()
+
+
+# ======================================================================= #
 # File attachments                                                         #
 # ======================================================================= #
 

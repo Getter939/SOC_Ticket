@@ -39,7 +39,8 @@ def _get_watermark():
 
 
 def _build_query(min_level, last_timestamp, batch_size):
-    timestamp_filter = {'gte': last_timestamp.isoformat()} if last_timestamp is None else {'gt': last_timestamp.isoformat()}
+    # Use >gt< when watermark exists to skip already-ingested alerts; fall back to >=gte>= on first run.
+    timestamp_filter = {'gt': last_timestamp.isoformat()} if last_timestamp is not None else {'gte': last_timestamp.isoformat()}
 
     return {
         'query': {

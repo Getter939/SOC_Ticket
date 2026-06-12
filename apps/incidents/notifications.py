@@ -14,6 +14,8 @@ from django.conf import settings
 from django.core.mail import EmailMessage
 from django.urls import reverse
 
+from .models import NotificationTemplate
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +30,26 @@ def _ticket_url(ticket):
     except Exception:
         path = f'/incidents/ticket/{ticket.pk}/'
     return f'{site_url}{path}'
+
+
+def _render(key, context, default_subject, default_body):
+    """
+    Render subject/body for notification ``key`` from the admin-editable
+    NotificationTemplate if one exists, otherwise fall back to the given
+    defaults. Placeholders are filled with ``str.format(**context)``;
+    malformed custom templates fall back to the default rather than erroring.
+    """
+    template = NotificationTemplate.objects.filter(key=key).first()
+    subject, body = default_subject, default_body
+    if template:
+        try:
+            subject = template.subject.format(**context)
+            body = template.body.format(**context)
+            return subject, body
+        except (KeyError, IndexError) as exc:
+            logger.warning('Invalid NotificationTemplate %s — falling back to default: %s', key, exc)
+
+    return default_subject.format(**context), default_body.format(**context)
 
 
 def _send(subject, body, recipient_email, ticket_id, attachments=None):
@@ -70,40 +92,51 @@ def notify_containment_required(ticket, reason=None):
         )
         return False
 
-    subject = (
-        f'[{ticket.ticket_id}] Containment resubmission required'
-        if reason else
-        f'[{ticket.ticket_id}] Containment required'
-    )
-
     ticket_url = _ticket_url(ticket)
     summary = ticket.issue_description[:100]
     if len(ticket.issue_description) > 100:
         summary += '…'
 
-    lines = [
-        f'Ticket {ticket.ticket_id} has been routed to you for containment action.',
-        '',
-        f'  Ticket ID : {ticket.ticket_id}',
-        f'  Category  : {ticket.get_category_display()} / {ticket.get_issue_type_display()}',
-        f'  Summary   : {summary}',
-        '',
-    ]
-
     if reason:
-        lines += [
-            'The SOC analyst has returned this ticket for re-containment.',
-            f'  Analyst note: {reason}',
-            '',
-            'Please review the feedback, then log in and submit an updated containment report.',
-            '',
-        ]
+        default_subject = '[{ticket_id}] Containment resubmission required'
+        reason_block = (
+            'The SOC analyst has returned this ticket for re-containment.\n'
+            f'  Analyst note: {reason}\n'
+            '\n'
+            'Please review the feedback, then log in and submit an updated containment report.'
+        )
     else:
-        lines += ['Please log in and submit your containment report as soon as possible.', '']
+        default_subject = '[{ticket_id}] Containment required'
+        reason_block = 'Please log in and submit your containment report as soon as possible.'
 
-    lines += ['View the ticket here (login required):', f'  {ticket_url}', '', 'Do not reply to this email.']
+    default_body = (
+        'Ticket {ticket_id} has been routed to you for containment action.\n'
+        '\n'
+        '  Ticket ID : {ticket_id}\n'
+        '  Category  : {category} / {issue_type}\n'
+        '  Summary   : {summary}\n'
+        '\n'
+        '{reason_block}\n'
+        '\n'
+        'View the ticket here (login required):\n'
+        '  {ticket_url}\n'
+        '\n'
+        'Do not reply to this email.'
+    )
 
-    return _send(subject, '\n'.join(lines), admin.email, ticket.ticket_id)
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': ticket_url,
+        'category': ticket.get_category_display(),
+        'issue_type': ticket.get_issue_type_display(),
+        'summary': summary,
+        'reason_block': reason_block,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_CONTAINMENT_REQUIRED, context, default_subject, default_body,
+    )
+    return _send(subject, body, admin.email, ticket.ticket_id)
 
 
 # ──────────────────────────────────────────────────────────────────────── #
@@ -121,30 +154,45 @@ def notify_system_owner_created(ticket, attachments=None):
     owner = ticket.system_owner
     owner_name = owner.get_full_name() or owner.username
     dept = getattr(getattr(owner, 'profile', None), 'department', '')
-    subject = f'[{ticket.ticket_id}] แจ้งเหตุความปลอดภัยบนระบบของท่าน'
 
     summary = ticket.issue_description[:150]
     if len(ticket.issue_description) > 150:
         summary += '...'
 
-    lines = [
-        f'เรียน {owner_name}{f" ({dept})" if dept else ""},',
-        '',
-        f'ทีม SOC ของ NT ตรวจพบเหตุการณ์ความปลอดภัยที่เกี่ยวข้องกับระบบของท่าน',
-        'และได้เปิด Ticket เพื่อดำเนินการแก้ไขแล้ว',
-        '',
-        f'  Ticket ID      : {ticket.ticket_id}',
-        f'  ประเภทเหตุการณ์ : {ticket.get_category_display()} / {ticket.get_issue_type_display()}',
-        f'  IP Source       : {ticket.device_name}',
-        f'  สรุปเหตุการณ์   : {summary}',
-        '',
-        'ทีม SOC กำลังดำเนินการควบคุมและแก้ไขเหตุการณ์ดังกล่าว',
-        'ท่านไม่จำเป็นต้องดำเนินการใดๆ — ทีม SOC จะแจ้งผลให้ทราบเมื่อเสร็จสิ้น',
-        '',
-        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
-    ]
+    default_subject = '[{ticket_id}] แจ้งเหตุความปลอดภัยบนระบบของท่าน'
+    default_body = (
+        'เรียน {owner_name}{department_suffix},\n'
+        '\n'
+        'ทีม SOC ของ NT ตรวจพบเหตุการณ์ความปลอดภัยที่เกี่ยวข้องกับระบบของท่าน\n'
+        'และได้เปิด Ticket เพื่อดำเนินการแก้ไขแล้ว\n'
+        '\n'
+        '  Ticket ID      : {ticket_id}\n'
+        '  ประเภทเหตุการณ์ : {category} / {issue_type}\n'
+        '  IP Source       : {device_name}\n'
+        '  สรุปเหตุการณ์   : {summary}\n'
+        '\n'
+        'ทีม SOC กำลังดำเนินการควบคุมและแก้ไขเหตุการณ์ดังกล่าว\n'
+        'ท่านไม่จำเป็นต้องดำเนินการใดๆ — ทีม SOC จะแจ้งผลให้ทราบเมื่อเสร็จสิ้น\n'
+        '\n'
+        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น'
+    )
 
-    return _send(subject, '\n'.join(lines), owner.email, ticket.ticket_id, attachments)
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': _ticket_url(ticket),
+        'owner_name': owner_name,
+        'department': dept,
+        'department_suffix': f' ({dept})' if dept else '',
+        'category': ticket.get_category_display(),
+        'issue_type': ticket.get_issue_type_display(),
+        'device_name': ticket.device_name,
+        'summary': summary,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_OWNER_CREATED, context, default_subject, default_body,
+    )
+    return _send(subject, body, owner.email, ticket.ticket_id, attachments)
 
 
 def notify_system_owner_closed(ticket, attachments=None):
@@ -160,37 +208,51 @@ def notify_system_owner_closed(ticket, attachments=None):
     dept = getattr(getattr(owner, 'profile', None), 'department', '')
     is_fp = ticket.status == ticket.STATUS_CLOSED_FP
 
-    subject = f'[{ticket.ticket_id}] แจ้งผลการแก้ไขเหตุการณ์ความปลอดภัย'
-
     if is_fp:
-        outcome_lines = [
-            'ผลการตรวจสอบ: เหตุการณ์ดังกล่าวได้รับการวินิจฉัยว่าเป็น False Positive',
-            '(ไม่ใช่ภัยคุกคามจริง) และปิดเคสเรียบร้อยแล้ว',
-        ]
+        outcome = (
+            'ผลการตรวจสอบ: เหตุการณ์ดังกล่าวได้รับการวินิจฉัยว่าเป็น False Positive\n'
+            '(ไม่ใช่ภัยคุกคามจริง) และปิดเคสเรียบร้อยแล้ว'
+        )
     else:
         closed_by = ''
         if ticket.approved_by:
             closed_by = ticket.approved_by.get_full_name() or ticket.approved_by.username
         closed_at = ticket.approved_at.strftime('%d/%m/%Y %H:%M') if ticket.approved_at else '-'
-        outcome_lines = [
-            'เหตุการณ์ดังกล่าวได้รับการควบคุม ตรวจสอบ และอนุมัติปิดเคสเรียบร้อยแล้ว',
-            f'  ผู้อนุมัติ : {closed_by}',
-            f'  ปิดเมื่อ   : {closed_at}',
-        ]
+        outcome = (
+            'เหตุการณ์ดังกล่าวได้รับการควบคุม ตรวจสอบ และอนุมัติปิดเคสเรียบร้อยแล้ว\n'
+            f'  ผู้อนุมัติ : {closed_by}\n'
+            f'  ปิดเมื่อ   : {closed_at}'
+        )
 
-    lines = [
-        f'เรียน {owner_name}{f" ({dept})" if dept else ""},',
-        '',
-        f'Ticket ความปลอดภัย [{ticket.ticket_id}] ที่แจ้งเกี่ยวกับระบบของท่านได้รับการปิดแล้ว',
-        '',
-        f'  Ticket ID      : {ticket.ticket_id}',
-        f'  ประเภทเหตุการณ์ : {ticket.get_category_display()} / {ticket.get_issue_type_display()}',
-        f'  IP Source       : {ticket.device_name}',
-        '',
-    ] + outcome_lines + [
-        '',
-        'บันทึกเหตุการณ์ฉบับสมบูรณ์ถูกเก็บรักษาไว้ในระบบ SOC',
-        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น',
-    ]
+    default_subject = '[{ticket_id}] แจ้งผลการแก้ไขเหตุการณ์ความปลอดภัย'
+    default_body = (
+        'เรียน {owner_name}{department_suffix},\n'
+        '\n'
+        'Ticket ความปลอดภัย [{ticket_id}] ที่แจ้งเกี่ยวกับระบบของท่านได้รับการปิดแล้ว\n'
+        '\n'
+        '  Ticket ID      : {ticket_id}\n'
+        '  ประเภทเหตุการณ์ : {category} / {issue_type}\n'
+        '  IP Source       : {device_name}\n'
+        '\n'
+        '{outcome}\n'
+        '\n'
+        'บันทึกเหตุการณ์ฉบับสมบูรณ์ถูกเก็บรักษาไว้ในระบบ SOC\n'
+        'หากมีข้อสงสัยกรุณาติดต่อทีม SOC โดยอ้างอิง Ticket ID ข้างต้น'
+    )
 
-    return _send(subject, '\n'.join(lines), owner.email, ticket.ticket_id, attachments)
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': _ticket_url(ticket),
+        'owner_name': owner_name,
+        'department': dept,
+        'department_suffix': f' ({dept})' if dept else '',
+        'category': ticket.get_category_display(),
+        'issue_type': ticket.get_issue_type_display(),
+        'device_name': ticket.device_name,
+        'outcome': outcome,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_OWNER_CLOSED, context, default_subject, default_body,
+    )
+    return _send(subject, body, owner.email, ticket.ticket_id, attachments)

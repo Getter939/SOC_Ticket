@@ -1,15 +1,23 @@
 import calendar
+import ipaddress
+import logging
+
+import requests
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+logger = logging.getLogger(__name__)
+
 from apps.wazuh_ingest.models import WazuhAlert
-from .forms import AttachmentForm, TicketForm, TriageForm
-from .models import Ticket, TicketAttachment, TicketLog, TriageRecord
+from .forms import AttachmentForm, SubtaskForm, SubtaskUpdateForm, TicketForm, TriageForm
+from .models import Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord
 from .notifications import (
     notify_containment_required,
     notify_system_owner_created,
@@ -284,6 +292,11 @@ def ticket_detail(request, pk):
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
 
+    subtasks = ticket.subtasks.all()
+    subtask_form = SubtaskForm()
+    subtask_update_form = SubtaskUpdateForm()
+    can_create_subtask = request.user.is_superuser or (profile and profile.is_soc)
+
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         'logs': logs,
@@ -294,6 +307,10 @@ def ticket_detail(request, pk):
         'can_submit_containment': can_submit_containment,
         'valid_status_choices': valid_status_choices,
         'DISPOSITION_CHOICES': Ticket.DISPOSITION_CHOICES,
+        'subtasks': subtasks,
+        'subtask_form': subtask_form,
+        'subtask_update_form': subtask_update_form,
+        'can_create_subtask': can_create_subtask,
     })
 
 
@@ -407,6 +424,149 @@ def create_triage(request):
         form = TriageForm(user=request.user)
 
     return render(request, 'incidents/triage_form.html', {'form': form})
+
+
+# ── Full-text search across tickets and triage records ─────────────────── #
+
+@login_required
+def global_search(request):
+    query = (request.GET.get('q') or '').strip()
+    ticket_results = []
+    triage_results = []
+
+    if query:
+        ticket_vector = SearchVector(
+            'ticket_id', 'device_name', 'ip_address', 'destination_ip',
+            'issue_description', 'ioc_details', 'mitre_phase', 'reference_id',
+        )
+        search_query = SearchQuery(query)
+        ticket_results = (
+            Ticket.objects.visible_to(request.user)
+            .annotate(rank=SearchRank(ticket_vector, search_query))
+            .filter(rank__gt=0)
+            .order_by('-rank', '-created_at')[:50]
+        )
+
+        profile = getattr(request.user, 'profile', None)
+        if request.user.is_superuser or (profile and profile.is_soc):
+            triage_vector = SearchVector(
+                'source_reference', 'alert_description', 'source_ip', 'notes', 't2_notes',
+            )
+            triage_results = (
+                TriageRecord.objects
+                .annotate(rank=SearchRank(triage_vector, search_query))
+                .filter(rank__gt=0)
+                .order_by('-rank', '-created_at')[:50]
+            )
+
+    return render(request, 'incidents/search_results.html', {
+        'query': query,
+        'ticket_results': ticket_results,
+        'triage_results': triage_results,
+    })
+
+
+# ── IOC / IP lookup tool ─────────────────────────────────────────────── #
+
+@login_required
+def ip_lookup(request):
+    """RDAP (WHOIS) lookup for an IP address — returns a small JSON summary
+    for use by the lookup button on the ticket form/detail pages.
+    """
+    ip = (request.GET.get('ip') or '').strip()
+
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        return JsonResponse({'error': 'รูปแบบ IP ไม่ถูกต้อง'}, status=400)
+
+    if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+        return JsonResponse({'error': 'เป็น IP ภายใน (private/loopback) — ไม่มีข้อมูล WHOIS'}, status=200)
+
+    try:
+        resp = requests.get(f'https://rdap.org/ip/{ip}', timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as exc:
+        logger.warning('RDAP lookup failed for %s: %s', ip, exc)
+        return JsonResponse({'error': 'ไม่สามารถติดต่อบริการ WHOIS/RDAP ได้'}, status=502)
+    except ValueError:
+        return JsonResponse({'error': 'ไม่พบข้อมูลสำหรับ IP นี้'}, status=404)
+
+    entities = data.get('entities') or []
+    org_name = ''
+    for entity in entities:
+        vcard = entity.get('vcardArray')
+        if vcard and len(vcard) > 1:
+            for field in vcard[1]:
+                if field[0] == 'fn':
+                    org_name = field[3]
+                    break
+        if org_name:
+            break
+
+    country = ''
+    for remark_key in ('country',):
+        if data.get(remark_key):
+            country = data[remark_key]
+
+    result = {
+        'ip': ip,
+        'network_name': data.get('name', ''),
+        'cidr': f"{data.get('startAddress', '')} - {data.get('endAddress', '')}",
+        'org': org_name,
+        'country': country,
+        'type': data.get('type', ''),
+    }
+    return JsonResponse(result)
+
+
+# ── Subtask views (Investigation / Countermeasure) ─────────────────────── #
+
+@login_required
+def create_subtask(request, pk):
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    if not request.user.is_superuser and (profile is None or not profile.is_soc):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถสร้างงานย่อยได้')
+        return redirect('ticket_detail', pk=pk)
+
+    if request.method == 'POST':
+        form = SubtaskForm(request.POST)
+        if form.is_valid():
+            subtask = form.save(commit=False)
+            subtask.ticket = ticket
+            subtask.created_by = request.user
+            subtask.save()
+            messages.success(request, f'สร้างงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
+        else:
+            messages.error(request, 'ไม่สามารถสร้างงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
+    return redirect('ticket_detail', pk=pk)
+
+
+@login_required
+def update_subtask(request, subtask_id):
+    subtask = get_object_or_404(TicketSubtask, pk=subtask_id)
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=subtask.ticket_id)
+    profile = getattr(request.user, 'profile', None)
+
+    can_update = (
+        request.user.is_superuser
+        or (profile and profile.is_soc)
+        or subtask.assigned_to_id == request.user.pk
+    )
+    if not can_update:
+        messages.error(request, 'คุณไม่มีสิทธิ์อัปเดตงานย่อยนี้')
+        return redirect('ticket_detail', pk=ticket.pk)
+
+    if request.method == 'POST':
+        form = SubtaskUpdateForm(request.POST, instance=subtask)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f'อัปเดตงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
+        else:
+            messages.error(request, 'ไม่สามารถอัปเดตงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
+    return redirect('ticket_detail', pk=ticket.pk)
 
 
 # ── Attachment views ─────────────────────────────────────────────────── #

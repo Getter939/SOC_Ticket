@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Ticket, TicketLog, TriageRecord
+from .models import NotificationTemplate, Ticket, TicketLog, TicketSubtask, TriageRecord
 
 
 @admin.register(Ticket)
@@ -55,6 +55,30 @@ class TicketLogAdmin(admin.ModelAdmin):
     list_filter = ('status_at_time',)
     search_fields = ('ticket__ticket_id', 'author__username', 'note')
     raw_id_fields = ('author', 'ticket')
+
+
+@admin.register(TicketSubtask)
+class TicketSubtaskAdmin(admin.ModelAdmin):
+    list_display = (
+        'ticket', 'subtask_type', 'title', 'status', 'assigned_to', 'created_by', 'created_at',
+    )
+    list_filter = ('subtask_type', 'status')
+    search_fields = ('ticket__ticket_id', 'title', 'description')
+    raw_id_fields = ('ticket', 'assigned_to', 'created_by')
+
+
+@admin.register(NotificationTemplate)
+class NotificationTemplateAdmin(admin.ModelAdmin):
+    list_display = ('key', 'subject', 'updated_at')
+    readonly_fields = ('updated_at',)
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj:
+            placeholders = NotificationTemplate.PLACEHOLDERS.get(obj.key, [])
+            hint = ', '.join(f'{{{p}}}' for p in placeholders)
+            form.base_fields['body'].help_text = f'Placeholders ที่ใช้ได้: {hint}'
+        return form
 
 
 @admin.register(TriageRecord)
