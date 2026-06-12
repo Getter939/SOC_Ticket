@@ -371,24 +371,29 @@ class Ticket(models.Model):
 
     @property
     def is_sla_breached(self):
-        if self.status in self.TERMINAL_STATUSES:
-            return False
-        if self.sla_deadline:
-            return timezone.now() > self.sla_deadline
+        """
+        SLA clock stops once the ticket is issued (created) — containment
+        progress afterwards no longer affects this. Breach is therefore a
+        fixed fact about whether the ticket was raised within SLA, not a
+        live countdown against now().
+        """
+        if self.sla_deadline and self.created_at:
+            return self.created_at > self.sla_deadline
         return False
 
     @property
     def sla_remaining(self):
-        if self.sla_deadline:
-            return self.sla_deadline - timezone.now()
+        """Time margin left at the moment the ticket was issued (fixed, not live)."""
+        if self.sla_deadline and self.created_at:
+            return self.sla_deadline - self.created_at
         return None
 
     @property
     def is_sla_urgent(self):
-        """Not yet breached, but less than 1 hour left on the SLA clock."""
-        if self.status in self.TERMINAL_STATUSES or not self.sla_deadline:
+        """Issued within SLA, but with less than 1 hour of margin to spare."""
+        remaining = self.sla_remaining
+        if remaining is None:
             return False
-        remaining = self.sla_deadline - timezone.now()
         return timedelta() < remaining <= timedelta(hours=1)
 
     class Meta:

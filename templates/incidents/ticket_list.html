@@ -101,15 +101,15 @@
                     <td>
                         {% if ticket.is_sla_breached %}
                             <span class="badge bg-danger" title="ครบกำหนด {{ ticket.sla_deadline|date:'d/m/Y H:i' }}">
-                                <i class="bi bi-alarm-fill me-1"></i>เกิน {{ ticket.sla_deadline|timesince }}
+                                <i class="bi bi-alarm-fill me-1"></i>เกินกำหนด {{ ticket.created_at|timesince:ticket.sla_deadline }}
                             </span>
                         {% elif ticket.is_sla_urgent %}
                             <span class="badge bg-warning text-dark" title="ครบกำหนด {{ ticket.sla_deadline|date:'d/m/Y H:i' }}">
-                                <i class="bi bi-hourglass-split me-1"></i>เหลือ {{ ticket.sla_deadline|timeuntil }}
+                                <i class="bi bi-hourglass-split me-1"></i>เหลือ {{ ticket.sla_deadline|timesince:ticket.created_at }}
                             </span>
                         {% elif ticket.sla_deadline %}
                             <span class="badge bg-success-subtle text-success border border-success-subtle" title="ครบกำหนด {{ ticket.sla_deadline|date:'d/m/Y H:i' }}">
-                                <i class="bi bi-clock me-1"></i>เหลือ {{ ticket.sla_deadline|timeuntil }}
+                                <i class="bi bi-clock me-1"></i>เหลือ {{ ticket.sla_deadline|timesince:ticket.created_at }}
                             </span>
                         {% else %}
                             <span class="text-muted small">-</span>

@@ -10,7 +10,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -151,7 +151,7 @@ def ticket_list(request):
     page_obj = paginator.get_page(request.GET.get('page'))
 
     sla_breach_count = visible.filter(
-        sla_deadline__lt=timezone.now()
+        sla_deadline__lt=F('created_at')
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
 
     return render(request, 'incidents/ticket_list.html', {
@@ -754,7 +754,7 @@ def system_owner_dashboard(request):
         'total':          my_tickets.count(),
         'active':         active_qs.count(),
         'closed':         closed_qs.count(),
-        'sla_breaches':   active_qs.filter(sla_deadline__lt=timezone.now()).count(),
+        'sla_breaches':   active_qs.filter(sla_deadline__lt=F('created_at')).count(),
     }
 
     recent_tickets = active_qs.order_by('-created_at')[:10]

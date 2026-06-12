@@ -1,6 +1,6 @@
 import json
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count
+from django.db.models import Count, F
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -25,7 +25,7 @@ def dashboard(request):
     active_qs   = all_tickets.exclude(status__in=terminal)
     closed_qs   = all_tickets.filter(status__in=terminal)
 
-    sla_breached_qs = active_qs.filter(sla_deadline__lt=today)
+    sla_breached_qs = active_qs.filter(sla_deadline__lt=F('created_at'))
 
     # ── Disposition counts (closed tickets only) ─────────────────────────── #
     tp_count = closed_qs.filter(disposition=Ticket.DISP_TRUE_POSITIVE).count()
