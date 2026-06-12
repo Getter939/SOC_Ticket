@@ -10,4 +10,6 @@ urlpatterns = [
     path('escalation_queue/', views.escalation_queue, name='escalation_queue'),
     path('claim_escalation/', views.claim_escalation, name='claim_escalation'),
     path('release_escalation/', views.release_escalation, name='release_escalation'),
+    path('triage_history/', views.triage_history, name='triage_history'),
+    path('reopen_alert/', views.reopen_alert, name='reopen_alert'),
 ]

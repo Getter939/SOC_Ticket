@@ -261,6 +261,75 @@ def escalation_queue(request):
 
 
 @login_required
+def triage_history(request):
+    profile = getattr(request.user, 'profile', None)
+    if not _has_soc_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเข้าถึงประวัติ Triage ได้')
+        return redirect('ticket_list')
+
+    status_filter = request.GET.get('status', '').strip()
+    alerts_qs = WazuhAlert.objects.filter(
+        triage_status__in=[WazuhAlert.TRIAGE_TRUE_POSITIVE, WazuhAlert.TRIAGE_FALSE_POSITIVE],
+    )
+    if status_filter in (WazuhAlert.TRIAGE_TRUE_POSITIVE, WazuhAlert.TRIAGE_FALSE_POSITIVE):
+        alerts_qs = alerts_qs.filter(triage_status=status_filter)
+
+    alerts_qs = alerts_qs.select_related('triaged_by').order_by('-triaged_at', '-timestamp')
+
+    paginator = Paginator(alerts_qs, 25)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    # For closed False Positives, flag whether a new alert with the same
+    # agent/rule has since come in — a hint that it may be worth reopening.
+    for alert in page_obj:
+        alert.related_pending_count = 0
+        if alert.triage_status == WazuhAlert.TRIAGE_FALSE_POSITIVE and alert.agent_ip and alert.rule_id:
+            alert.related_pending_count = WazuhAlert.objects.filter(
+                triage_status__in=[WazuhAlert.TRIAGE_PENDING, WazuhAlert.TRIAGE_TRIAGING],
+                agent_ip=alert.agent_ip,
+                rule_id=alert.rule_id,
+            ).exclude(pk=alert.pk).count()
+
+    return render(request, 'wazuh_ingest/triage_history.html', {
+        'page_obj': page_obj,
+        'alerts': page_obj,
+        'status_filter': status_filter,
+        'fp_count': WazuhAlert.objects.filter(triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE).count(),
+        'tp_count': WazuhAlert.objects.filter(triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE).count(),
+    })
+
+
+@login_required
+def reopen_alert(request):
+    if request.method != 'POST':
+        return redirect('triage_history')
+
+    if not _has_soc_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
+        return redirect('ticket_list')
+
+    alert_id = request.POST.get('alert_id')
+    updated = WazuhAlert.objects.filter(
+        pk=alert_id,
+        triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE,
+    ).update(
+        triage_status=WazuhAlert.TRIAGE_PENDING,
+        triaged_by=None,
+        triaged_at=None,
+        triage_note='',
+        escalated_to_tier=None,
+        claimed_by=None,
+        claimed_at=None,
+    )
+    if not updated:
+        messages.error(request, f'Alert #{alert_id} ไม่สามารถเปิดกลับได้ (ต้องเป็นสถานะ False Positive)')
+        return redirect('triage_history')
+
+    messages.success(request, f'เปิด Alert #{alert_id} กลับเข้า Triage Queue แล้ว')
+    return redirect('triage_history')
+
+
+@login_required
 def triage_action(request):
     if request.method != 'POST':
         return redirect('triage_queue')

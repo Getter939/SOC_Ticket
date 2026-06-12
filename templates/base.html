@@ -258,6 +258,10 @@
         <span class="badge bg-warning text-dark ms-auto">{{ escalation_queue_count }}</span>
         {% endif %}
     </a>
+    <a href="{% url 'triage_history' %}" data-label="ประวัติ Triage"
+       class="nav-link {% if request.resolver_match.url_name == 'triage_history' %}active{% endif %}">
+        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติ Triage</span>
+    </a>
     {% endif %}
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
