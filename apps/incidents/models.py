@@ -359,7 +359,7 @@ class Ticket(models.Model):
         related_name='ticket', verbose_name='Wazuh Alert',
     )
 
-    SLA_HOURS = 48
+    SLA_HOURS = 4
 
     # ------------------------------------------------------------------ #
     # Properties                                                          #
@@ -385,11 +385,11 @@ class Ticket(models.Model):
 
     @property
     def is_sla_urgent(self):
-        """Not yet breached, but less than 8 hours left on the SLA clock."""
+        """Not yet breached, but less than 1 hour left on the SLA clock."""
         if self.status in self.TERMINAL_STATUSES or not self.sla_deadline:
             return False
         remaining = self.sla_deadline - timezone.now()
-        return timedelta() < remaining <= timedelta(hours=8)
+        return timedelta() < remaining <= timedelta(hours=1)
 
     class Meta:
         ordering = ['-created_at']
@@ -403,7 +403,10 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.pk and not self.sla_deadline:
-            self.sla_deadline = timezone.now() + timedelta(hours=self.SLA_HOURS)
+            # SLA clock starts when the alert/incident occurred, not when
+            # the ticket is filed — fall back to now() if T1 left it blank.
+            base_time = self.incident_datetime or timezone.now()
+            self.sla_deadline = base_time + timedelta(hours=self.SLA_HOURS)
 
         if not self.ticket_id or self.ticket_id.strip() == '':
             now = timezone.now()
