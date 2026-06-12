@@ -33,10 +33,12 @@
                         {{ ticket.get_disposition_display }}
                     </span>
                     {% endif %}
+                    {% if not profile.is_system_admin %}
                     {% if ticket.is_sla_breached %}
                     <span class="badge bg-danger"><i class="bi bi-alarm-fill me-1"></i>เกินกำหนด SLA {{ ticket.created_at|timesince:ticket.sla_deadline }}</span>
                     {% elif ticket.sla_deadline %}
                     <span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>เปิด Ticket ภายใน SLA (เหลือ {{ ticket.sla_deadline|timesince:ticket.created_at }})</span>
+                    {% endif %}
                     {% endif %}
                 </div>
 
@@ -49,7 +51,7 @@
                     <dd>{{ ticket.incident_datetime|date:"d M Y H:i" }} น.</dd>
                     {% endif %}
 
-                    {% if ticket.sla_deadline %}
+                    {% if ticket.sla_deadline and not profile.is_system_admin %}
                     <dt>SLA Deadline</dt>
                     <dd>{{ ticket.sla_deadline|date:"d M Y H:i" }} น.</dd>
                     {% endif %}

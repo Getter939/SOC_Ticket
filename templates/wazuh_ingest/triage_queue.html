@@ -54,6 +54,7 @@
           <th>Rule Level</th>
           <th>Rule Description</th>
           <th>MITRE Tactics</th>
+          <th>SLA Triage</th>
           <th>Status</th>
           <th>ผู้รับผิดชอบ</th>
           <th class="text-end">Actions</th>
@@ -82,6 +83,21 @@
             {% empty %}
               <span class="text-muted">—</span>
             {% endfor %}
+          </td>
+          <td>
+            {% if alert.is_sla_breached %}
+              <span class="badge bg-danger" title="ครบกำหนด {{ alert.sla_deadline|date:'d/m/Y H:i' }}">
+                <i class="bi bi-alarm-fill me-1"></i>เกินกำหนด {{ alert.sla_deadline|timesince }}
+              </span>
+            {% elif alert.is_sla_urgent %}
+              <span class="badge bg-warning text-dark" title="ครบกำหนด {{ alert.sla_deadline|date:'d/m/Y H:i' }}">
+                <i class="bi bi-hourglass-split me-1"></i>เหลือ {{ alert.sla_deadline|timeuntil }}
+              </span>
+            {% else %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle" title="ครบกำหนด {{ alert.sla_deadline|date:'d/m/Y H:i' }}">
+                <i class="bi bi-clock me-1"></i>เหลือ {{ alert.sla_deadline|timeuntil }}
+              </span>
+            {% endif %}
           </td>
           <td>
             {% if alert.triage_status == 'TRIAGING' %}
@@ -134,7 +150,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">ไม่มี Alert ที่รอการ Triage</td>
+          <td colspan="9" class="text-center text-muted py-4">ไม่มี Alert ที่รอการ Triage</td>
         </tr>
         {% endfor %}
       </tbody>

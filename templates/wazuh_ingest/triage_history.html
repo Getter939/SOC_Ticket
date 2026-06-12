@@ -74,6 +74,7 @@
           <th>Agent</th>
           <th>Rule Level</th>
           <th>Rule Description</th>
+          <th>ระยะเวลา Triage</th>
           <th>ผลการ Triage</th>
           <th>ผู้ตัดสิน</th>
           <th>หมายเหตุ</th>
@@ -87,6 +88,21 @@
           <td>{{ alert.agent_name|default:"—" }}</td>
           <td>{{ alert.rule_level }}</td>
           <td style="max-width:340px;">{{ alert.rule_description }}</td>
+          <td>
+            {% if alert.triage_duration %}
+              {% if alert.triage_within_sla %}
+                <span class="badge bg-success-subtle text-success border border-success-subtle">
+                  <i class="bi bi-check-circle me-1"></i>{{ alert.triaged_at|timesince:alert.timestamp }}
+                </span>
+              {% else %}
+                <span class="badge bg-danger">
+                  <i class="bi bi-alarm-fill me-1"></i>{{ alert.triaged_at|timesince:alert.timestamp }}
+                </span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
           <td>
             {% if alert.triage_status == 'TRUE_POSITIVE' %}
               <span class="status-badge tp">True Positive</span>
@@ -121,7 +137,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">ไม่มีประวัติ Triage</td>
+          <td colspan="9" class="text-center text-muted py-4">ไม่มีประวัติ Triage</td>
         </tr>
         {% endfor %}
       </tbody>
