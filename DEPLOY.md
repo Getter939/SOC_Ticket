@@ -9,6 +9,18 @@ Commands below assume a Linux host with Docker and the Docker Compose plugin
 installed, run from the project root (where `.env` and the compose files
 live).
 
+## Quick start — end to end
+
+1. [First-time setup](#1-first-time-setup) — fill in `.env`, then
+   `docker compose -f docker-compose.prod.yml up -d --build`
+2. [Create a superuser](#3-create-a-superuser) — your own admin login
+3. [Open port 80 on UFW](#5-open-port-80-on-ufw) so the LAN can reach the app
+4. [Add user accounts for your team](#7-add-user-accounts-for-your-team) —
+   log into `/admin/` and create a User + profile (role/tier) for each
+   teammate
+5. Send each teammate `http://<server-ip>/login/` — they log in with the
+   username/password from step 4 and work tickets per their role
+
 ## 1. First-time setup
 
 1. Make sure `.env` exists and is filled in (copy from `.env.example` if
@@ -79,6 +91,40 @@ docker compose -f docker-compose.prod.yml restart web
 # Rebuild and restart after a code change
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+## 7. Add user accounts for your team
+
+There's no public sign-up page — every account is created by an admin
+through the Django admin site (`/admin/`), logged in with the superuser
+from step 3.
+
+1. Go to `http://<server-ip>/admin/` and log in.
+2. **Users → Add user** → fill in username, email, first/last name, and a
+   temporary password.
+3. On the same page, fill in the **User profile** section:
+   - **Department** / **Phone** — free text
+   - **Role** — determines what the user can see/do (see table below)
+   - **Tier** — `T1`/`T2`, SOC Staff only; a seniority label with no
+     permission effect
+4. Click **Save**. If `EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD` are set in
+   `.env`, the user is automatically emailed their username and password.
+
+### Roles
+
+| Role | What they can do |
+|---|---|
+| **SOC Staff** | Create and work all tickets |
+| **SOC Manager** | Same as SOC Staff, plus approve verified tickets (VERIFIED → APPROVED) |
+| **System Admin** | Only sees tickets where they're the *assigned admin*; submits containment reports |
+| **System Owner** | Notified when a ticket opens/closes for a system they own; has a dedicated "My Tickets" view (`/incidents/my-tickets/`) for those tickets |
+
+### Resending credentials / password resets
+
+In **Users**, select one or more accounts and use the admin actions:
+- **"ส่ง Email แจ้ง Username ให้ผู้ใช้งานที่เลือก"** — re-sends the username
+  and login link by email
+- **"รีเซ็ตรหัสผ่านและส่งเมลแจ้ง User"** — generates a new random password
+  and emails it
 
 ## Logs
 
