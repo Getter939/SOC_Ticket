@@ -7,7 +7,11 @@ SECRET_KEY = config('SECRET-KEY')
 
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['192.168.100.44', 'localhost', '127.0.0.1', 'web']
+_ALLOWED_HOSTS_DEFAULT = '192.168.100.44,localhost,127.0.0.1,web'
+ALLOWED_HOSTS = [
+    h.strip() for h in config('ALLOWED_HOSTS', default=_ALLOWED_HOSTS_DEFAULT).split(',')
+    if h.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',

@@ -330,8 +330,9 @@ def notify_system_owner_closed(ticket, attachments=None):
 # Containment alert (HTML, Thai)                                            #
 # ──────────────────────────────────────────────────────────────────────── #
 
-def notify_containment_alert(ticket):
+def notify_containment_alert(ticket, reason=None):
     """
+    Email the assigned admin an HTML containment alert (Thai body) with
     ticket details and a link to submit the containment report.
     """
     admin = ticket.assigned_admin
@@ -367,6 +368,7 @@ def notify_containment_alert(ticket):
         },
         'severity_th': SEVERITY_TH.get(ticket.severity, ticket.severity),
         'ticket_url': ticket_url,
+        'reason': reason,
     }
 
     subject = f'[{ticket.ticket_id}] ต้องดำเนินการกักกัน – {ticket.issue_description[:60]}'
