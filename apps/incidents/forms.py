@@ -3,7 +3,10 @@ from django.contrib.auth.models import User
 
 from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
-from .models import Ticket, TicketAttachment, TicketSubtask, TriageRecord
+from .models import (
+    Ticket, TicketAttachment, TicketSubtask, TriageRecord,
+    validate_attachment_size,
+)
 
 
 class TicketForm(forms.ModelForm):
@@ -245,3 +248,8 @@ class AttachmentForm(forms.ModelForm):
                 'placeholder': 'คำอธิบายไฟล์ (ไม่บังคับ)',
             }),
         }
+
+    def clean_file(self):
+        uploaded = self.cleaned_data.get('file')
+        validate_attachment_size(uploaded)
+        return uploaded

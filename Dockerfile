@@ -24,5 +24,8 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
-# Start command
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# Production start command: apply migrations, collect static for WhiteNoise,
+# then serve via gunicorn (a real WSGI server). DEBUG must be False in prod
+# (set in .env) — never ship the Django dev server. For local development with
+# auto-reload, docker-compose overrides this with `command:` (runserver).
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"]

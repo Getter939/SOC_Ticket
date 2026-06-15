@@ -20,6 +20,11 @@ services:
   web:
     build: .
     restart: always
+    # ⚠ LOCAL DEVELOPMENT ONLY — this overrides the image's production CMD with
+    # the Django dev server (auto-reload) and bind-mounts the source tree.
+    # Do NOT use this compose file as-is for production: the image's default
+    # CMD (gunicorn, DEBUG=False) is the production entrypoint. Keep DEBUG=True
+    # in .env for this dev setup.
     command: >
       sh -c "python manage.py migrate &&
              python manage.py runserver 0.0.0.0:8000"

@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import F, Q
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import AttachmentForm, SubtaskForm, SubtaskUpdateForm, TicketForm, TriageForm
-from .models import Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord
+from .models import (
+    Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
+    validate_attachment_size,
+)
 from .notifications import (
     notify_containment_required,
     notify_containment_submitted,
@@ -253,6 +256,7 @@ def create_ticket(request):
                         ])
 
                     for evidence_file in request.FILES.getlist('evidence_files'):
+                        validate_attachment_size(evidence_file)
                         TicketAttachment.objects.create(
                             ticket=ticket,
                             file=evidence_file,
@@ -739,6 +743,34 @@ def delete_attachment(request, attachment_id):
         att.delete()
         messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว')
     return redirect('ticket_detail', pk=ticket.pk)
+
+
+@login_required
+def download_attachment(request, attachment_id):
+    """Serve a ticket attachment to authorized users only.
+
+    Attachments are incident evidence and must never be a security hole:
+
+      • Authorization — the requester must be able to see the parent ticket
+        (same rule as ``ticket_detail`` via ``visible_to``). This closes both
+        unauthenticated access and cross-role IDOR on the raw file path.
+      • Forced download — ``Content-Disposition: attachment`` plus
+        ``X-Content-Type-Options: nosniff`` means an uploaded ``.html`` or
+        ``.svg`` is downloaded, never rendered as same-origin script. Without
+        this a user could upload ``<svg onload=…>`` and land stored XSS on
+        whoever opens the file.
+    """
+    att = get_object_or_404(TicketAttachment, pk=attachment_id)
+    # 404 (not 403) if the user can't see the parent ticket — no enumeration.
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
+
+    response = FileResponse(
+        att.file.open('rb'),
+        as_attachment=True,
+        filename=att.original_name,
+    )
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 # ── System Owner dashboard ────────────────────────────────────────────── #

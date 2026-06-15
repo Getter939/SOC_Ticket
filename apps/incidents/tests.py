@@ -19,16 +19,22 @@ Notes
              initialises django.core.mail.outbox — no real SMTP is needed.
 """
 
+import shutil
+import tempfile
+from unittest.mock import patch
+
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
-from apps.incidents.forms import TriageForm
-from apps.incidents.models import Ticket, TicketLog, TriageRecord
+from apps.incidents.forms import AttachmentForm, TriageForm
+from apps.incidents.models import Ticket, TicketAttachment, TicketLog, TriageRecord
 from apps.incidents.notifications import notify_containment_required
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -1048,3 +1054,104 @@ class SuperuserAccessTest(TestCase):
         self.assertContains(list_response, 'Unknown user')
         self.assertEqual(detail_response.status_code, 200)
         self.assertContains(detail_response, 'Unknown user')
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 9. Attachment download authorization                                          #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_test_media_'))
+class AttachmentDownloadSecurityTest(TestCase):
+    """download_attachment must enforce ticket visibility and force a safe
+    download: an uploaded .html/.svg must never render inline (stored XSS),
+    and a user must not reach attachments on tickets they cannot see (IDOR)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc_staff = _make_user('att_soc', UserProfile.ROLE_SOC_STAFF)
+        cls.admin_a = _make_user('att_admin_a', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.admin_b = _make_user('att_admin_b', UserProfile.ROLE_SYSTEM_ADMIN)
+
+        cls.ticket_a = _make_ticket(
+            issue_description='Attachment test — admin A ticket',
+            assigned_admin=cls.admin_a,
+        )
+        cls.attachment = TicketAttachment.objects.create(
+            ticket=cls.ticket_a,
+            file=SimpleUploadedFile(
+                'evidence.html',
+                b'<script>alert(document.cookie)</script>',
+                content_type='text/html',
+            ),
+            original_name='evidence.html',
+            uploaded_by=cls.soc_staff,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def _url(self):
+        return reverse('download_attachment', args=[self.attachment.pk])
+
+    def test_unauthenticated_redirected_to_login(self):
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
+
+    def test_authorized_user_downloads_with_safe_headers(self):
+        self.client.force_login(self.soc_staff)
+        # NB: don't call response.close() — for a FileResponse it fires
+        # request_finished, which closes the (CONN_MAX_AGE=0) test DB
+        # connection and breaks the TestCase rollback. Headers are readable
+        # without consuming the stream.
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+        # Forced download — uploaded HTML/SVG is never rendered inline.
+        self.assertTrue(
+            response['Content-Disposition'].startswith('attachment'),
+            msg=response['Content-Disposition'],
+        )
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+
+    def test_admin_cannot_download_attachment_on_unrelated_ticket(self):
+        # admin_b is not the assigned_admin of ticket_a → cannot see it → 404.
+        self.client.force_login(self.admin_b)
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 404)
+
+    def test_assigned_admin_can_download_own_ticket_attachment(self):
+        self.client.force_login(self.admin_a)
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 10. Attachment upload size limit                                              #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class AttachmentUploadLimitTest(TestCase):
+    """Oversized uploads are rejected (disk-exhaustion DoS guard)."""
+
+    def test_oversize_file_rejected_by_form(self):
+        # Patch the cap low so we don't have to allocate a 25 MB test file.
+        with patch('apps.incidents.models.MAX_ATTACHMENT_SIZE', 10):
+            form = AttachmentForm(
+                data={'description': ''},
+                files={'file': SimpleUploadedFile(
+                    'big.bin', b'01234567890',  # 11 bytes > 10
+                    content_type='application/octet-stream',
+                )},
+            )
+            self.assertFalse(form.is_valid())
+            self.assertIn('file', form.errors)
+
+    def test_within_limit_file_accepted_by_form(self):
+        form = AttachmentForm(
+            data={'description': 'ok'},
+            files={'file': SimpleUploadedFile(
+                'small.txt', b'hello', content_type='text/plain',
+            )},
+        )
+        self.assertTrue(form.is_valid(), msg=form.errors)

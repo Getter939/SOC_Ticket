@@ -817,6 +817,22 @@ class NotificationTemplate(models.Model):
 # File attachments                                                         #
 # ======================================================================= #
 
+# Per-file upload cap — guards against disk-exhaustion DoS from oversized
+# uploads. Django has no built-in per-file size limit, so it is enforced
+# explicitly in BOTH upload paths (AttachmentForm.clean_file and the
+# create_ticket evidence loop). Bump if SOC evidence (pcaps, memory dumps)
+# legitimately needs more headroom.
+MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+def validate_attachment_size(uploaded_file):
+    """Raise ValidationError if an uploaded file exceeds MAX_ATTACHMENT_SIZE."""
+    if uploaded_file is not None and uploaded_file.size > MAX_ATTACHMENT_SIZE:
+        raise ValidationError(
+            f'ไฟล์มีขนาดใหญ่เกินไป — สูงสุด {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB'
+        )
+
+
 def attachment_upload_path(instance, filename):
     return f'ticket_attachments/{instance.ticket.ticket_id}/{filename}'
 

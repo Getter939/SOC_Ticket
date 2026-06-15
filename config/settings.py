@@ -25,6 +25,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'config.middleware.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -88,6 +89,53 @@ MEDIA_ROOT = BASE_DIR / 'media'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'   # → dashboard
 LOGOUT_REDIRECT_URL = 'login'
+
+# ── Security hardening ─────────────────────────────────────────────────────
+# Always-on — safe over both HTTP and HTTPS:
+SESSION_COOKIE_HTTPONLY = True       # session cookie unreadable from JavaScript
+SESSION_COOKIE_SAMESITE = 'Lax'      # CSRF defense-in-depth
+CSRF_COOKIE_SAMESITE    = 'Lax'
+SECURE_CONTENT_TYPE_NOSNIFF = True   # X-Content-Type-Options: nosniff
+X_FRAME_OPTIONS = 'DENY'             # clickjacking (with XFrameOptionsMiddleware)
+
+# HTTPS-dependent — turn these ON in production behind TLS via .env. They
+# default OFF so an internal HTTP deployment keeps working: enabling secure
+# cookies without HTTPS withholds the cookie (breaking login) and SSL_REDIRECT
+# would cause redirect loops. See .env.example for the recommended prod values.
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
+CSRF_COOKIE_SECURE    = config('CSRF_COOKIE_SECURE',    default=False, cast=bool)
+SECURE_SSL_REDIRECT   = config('SECURE_SSL_REDIRECT',   default=False, cast=bool)
+SECURE_HSTS_SECONDS   = config('SECURE_HSTS_SECONDS',   default=0,     cast=int)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
+SECURE_HSTS_PRELOAD            = config('SECURE_HSTS_PRELOAD',            default=True, cast=bool)
+# If deployed behind a TLS-terminating reverse proxy (nginx/traefik) that sets
+# X-Forwarded-Proto, uncomment so Django trusts it. Only enable when the proxy
+# strips any client-supplied X-Forwarded-Proto, otherwise it is spoofable.
+# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# ── Content-Security-Policy (applied by config.middleware) ─────────────────
+# Defense-in-depth against XSS / clickjacking / data exfiltration. Scripts and
+# styles still allow 'unsafe-inline' (templates use inline <script>/<style>);
+# everything else is locked to 'self' plus the one CDN the UI loads
+# (Bootstrap + Chart.js from jsdelivr). Tightening script-src to a nonce is the
+# recommended next step. Flip *_REPORT_ONLY on to trial changes without
+# enforcing.
+_CSP_CDN = 'https://cdn.jsdelivr.net'
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "form-action 'self'; "
+    "img-src 'self' data:; "
+    f"font-src 'self' {_CSP_CDN}; "
+    f"style-src 'self' 'unsafe-inline' {_CSP_CDN}; "
+    f"script-src 'self' 'unsafe-inline' {_CSP_CDN}; "
+    "connect-src 'self'"
+)
+CONTENT_SECURITY_POLICY_REPORT_ONLY = config(
+    'CSP_REPORT_ONLY', default=False, cast=bool
+)
 
 # ── Email / SMTP ──────────────────────────────────────────────────────────
 # Production: set EMAIL_* vars in .env (see .env.example).

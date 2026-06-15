@@ -10,6 +10,7 @@ urlpatterns = [
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'),
     path('ticket/<int:pk>/upload/', views.upload_attachment, name='upload_attachment'),
     path('attachment/<int:attachment_id>/delete/', views.delete_attachment, name='delete_attachment'),
+    path('attachment/<int:attachment_id>/download/', views.download_attachment, name='download_attachment'),
     path('log/edit/<int:log_id>/', views.edit_log, name='edit_log'),
     path('ticket/<int:pk>/subtask/new/', views.create_subtask, name='create_subtask'),
     path('subtask/<int:subtask_id>/update/', views.update_subtask, name='update_subtask'),
