@@ -1,9 +1,15 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.db.models import Count, Q
 
 from .forms import ProjectForm, TaskForm
 from .models import Project, Task
+
+
+def _has_soc_access(user):
+    profile = getattr(user, 'profile', None)
+    return user.is_superuser or (profile is not None and profile.is_soc)
 
 
 @login_required
@@ -32,6 +38,9 @@ def project_detail(request, pk):
     }
 
     if request.method == 'POST':
+        if not _has_soc_access(request.user):
+            messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถสร้างงานในโปรเจกต์ได้')
+            return redirect('project_detail', pk=pk)
         form = TaskForm(request.POST)
         if form.is_valid():
             task = form.save(commit=False)
@@ -51,6 +60,10 @@ def project_detail(request, pk):
 
 @login_required
 def create_project(request):
+    if not _has_soc_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถสร้างโปรเจกต์ได้')
+        return redirect('project_list')
+
     if request.method == 'POST':
         form = ProjectForm(request.POST)
         if form.is_valid():
@@ -65,6 +78,10 @@ def create_project(request):
 
 @login_required
 def edit_project(request, pk):
+    if not _has_soc_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถแก้ไขโปรเจกต์ได้')
+        return redirect('project_list')
+
     project = get_object_or_404(Project, pk=pk)
     if request.method == 'POST':
         form = ProjectForm(request.POST, instance=project)
@@ -81,6 +98,9 @@ def update_task_status(request, task_id):
     """HTMX-friendly: update task status via POST."""
     task = get_object_or_404(Task, id=task_id)
     if request.method == 'POST':
+        if not _has_soc_access(request.user):
+            messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถอัปเดตสถานะงานได้')
+            return redirect('project_detail', pk=task.project.pk)
         new_status = request.POST.get('status')
         if new_status in dict(Task.STATUS_CHOICES):
             task.status = new_status
@@ -93,5 +113,8 @@ def delete_task(request, task_id):
     task = get_object_or_404(Task, id=task_id)
     project_pk = task.project.pk
     if request.method == 'POST':
+        if not _has_soc_access(request.user):
+            messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถลบงานได้')
+            return redirect('project_detail', pk=project_pk)
         task.delete()
     return redirect('project_detail', pk=project_pk)
