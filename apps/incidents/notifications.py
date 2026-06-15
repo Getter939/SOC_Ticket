@@ -11,12 +11,20 @@ Rules
 import logging
 
 from django.conf import settings
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, send_mail
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from .models import NotificationTemplate
 
 logger = logging.getLogger(__name__)
+
+SEVERITY_TH = {
+    'Critical': 'วิกฤต',
+    'High': 'สูง',
+    'Medium': 'ปานกลาง',
+    'Low': 'ต่ำ',
+}
 
 
 # ──────────────────────────────────────────────────────────────────────── #
@@ -316,3 +324,65 @@ def notify_system_owner_closed(ticket, attachments=None):
         NotificationTemplate.KEY_OWNER_CLOSED, context, default_subject, default_body,
     )
     return _send(subject, body, owner.email, ticket.ticket_id, attachments)
+
+
+# ──────────────────────────────────────────────────────────────────────── #
+# Containment alert (HTML, Thai)                                            #
+# ──────────────────────────────────────────────────────────────────────── #
+
+def notify_containment_alert(ticket):
+    """
+    ticket details and a link to submit the containment report.
+    """
+    admin = ticket.assigned_admin
+    if not admin or not admin.email:
+        logger.warning(
+            'notify_containment_alert: ticket %s — no assigned admin or no email.',
+            ticket.ticket_id,
+        )
+        return False
+
+    ticket_url = _ticket_url(ticket)
+
+    if ticket.issue_type == 'SIEM':
+        routed_by = 'ระบบ SIEM อัตโนมัติ'
+    else:
+        routed_by = ticket.created_by.get_full_name() or ticket.created_by.username
+
+    assigned_to = ''
+    if ticket.assigned_to:
+        assigned_to = ticket.assigned_to.get_full_name() or ticket.assigned_to.username
+
+    context = {
+        'ticket': {
+            'id': ticket.ticket_id,
+            'ticket_id': ticket.ticket_id,
+            'summary': ticket.issue_description,
+            'category': ticket.get_category_display(),
+            'severity': SEVERITY_TH.get(ticket.severity, ticket.severity),
+            'assigned_to': assigned_to,
+            'created_at': ticket.created_at,
+            'routed_by': routed_by,
+            'device_name': ticket.device_name,
+        },
+        'severity_th': SEVERITY_TH.get(ticket.severity, ticket.severity),
+        'ticket_url': ticket_url,
+    }
+
+    subject = f'[{ticket.ticket_id}] ต้องดำเนินการกักกัน – {ticket.issue_description[:60]}'
+    html_message = render_to_string('tickets/email/containment_alert.html', context)
+
+    try:
+        send_mail(
+            subject=subject,
+            message='',
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[admin.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+        logger.info('Containment alert email sent to %s for ticket %s.', admin.email, ticket.ticket_id)
+        return True
+    except Exception as exc:
+        logger.error('SMTP failure for containment alert, ticket %s — %s', ticket.ticket_id, exc)
+        return False
