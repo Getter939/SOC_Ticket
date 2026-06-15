@@ -220,10 +220,34 @@
 </div>
 
 <!-- ── Chart.js ───────────────────────────────────────────────────────────── -->
+{{ status_labels|json_script:"status-labels" }}
+{{ status_data|json_script:"status-data" }}
+{{ fp_tp_labels|json_script:"fp-tp-labels" }}
+{{ fp_tp_data|json_script:"fp-tp-data" }}
+{{ by_type_labels|json_script:"by-type-labels" }}
+{{ by_type_data|json_script:"by-type-data" }}
+{{ by_category_labels|json_script:"by-category-labels" }}
+{{ by_category_data|json_script:"by-category-data" }}
+{{ monthly_labels|json_script:"monthly-labels" }}
+{{ monthly_data|json_script:"monthly-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const DARK   = '#1a1a2e';
 const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
+
+function readJSON(id) {
+    return JSON.parse(document.getElementById(id).textContent);
+}
+const statusLabels     = readJSON('status-labels');
+const statusData       = readJSON('status-data');
+const fpTpLabels       = readJSON('fp-tp-labels');
+const fpTpData         = readJSON('fp-tp-data');
+const byTypeLabels     = readJSON('by-type-labels');
+const byTypeData       = readJSON('by-type-data');
+const byCategoryLabels = readJSON('by-category-labels');
+const byCategoryData   = readJSON('by-category-data');
+const monthlyLabels    = readJSON('monthly-labels');
+const monthlyData      = readJSON('monthly-data');
 
 // Colours aligned with the 7-state order in STATUS_CHOICES:
 // NEW, AWAITING_CONTAINMENT, CONTAINMENT_REPORTED, UNDER_REVIEW, VERIFIED, APPROVED, CLOSED_FP
@@ -241,9 +265,9 @@ const PIPELINE_COLORS = [
 new Chart(document.getElementById('chartPipeline'), {
     type: 'bar',
     data: {
-        labels: {{ status_labels|safe }},
+        labels: statusLabels,
         datasets: [{
-            data: {{ status_data|safe }},
+            data: statusData,
             backgroundColor: PIPELINE_COLORS,
             borderRadius: 4,
         }]
@@ -261,9 +285,9 @@ new Chart(document.getElementById('chartPipeline'), {
 new Chart(document.getElementById('chartFpTp'), {
     type: 'doughnut',
     data: {
-        labels: {{ fp_tp_labels|safe }},
+        labels: fpTpLabels,
         datasets: [{
-            data: {{ fp_tp_data|safe }},
+            data: fpTpData,
             backgroundColor: ['#198754', '#e63946'],
             borderWidth: 2,
         }]
@@ -282,8 +306,8 @@ new Chart(document.getElementById('chartFpTp'), {
 new Chart(document.getElementById('chartByType'), {
     type: 'bar',
     data: {
-        labels: {{ by_type_labels|safe }},
-        datasets: [{ data: {{ by_type_data|safe }}, backgroundColor: COLORS, borderRadius: 4 }]
+        labels: byTypeLabels,
+        datasets: [{ data: byTypeData, backgroundColor: COLORS, borderRadius: 4 }]
     },
     options: {
         plugins: { legend: { display: false } },
@@ -296,8 +320,8 @@ new Chart(document.getElementById('chartByType'), {
 new Chart(document.getElementById('chartByCategory'), {
     type: 'doughnut',
     data: {
-        labels: {{ by_category_labels|safe }},
-        datasets: [{ data: {{ by_category_data|safe }}, backgroundColor: COLORS, borderWidth: 2 }]
+        labels: byCategoryLabels,
+        datasets: [{ data: byCategoryData, backgroundColor: COLORS, borderWidth: 2 }]
     },
     options: {
         plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
@@ -310,10 +334,10 @@ new Chart(document.getElementById('chartByCategory'), {
 new Chart(document.getElementById('chartMonthly'), {
     type: 'line',
     data: {
-        labels: {{ monthly_labels|safe }},
+        labels: monthlyLabels,
         datasets: [{
             label: 'Tickets',
-            data: {{ monthly_data|safe }},
+            data: monthlyData,
             borderColor: DARK,
             backgroundColor: 'rgba(26,26,46,0.08)',
             fill: true,

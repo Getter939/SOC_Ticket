@@ -1,4 +1,3 @@
-import json
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, F
 from django.shortcuts import render
@@ -67,26 +66,26 @@ def dashboard(request):
         row['status']: row['count']
         for row in all_tickets.values('status').annotate(count=Count('id'))
     }
-    status_labels = json.dumps([status_map[s] for s in status_order])
-    status_data   = json.dumps([counts_by_status.get(s, 0) for s in status_order])
+    status_labels = [status_map[s] for s in status_order]
+    status_data   = [counts_by_status.get(s, 0) for s in status_order]
 
     # ── FP / TP doughnut ─────────────────────────────────────────────────── #
-    fp_tp_labels = json.dumps(['True Positive', 'False Positive'])
-    fp_tp_data   = json.dumps([tp_count, fp_count])
+    fp_tp_labels = ['True Positive', 'False Positive']
+    fp_tp_data   = [tp_count, fp_count]
 
     # ── By Type bar chart ─────────────────────────────────────────────────── #
     by_type = list(
         all_tickets.values('issue_type').annotate(count=Count('id')).order_by('-count')
     )
-    by_type_labels = json.dumps([b['issue_type'] for b in by_type])
-    by_type_data   = json.dumps([b['count']      for b in by_type])
+    by_type_labels = [b['issue_type'] for b in by_type]
+    by_type_data   = [b['count']      for b in by_type]
 
     # ── By Category doughnut ─────────────────────────────────────────────── #
     by_category = list(
         all_tickets.values('category').annotate(count=Count('id')).order_by('-count')
     )
-    by_category_labels = json.dumps([b['category'] for b in by_category])
-    by_category_data   = json.dumps([b['count']    for b in by_category])
+    by_category_labels = [b['category'] for b in by_category]
+    by_category_data   = [b['count']    for b in by_category]
 
     # ── Monthly trend (last 6 months) ────────────────────────────────────── #
     monthly = []
@@ -96,8 +95,8 @@ def dashboard(request):
         count = all_tickets.filter(created_at__month=month, created_at__year=year).count()
         monthly.append({'month': f"{year}/{month:02d}", 'count': count})
 
-    monthly_labels = json.dumps([m['month'] for m in monthly])
-    monthly_data   = json.dumps([m['count'] for m in monthly])
+    monthly_labels = [m['month'] for m in monthly]
+    monthly_data   = [m['count'] for m in monthly]
 
     # ── Recent & breach lists ─────────────────────────────────────────────── #
     recent_tickets = active_qs.order_by('-created_at')[:8]

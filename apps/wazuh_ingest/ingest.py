@@ -161,7 +161,7 @@ def fetch_and_store_alerts(min_level=10, batch_size=500):
             _opensearch_url(),
             json=query,
             auth=(settings.OPENSEARCH_USER, settings.OPENSEARCH_PASSWORD),
-            verify=settings.OPENSEARCH_VERIFY_SSL,
+            verify=settings.OPENSEARCH_CA_BUNDLE or settings.OPENSEARCH_VERIFY_SSL,
             timeout=30,
         )
         response.raise_for_status()

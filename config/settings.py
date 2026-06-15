@@ -170,5 +170,8 @@ OPENSEARCH_PORT        = config('OPENSEARCH_PORT', default=9200, cast=int)
 OPENSEARCH_USER        = config('OPENSEARCH_USER', default='')
 OPENSEARCH_PASSWORD    = config('OPENSEARCH_PASSWORD', default='')
 OPENSEARCH_VERIFY_SSL  = config('OPENSEARCH_VERIFY_SSL', default=False, cast=bool)
+# Path to a CA bundle (PEM) for verifying a self-signed/internal Wazuh/OpenSearch
+# certificate. If set, takes precedence over OPENSEARCH_VERIFY_SSL=True/False.
+OPENSEARCH_CA_BUNDLE  = config('OPENSEARCH_CA_BUNDLE', default='')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
