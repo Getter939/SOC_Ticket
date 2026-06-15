@@ -25,7 +25,7 @@ from .models import (
     validate_attachment_size,
 )
 from .notifications import (
-    notify_containment_required,
+    notify_containment_alert,
     notify_containment_submitted,
     notify_system_owner_created,
     notify_system_owner_closed,
@@ -74,7 +74,7 @@ def _notify_containment(ticket, reason, request):
     if not admin.email:
         messages.warning(request, f'Ticket routed — {admin.get_full_name() or admin.username} ไม่มีอีเมล')
         return
-    if not notify_containment_required(ticket, reason=reason):
+    if not notify_containment_alert(ticket, reason=reason):
         messages.warning(request, 'Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — โปรดแจ้งผู้ดูแลระบบด้วยตนเอง')
 
 
