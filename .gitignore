@@ -43,8 +43,3 @@ logs/
 .DS_Store
 Thumbs.db
 desktop.ini
-
-
-# Test
-tests/
-pytest.ini
