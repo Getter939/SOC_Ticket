@@ -32,7 +32,7 @@ SEVERITY_TH = {
 # ──────────────────────────────────────────────────────────────────────── #
 
 def _ticket_url(ticket):
-    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8000').rstrip('/')
+    site_url = getattr(settings, 'SITE_URL', 'http://localhost:8088').rstrip('/')
     try:
         path = reverse('ticket_detail', kwargs={'pk': ticket.pk})
     except Exception:

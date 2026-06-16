@@ -27,11 +27,11 @@ services:
     # in .env for this dev setup.
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
+             python manage.py runserver 0.0.0.0:8088"
     volumes:
       - .:/app                # live reload: code changes reflect instantly
     ports:
-      - "8000:8000"
+      - "8088:8088"
     env_file:
       - .env
     environment:

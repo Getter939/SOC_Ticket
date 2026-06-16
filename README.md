@@ -56,11 +56,11 @@ python manage.py createsuperuser
 ### 6. Run the development server
 
 ```bash
-python manage.py runserver
+python manage.py runserver 0.0.0.0:8088
 ```
 
-The app is then available at <http://127.0.0.1:8000/>.
-Admin panel: <http://127.0.0.1:8000/admin/>
+The app is then available at <http://127.0.0.1:8088/>.
+Admin panel: <http://127.0.0.1:8088/admin/>
 
 ## Offline Wazuh testing
 

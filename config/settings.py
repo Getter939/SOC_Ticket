@@ -7,9 +7,8 @@ SECRET_KEY = config('SECRET-KEY')
 
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-_ALLOWED_HOSTS_DEFAULT = '192.168.100.44,localhost,127.0.0.1,web'
 ALLOWED_HOSTS = [
-    h.strip() for h in config('ALLOWED_HOSTS', default=_ALLOWED_HOSTS_DEFAULT).split(',')
+    h.strip() for h in config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
     if h.strip()
 ]
 
@@ -167,7 +166,7 @@ DEFAULT_FROM_EMAIL = config(
 
 # ── Site URL (used in email notification links) ────────────────────────────
 # Set to your public hostname in production, e.g. https://soc.example.com
-SITE_URL = config('SITE_URL', default='http://localhost:8000')
+SITE_URL = config('SITE_URL', default='http://localhost:8088')
 
 # ── Wazuh / OpenSearch alert ingestion ─────────────────────────────────────
 OPENSEARCH_HOST        = config('OPENSEARCH_HOST', default='')
