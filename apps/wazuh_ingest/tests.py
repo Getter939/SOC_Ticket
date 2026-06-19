@@ -244,16 +244,31 @@ class TriageQueueTest(TestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.claimed_by, self.soc_staff)
 
-    def test_release_alert_returns_to_pending(self):
+    def test_release_alert_requires_reason(self):
         self._claim('triage_soc')
 
         response = self.client.post(reverse('release_alert'), {'alert_id': self.alert.pk})
 
         self.assertRedirects(response, reverse('triage_queue'))
         self.alert.refresh_from_db()
+        # No reason → not released, stays claimed/triaging.
+        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+        self.assertEqual(self.alert.claimed_by, self.soc_staff)
+
+    def test_release_alert_with_reason_returns_to_pending(self):
+        self._claim('triage_soc')
+
+        response = self.client.post(reverse('release_alert'), {
+            'alert_id': self.alert.pk,
+            'release_reason': 'Need host owner confirmation first.',
+        })
+
+        self.assertRedirects(response, reverse('triage_queue'))
+        self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_PENDING)
         self.assertIsNone(self.alert.claimed_by)
         self.assertIsNone(self.alert.claimed_at)
+        self.assertIn('host owner', self.alert.release_reason)
 
     def test_action_without_claim_is_rejected(self):
         self.client.login(username='triage_soc', password='testpass123')
@@ -282,7 +297,8 @@ class TriageQueueTest(TestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
 
-    def test_close_fp_sets_status_and_audit_fields(self):
+    def test_close_fp_action_is_removed(self):
+        """The old triage-level Close (FP) action no longer exists — rejected."""
         self._claim('triage_soc')
 
         response = self.client.post(reverse('triage_action'), {
@@ -293,10 +309,7 @@ class TriageQueueTest(TestCase):
 
         self.assertRedirects(response, reverse('triage_queue'))
         self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
-        self.assertEqual(self.alert.triaged_by, self.soc_staff)
-        self.assertIsNotNone(self.alert.triaged_at)
-        self.assertEqual(self.alert.triage_note, 'Confirmed benign — known admin activity.')
+        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)  # unchanged
 
     def test_create_ticket_requires_category(self):
         self._claim('triage_soc')
@@ -332,22 +345,8 @@ class TriageQueueTest(TestCase):
         self.assertIn('severity=High', response.url)
         self.assertIn('detailed_issue2=Malware', response.url)
 
-    def test_t1_cannot_escalate_to_same_tier(self):
-        self._claim('triage_soc')
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'escalate',
-            'escalate_to': WazuhAlert.TIER_T1,
-            'category': WazuhAlert.CATEGORY_OTHER,
-            'note': 'Invalid same-tier escalation.',
-        })
-
-        self.assertRedirects(response, reverse('triage_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
-
-    def test_escalate_sets_status_and_tier(self):
+    def test_escalate_action_is_removed(self):
+        """The old triage-level Escalate action no longer exists — rejected."""
         self._claim('triage_soc')
 
         response = self.client.post(reverse('triage_action'), {
@@ -360,41 +359,46 @@ class TriageQueueTest(TestCase):
 
         self.assertRedirects(response, reverse('triage_queue'))
         self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-        self.assertEqual(self.alert.escalated_to_tier, WazuhAlert.TIER_T2)
-        self.assertEqual(self.alert.incident_category, WazuhAlert.CATEGORY_OTHER)
+        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)  # unchanged
 
-    def test_action_on_already_triaged_alert_is_rejected(self):
-        self.alert.triage_status = WazuhAlert.TRIAGE_FALSE_POSITIVE
-        self.alert.save(update_fields=['triage_status'])
-
+    def test_create_ticket_on_unclaimed_alert_is_rejected(self):
+        # Not claimed by this analyst → cannot create a ticket from it.
         self.client.login(username='triage_soc', password='testpass123')
         response = self.client.post(reverse('triage_action'), {
             'alert_id': self.alert.pk,
-            'action': 'close_fp',
-            'note': 'Trying again.',
+            'action': 'create_ticket',
+            'category': WazuhAlert.CATEGORY_MALWARE,
+            'note': 'Trying without claiming first.',
         })
 
         self.assertRedirects(response, reverse('triage_queue'))
         messages_list = list(get_messages(response.wsgi_request))
         self.assertTrue(any('ไม่ได้อยู่ในความรับผิดชอบ' in str(m) for m in messages_list))
-
         self.alert.refresh_from_db()
-        # Status unchanged from the FALSE_POSITIVE set above.
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_PENDING)
 
     def test_empty_note_is_rejected(self):
         self._claim('triage_soc')
 
         response = self.client.post(reverse('triage_action'), {
             'alert_id': self.alert.pk,
-            'action': 'close_fp',
+            'action': 'create_ticket',
+            'category': WazuhAlert.CATEGORY_MALWARE,
             'note': '',
         })
 
         self.assertRedirects(response, reverse('triage_queue'))
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+
+    def test_tier2_cannot_claim_for_triage(self):
+        """Triage is Tier-1-only — a Tier 2 analyst cannot claim from the queue."""
+        t2 = _make_user('triage_t2', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2)
+        self.client.login(username='triage_t2', password='testpass123')
+        self.client.post(reverse('claim_alert'), {'alert_id': self.alert.pk})
+        self.alert.refresh_from_db()
+        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_PENDING)
+        self.assertIsNone(self.alert.claimed_by)
 
 
 class EscalationQueueTest(TestCase):
@@ -431,56 +435,9 @@ class EscalationQueueTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'Suspicious PowerShell execution')
 
-    def test_t2_can_close_escalated_alert_as_fp(self):
-        self._claim()
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'close_fp',
-            'note': 'T2 confirmed benign.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
-        self.assertEqual(self.alert.triaged_by, self.t2_analyst)
-
-    def test_t2_can_create_ticket_from_escalated_alert(self):
-        self._claim()
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'create_ticket',
-            'category': WazuhAlert.CATEGORY_DATA_EXFILTRATION,
-            'note': 'T2 confirmed malicious.',
-            'source': 'escalation_queue',
-        })
-
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-        self.assertEqual(self.alert.claimed_by, self.t2_analyst)
-
-        expected_url = reverse('create_ticket')
-        self.assertTrue(response.url.startswith(expected_url + '?'))
-        self.assertIn(f'wazuh_alert={self.alert.pk}', response.url)
-
-    def test_t2_can_escalate_further_to_manager(self):
-        self._claim()
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'escalate',
-            'escalate_to': WazuhAlert.TIER_MANAGER,
-            'category': WazuhAlert.CATEGORY_DATA_EXFILTRATION,
-            'note': 'T2 needs Manager review.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-        self.assertEqual(self.alert.escalated_to_tier, WazuhAlert.TIER_MANAGER)
+    # NOTE: alert-level Close/Escalate/Create-ticket from the escalation queue
+    # are gone — escalation is now a ticket-level decision and triage is
+    # Tier-1-only. The escalation queue retains only listing + claim/release.
 
     def test_manager_sees_alert_escalated_to_manager(self):
         self.alert.escalated_to_tier = WazuhAlert.TIER_MANAGER
@@ -491,35 +448,6 @@ class EscalationQueueTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Suspicious PowerShell execution')
-
-    def test_t1_cannot_act_on_alert_escalated_to_t2(self):
-        self.client.login(username='esc_t1', password='testpass123')
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'close_fp',
-            'note': 'T1 trying to close.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-
-    def test_escalated_alert_must_be_claimed_before_action(self):
-        self.client.login(username='esc_t2', password='testpass123')
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'close_fp',
-            'note': 'Attempt without claim.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-        self.assertIsNone(self.alert.claimed_by)
 
     def test_claim_and_release_escalated_alert(self):
         self._claim()
@@ -535,40 +463,6 @@ class EscalationQueueTest(TestCase):
         self.alert.refresh_from_db()
         self.assertIsNone(self.alert.claimed_by)
         self.assertIsNone(self.alert.claimed_at)
-
-    def test_other_t2_cannot_act_on_claimed_escalation(self):
-        self._claim()
-        self.client.login(username='esc_t2_other', password='testpass123')
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'close_fp',
-            'note': 'Attempt by another T2 analyst.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_ESCALATED)
-        self.assertEqual(self.alert.claimed_by, self.t2_analyst)
-
-    def test_manager_cannot_escalate_to_same_or_lower_tier(self):
-        self.alert.escalated_to_tier = WazuhAlert.TIER_MANAGER
-        self.alert.save(update_fields=['escalated_to_tier'])
-        self._claim('esc_mgr')
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': self.alert.pk,
-            'action': 'escalate',
-            'escalate_to': WazuhAlert.TIER_T2,
-            'category': WazuhAlert.CATEGORY_OTHER,
-            'note': 'Invalid downward escalation.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertEqual(self.alert.escalated_to_tier, WazuhAlert.TIER_MANAGER)
 
 
 class SuperuserWazuhAccessTest(TestCase):
@@ -605,14 +499,17 @@ class SuperuserWazuhAccessTest(TestCase):
 
         action_response = self.client.post(reverse('triage_action'), {
             'alert_id': alert.pk,
-            'action': 'close_fp',
-            'note': 'Superuser confirmed benign.',
+            'action': 'create_ticket',
+            'category': WazuhAlert.CATEGORY_MALWARE,
+            'note': 'Superuser opening a ticket.',
         })
-        self.assertRedirects(action_response, reverse('triage_queue'))
+        # create_ticket redirects to the ticket form with prefilled params.
+        self.assertEqual(action_response.status_code, 302)
+        self.assertIn(reverse('create_ticket'), action_response.url)
 
         alert.refresh_from_db()
-        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
-        self.assertEqual(alert.triaged_by, self.superuser)
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+        self.assertEqual(alert.claimed_by, self.superuser)
 
     def test_superuser_sees_and_can_claim_escalations_for_all_tiers(self):
         t1_alert = _make_alert(
@@ -647,27 +544,3 @@ class SuperuserWazuhAccessTest(TestCase):
         self.assertRedirects(claim_response, reverse('escalation_queue'))
         t2_alert.refresh_from_db()
         self.assertEqual(t2_alert.claimed_by, self.superuser)
-
-    def test_superuser_can_escalate_to_any_tier(self):
-        alert = _make_alert(
-            opensearch_id='superuser-reassign-escalation',
-            rule_level=13,
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-            escalated_to_tier=WazuhAlert.TIER_MANAGER,
-            claimed_by=self.superuser,
-            claimed_at=timezone.now(),
-        )
-
-        response = self.client.post(reverse('triage_action'), {
-            'alert_id': alert.pk,
-            'action': 'escalate',
-            'escalate_to': WazuhAlert.TIER_T1,
-            'category': WazuhAlert.CATEGORY_OTHER,
-            'note': 'Superuser reassigned for operational review.',
-            'source': 'escalation_queue',
-        })
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        alert.refresh_from_db()
-        self.assertEqual(alert.escalated_to_tier, WazuhAlert.TIER_T1)
-        self.assertIsNone(alert.claimed_by)

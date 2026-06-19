@@ -26,9 +26,11 @@ def dashboard(request):
 
     sla_breached_qs = active_qs.filter(sla_deadline__lt=F('created_at'))
 
-    # ── Disposition counts (closed tickets only) ─────────────────────────── #
-    tp_count = closed_qs.filter(disposition=Ticket.DISP_TRUE_POSITIVE).count()
-    fp_count = closed_qs.filter(disposition=Ticket.DISP_FALSE_POSITIVE).count()
+    # ── Event/Incident classification counts (closed tickets only) ───────── #
+    # Kept under the legacy tp_*/fp_* stat keys so the dashboard template keeps
+    # working: tp_* now means Incident, fp_* means Event.
+    tp_count = closed_qs.filter(classification=Ticket.CLASSIFICATION_INCIDENT).count()
+    fp_count = closed_qs.filter(classification=Ticket.CLASSIFICATION_EVENT).count()
     total_disp = tp_count + fp_count
     tp_pct = round(tp_count / total_disp * 100) if total_disp else 0
     fp_pct = round(fp_count / total_disp * 100) if total_disp else 0
@@ -48,10 +50,11 @@ def dashboard(request):
         'awaiting_soc':     active_qs.filter(
                                 status__in=[
                                     Ticket.STATUS_CONTAINMENT_REPORTED,
-                                    Ticket.STATUS_UNDER_REVIEW,
+                                    Ticket.STATUS_T1_REVIEW,
+                                    Ticket.STATUS_ESCALATED_T2,
                                 ]
                             ).count(),
-        'awaiting_manager': active_qs.filter(status=Ticket.STATUS_VERIFIED).count(),
+        'awaiting_manager': active_qs.filter(status=Ticket.STATUS_PENDING_MANAGER).count(),
         # FP / TP
         'tp_count': tp_count,
         'fp_count': fp_count,

@@ -5,19 +5,19 @@ from .models import NotificationTemplate, Ticket, TicketLog, TicketSubtask, Tria
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     list_display = (
-        'ticket_id', 'device_name', 'status', 'disposition',
+        'ticket_id', 'device_name', 'status', 'classification', 'is_emergency',
         'category', 'issue_type',
         'assigned_to', 'assigned_admin', 'created_by', 'created_at',
         'system_owner',
     )
-    list_filter = ('status', 'disposition', 'category', 'issue_type', 'created_at')
+    list_filter = ('status', 'classification', 'is_emergency', 'category', 'issue_type', 'created_at')
     search_fields = (
         'ticket_id', 'device_name', 'ip_address',
         'assigned_to__username', 'assigned_admin__username',
         'system_owner__username', 'system_owner__first_name',
     )
     readonly_fields = (
-        'ticket_id', 'created_at', 'updated_at',
+        'ticket_id', 'created_at', 'updated_at', 'escalated_to_t2_at',
         'verified_by', 'verified_at',
         'approved_by', 'approved_at',
     )
@@ -34,8 +34,9 @@ class TicketAdmin(admin.ModelAdmin):
         ('เจ้าของระบบ', {
             'fields': ('system_owner',),
         }),
-        ('สถานะและการวินิจฉัย', {
-            'fields': ('status', 'disposition', 'containment_report'),
+        ('สถานะและการจัดประเภท', {
+            'fields': ('status', 'classification', 'is_emergency',
+                       'escalated_to_t2_at', 'containment_report', 'remediation_summary'),
         }),
         ('การมอบหมาย', {
             'fields': ('assigned_to', 'assigned_admin', 'created_by'),

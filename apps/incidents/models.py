@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -33,71 +34,116 @@ class Ticket(models.Model):
     objects = TicketQuerySet.as_manager()
 
     # ------------------------------------------------------------------ #
-    # Status choices — SOC containment workflow                           #
+    # Status choices — redesigned SOC workflow                            #
     # ------------------------------------------------------------------ #
     STATUS_NEW                  = 'NEW'
+    STATUS_ESCALATED_T2         = 'ESCALATED_T2'
+    STATUS_T1_REVIEW            = 'T1_REVIEW'
     STATUS_AWAITING_CONTAINMENT = 'AWAITING_CONTAINMENT'
     STATUS_CONTAINMENT_REPORTED = 'CONTAINMENT_REPORTED'
-    STATUS_UNDER_REVIEW         = 'UNDER_REVIEW'
-    STATUS_VERIFIED             = 'VERIFIED'
+    STATUS_PENDING_MANAGER      = 'PENDING_MANAGER'
     STATUS_APPROVED             = 'APPROVED'
-    STATUS_CLOSED_FP            = 'CLOSED_FP'
+    STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
 
     STATUS_CHOICES = [
         (STATUS_NEW,                  'แจ้งเหตุใหม่'),
+        (STATUS_ESCALATED_T2,         'ส่งต่อให้ Tier 2'),
+        (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
         (STATUS_AWAITING_CONTAINMENT, 'รอการจัดการจากผู้ดูแลระบบ'),
         (STATUS_CONTAINMENT_REPORTED, 'รายงานการควบคุมแล้ว'),
-        (STATUS_UNDER_REVIEW,         'กำลังตรวจสอบ'),
-        (STATUS_VERIFIED,             'ตรวจสอบแล้ว'),
+        (STATUS_PENDING_MANAGER,      'รอผู้จัดการตรวจสอบ'),
         (STATUS_APPROVED,             'อนุมัติแล้ว'),
-        (STATUS_CLOSED_FP,            'ปิด (เหตุการณ์ปลอม)'),
+        (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
     ]
 
     # States where no further action is possible
-    TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_FP})
+    TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_EVENT})
 
     # ------------------------------------------------------------------ #
-    # Disposition choices                                                  #
+    # Event / Incident classification (replaces the old TP/FP disposition) #
+    #   INCIDENT — actionable case that proceeds to containment (was TP)   #
+    #   EVENT    — benign case that gets closed (was FP)                   #
+    # Set by Tier 1 in the create flow; may be revised by Tier 2 on an     #
+    # escalated ticket. Every ticket carries an explicit value.            #
     # ------------------------------------------------------------------ #
-    DISP_TRUE_POSITIVE  = 'TRUE_POSITIVE'
-    DISP_FALSE_POSITIVE = 'FALSE_POSITIVE'
+    CLASSIFICATION_INCIDENT = 'INCIDENT'
+    CLASSIFICATION_EVENT    = 'EVENT'
 
-    DISPOSITION_CHOICES = [
-        (DISP_TRUE_POSITIVE,  'เหตุการณ์จริง (True Positive)'),
-        (DISP_FALSE_POSITIVE, 'เหตุการณ์ปลอม (False Positive)'),
+    CLASSIFICATION_CHOICES = [
+        (CLASSIFICATION_INCIDENT, 'Incident (เหตุการณ์จริง)'),
+        (CLASSIFICATION_EVENT,    'Event (ไม่เป็นภัย)'),
     ]
 
     # ------------------------------------------------------------------ #
     # State-machine: legal transitions                                    #
     # ------------------------------------------------------------------ #
     ALLOWED_TRANSITIONS = {
-        STATUS_NEW:                  [STATUS_AWAITING_CONTAINMENT],
-        STATUS_AWAITING_CONTAINMENT: [STATUS_CONTAINMENT_REPORTED],
-        STATUS_CONTAINMENT_REPORTED: [STATUS_UNDER_REVIEW],
-        STATUS_UNDER_REVIEW:         [STATUS_VERIFIED, STATUS_AWAITING_CONTAINMENT, STATUS_CLOSED_FP],
-        STATUS_VERIFIED:             [STATUS_APPROVED],
-        STATUS_APPROVED:             [],
-        STATUS_CLOSED_FP:            [],
+        STATUS_NEW: [
+            STATUS_AWAITING_CONTAINMENT,   # Incident → assign admin directly
+            STATUS_ESCALATED_T2,           # Incident → escalate to Tier 2
+            STATUS_CLOSED_EVENT,           # Event    → T1 closes
+        ],
+        STATUS_ESCALATED_T2: [
+            STATUS_T1_REVIEW,              # Incident → T2 returns to Tier 1
+            STATUS_CLOSED_EVENT,           # Event    → T2 closes
+        ],
+        STATUS_T1_REVIEW: [
+            STATUS_AWAITING_CONTAINMENT,   # T1 reviews → assign admin
+        ],
+        STATUS_AWAITING_CONTAINMENT: [
+            STATUS_CONTAINMENT_REPORTED,   # admin returns to T1
+        ],
+        STATUS_CONTAINMENT_REPORTED: [
+            STATUS_AWAITING_CONTAINMENT,   # not contained → back to admin (loop)
+            STATUS_PENDING_MANAGER,        # contained + needs manager verification
+            STATUS_APPROVED,               # contained + no manager needed → T1 closes
+        ],
+        STATUS_PENDING_MANAGER: [
+            STATUS_APPROVED,               # manager verifies → close
+        ],
+        STATUS_APPROVED:     [],
+        STATUS_CLOSED_EVENT: [],
     }
 
     # ------------------------------------------------------------------ #
-    # Permission map: (from, to) → required permission                   #
+    # Permission map: (from, to) → required permission token             #
+    #   TIER1_CREATOR — profile.is_tier1 AND user == created_by           #
+    #   TIER2         — profile.is_tier2                                   #
+    #   ASSIGNED_ADMIN— user == assigned_admin                            #
+    #   MANAGER       — profile.is_soc_manager                            #
     # ------------------------------------------------------------------ #
     TRANSITION_PERMISSIONS = {
-        (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'SOC',
+        (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
+        (STATUS_NEW,                  STATUS_ESCALATED_T2):         'TIER1_CREATOR',
+        (STATUS_NEW,                  STATUS_CLOSED_EVENT):         'TIER1_CREATOR',
+        (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
+        (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
+        (STATUS_T1_REVIEW,            STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
         (STATUS_AWAITING_CONTAINMENT, STATUS_CONTAINMENT_REPORTED): 'ASSIGNED_ADMIN',
-        (STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW):         'ASSIGNED_CREATOR',
-        (STATUS_UNDER_REVIEW,         STATUS_VERIFIED):             'ASSIGNED_CREATOR',
-        (STATUS_UNDER_REVIEW,         STATUS_AWAITING_CONTAINMENT): 'ASSIGNED_CREATOR',
-        (STATUS_UNDER_REVIEW,         STATUS_CLOSED_FP):            'ASSIGNED_CREATOR',
-        (STATUS_VERIFIED,             STATUS_APPROVED):             'MANAGER',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER1_CREATOR',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER1_CREATOR',
+        (STATUS_PENDING_MANAGER,      STATUS_APPROVED):             'MANAGER',
     }
 
-    # Statuses where review is gated to the ticket's original creator
-    # (the analyst who triaged the alert and opened the ticket) — see
-    # ASSIGNED_CREATOR permission below.
+    # Statuses on the Tier 1 side of the lifecycle that are gated to the
+    # ticket's original creator (same analyst who opened it). Used both by
+    # transition_to and the same-status note guard.
     CREATOR_REVIEW_STATUSES = frozenset({
-        STATUS_CONTAINMENT_REPORTED, STATUS_UNDER_REVIEW, STATUS_VERIFIED,
+        STATUS_T1_REVIEW, STATUS_CONTAINMENT_REPORTED,
+    })
+
+    # Edges that close a benign Event — require classification == EVENT.
+    EVENT_CLOSE_TRANSITIONS = frozenset({
+        (STATUS_NEW,          STATUS_CLOSED_EVENT),
+        (STATUS_ESCALATED_T2, STATUS_CLOSED_EVENT),
+    })
+
+    # Edges that commit to handling an Incident — require classification == INCIDENT.
+    INCIDENT_TRANSITIONS = frozenset({
+        (STATUS_NEW,          STATUS_AWAITING_CONTAINMENT),
+        (STATUS_NEW,          STATUS_ESCALATED_T2),
+        (STATUS_ESCALATED_T2, STATUS_T1_REVIEW),
     })
 
     # ------------------------------------------------------------------ #
@@ -109,6 +155,15 @@ class Ticket(models.Model):
         ('Medium',   'Medium'),
         ('Low',      'Low'),
     ]
+
+    # Ordered severity ranks for the manager-routing floor. Severities not in
+    # this map (e.g. unknown/blank) rank 0 and never meet the floor.
+    SEVERITY_RANK = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+
+    # Manager-verification floor (config constant). A ticket at or above this
+    # severity always routes to the SOC manager. Default Critical → High/Unknown
+    # reach the manager only via the emergency flag. Override in settings.
+    SEVERITY_FLOOR = 'Critical'
 
     ASSET_TYPE_CHOICES = [
         ('Computer',       'Computer'),
@@ -311,13 +366,26 @@ class Ticket(models.Model):
     status = models.CharField(
         max_length=30, choices=STATUS_CHOICES, default=STATUS_NEW,
     )
-    disposition = models.CharField(
-        max_length=20, choices=DISPOSITION_CHOICES, blank=True, default='',
-        verbose_name='การวินิจฉัยเหตุการณ์',
+    classification = models.CharField(
+        max_length=20, choices=CLASSIFICATION_CHOICES, blank=True, default='',
+        verbose_name='การจัดประเภท (Event/Incident)',
     )
     containment_report = models.TextField(
         blank=True, default='',
         verbose_name='รายงานการควบคุม',
+    )
+
+    # Set to True the first time a ticket enters ESCALATED_T2 and never cleared
+    # — the authoritative record of "this ticket was escalated to Tier 2 at some
+    # point", used to gate the Tier 1 emergency-flag permission.
+    escalated_to_t2_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='เวลาที่ส่งต่อ Tier 2 ครั้งแรก',
+    )
+
+    # Emergency marker — mutable at ANY lifecycle stage (see set_emergency /
+    # can_set_emergency). Feeds requires_manager_verification.
+    is_emergency = models.BooleanField(
+        default=False, verbose_name='เหตุฉุกเฉิน (Emergency)',
     )
 
     # ── System Owner ─────────────────────────────────────────────────── #
@@ -390,8 +458,35 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
 
     @property
-    def is_false_positive(self):
-        return self.disposition == self.DISP_FALSE_POSITIVE
+    def is_event(self):
+        """Benign Event (was False Positive) — the close-without-action path."""
+        return self.classification == self.CLASSIFICATION_EVENT
+
+    @property
+    def is_incident(self):
+        """Actionable Incident (was True Positive) — proceeds to containment."""
+        return self.classification == self.CLASSIFICATION_INCIDENT
+
+    @property
+    def was_escalated_to_t2(self):
+        """True if this ticket was escalated to Tier 2 at any point in its life."""
+        return self.escalated_to_t2_at is not None
+
+    @property
+    def requires_manager_verification(self):
+        """Single tunable rule deciding whether a contained ticket must be
+        verified by the SOC manager before it can close.
+
+        True when the severity is at or above ``SEVERITY_FLOOR`` (default
+        Critical, override via ``settings.SOC_SEVERITY_FLOOR``) OR the emergency
+        flag is set. No other auto-triggers.
+        """
+        floor = getattr(settings, 'SOC_SEVERITY_FLOOR', self.SEVERITY_FLOOR)
+        severity_meets_floor = (
+            self.SEVERITY_RANK.get(self.severity, 0)
+            >= self.SEVERITY_RANK.get(floor, 99)
+        )
+        return severity_meets_floor or self.is_emergency
 
     @property
     def is_sla_breached(self):
@@ -465,28 +560,33 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
 
     def can_transition_to(self, new_status):
-        """Return True if new_status is a legal next state (ignores permissions).
-        Exception: FP tickets can only transition to CLOSED_FP, nothing else.
+        """Return True if new_status is a legal next state for this ticket,
+        honoring the Event/Incident classification gate and the manager-routing
+        rule but ignoring per-user permissions.
         """
-        if self.is_false_positive and new_status != self.STATUS_CLOSED_FP:
+        edge = (self.status, new_status)
+        if new_status not in self.ALLOWED_TRANSITIONS.get(self.status, []):
             return False
-        return new_status in self.ALLOWED_TRANSITIONS.get(self.status, [])
+        if edge in self.EVENT_CLOSE_TRANSITIONS and not self.is_event:
+            return False
+        if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
+            return False
+        if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
+                and self.requires_manager_verification):
+            return False
+        if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
+                and not self.requires_manager_verification):
+            return False
+        return True
 
     def transition_to(self, new_status, user, note=''):
         status_map = dict(self.STATUS_CHOICES)
 
-        # ── 1. FP gate (allow CLOSED_FP transition through) ──────────── #
-        if self.is_false_positive and new_status != self.STATUS_CLOSED_FP:
-            raise ValidationError(
-                'Ticket นี้เป็น False Positive (เหตุการณ์ปลอม) '
-                'ใช้ "ปิด (False Positive)" เพื่อปิด Ticket'
-            )
-
-        # ── 2. Validate new_status is a known code ────────────────────── #
+        # ── 1. Validate new_status is a known code ────────────────────── #
         if new_status not in status_map:
             raise ValidationError(f"'{new_status}' ไม่ใช่สถานะที่ถูกต้อง")
 
-        # ── 3. Same-status = note-only update (SOC only, TP tickets) ──── #
+        # ── 2. Same-status = note-only update (SOC only; creator-gated) ─ #
         if new_status == self.status:
             profile = getattr(user, 'profile', None)
             if not user.is_superuser and (profile is None or not profile.is_soc):
@@ -507,7 +607,7 @@ class Ticket(models.Model):
             )
             return
 
-        # ── 4. Check legal transition ─────────────────────────────────── #
+        # ── 3. Check legal transition ─────────────────────────────────── #
         if new_status not in self.ALLOWED_TRANSITIONS.get(self.status, []):
             raise ValidationError(
                 f"ไม่สามารถเปลี่ยนสถานะจาก "
@@ -515,30 +615,55 @@ class Ticket(models.Model):
                 f"เป็น '{status_map.get(new_status, new_status)}' ได้"
             )
 
-        # ── 5. Check permission ───────────────────────────────────────── #
-        required_perm = self.TRANSITION_PERMISSIONS.get((self.status, new_status))
+        prev_status = self.status
+        edge = (prev_status, new_status)
+
+        # ── 4. Event/Incident classification gate ─────────────────────── #
+        if edge in self.EVENT_CLOSE_TRANSITIONS and not self.is_event:
+            raise ValidationError(
+                'ต้องจัดประเภทเป็น Event ก่อนจึงจะปิดแบบ Event ได้'
+            )
+        if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
+            raise ValidationError(
+                'ต้องจัดประเภทเป็น Incident ก่อนจึงจะส่งต่อ/ดำเนินการได้'
+            )
+
+        # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #
+        if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
+                and self.requires_manager_verification):
+            raise ValidationError(
+                'Ticket นี้ต้องผ่านการตรวจสอบจากผู้จัดการ SOC ก่อนปิด'
+            )
+        if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
+                and not self.requires_manager_verification):
+            raise ValidationError(
+                'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 1 ปิดได้ทันที'
+            )
+
+        # ── 6. Check permission ───────────────────────────────────────── #
+        required_perm = self.TRANSITION_PERMISSIONS.get(edge)
         profile = getattr(user, 'profile', None)
 
         if user.is_superuser:
             pass
-        elif required_perm == 'SOC':
-            if profile is None or not profile.is_soc:
+        elif required_perm == 'TIER1_CREATOR':
+            if profile is None or not profile.is_tier1:
                 raise ValidationError(
-                    'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้'
+                    'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถดำเนินการนี้ได้'
+                )
+            if user.pk != self.created_by_id:
+                raise ValidationError(
+                    'เฉพาะผู้เปิด Ticket นี้ (Tier 1) เท่านั้นที่สามารถดำเนินการต่อได้'
+                )
+        elif required_perm == 'TIER2':
+            if profile is None or not profile.is_tier2:
+                raise ValidationError(
+                    'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถดำเนินการนี้ได้'
                 )
         elif required_perm == 'MANAGER':
             if profile is None or not profile.is_soc_manager:
                 raise ValidationError(
                     'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถอนุมัติได้'
-                )
-        elif required_perm == 'ASSIGNED_CREATOR':
-            if profile is None or not profile.is_soc:
-                raise ValidationError(
-                    'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้'
-                )
-            if user.pk != self.created_by_id:
-                raise ValidationError(
-                    'เฉพาะผู้เปิด Ticket นี้เท่านั้นที่สามารถตรวจสอบและดำเนินการต่อได้'
                 )
         elif required_perm == 'ASSIGNED_ADMIN':
             if self.assigned_admin_id is None or user.pk != self.assigned_admin_id:
@@ -547,13 +672,25 @@ class Ticket(models.Model):
                     'ที่สามารถส่งรายงานการควบคุมได้'
                 )
 
-        # ── 6. Apply transition ───────────────────────────────────────── #
+        # ── 7. Apply transition ───────────────────────────────────────── #
         self.status = new_status
-
         now = timezone.now()
-        if new_status == self.STATUS_VERIFIED and self.verified_by_id is None:
+
+        # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
+        if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:
+            self.escalated_to_t2_at = now
+
+        # T1 verification sign-off (write-once): set when Tier 1 marks a
+        # contained ticket done — whether it routes to the manager or closes.
+        if (
+            prev_status == self.STATUS_CONTAINMENT_REPORTED
+            and new_status in (self.STATUS_PENDING_MANAGER, self.STATUS_APPROVED)
+            and self.verified_by_id is None
+        ):
             self.verified_by = user
             self.verified_at = now
+
+        # Final approval sign-off (write-once).
         if new_status == self.STATUS_APPROVED and self.approved_by_id is None:
             self.approved_by = user
             self.approved_at = now
@@ -561,6 +698,50 @@ class Ticket(models.Model):
         self.save()
         TicketLog.objects.create(
             ticket=self, note=note, status_at_time=new_status, author=user,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Emergency flag                                                      #
+    # ------------------------------------------------------------------ #
+
+    def can_set_emergency(self, user):
+        """Who may toggle ``is_emergency``.
+
+        Any authenticated role may set/clear it EXCEPT a Tier 1 analyst, who may
+        only do so on a ticket that was escalated to Tier 2 at some point
+        (``was_escalated_to_t2``). Superuser always may.
+        """
+        if user.is_superuser:
+            return True
+        profile = getattr(user, 'profile', None)
+        if profile is None:
+            return False
+        if profile.is_tier1:
+            return self.was_escalated_to_t2
+        return True
+
+    def set_emergency(self, value, user, note=''):
+        """Set/clear the emergency flag with permission check + audit log.
+
+        Mutable at ANY lifecycle stage (including terminal). Writes a TicketLog
+        recording who toggled it and the old→new value.
+        """
+        value = bool(value)
+        if not self.can_set_emergency(user):
+            raise ValidationError(
+                'คุณไม่มีสิทธิ์เปลี่ยนสถานะฉุกเฉินของ Ticket นี้'
+            )
+        if value == self.is_emergency:
+            return  # no-op — don't pollute the audit trail
+        old = self.is_emergency
+        self.is_emergency = value
+        self.save(update_fields=['is_emergency', 'updated_at'])
+        action = 'ตั้งค่า' if value else 'ยกเลิก'
+        audit = f'🚨 {action}สถานะฉุกเฉิน (Emergency: {old} → {value})'
+        if note:
+            audit = f'{audit} — {note}'
+        TicketLog.objects.create(
+            ticket=self, note=audit, status_at_time=self.status, author=user,
         )
 
 
@@ -789,7 +970,7 @@ class NotificationTemplate(models.Model):
         ],
         KEY_CONTAINMENT_SUBMITTED: [
             'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary',
-            'admin_name', 'disposition', 'containment_report',
+            'admin_name', 'classification', 'containment_report',
         ],
         KEY_OWNER_CREATED: [
             'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',

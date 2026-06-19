@@ -10,6 +10,29 @@ from .models import (
 
 
 class TicketForm(forms.ModelForm):
+    # ── Tier 1 disposition (set at creation) ─────────────────────────────── #
+    # The Event/Incident decision IS the disposition. Required — every ticket
+    # carries an explicit value; it is never derived.
+    ROUTE_ASSIGN_ADMIN = 'assign_admin'
+    ROUTE_ESCALATE_T2  = 'escalate_t2'
+    ROUTE_CHOICES = [
+        (ROUTE_ASSIGN_ADMIN, 'มอบหมายให้ผู้ดูแลระบบ (System Admin)'),
+        (ROUTE_ESCALATE_T2,  'ส่งต่อให้ Tier 2'),
+    ]
+
+    classification = forms.ChoiceField(
+        choices=Ticket.CLASSIFICATION_CHOICES,
+        required=True,
+        label='การจัดประเภท (Event/Incident)',
+        widget=forms.RadioSelect(attrs={'class': 'classification-radio'}),
+    )
+    t1_route = forms.ChoiceField(
+        choices=ROUTE_CHOICES,
+        required=False,
+        label='เมื่อเป็น Incident จะดำเนินการ',
+        widget=forms.RadioSelect(attrs={'class': 'route-radio'}),
+    )
+
     wazuh_alert = forms.ModelChoiceField(
         queryset=WazuhAlert.objects.none(),
         required=False,
@@ -43,6 +66,8 @@ class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
         fields = [
+            # Disposition (Event/Incident) — set by T1
+            'classification',
             # Section 1
             'wazuh_alert',
             'severity',
@@ -137,6 +162,23 @@ class TicketForm(forms.ModelForm):
             f"{u.profile.department} — {u.get_full_name() or u.username}"
             if hasattr(u, 'profile') else u.username
         )
+
+    def clean(self):
+        cleaned = super().clean()
+        classification = cleaned.get('classification')
+        route = cleaned.get('t1_route')
+
+        if classification == Ticket.CLASSIFICATION_INCIDENT:
+            # An Incident must choose a forward route at creation.
+            if route not in (self.ROUTE_ASSIGN_ADMIN, self.ROUTE_ESCALATE_T2):
+                self.add_error('t1_route', 'กรุณาเลือกการดำเนินการสำหรับ Incident')
+            elif route == self.ROUTE_ASSIGN_ADMIN and not cleaned.get('assigned_admin'):
+                self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+        elif classification == Ticket.CLASSIFICATION_EVENT:
+            # A benign Event is closed immediately — no route, no admin.
+            cleaned['t1_route'] = ''
+            cleaned['assigned_admin'] = None
+        return cleaned
 
 
 class TriageForm(forms.ModelForm):

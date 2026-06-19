@@ -55,6 +55,12 @@ def _has_soc_access(user):
     return user.is_superuser or (profile is not None and profile.is_soc)
 
 
+def _has_tier1_access(user):
+    """Triage (claim / create-ticket / release) is a Tier 1 activity."""
+    profile = getattr(user, 'profile', None)
+    return user.is_superuser or (profile is not None and profile.is_tier1)
+
+
 def _allowed_escalation_tiers(profile, user=None):
     """Return only tiers higher than the current analyst's tier."""
     if user is not None and user.is_superuser:
@@ -118,10 +124,9 @@ def claim_alert(request):
     if request.method != 'POST':
         return redirect('triage_queue')
 
-    profile = getattr(request.user, 'profile', None)
-    if not _has_soc_access(request.user):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
-        return redirect('ticket_list')
+    if not _has_tier1_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถรับ Alert มา Triage ได้')
+        return redirect('triage_queue')
 
     alert_id = request.POST.get('alert_id')
     updated = WazuhAlert.objects.filter(
@@ -146,26 +151,41 @@ def release_alert(request):
     if request.method != 'POST':
         return redirect('triage_queue')
 
-    profile = getattr(request.user, 'profile', None)
-    if not _has_soc_access(request.user):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
-        return redirect('ticket_list')
-
-    alert_id = request.POST.get('alert_id')
-    updated = WazuhAlert.objects.filter(
-        pk=alert_id,
-        triage_status=WazuhAlert.TRIAGE_TRIAGING,
-        claimed_by=request.user,
-    ).update(
-        triage_status=WazuhAlert.TRIAGE_PENDING,
-        claimed_by=None,
-        claimed_at=None,
-    )
-    if not updated:
-        messages.error(request, 'Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
+    if not _has_tier1_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถดำเนินการนี้ได้')
         return redirect('triage_queue')
 
-    messages.success(request, f'คืน Alert #{alert_id} กลับเข้า Queue แล้ว')
+    # A reason is REQUIRED when releasing a claimed alert back to the queue.
+    reason = request.POST.get('release_reason', '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการคืน Alert กลับเข้า Queue')
+        return redirect('triage_queue')
+
+    alert_id = request.POST.get('alert_id')
+    with transaction.atomic():
+        alert = (
+            WazuhAlert.objects.select_for_update()
+            .filter(
+                pk=alert_id,
+                triage_status=WazuhAlert.TRIAGE_TRIAGING,
+                claimed_by=request.user,
+            )
+            .first()
+        )
+        if alert is None:
+            messages.error(request, 'Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
+            return redirect('triage_queue')
+        alert.release_reason = reason
+        alert.triage_note = reason
+        alert.triage_status = WazuhAlert.TRIAGE_PENDING
+        alert.claimed_by = None
+        alert.claimed_at = None
+        alert.save(update_fields=[
+            'release_reason', 'triage_note', 'triage_status',
+            'claimed_by', 'claimed_at',
+        ])
+
+    messages.success(request, f'คืน Alert #{alert_id} กลับเข้า Queue พร้อมเหตุผลแล้ว')
     return redirect('triage_queue')
 
 
@@ -374,39 +394,37 @@ def reopen_alert(request):
 
 @login_required
 def triage_action(request):
+    """Tier 1 triage has exactly two actions after claiming an alert:
+    create a ticket (here) or release it back to the queue (release_alert).
+
+    The old triage-level Close (FP) and Escalate actions are gone — the
+    Event/Incident and escalation decisions now live on the ticket.
+    """
     if request.method != 'POST':
         return redirect('triage_queue')
 
-    profile = getattr(request.user, 'profile', None)
-    if not _has_soc_access(request.user):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถดำเนินการนี้ได้')
-        return redirect('ticket_list')
+    if not _has_tier1_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถดำเนินการนี้ได้')
+        return redirect('triage_queue')
 
     action = request.POST.get('action', '')
     note = request.POST.get('note', '').strip()
     category = request.POST.get('category', '').strip()
-    escalate_to = request.POST.get('escalate_to', '').strip()
-    source = request.POST.get('source', 'triage_queue')
-    redirect_to = 'escalation_queue' if source == 'escalation_queue' else 'triage_queue'
 
-    if action not in ('close_fp', 'create_ticket', 'escalate'):
-        messages.error(request, 'การดำเนินการไม่ถูกต้อง')
-        return redirect(redirect_to)
+    if action != 'create_ticket':
+        messages.error(
+            request,
+            'การดำเนินการไม่ถูกต้อง — Tier 1 สามารถสร้าง Ticket หรือคืน Alert เท่านั้น',
+        )
+        return redirect('triage_queue')
 
     if not note:
         messages.error(request, 'กรุณาระบุหมายเหตุประกอบการตัดสินใจ')
-        return redirect(redirect_to)
+        return redirect('triage_queue')
 
-    if action in ('create_ticket', 'escalate') and category not in CATEGORY_CHOICES:
+    if category not in CATEGORY_CHOICES:
         messages.error(request, 'กรุณาเลือกประเภทของเหตุการณ์ (Incident Category)')
-        return redirect(redirect_to)
-
-    allowed_escalation_tiers = dict(
-        _allowed_escalation_tiers(profile, request.user)
-    )
-    if action == 'escalate' and escalate_to not in allowed_escalation_tiers:
-        messages.error(request, 'สามารถ Escalate ได้เฉพาะ Tier ที่สูงกว่าปัจจุบันเท่านั้น')
-        return redirect(redirect_to)
+        return redirect('triage_queue')
 
     with transaction.atomic():
         alert = get_object_or_404(
@@ -417,55 +435,18 @@ def triage_action(request):
             alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
             and alert.claimed_by_id == request.user.id
         )
-        owns_escalation = (
-            alert.triage_status == WazuhAlert.TRIAGE_ESCALATED
-            and (
-                request.user.is_superuser
-                or alert.escalated_to_tier == _user_tier(profile)
-            )
-            and alert.claimed_by_id == request.user.id
-        )
-        if not (owns_triage or owns_escalation):
+        if not (owns_triage or (
+            request.user.is_superuser
+            and alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
+        )):
             messages.error(request, f'Alert #{alert.pk} ไม่ได้อยู่ในความรับผิดชอบของคุณ หรือถูกดำเนินการไปแล้ว')
-            return redirect(redirect_to)
+            return redirect('triage_queue')
 
+        # Keep the alert claimed and in TRIAGING until the Ticket is saved —
+        # a cancelled ticket form must not lose the claim.
         alert.triage_note = note
         if category:
             alert.incident_category = category
-
-        if action == 'close_fp':
-            alert.triage_status = WazuhAlert.TRIAGE_FALSE_POSITIVE
-            alert.triaged_by = request.user
-            alert.triaged_at = timezone.now()
-            alert.escalated_to_tier = None
-            alert.claimed_by = None
-            alert.claimed_at = None
-            alert.save(update_fields=[
-                'triage_status', 'triaged_by', 'triaged_at', 'triage_note',
-                'incident_category', 'escalated_to_tier', 'claimed_by', 'claimed_at',
-            ])
-            messages.success(request, f'Alert #{alert.pk} ถูกปิดเป็น False Positive แล้ว')
-            return redirect(redirect_to)
-
-        if action == 'escalate':
-            alert.triage_status = WazuhAlert.TRIAGE_ESCALATED
-            alert.triaged_by = request.user
-            alert.triaged_at = timezone.now()
-            alert.escalated_to_tier = escalate_to
-            alert.claimed_by = None
-            alert.claimed_at = None
-            alert.save(update_fields=[
-                'triage_status', 'triaged_by', 'triaged_at', 'triage_note',
-                'incident_category', 'escalated_to_tier', 'claimed_by', 'claimed_at',
-            ])
-            messages.success(
-                request,
-                f'Alert #{alert.pk} ถูก Escalate ไปยัง {alert.get_escalated_to_tier_display()} แล้ว',
-            )
-            return redirect(redirect_to)
-
-        # Keep the alert assigned and in its current queue until the Ticket
-        # is successfully saved. This prevents a cancelled form from losing it.
         alert.save(update_fields=['triage_note', 'incident_category'])
 
     params = {

@@ -34,7 +34,31 @@ from .notifications import (
 
 # ── Private helpers ──────────────────────────────────────────────────── #
 
+def _user_can_drive(ticket, user, perm):
+    """Whether ``user`` satisfies a SOC-side transition permission token.
+
+    Only the SOC-driven tokens are considered here (the ASSIGNED_ADMIN step is
+    handled by the dedicated containment form, not the status dropdown).
+    """
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    if profile is None:
+        return False
+    if perm == 'TIER1_CREATOR':
+        return profile.is_tier1 and user.pk == ticket.created_by_id
+    if perm == 'TIER2':
+        return profile.is_tier2
+    if perm == 'MANAGER':
+        return profile.is_soc_manager
+    return False
+
+
 def _valid_soc_status_choices(ticket, user):
+    """Status options to offer this user in the detail-page dropdown, honoring
+    the state machine, the Event/Incident + manager-routing gates, and the
+    per-user transition permission.
+    """
     profile = getattr(user, 'profile', None)
     if not user.is_superuser and (profile is None or not profile.is_soc):
         return []
@@ -51,16 +75,12 @@ def _valid_soc_status_choices(ticket, user):
         result.append((ticket.status, status_map.get(ticket.status, ticket.status)))
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
+        if not ticket.can_transition_to(next_status):
+            continue  # blocked by classification or manager-routing gate
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
-        if user.is_superuser:
-            result.append((next_status, status_map.get(next_status, next_status)))
-        elif perm == 'SOC':
-            result.append((next_status, status_map.get(next_status, next_status)))
-        elif perm == 'ASSIGNED_CREATOR' and user.pk == ticket.created_by_id:
-            result.append((next_status, status_map.get(next_status, next_status)))
-        elif perm == 'MANAGER' and (
-            user.is_superuser or (profile and profile.is_soc_manager)
-        ):
+        if perm == 'ASSIGNED_ADMIN':
+            continue  # admin uses the containment form, not this dropdown
+        if _user_can_drive(ticket, user, perm):
             result.append((next_status, status_map.get(next_status, next_status)))
 
     return result
@@ -184,8 +204,9 @@ def ticket_list(request):
 @login_required
 def create_ticket(request):
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (profile is None or not profile.is_soc):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเปิดเคสใหม่ได้')
+    # Tickets are always created by Tier 1 — no other role may open a case.
+    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเปิดเคสใหม่ได้')
         return redirect('ticket_list')
 
     # Pre-fill from triage if coming from a TP triage decision
@@ -229,14 +250,24 @@ def create_ticket(request):
 
                     ticket.save()
 
-                    # Triage was already done at creation — if an admin was
-                    # assigned, route straight to AWAITING_CONTAINMENT
-                    # instead of leaving the ticket parked at NEW.
-                    if ticket.assigned_admin_id:
+                    # T1 disposition is part of the create flow: the
+                    # Event/Incident classification (set on the ticket by the
+                    # form) plus the chosen route decide where the ticket goes.
+                    route = form.cleaned_data.get('t1_route')
+                    if ticket.classification == Ticket.CLASSIFICATION_EVENT:
                         ticket.transition_to(
-                            Ticket.STATUS_AWAITING_CONTAINMENT,
-                            request.user,
-                            'เปิด Ticket และส่งต่อให้ผู้ดูแลระบบโดยอัตโนมัติ',
+                            Ticket.STATUS_CLOSED_EVENT, request.user,
+                            'จัดประเภทเป็น Event — ปิด Ticket',
+                        )
+                    elif route == TicketForm.ROUTE_ESCALATE_T2:
+                        ticket.transition_to(
+                            Ticket.STATUS_ESCALATED_T2, request.user,
+                            'จัดประเภทเป็น Incident — ส่งต่อให้ Tier 2',
+                        )
+                    elif route == TicketForm.ROUTE_ASSIGN_ADMIN:
+                        ticket.transition_to(
+                            Ticket.STATUS_AWAITING_CONTAINMENT, request.user,
+                            'จัดประเภทเป็น Incident — มอบหมายให้ผู้ดูแลระบบ',
                         )
 
                     if locked_triage:
@@ -322,21 +353,34 @@ def ticket_detail(request, pk):
     if request.method == 'POST':
         action = request.POST.get('action')
 
-        if action == 'containment':
+        if action == 'toggle_emergency':
+            value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
+            note = request.POST.get('emergency_note', '').strip()
+            try:
+                ticket.set_emergency(value, request.user, note)
+                state = 'เปิด' if value else 'ปิด'
+                messages.success(request, f'{state}สถานะฉุกเฉิน (Emergency) เรียบร้อยแล้ว')
+            except ValidationError as e:
+                messages.error(request, e.message)
+
+        elif action == 'containment':
             if not can_submit_containment:
                 messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
             else:
+                # The System Admin writes the countermeasure (containment_report)
+                # and investigation-findings (remediation_summary) fields, then
+                # returns the ticket to Tier 1. Classification is NOT set here —
+                # it is Tier 1's (or Tier 2's) decision.
                 report = request.POST.get('containment_report', '').strip()
-                disposition = request.POST.get('disposition', '').strip()
+                remediation = request.POST.get('remediation_summary', '').strip()
                 note = request.POST.get('note', '').strip()
 
                 if not report:
                     messages.error(request, 'กรุณากรอกรายงานการควบคุม')
-                elif not disposition:
-                    messages.error(request, 'กรุณาระบุการวินิจฉัยเหตุการณ์ (True/False Positive)')
                 else:
-                    ticket.disposition = disposition
                     ticket.containment_report = report
+                    if remediation:
+                        ticket.remediation_summary = remediation
                     try:
                         ticket.transition_to(
                             Ticket.STATUS_CONTAINMENT_REPORTED,
@@ -362,13 +406,20 @@ def ticket_detail(request, pk):
                 try:
                     ticket.transition_to(new_status, request.user, new_note)
 
-                    # Notify Security Admin when routed to AWAITING_CONTAINMENT
+                    # Notify Security Admin when routed to AWAITING_CONTAINMENT.
+                    # The rejection-loop note (CONTAINMENT_REPORTED → AC) tells
+                    # the admin what to fix; the first assignment has no reason.
                     if new_status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                        reason = new_note if prev_status == Ticket.STATUS_UNDER_REVIEW else None
+                        reason = (
+                            new_note
+                            if prev_status == Ticket.STATUS_CONTAINMENT_REPORTED
+                            else None
+                        )
                         _notify_containment(ticket, reason, request)
 
-                    # Stage 11 — notify System Owner on closure
-                    if new_status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_FP):
+                    # Notify System Owner on closure (incident approved or
+                    # benign Event closed).
+                    if new_status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
                         _notify_owner_closed(ticket, request)
 
                 except ValidationError as e:
@@ -395,7 +446,8 @@ def ticket_detail(request, pk):
         'is_terminal': is_terminal,
         'can_submit_containment': can_submit_containment,
         'valid_status_choices': valid_status_choices,
-        'DISPOSITION_CHOICES': Ticket.DISPOSITION_CHOICES,
+        'can_set_emergency': ticket.can_set_emergency(request.user),
+        'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
         'subtasks': subtasks,
         'subtask_form': subtask_form,
         'subtask_update_form': subtask_update_form,
@@ -462,7 +514,7 @@ def ticket_history(request):
     if search_ticket:
         query_set = query_set.filter(ticket_id__icontains=search_ticket)
 
-    if status_filter in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_FP):
+    if status_filter in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
         query_set = query_set.filter(status=status_filter)
 
     if severity_filter:
@@ -498,7 +550,7 @@ def ticket_history(request):
         'all_time': all_time,
         'severity_choices': Ticket.SEVERITY_CHOICES,
         'approved_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_APPROVED).count(),
-        'fp_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_FP).count(),
+        'fp_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_EVENT).count(),
     })
 
 

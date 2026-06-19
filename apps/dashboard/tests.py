@@ -39,7 +39,7 @@ def _make_user(username, role, email=''):
 def _make_ticket(
     status=Ticket.STATUS_NEW,
     sla_offset_hours=None,
-    disposition='',
+    classification='',
 ):
     """
     Create a Ticket directly (bypassing the state machine).
@@ -53,7 +53,7 @@ def _make_ticket(
         'ip_address':       '10.0.0.1',
         'issue_description': 'Test incident',
         'status':           status,
-        'disposition':      disposition,
+        'classification':   classification,
     }
     if sla_offset_hours is not None:
         kwargs['sla_deadline'] = timezone.now() + timedelta(hours=sla_offset_hours)
@@ -141,9 +141,9 @@ class DashboardSLABreachTest(TestCase):
         _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
         self.assertEqual(self._get_sla_count(), 0)
 
-    def test_overdue_closed_fp_ticket_not_counted(self):
-        """CLOSED_FP is also a terminal state — must not appear in SLA breach count."""
-        _make_ticket(status=Ticket.STATUS_CLOSED_FP, sla_offset_hours=-1)
+    def test_overdue_closed_event_ticket_not_counted(self):
+        """CLOSED_EVENT is also a terminal state — must not appear in SLA breach count."""
+        _make_ticket(status=Ticket.STATUS_CLOSED_EVENT, sla_offset_hours=-1)
         self.assertEqual(self._get_sla_count(), 0)
 
     def test_not_yet_due_active_ticket_not_counted(self):
@@ -178,12 +178,12 @@ class DashboardMetricsTest(TestCase):
     # ── active / closed split ──────────────────────────────────────────── #
 
     def test_active_vs_closed_split(self):
-        """active = non-terminal; closed = APPROVED + CLOSED_FP."""
+        """active = non-terminal; closed = APPROVED + CLOSED_EVENT."""
         _make_ticket(status=Ticket.STATUS_NEW)                  # active
         _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT) # active
-        _make_ticket(status=Ticket.STATUS_UNDER_REVIEW)         # active
+        _make_ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED) # active
         _make_ticket(status=Ticket.STATUS_APPROVED)             # closed (terminal)
-        _make_ticket(status=Ticket.STATUS_CLOSED_FP)            # closed (terminal)
+        _make_ticket(status=Ticket.STATUS_CLOSED_EVENT)         # closed (terminal)
 
         s = self._stats()
         self.assertEqual(s['active'], 3)
@@ -192,20 +192,20 @@ class DashboardMetricsTest(TestCase):
 
     def test_all_active_no_closed(self):
         _make_ticket(status=Ticket.STATUS_NEW)
-        _make_ticket(status=Ticket.STATUS_VERIFIED)
+        _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
         s = self._stats()
         self.assertEqual(s['active'], 2)
         self.assertEqual(s['closed'], 0)
         self.assertEqual(s['total'],  2)
 
-    # ── FP/TP counts and percentages ───────────────────────────────────── #
+    # ── Event/Incident counts and percentages ──────────────────────────── #
 
-    def test_tp_fp_counts_and_percentages(self):
-        """2 TP + 1 FP → tp_pct=67, fp_pct=33."""
-        _make_ticket(disposition=Ticket.DISP_TRUE_POSITIVE,  status=Ticket.STATUS_APPROVED)
-        _make_ticket(disposition=Ticket.DISP_TRUE_POSITIVE,  status=Ticket.STATUS_APPROVED)
-        _make_ticket(disposition=Ticket.DISP_FALSE_POSITIVE, status=Ticket.STATUS_CLOSED_FP)
-        _make_ticket(status=Ticket.STATUS_NEW)  # no disposition — not counted in ratio
+    def test_incident_event_counts_and_percentages(self):
+        """2 Incident + 1 Event → tp_pct=67 (Incident), fp_pct=33 (Event)."""
+        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
+        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
+        _make_ticket(classification=Ticket.CLASSIFICATION_EVENT,    status=Ticket.STATUS_CLOSED_EVENT)
+        _make_ticket(status=Ticket.STATUS_NEW)  # unclassified — not counted in ratio
 
         s = self._stats()
         self.assertEqual(s['tp_count'], 2)
@@ -213,8 +213,8 @@ class DashboardMetricsTest(TestCase):
         self.assertEqual(s['tp_pct'],  67)
         self.assertEqual(s['fp_pct'],  33)
 
-    def test_tp_fp_zero_when_no_dispositions(self):
-        """No tickets with a disposition → all zeros; no ZeroDivisionError."""
+    def test_counts_zero_when_no_classifications(self):
+        """No closed/classified tickets → all zeros; no ZeroDivisionError."""
         _make_ticket(status=Ticket.STATUS_NEW)
         s = self._stats()
         self.assertEqual(s['tp_count'], 0)
@@ -222,9 +222,9 @@ class DashboardMetricsTest(TestCase):
         self.assertEqual(s['tp_pct'],  0)
         self.assertEqual(s['fp_pct'],  0)
 
-    def test_all_true_positive(self):
-        """100% TP: fp_count=0, tp_pct=100, fp_pct=0."""
-        _make_ticket(disposition=Ticket.DISP_TRUE_POSITIVE, status=Ticket.STATUS_APPROVED)
+    def test_all_incident(self):
+        """100% Incident: fp_count=0, tp_pct=100, fp_pct=0."""
+        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
         s = self._stats()
         self.assertEqual(s['tp_count'], 1)
         self.assertEqual(s['fp_count'], 0)
@@ -236,14 +236,14 @@ class DashboardMetricsTest(TestCase):
     def test_actionable_backlog_correct(self):
         """
         awaiting_admin   = AWAITING_CONTAINMENT count
-        awaiting_soc     = CONTAINMENT_REPORTED + UNDER_REVIEW
-        awaiting_manager = VERIFIED
+        awaiting_soc     = CONTAINMENT_REPORTED + T1_REVIEW + ESCALATED_T2
+        awaiting_manager = PENDING_MANAGER
         """
         _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)  # → admin (×2)
         _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
         _make_ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)  # → soc (×1)
-        _make_ticket(status=Ticket.STATUS_UNDER_REVIEW)          # → soc (×1)
-        _make_ticket(status=Ticket.STATUS_VERIFIED)              # → manager (×1)
+        _make_ticket(status=Ticket.STATUS_T1_REVIEW)             # → soc (×1)
+        _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)       # → manager (×1)
         _make_ticket(status=Ticket.STATUS_NEW)                   # counted nowhere
 
         s = self._stats()

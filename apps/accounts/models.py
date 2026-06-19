@@ -55,5 +55,19 @@ class UserProfile(models.Model):
         """True for both SOC staff and SOC managers."""
         return self.role in (self.ROLE_SOC_STAFF, self.ROLE_SOC_MANAGER)
 
+    @property
+    def is_tier1(self):
+        """SOC staff at Tier 1 — opens tickets, classifies, reviews, verifies.
+
+        Under the redesigned workflow ``tier`` carries permission weight: only a
+        Tier 1 analyst may create tickets and drive the T1 side of the lifecycle.
+        """
+        return self.is_soc_staff and self.tier == self.TIER_T1
+
+    @property
+    def is_tier2(self):
+        """SOC staff at Tier 2 — handles escalated tickets (return-to-T1 / close only)."""
+        return self.is_soc_staff and self.tier == self.TIER_T2
+
     def __str__(self):
         return f"Profile of {self.user.username}"

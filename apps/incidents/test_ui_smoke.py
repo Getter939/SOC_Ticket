@@ -17,8 +17,8 @@ from apps.incidents.tests import _make_user, _make_ticket
 class UiSmokeTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.soc_staff   = _make_user('ui_soc',     UserProfile.ROLE_SOC_STAFF)
-        cls.soc_staff2  = _make_user('ui_soc2',    UserProfile.ROLE_SOC_STAFF)
+        cls.soc_staff   = _make_user('ui_soc',     UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        cls.soc_staff2  = _make_user('ui_soc2',    UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
         cls.soc_manager = _make_user('ui_manager', UserProfile.ROLE_SOC_MANAGER)
         cls.admin       = _make_user('ui_admin',   UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -26,6 +26,7 @@ class UiSmokeTest(TestCase):
             severity='Critical',
             assigned_admin=cls.admin,
             created_by=cls.soc_staff,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
         )
         cls.log = TicketLog.objects.create(
             ticket=cls.ticket, note='first note',

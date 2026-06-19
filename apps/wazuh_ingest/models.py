@@ -84,6 +84,9 @@ class WazuhAlert(models.Model):
     )
     triaged_at = models.DateTimeField(null=True, blank=True)
     triage_note = models.TextField(blank=True, default='')
+    # Reason captured when a Tier 1 analyst releases a claimed alert back to the
+    # queue (required by release_alert). Holds the most recent release reason.
+    release_reason = models.TextField(blank=True, default='')
     escalated_to_tier = models.CharField(
         max_length=10, choices=TIER_CHOICES, null=True, blank=True,
     )

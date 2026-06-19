@@ -167,17 +167,17 @@ def notify_containment_submitted(ticket):
 
     admin = ticket.assigned_admin
     admin_name = (admin.get_full_name() or admin.username) if admin else '-'
-    disposition = ticket.get_disposition_display() if ticket.disposition else '-'
+    classification = ticket.get_classification_display() if ticket.classification else '-'
 
     default_subject = '[{ticket_id}] Containment report submitted — review required'
     default_body = (
         'The assigned admin has submitted a containment report for ticket {ticket_id}.\n'
         '\n'
-        '  Ticket ID    : {ticket_id}\n'
-        '  Category     : {category} / {issue_type}\n'
-        '  Summary      : {summary}\n'
-        '  Submitted by : {admin_name}\n'
-        '  Disposition  : {disposition}\n'
+        '  Ticket ID      : {ticket_id}\n'
+        '  Category       : {category} / {issue_type}\n'
+        '  Summary        : {summary}\n'
+        '  Submitted by   : {admin_name}\n'
+        '  Classification : {classification}\n'
         '\n'
         'Containment report:\n'
         '{containment_report}\n'
@@ -197,7 +197,7 @@ def notify_containment_submitted(ticket):
         'issue_type': ticket.get_issue_type_display(),
         'summary': summary,
         'admin_name': admin_name,
-        'disposition': disposition,
+        'classification': classification,
         'containment_report': ticket.containment_report,
     }
 
@@ -274,11 +274,11 @@ def notify_system_owner_closed(ticket, attachments=None):
     owner = ticket.system_owner
     owner_name = owner.get_full_name() or owner.username
     dept = getattr(getattr(owner, 'profile', None), 'department', '')
-    is_fp = ticket.status == ticket.STATUS_CLOSED_FP
+    is_event = ticket.status == ticket.STATUS_CLOSED_EVENT
 
-    if is_fp:
+    if is_event:
         outcome = (
-            'ผลการตรวจสอบ: เหตุการณ์ดังกล่าวได้รับการวินิจฉัยว่าเป็น False Positive\n'
+            'ผลการตรวจสอบ: เหตุการณ์ดังกล่าวได้รับการวินิจฉัยว่าเป็น Event\n'
             '(ไม่ใช่ภัยคุกคามจริง) และปิดเคสเรียบร้อยแล้ว'
         )
     else:
