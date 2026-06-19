@@ -1164,3 +1164,112 @@ class AttachmentUploadLimitTest(TestCase):
             files={'file': SimpleUploadedFile('small.txt', b'hello', content_type='text/plain')},
         )
         self.assertTrue(form.is_valid(), msg=form.errors)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 17. 'Unknown' severity (additive, human-assigned)                            #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class UnknownSeverityTest(TestCase):
+    """
+    'Unknown' is a human-assigned severity for cases the analyst cannot yet
+    classify. It is selectable in the manual create + manual triage forms,
+    absent from the automated Wazuh mapping, ranks lowest (never meets the
+    manager floor on its own), and renders a distinct badge.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1    = _make_t1('uk_t1')
+        cls.mgr   = _make_user('uk_mgr',   UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('uk_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    # ── Model / choices ─────────────────────────────────────────────────── #
+    def test_unknown_is_a_model_choice(self):
+        self.assertIn(('Unknown', 'Unknown'), Ticket.SEVERITY_CHOICES)
+
+    def test_unknown_ranks_lowest(self):
+        ranks = Ticket.SEVERITY_RANK
+        self.assertEqual(ranks['Unknown'], 0)
+        self.assertLess(ranks['Unknown'], min(
+            ranks['Low'], ranks['Medium'], ranks['High'], ranks['Critical']
+        ))
+
+    # ── Availability: manual create + manual triage forms ───────────────── #
+    def test_unknown_selectable_on_manual_create_form(self):
+        values = [v for v, _ in TicketForm().fields['severity'].choices]
+        self.assertIn('Unknown', values)
+
+    def test_unknown_selectable_on_manual_triage_create_form(self):
+        # A ticket opened from a manual TriageRecord uses the same TicketForm,
+        # so 'Unknown' must be offered there too.
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Caller reported odd activity, severity unclear.',
+            decision=TriageRecord.DECISION_TP, notes='Cannot yet classify.',
+        )
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'), {'triage_id': triage.pk})
+        self.assertEqual(response.status_code, 200)
+        values = [v for v, _ in response.context['form'].fields['severity'].choices]
+        self.assertIn('Unknown', values)
+
+    def test_unknown_accepted_when_creating_ticket(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            severity='Unknown',
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=TicketForm.ROUTE_ESCALATE_T2,
+        ))
+        self.assertEqual(response.status_code, 302)
+        ticket = Ticket.objects.get(device_name='TEST-ENDPOINT-01')
+        self.assertEqual(ticket.severity, 'Unknown')
+
+    # ── Availability: NOT in automated Wazuh ingest mapping ─────────────── #
+    def test_unknown_absent_from_wazuh_severity_mapping(self):
+        from apps.wazuh_ingest.views import _severity_for_rule_level
+        mapped = {_severity_for_rule_level(level) for level in range(0, 20)}
+        self.assertNotIn('Unknown', mapped)
+        self.assertTrue(mapped <= {'Critical', 'High', 'Medium', 'Low'})
+
+    # ── Routing: emergency flag is the only path to the manager ─────────── #
+    def _contained(self, is_emergency=False):
+        return _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            assigned_admin=self.admin, status=Ticket.STATUS_CONTAINMENT_REPORTED,
+            severity='Unknown', is_emergency=is_emergency, containment_report='done',
+        )
+
+    def test_unknown_without_emergency_does_not_require_manager(self):
+        self.assertFalse(self._contained().requires_manager_verification)
+
+    def test_unknown_without_emergency_t1_closes_directly(self):
+        t = self._contained()
+        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'closed — no manager needed')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+
+    def test_unknown_without_emergency_cannot_route_to_manager(self):
+        t = self._contained()
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no need')
+
+    def test_unknown_with_emergency_requires_manager(self):
+        self.assertTrue(self._contained(is_emergency=True).requires_manager_verification)
+
+    def test_unknown_with_emergency_routes_to_manager(self):
+        t = self._contained(is_emergency=True)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'blocked by emergency')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'route to manager')
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+
+    # ── Display: distinct badge ─────────────────────────────────────────── #
+    def test_unknown_badge_renders_distinctly(self):
+        from django.template.loader import render_to_string
+        html = render_to_string('incidents/_severity_badge.html', {'severity': 'Unknown'})
+        self.assertIn('Unknown', html)
+        self.assertIn('#6f42c1', html)  # distinct colour, not reused by any severity
+        # Sanity: the Unknown badge must not borrow an existing severity colour.
+        for other_colour in ('bg-danger', '#fd7e14', 'bg-warning', 'bg-success'):
+            self.assertNotIn(other_colour, html)

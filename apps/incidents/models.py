@@ -154,11 +154,17 @@ class Ticket(models.Model):
         ('High',     'High'),
         ('Medium',   'Medium'),
         ('Low',      'Low'),
+        # Unknown = analyst cannot yet classify severity. It is unclassified,
+        # NOT low-risk, so it sits below Low only for queue ordering — it never
+        # auto-routes to the manager (rank 0 < floor) and reaches the manager
+        # solely via the emergency flag. Human-assigned only (not Wazuh ingest).
+        ('Unknown',  'Unknown'),
     ]
 
-    # Ordered severity ranks for the manager-routing floor. Severities not in
-    # this map (e.g. unknown/blank) rank 0 and never meet the floor.
-    SEVERITY_RANK = {'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+    # Ordered severity ranks for the manager-routing floor and queue ordering.
+    # Unknown ranks 0 (lowest) so it sorts last and never meets the floor.
+    # Severities not in this map (e.g. blank) also rank 0.
+    SEVERITY_RANK = {'Unknown': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
 
     # Manager-verification floor (config constant). A ticket at or above this
     # severity always routes to the SOC manager. Default Critical → High/Unknown
