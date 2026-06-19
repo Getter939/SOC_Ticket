@@ -55,7 +55,7 @@ def dashboard(request):
                                 ]
                             ).count(),
         'awaiting_manager': active_qs.filter(status=Ticket.STATUS_PENDING_MANAGER).count(),
-        # FP / TP
+        # Event / Incident
         'tp_count': tp_count,
         'fp_count': fp_count,
         'tp_pct':   tp_pct,
@@ -72,9 +72,9 @@ def dashboard(request):
     status_labels = [status_map[s] for s in status_order]
     status_data   = [counts_by_status.get(s, 0) for s in status_order]
 
-    # ── FP / TP doughnut ─────────────────────────────────────────────────── #
-    fp_tp_labels = ['True Positive', 'False Positive']
-    fp_tp_data   = [tp_count, fp_count]
+    # Event / Incident doughnut
+    classification_labels = ['Incident', 'Event']
+    classification_data   = [tp_count, fp_count]
 
     # ── By Type bar chart ─────────────────────────────────────────────────── #
     by_type = list(
@@ -109,8 +109,8 @@ def dashboard(request):
         'stats':               stats,
         'status_labels':       status_labels,
         'status_data':         status_data,
-        'fp_tp_labels':        fp_tp_labels,
-        'fp_tp_data':          fp_tp_data,
+        'classification_labels': classification_labels,
+        'classification_data': classification_data,
         'by_type_labels':      by_type_labels,
         'by_type_data':        by_type_data,
         'by_category_labels':  by_category_labels,

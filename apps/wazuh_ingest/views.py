@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
+from apps.incidents.models import Ticket
 from .models import WazuhAlert
 
 ESCALATE_TIER_CHOICES = dict(WazuhAlert.TIER_CHOICES)
@@ -78,8 +79,8 @@ def _allowed_escalation_tiers(profile, user=None):
 @login_required
 def triage_queue(request):
     profile = getattr(request.user, 'profile', None)
-    if not _has_soc_access(request.user):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเข้าถึง Triage Queue ได้')
+    if not _has_tier1_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเข้าถึง Triage Queue ได้')
         return redirect('ticket_list')
 
     queue = WazuhAlert.objects.filter(
@@ -191,94 +192,50 @@ def release_alert(request):
 
 @login_required
 def claim_escalation(request):
-    if request.method != 'POST':
-        return redirect('escalation_queue')
-
-    profile = getattr(request.user, 'profile', None)
-    tier = _user_tier(profile) if profile and profile.is_soc else None
-    if not request.user.is_superuser and tier is None:
-        messages.error(request, 'บัญชีของคุณไม่มีสิทธิ์รับงานจาก Escalation Queue')
-        return redirect('ticket_list')
-
-    alert_id = request.POST.get('alert_id')
-    claimable = WazuhAlert.objects.filter(
-        pk=alert_id,
-        triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        claimed_by__isnull=True,
-    )
-    if not request.user.is_superuser:
-        claimable = claimable.filter(escalated_to_tier=tier)
-    updated = claimable.update(claimed_by=request.user, claimed_at=timezone.now())
-    if not updated:
-        messages.error(request, 'Alert นี้ถูกเจ้าหน้าที่คนอื่นรับไปแล้ว หรือไม่อยู่ใน Queue ของ Tier คุณ')
-        return redirect('escalation_queue')
-
-    messages.success(request, f'คุณรับ Escalated Alert #{alert_id} แล้ว')
+    messages.info(request, 'Ticket escalation does not require a separate claim.')
     return redirect('escalation_queue')
 
 
 @login_required
 def release_escalation(request):
-    if request.method != 'POST':
-        return redirect('escalation_queue')
-
-    profile = getattr(request.user, 'profile', None)
-    tier = _user_tier(profile) if profile and profile.is_soc else None
-    if not request.user.is_superuser and tier is None:
-        messages.error(request, 'บัญชีของคุณไม่มีสิทธิ์ดำเนินการนี้')
-        return redirect('ticket_list')
-
-    alert_id = request.POST.get('alert_id')
-    releasable = WazuhAlert.objects.filter(
-        pk=alert_id,
-        triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        claimed_by=request.user,
-    )
-    if not request.user.is_superuser:
-        releasable = releasable.filter(escalated_to_tier=tier)
-    updated = releasable.update(claimed_by=None, claimed_at=None)
-    if not updated:
-        messages.error(request, 'Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
-        return redirect('escalation_queue')
-
-    messages.success(request, f'คืน Escalated Alert #{alert_id} กลับเข้า Queue แล้ว')
+    messages.info(request, 'Ticket escalation does not use release actions.')
     return redirect('escalation_queue')
 
 
 @login_required
 def escalation_queue(request):
     profile = getattr(request.user, 'profile', None)
-    if not _has_soc_access(request.user):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถเข้าถึง Escalation Queue ได้')
+    if not request.user.is_superuser and (profile is None or not profile.is_tier2):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถเข้าถึง Escalation Queue ได้')
         return redirect('ticket_list')
 
-    tier = _user_tier(profile) if profile else None
-    if request.user.is_superuser:
-        alerts_qs = WazuhAlert.objects.filter(
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        )
-        tier_label = 'All tiers'
-    elif tier is None:
-        alerts_qs = WazuhAlert.objects.none()
-        tier_label = None
+    emergency_filter = request.GET.get('emergency', '').strip()
+    sort = request.GET.get('sort', 'emergency').strip()
+    tickets_qs = Ticket.objects.filter(status=Ticket.STATUS_ESCALATED_T2).select_related(
+        'created_by', 'assigned_admin',
+    )
+    if emergency_filter in ('1', '0'):
+        tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')
     else:
-        alerts_qs = WazuhAlert.objects.filter(
-            triage_status=WazuhAlert.TRIAGE_ESCALATED, escalated_to_tier=tier,
-        )
-        tier_label = tier
+        emergency_filter = ''
+    sort_map = {
+        'emergency': ('-is_emergency', '-escalated_to_t2_at'),
+        'newest': ('-escalated_to_t2_at',),
+        'severity': ('severity', '-escalated_to_t2_at'),
+    }
+    if sort not in sort_map:
+        sort = 'emergency'
+    tickets_qs = tickets_qs.order_by(*sort_map[sort])
 
-    alerts_qs = alerts_qs.select_related('triaged_by', 'claimed_by').order_by('-rule_level', 'timestamp')
-
-    paginator = Paginator(alerts_qs, 25)
+    paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
     return render(request, 'wazuh_ingest/escalation_queue.html', {
         'page_obj': page_obj,
-        'alerts': page_obj,
-        'escalated_count': alerts_qs.count(),
-        'tier': tier_label,
-        'tier_choices': _allowed_escalation_tiers(profile, request.user),
-        'category_choices': WazuhAlert.CATEGORY_CHOICES,
+        'tickets': page_obj,
+        'escalated_count': tickets_qs.count(),
+        'emergency_filter': emergency_filter,
+        'sort': sort,
     })
 
 
@@ -337,7 +294,7 @@ def triage_history(request):
         .order_by('first_name', 'username')
     )
 
-    # For closed False Positives, flag whether a new alert with the same
+    # For closed Events, flag whether a new alert with the same
     # agent/rule has since come in — a hint that it may be worth reopening.
     for alert in page_obj:
         alert.related_pending_count = 0
@@ -385,7 +342,7 @@ def reopen_alert(request):
         claimed_at=None,
     )
     if not updated:
-        messages.error(request, f'Alert #{alert_id} ไม่สามารถเปิดกลับได้ (ต้องเป็นสถานะ False Positive)')
+        messages.error(request, f'Alert #{alert_id} ไม่สามารถเปิดกลับได้ (ต้องเป็นสถานะ Event)')
         return redirect('triage_history')
 
     messages.success(request, f'เปิด Alert #{alert_id} กลับเข้า Triage Queue แล้ว')

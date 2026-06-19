@@ -935,9 +935,10 @@ class TriageWorkflowIntegrityTest(TestCase):
         cls.other_t1 = _make_t1('manual_t1_other')
         cls.t2       = _make_t2('manual_t2')
 
-    def test_manual_triage_form_only_lists_active_t2_staff(self):
+    def test_manual_triage_form_has_no_pre_ticket_decision_or_escalation(self):
         form = TriageForm(user=self.t1)
-        self.assertQuerySetEqual(form.fields['escalated_to'].queryset, [self.t2])
+        self.assertNotIn('decision', form.fields)
+        self.assertNotIn('escalated_to', form.fields)
 
     def test_non_owner_cannot_create_ticket_from_manual_triage(self):
         triage = TriageRecord.objects.create(
@@ -970,6 +971,47 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(ticket.created_by, self.t1)
         self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
         self.assertIsNone(alert.claimed_by)
+
+    def test_wazuh_event_ticket_is_recorded_as_event_history(self):
+        alert = WazuhAlert.objects.create(
+            opensearch_id='ticket-event-alert', timestamp=timezone.now(),
+            rule_level=10, rule_description='Benign scheduled activity',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            wazuh_alert=alert.pk,
+            classification=Ticket.CLASSIFICATION_EVENT,
+            t1_route='',
+        ))
+        alert.refresh_from_db()
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+
+    def test_manual_triage_claim_and_reason_required_release(self):
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE,
+            analyst=self.t1,
+            alert_description='Manual intake awaiting claim.',
+            notes='Caller reported unusual behavior.',
+        )
+        self.client.force_login(self.t1)
+        self.client.post(reverse('claim_manual_triage', args=[triage.pk]))
+        triage.refresh_from_db()
+        self.assertEqual(triage.claimed_by, self.t1)
+
+        self.client.post(reverse('release_manual_triage', args=[triage.pk]), {
+            'release_reason': '   ',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.claimed_by, self.t1)
+
+        self.client.post(reverse('release_manual_triage', args=[triage.pk]), {
+            'release_reason': 'Shift handoff.',
+        })
+        triage.refresh_from_db()
+        self.assertIsNone(triage.claimed_by)
+        self.assertEqual(triage.release_reason, 'Shift handoff.')
 
     def test_invalid_ticket_form_keeps_wazuh_alert_in_progress(self):
         alert = WazuhAlert.objects.create(

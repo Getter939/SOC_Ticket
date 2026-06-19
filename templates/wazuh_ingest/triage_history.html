@@ -5,8 +5,8 @@
 {% block content %}
 <style>
   .status-badge { font-size: .7rem; font-weight: 700; padding: .25rem .6rem; border-radius: 20px; }
-  .status-badge.tp { background: #d1e7dd; color: #0f5132; }
-  .status-badge.fp { background: #e2e3e5; color: #495057; }
+  .status-badge.incident { background: #d1e7dd; color: #0f5132; }
+  .status-badge.event { background: #e2e3e5; color: #495057; }
   .level-pill {
     display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .6rem;
     border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
@@ -16,16 +16,16 @@
 
 <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
   <h4 class="mb-0 fw-bold"><i class="bi bi-clock-history text-secondary me-2"></i>ประวัติ Triage</h4>
-  <span class="badge bg-success" style="font-size:.85rem;">{{ tp_count }} True Positive</span>
-  <span class="badge bg-secondary" style="font-size:.85rem;">{{ fp_count }} False Positive</span>
+  <span class="badge bg-success" style="font-size:.85rem;">{{ tp_count }} Incident</span>
+  <span class="badge bg-secondary" style="font-size:.85rem;">{{ fp_count }} Event</span>
 </div>
 
 <div class="form-section bg-white border rounded-3 p-3 mb-3">
   <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
     <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลการ Triage:</span>
     <a href="{% url 'triage_history' %}" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
-    <a href="?status=TRUE_POSITIVE" class="level-pill {% if status_filter == 'TRUE_POSITIVE' %}active{% endif %}">True Positive</a>
-    <a href="?status=FALSE_POSITIVE" class="level-pill {% if status_filter == 'FALSE_POSITIVE' %}active{% endif %}">False Positive</a>
+    <a href="?status=TRUE_POSITIVE" class="level-pill {% if status_filter == 'TRUE_POSITIVE' %}active{% endif %}">Incident</a>
+    <a href="?status=FALSE_POSITIVE" class="level-pill {% if status_filter == 'FALSE_POSITIVE' %}active{% endif %}">Event</a>
   </div>
 
   <form method="GET" class="row g-2 align-items-end">
@@ -105,9 +105,9 @@
           </td>
           <td>
             {% if alert.triage_status == 'TRUE_POSITIVE' %}
-              <span class="status-badge tp">True Positive</span>
+              <span class="status-badge incident">Incident</span>
             {% else %}
-              <span class="status-badge fp">False Positive</span>
+              <span class="status-badge event">Event</span>
             {% endif %}
           </td>
           <td>

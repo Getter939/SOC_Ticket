@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
+from apps.incidents.models import Ticket
 from .ingest import fetch_and_store_alerts
 from .models import IngestWatermark, WazuhAlert
 
@@ -410,59 +411,40 @@ class EscalationQueueTest(TestCase):
         cls.manager = _make_user('esc_mgr', UserProfile.ROLE_SOC_MANAGER)
 
     def setUp(self):
-        self.alert = _make_alert(rule_level=14, opensearch_id='escalated-alert-1')
-        self.alert.triage_status = WazuhAlert.TRIAGE_ESCALATED
-        self.alert.escalated_to_tier = WazuhAlert.TIER_T2
-        self.alert.triage_note = 'Needs deeper investigation by T2.'
-        self.alert.save(update_fields=['triage_status', 'escalated_to_tier', 'triage_note'])
+        self.ticket = Ticket.objects.create(
+            device_name='ESCALATED-ENDPOINT',
+            ip_address='192.0.2.77',
+            issue_description='Suspicious PowerShell execution',
+            severity='Critical',
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_ESCALATED_T2,
+            created_by=self.t1_analyst,
+            escalated_to_t2_at=timezone.now(),
+        )
 
-    def _claim(self, username='esc_t2'):
-        self.client.login(username=username, password='testpass123')
-        self.client.post(reverse('claim_escalation'), {'alert_id': self.alert.pk})
-        self.alert.refresh_from_db()
-
-    def test_t2_sees_alert_escalated_to_t2(self):
+    def test_t2_sees_ticket_escalated_to_t2(self):
         self.client.login(username='esc_t2', password='testpass123')
         response = self.client.get(reverse('escalation_queue'))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Suspicious PowerShell execution')
+        self.assertContains(response, self.ticket.ticket_id)
 
-    def test_t1_does_not_see_alert_escalated_to_t2(self):
+    def test_t1_is_redirected_from_tier2_queue(self):
         self.client.login(username='esc_t1', password='testpass123')
         response = self.client.get(reverse('escalation_queue'))
+        self.assertRedirects(response, reverse('ticket_list'))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'Suspicious PowerShell execution')
-
-    # NOTE: alert-level Close/Escalate/Create-ticket from the escalation queue
-    # are gone — escalation is now a ticket-level decision and triage is
-    # Tier-1-only. The escalation queue retains only listing + claim/release.
-
-    def test_manager_sees_alert_escalated_to_manager(self):
-        self.alert.escalated_to_tier = WazuhAlert.TIER_MANAGER
-        self.alert.save(update_fields=['escalated_to_tier'])
-
+    def test_manager_is_redirected_from_tier2_queue(self):
         self.client.login(username='esc_mgr', password='testpass123')
         response = self.client.get(reverse('escalation_queue'))
+        self.assertRedirects(response, reverse('ticket_list'))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Suspicious PowerShell execution')
-
-    def test_claim_and_release_escalated_alert(self):
-        self._claim()
-        self.assertEqual(self.alert.claimed_by, self.t2_analyst)
-        self.assertIsNotNone(self.alert.claimed_at)
-
-        response = self.client.post(
-            reverse('release_escalation'),
-            {'alert_id': self.alert.pk},
-        )
-
-        self.assertRedirects(response, reverse('escalation_queue'))
-        self.alert.refresh_from_db()
-        self.assertIsNone(self.alert.claimed_by)
-        self.assertIsNone(self.alert.claimed_at)
+    def test_queue_never_renders_alert_claim_or_release_actions(self):
+        self.client.login(username='esc_t2', password='testpass123')
+        response = self.client.get(reverse('escalation_queue'))
+        self.assertNotContains(response, reverse('claim_escalation'))
+        self.assertNotContains(response, reverse('release_escalation'))
 
 
 class SuperuserWazuhAccessTest(TestCase):
@@ -511,36 +493,16 @@ class SuperuserWazuhAccessTest(TestCase):
         self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
         self.assertEqual(alert.claimed_by, self.superuser)
 
-    def test_superuser_sees_and_can_claim_escalations_for_all_tiers(self):
-        t1_alert = _make_alert(
-            opensearch_id='superuser-t1-escalation',
-            rule_level=11,
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-            escalated_to_tier=WazuhAlert.TIER_T1,
+    def test_superuser_sees_ticket_escalation_queue(self):
+        ticket = Ticket.objects.create(
+            device_name='SUPERUSER-ESCALATION',
+            ip_address='192.0.2.88',
+            issue_description='Escalated ticket visible to superuser.',
+            severity='High',
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_ESCALATED_T2,
+            escalated_to_t2_at=timezone.now(),
         )
-        t2_alert = _make_alert(
-            opensearch_id='superuser-t2-escalation',
-            rule_level=12,
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-            escalated_to_tier=WazuhAlert.TIER_T2,
-        )
-        manager_alert = _make_alert(
-            opensearch_id='superuser-manager-escalation',
-            rule_level=15,
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-            escalated_to_tier=WazuhAlert.TIER_MANAGER,
-        )
-
         response = self.client.get(reverse('escalation_queue'))
         self.assertEqual(response.status_code, 200)
-        visible_alerts = list(response.context['alerts'])
-        for alert in (t1_alert, t2_alert, manager_alert):
-            self.assertIn(alert, visible_alerts)
-
-        claim_response = self.client.post(
-            reverse('claim_escalation'),
-            {'alert_id': t2_alert.pk},
-        )
-        self.assertRedirects(claim_response, reverse('escalation_queue'))
-        t2_alert.refresh_from_db()
-        self.assertEqual(t2_alert.claimed_by, self.superuser)
+        self.assertIn(ticket, list(response.context['tickets']))

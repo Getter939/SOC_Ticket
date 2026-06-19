@@ -48,7 +48,7 @@
     </div>
 </div>
 
-<!-- ══ ACTIONABLE BACKLOG + FP/TP RATIO — most operationally valuable ═════ -->
+<!-- Actionable backlog and Event/Incident ratio -->
 <div class="row g-3 mb-4">
 
     <!-- Who must act next -->
@@ -77,7 +77,7 @@
                         </div>
                         <div class="display-5 fw-bold" style="color:#0dcaf0;">{{ stats.awaiting_soc }}</div>
                         <div class="text-muted mt-1" style="font-size:0.7rem;">Awaiting SOC</div>
-                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">REPORTED + UNDER_REVIEW</div>
+                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">T1_REVIEW + CONTAINMENT_REPORTED</div>
                     </div>
                 </div>
 
@@ -88,7 +88,7 @@
                         </div>
                         <div class="display-5 fw-bold text-primary">{{ stats.awaiting_manager }}</div>
                         <div class="text-muted mt-1" style="font-size:0.7rem;">Awaiting Manager</div>
-                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">VERIFIED</div>
+                        <div class="text-muted" style="font-size:0.65rem; opacity:0.75;">PENDING_MANAGER</div>
                     </div>
                 </div>
 
@@ -96,25 +96,25 @@
         </div>
     </div>
 
-    <!-- FP/TP ratio -->
+    <!-- Event/Incident ratio -->
     <div class="col-md-4">
         <div class="card border-0 shadow-sm h-100 p-4">
             <div class="fw-bold mb-2 small text-uppercase text-muted">
-                <i class="bi bi-pie-chart me-1"></i>สัดส่วนการวินิจฉัย — FP / TP Ratio
+                <i class="bi bi-pie-chart me-1"></i>สัดส่วนการจัดประเภท Event / Incident
             </div>
             {% if stats.tp_count or stats.fp_count %}
-            <canvas id="chartFpTp" height="160"></canvas>
+            <canvas id="chartClassification" height="160"></canvas>
             <div class="d-flex justify-content-around mt-3">
                 <div class="text-center">
                     <div class="fw-bold fs-5" style="color:#198754;">{{ stats.tp_count }}</div>
                     <div class="text-muted" style="font-size:0.72rem;">
-                        True Positive&nbsp;<span class="badge bg-success">{{ stats.tp_pct }}%</span>
+                        Incident&nbsp;<span class="badge bg-success">{{ stats.tp_pct }}%</span>
                     </div>
                 </div>
                 <div class="text-center">
                     <div class="fw-bold fs-5" style="color:#e63946;">{{ stats.fp_count }}</div>
                     <div class="text-muted" style="font-size:0.72rem;">
-                        False Positive&nbsp;<span class="badge bg-danger">{{ stats.fp_pct }}%</span>
+                        Event&nbsp;<span class="badge bg-secondary">{{ stats.fp_pct }}%</span>
                     </div>
                 </div>
             </div>
@@ -122,7 +122,7 @@
             <div class="d-flex align-items-center justify-content-center h-75 text-center text-muted">
                 <div>
                     <i class="bi bi-info-circle fs-3 d-block mb-2 opacity-50"></i>
-                    <span class="small">ยังไม่มีข้อมูลการวินิจฉัย<br>(FP/TP)</span>
+                    <span class="small">ยังไม่มีข้อมูลการจัดประเภท<br>(Event/Incident)</span>
                 </div>
             </div>
             {% endif %}
@@ -222,8 +222,8 @@
 <!-- ── Chart.js ───────────────────────────────────────────────────────────── -->
 {{ status_labels|json_script:"status-labels" }}
 {{ status_data|json_script:"status-data" }}
-{{ fp_tp_labels|json_script:"fp-tp-labels" }}
-{{ fp_tp_data|json_script:"fp-tp-data" }}
+{{ classification_labels|json_script:"classification-labels" }}
+{{ classification_data|json_script:"classification-data" }}
 {{ by_type_labels|json_script:"by-type-labels" }}
 {{ by_type_data|json_script:"by-type-data" }}
 {{ by_category_labels|json_script:"by-category-labels" }}
@@ -240,8 +240,8 @@ function readJSON(id) {
 }
 const statusLabels     = readJSON('status-labels');
 const statusData       = readJSON('status-data');
-const fpTpLabels       = readJSON('fp-tp-labels');
-const fpTpData         = readJSON('fp-tp-data');
+const classificationLabels = readJSON('classification-labels');
+const classificationData   = readJSON('classification-data');
 const byTypeLabels     = readJSON('by-type-labels');
 const byTypeData       = readJSON('by-type-data');
 const byCategoryLabels = readJSON('by-category-labels');
@@ -249,19 +249,19 @@ const byCategoryData   = readJSON('by-category-data');
 const monthlyLabels    = readJSON('monthly-labels');
 const monthlyData      = readJSON('monthly-data');
 
-// Colours aligned with the 7-state order in STATUS_CHOICES:
-// NEW, AWAITING_CONTAINMENT, CONTAINMENT_REPORTED, UNDER_REVIEW, VERIFIED, APPROVED, CLOSED_FP
+// Colors follow Ticket.STATUS_CHOICES order.
 const PIPELINE_COLORS = [
-    '#e63946',  // NEW           — danger red
-    '#ffc107',  // AWAITING_CONTAINMENT — warning yellow
-    '#0dcaf0',  // CONTAINMENT_REPORTED — info cyan
-    '#17a2b8',  // UNDER_REVIEW  — teal
-    '#6f42c1',  // VERIFIED      — purple
-    '#198754',  // APPROVED      — success green
-    '#6c757d',  // CLOSED_FP     — muted grey
+    '#e63946',  // NEW
+    '#ffc107',  // ESCALATED_T2
+    '#0d6efd',  // T1_REVIEW
+    '#fd7e14',  // AWAITING_CONTAINMENT
+    '#0dcaf0',  // CONTAINMENT_REPORTED
+    '#6f42c1',  // PENDING_MANAGER
+    '#198754',  // APPROVED
+    '#6c757d',  // CLOSED_EVENT
 ];
 
-// Status Pipeline — horizontal bar (all 7 states)
+// Status Pipeline
 new Chart(document.getElementById('chartPipeline'), {
     type: 'bar',
     data: {
@@ -280,15 +280,15 @@ new Chart(document.getElementById('chartPipeline'), {
     }
 });
 
-// FP/TP doughnut
+// Event/Incident doughnut
 {% if stats.tp_count or stats.fp_count %}
-new Chart(document.getElementById('chartFpTp'), {
+new Chart(document.getElementById('chartClassification'), {
     type: 'doughnut',
     data: {
-        labels: fpTpLabels,
+        labels: classificationLabels,
         datasets: [{
-            data: fpTpData,
-            backgroundColor: ['#198754', '#e63946'],
+            data: classificationData,
+            backgroundColor: ['#198754', '#6c757d'],
             borderWidth: 2,
         }]
     },

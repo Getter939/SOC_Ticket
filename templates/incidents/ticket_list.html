@@ -19,7 +19,7 @@
 <div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-3">
         <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label small fw-bold mb-1">ค้นหา</label>
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
@@ -27,7 +27,7 @@
                            placeholder="เลข Ticket, ระบบ/บริการ, IP, รายละเอียด...">
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small fw-bold mb-1">สถานะ</label>
                 <select name="status" class="form-select form-select-sm">
                     <option value="">ทั้งหมด</option>
@@ -46,9 +46,18 @@
                 </select>
             </div>
             <div class="col-md-2">
+                <label class="form-label small fw-bold mb-1">Emergency</label>
+                <select name="emergency" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    <option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option>
+                    <option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option>
+                </select>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label small fw-bold mb-1">เรียงตาม</label>
                 <select name="sort" class="form-select form-select-sm">
                     <option value="sla" {% if sort == 'sla' %}selected{% endif %}>SLA ใกล้ครบกำหนด</option>
+                    <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
                     <option value="newest" {% if sort == 'newest' %}selected{% endif %}>ใหม่สุดก่อน</option>
                     <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>เก่าสุดก่อน</option>
                 </select>
@@ -56,7 +65,7 @@
             <div class="col-md-1 d-grid">
                 <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
             </div>
-            {% if search or status_filter or severity_filter %}
+            {% if search or status_filter or severity_filter or emergency_filter %}
             <div class="col-12">
                 <a href="{% url 'ticket_list' %}" class="small text-decoration-none">
                     <i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด
@@ -83,7 +92,7 @@
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr {% if ticket.is_sla_breached %}class="table-danger"{% endif %}>
+                <tr {% if ticket.is_emergency or ticket.is_sla_breached %}class="table-danger"{% endif %}>
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
                     </td>
@@ -106,7 +115,7 @@
                 <tr>
                     <td colspan="7" class="text-center py-5 text-muted">
                         <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                        {% if search or status_filter or severity_filter %}
+                        {% if search or status_filter or severity_filter or emergency_filter %}
                             ไม่พบรายการที่ตรงกับเงื่อนไขการค้นหา
                         {% else %}
                             ไม่มีรายการแจ้งเหตุที่รอดำเนินการ

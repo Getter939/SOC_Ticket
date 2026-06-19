@@ -801,14 +801,14 @@ class TriageRecord(models.Model):
     ]
 
     T1_DECISION_CHOICES = [
-        (DECISION_FP,        'False Positive — ปิดทันที'),
-        (DECISION_TP,        'True Positive — สร้าง Ticket'),
-        (DECISION_ESCALATED, 'ไม่แน่ใจ — Escalate ไปยัง T2'),
+        (DECISION_FP,        'Event — ปิดเคส'),
+        (DECISION_TP,        'Incident — สร้าง Ticket'),
+        (DECISION_ESCALATED, 'ส่งต่อให้ Tier 2 (ข้อมูลเดิม)'),
     ]
 
     T2_DECISION_CHOICES = [
-        (DECISION_FP, 'False Positive — ปิด'),
-        (DECISION_TP, 'True Positive — สร้าง Ticket'),
+        (DECISION_FP, 'Event — ปิดเคส'),
+        (DECISION_TP, 'Incident — สร้าง Ticket'),
     ]
 
     # ── T1 fields ──────────────────────────────────────────────────── #
@@ -829,10 +829,20 @@ class TriageRecord(models.Model):
         max_length=50, blank=True, default='', verbose_name='IP Source',
     )
     decision = models.CharField(
-        max_length=20, choices=T1_DECISION_CHOICES, verbose_name='การตัดสินใจ T1',
+        max_length=20, choices=T1_DECISION_CHOICES, blank=True, default='',
+        verbose_name='ผลลัพธ์เดิมของ Manual Triage',
     )
     notes = models.TextField(blank=True, default='', verbose_name='บันทึก T1')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Manual triage is an intake queue. Classification and routing happen only
+    # after a claimed item is turned into a Ticket.
+    claimed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='claimed_manual_triages', verbose_name='ผู้รับรายการ Manual Triage',
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    release_reason = models.TextField(blank=True, default='', verbose_name='เหตุผลที่คืนคิว')
 
     # ── T2 escalation fields ───────────────────────────────────────── #
     escalated_to = models.ForeignKey(

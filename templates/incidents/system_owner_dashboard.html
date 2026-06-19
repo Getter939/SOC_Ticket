@@ -13,6 +13,12 @@
     </div>
 </div>
 
+<div class="card border-0 shadow-sm mb-4"><div class="card-body py-3"><form method="get" class="row g-2 align-items-end">
+    <div class="col-md-3"><label class="form-label small fw-bold">Emergency</label><select name="emergency" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select></div>
+    <div class="col-md-3"><label class="form-label small fw-bold">เรียงตาม</label><select name="sort" class="form-select form-select-sm"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>ล่าสุด</option><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option></select></div>
+    <div class="col-md-2"><button class="btn btn-dark btn-sm" type="submit">กรอง</button></div>
+</form></div></div>
+
 <!-- Stats -->
 <div class="row g-3 mb-4">
     <div class="col-6 col-md-3">

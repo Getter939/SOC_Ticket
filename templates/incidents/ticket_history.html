@@ -15,7 +15,7 @@
         <h4 class="mb-0 fw-bold"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket (อนุมัติแล้ว / ปิด)</h4>
         <div>
             <span class="badge bg-success" style="font-size:.85rem;">{{ approved_count }} อนุมัติแล้ว</span>
-            <span class="badge bg-secondary" style="font-size:.85rem;">{{ fp_count }} False Positive</span>
+            <span class="badge bg-secondary" style="font-size:.85rem;">{{ event_count }} Event</span>
         </div>
     </div>
 
@@ -25,7 +25,7 @@
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
                 <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
                 <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
-                <a href="?status=CLOSED_FP{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_FP' %}active{% endif %}">False Positive</a>
+                <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>
             </div>
             <form method="GET" class="row g-3">
                 {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
@@ -41,6 +41,14 @@
                             <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold">Emergency</label>
+                    <select name="emergency" class="form-select"><option value="">All</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold">เรียงตาม</label>
+                    <select name="sort" class="form-select"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>ล่าสุด</option><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option></select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small fw-bold">ผู้อนุมัติ/ปิดเคส</label>

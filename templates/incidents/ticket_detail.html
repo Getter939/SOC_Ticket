@@ -1,517 +1,81 @@
 {% extends 'base.html' %}
-
-{% block title %}Ticket #{{ ticket.ticket_id }} — SOC Support System{% endblock %}
-
+{% block title %}Ticket #{{ ticket.ticket_id }} - SOC Support System{% endblock %}
 {% block content %}
 <style>
-  .meta-grid { display: grid; grid-template-columns: 150px 1fr; row-gap: .45rem; column-gap: .75rem; font-size: .875rem; }
-  .meta-grid dt { color: #6c757d; font-weight: 600; margin: 0; }
-  .meta-grid dd { margin: 0; word-break: break-word; }
-  @media (max-width: 576px) { .meta-grid { grid-template-columns: 1fr; row-gap: .15rem; } .meta-grid dd { margin-bottom: .4rem; } }
+  .meta-grid { display:grid; grid-template-columns:160px 1fr; gap:.5rem .8rem; font-size:.875rem; }
+  .meta-grid dt { color:#6c757d; margin:0; } .meta-grid dd { margin:0; word-break:break-word; }
+  .emergency-card { border:2px solid #dc3545; background:#fff8f8; }
+  .review-fields > div { margin-bottom:1rem; }
+  @media (max-width:576px) { .meta-grid { grid-template-columns:1fr; } }
 </style>
 
-<div class="row g-4">
-    {# ════ Left column: ticket info + attachments + timeline ════ #}
-    <div class="col-lg-7">
-
-        {# ── Ticket info ── #}
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0 font-monospace">Ticket #{{ ticket.ticket_id }}</h5>
-                <div class="d-flex gap-2 align-items-center">
-                    {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
-                    {% include 'incidents/_status_badge.html' with ticket=ticket %}
-                </div>
-            </div>
-            <div class="card-body">
-
-                <div class="mb-3">
-                    <span class="badge bg-info text-dark">Category: {{ ticket.get_category_display }}</span>
-                    <span class="badge bg-warning text-dark">Type: {{ ticket.get_issue_type_display }}</span>
-                    {% if ticket.disposition %}
-                    <span class="badge {% if ticket.is_false_positive %}bg-secondary{% else %}bg-danger{% endif %}">
-                        {{ ticket.get_disposition_display }}
-                    </span>
-                    {% endif %}
-                    {% if not profile.is_system_admin %}
-                    {% if ticket.is_sla_breached %}
-                    <span class="badge bg-danger"><i class="bi bi-alarm-fill me-1"></i>เกินกำหนด SLA {{ ticket.created_at|timesince:ticket.sla_deadline }}</span>
-                    {% elif ticket.sla_deadline %}
-                    <span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>เปิด Ticket ภายใน SLA (เหลือ {{ ticket.sla_deadline|timesince:ticket.created_at }})</span>
-                    {% endif %}
-                    {% endif %}
-                </div>
-
-                <dl class="meta-grid mb-0">
-                    <dt>วันที่แจ้งเหตุ</dt>
-                    <dd>{{ ticket.created_at|date:"d M Y H:i" }} น. <span class="text-muted small">({{ ticket.created_at|timesince }} ที่แล้ว)</span></dd>
-
-                    {% if ticket.incident_datetime %}
-                    <dt>วันที่ตรวจพบ</dt>
-                    <dd>{{ ticket.incident_datetime|date:"d M Y H:i" }} น.</dd>
-                    {% endif %}
-
-                    {% if ticket.sla_deadline and not profile.is_system_admin %}
-                    <dt>SLA Deadline</dt>
-                    <dd>{{ ticket.sla_deadline|date:"d M Y H:i" }} น.</dd>
-                    {% endif %}
-
-                    {% if ticket.reference_id %}
-                    <dt>Reference ID</dt>
-                    <dd class="font-monospace">{{ ticket.reference_id }}</dd>
-                    {% endif %}
-
-                    <dt>เหตุการณ์ที่พบ</dt>
-                    <dd>{{ ticket.get_detailed_issue_display }}</dd>
-
-                    <dt>เรื่องที่แจ้ง</dt>
-                    <dd>{{ ticket.get_detailed_issue2_display }}</dd>
-
-                    <dt>ระบบ / บริการ</dt>
-                    <dd>{{ ticket.device_name }}</dd>
-
-                    <dt>IP Address</dt>
-                    <dd>
-                        <span class="font-monospace">{{ ticket.ip_address }}</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1 py-0 ioc-lookup-btn" data-ip="{{ ticket.ip_address }}" title="WHOIS lookup">
-                            <i class="bi bi-search"></i> WHOIS
-                        </button>
-                    </dd>
-
-                    {% if ticket.destination_ip %}
-                    <dt>Destination IoC</dt>
-                    <dd>
-                        <span class="font-monospace">{{ ticket.destination_ip }}</span>
-                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1 py-0 ioc-lookup-btn" data-ip="{{ ticket.destination_ip }}" title="WHOIS lookup">
-                            <i class="bi bi-search"></i> WHOIS
-                        </button>
-                    </dd>
-                    {% endif %}
-
-                    {% if ticket.mac_address %}
-                    <dt>MAC Address</dt>
-                    <dd class="font-monospace">{{ ticket.mac_address }}</dd>
-                    {% endif %}
-
-                    {% if ticket.asset_type %}
-                    <dt>ประเภททรัพย์สิน</dt>
-                    <dd>{{ ticket.get_asset_type_display }}</dd>
-                    {% endif %}
-
-                    {% if ticket.spread_to_others is not None %}
-                    <dt>การกระจายตัว</dt>
-                    <dd>
-                        {% if ticket.spread_to_others %}
-                            <span class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>พบการกระจายไปยังจุดอื่น</span>
-                        {% else %}
-                            ไม่พบการกระจายไปยังจุดอื่น
-                        {% endif %}
-                    </dd>
-                    {% endif %}
-
-                    {% if ticket.mitre_phase %}
-                    <dt>MITRE ATT&CK</dt>
-                    <dd class="font-monospace">{{ ticket.mitre_phase }}</dd>
-                    {% endif %}
-                </dl>
-
-                <div id="ioc-lookup-result" class="alert alert-light border d-none small mt-3 mb-0"></div>
-
-                <hr>
-
-                <h6 class="text-primary"><i class="bi bi-info-circle"></i> รายละเอียดเหตุการณ์</h6>
-                <div class="p-3 bg-light rounded border">
-                    {{ ticket.issue_description|linebreaks }}
-                </div>
-
-                {% if ticket.ioc_details %}
-                <h6 class="text-primary mt-3"><i class="bi bi-fingerprint"></i> Indicators of Compromise (IoC)</h6>
-                <div class="p-3 bg-light rounded border font-monospace small">
-                    {{ ticket.ioc_details|linebreaks }}
-                </div>
-                {% endif %}
-
-                {% if ticket.action_required %}
-                <h6 class="text-primary mt-3"><i class="bi bi-list-check"></i> สิ่งที่ต้องดำเนินการ</h6>
-                <div class="p-3 bg-light rounded border">
-                    {{ ticket.action_required|linebreaks }}
-                </div>
-                {% endif %}
-
-                {% if ticket.action_precautions %}
-                <h6 class="text-warning mt-3"><i class="bi bi-cone-striped"></i> ข้อควรระวังในการดำเนินการ</h6>
-                <div class="p-3 bg-light rounded border">
-                    {{ ticket.action_precautions|linebreaks }}
-                </div>
-                {% endif %}
-
-                {% if ticket.containment_report %}
-                <h6 class="text-success mt-3"><i class="bi bi-shield-check"></i> รายงานการควบคุม</h6>
-                <div class="p-3 bg-light rounded border">
-                    {{ ticket.containment_report|linebreaks }}
-                </div>
-                {% endif %}
-
-                <hr>
-
-                <dl class="meta-grid mb-0">
-                    <dt>ผู้เปิดงาน</dt>
-                    <dd>
-                        {% if not ticket.created_by %}
-                            <span class="text-muted">Unknown user</span>
-                        {% else %}
-                            {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}
-                        {% endif %}
-                    </dd>
-
-                    {% if ticket.assigned_admin %}
-                    <dt>ผู้ดูแลระบบ</dt>
-                    <dd>{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}</dd>
-                    {% endif %}
-
-                    {% if ticket.system_owner %}
-                    <dt>เจ้าของระบบ</dt>
-                    <dd>
-                        {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}
-                        {% if ticket.system_owner.email %}<span class="text-muted small">({{ ticket.system_owner.email }})</span>{% endif %}
-                    </dd>
-                    {% endif %}
-
-                    {% if ticket.verified_by %}
-                    <dt>ผู้ตรวจสอบ</dt>
-                    <dd>
-                        {{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}
-                        {% if ticket.verified_at %}<span class="text-muted small">เมื่อ {{ ticket.verified_at|date:"d M Y H:i" }}</span>{% endif %}
-                    </dd>
-                    {% endif %}
-
-                    {% if ticket.approved_by %}
-                    <dt>ผู้อนุมัติ</dt>
-                    <dd>
-                        {{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}
-                        {% if ticket.approved_at %}<span class="text-muted small">เมื่อ {{ ticket.approved_at|date:"d M Y H:i" }}</span>{% endif %}
-                    </dd>
-                    {% endif %}
-                </dl>
-            </div>
-        </div>
-
-        {# ── Attachments ── #}
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white fw-bold small text-uppercase text-muted">
-                <i class="bi bi-paperclip me-1"></i>ไฟล์แนบ {% if attachments %}({{ attachments|length }}){% endif %}
-            </div>
-            <div class="card-body">
-                {% if attachments %}
-                <ul class="list-group list-group-flush mb-2">
-                    {% for att in attachments %}
-                    <li class="list-group-item px-0 py-1 d-flex justify-content-between align-items-center">
-                        <a href="{% url 'download_attachment' att.pk %}" rel="noopener" class="small text-decoration-none">
-                            <i class="bi bi-file-earmark me-1"></i>{{ att.original_name }}
-                            {% if att.description %}<span class="text-muted">({{ att.description }})</span>{% endif %}
-                        </a>
-                        {% if request.user.is_superuser or profile and profile.is_soc or att.uploaded_by == request.user %}
-                        <form method="post" action="{% url 'delete_attachment' att.pk %}" class="d-inline">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-link btn-sm text-danger p-0" title="ลบ"
-                                onclick="return confirm('ลบไฟล์นี้?')">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </form>
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-muted small mb-2">ยังไม่มีไฟล์แนบ</p>
-                {% endif %}
-
-                {% if not is_terminal %}
-                <form method="post" action="{% url 'upload_attachment' ticket.pk %}"
-                      enctype="multipart/form-data" class="d-flex gap-2 align-items-start mt-1 flex-wrap">
-                    {% csrf_token %}
-                    <div class="flex-grow-1" style="min-width:200px;">{{ attachment_form.file }}</div>
-                    <div style="min-width:160px;">{{ attachment_form.description }}</div>
-                    <button type="submit" class="btn btn-outline-secondary btn-sm">
-                        <i class="bi bi-upload me-1"></i>อัพโหลด
-                    </button>
-                </form>
-                {% endif %}
-            </div>
-        </div>
-
-        {# ── Timeline ── #}
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-white fw-bold small text-uppercase text-muted">
-                <i class="bi bi-clock-history me-1"></i>ประวัติการติดตามงาน {% if logs %}({{ logs|length }}){% endif %}
-            </div>
-            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
-                {% for log in logs %}
-                <div class="border-start border-primary border-4 ps-3 mb-4 position-relative">
-                    <div class="d-flex justify-content-between">
-                        <span class="badge bg-secondary">{{ log.status_display }}</span>
-                        <div>
-                            <small class="text-muted">{{ log.created_at|date:"d M Y H:i" }}</small>
-                            {% if request.user.is_superuser or log.author_id == request.user.pk or profile and profile.is_soc_manager %}
-                            <a href="{% url 'edit_log' log.id %}" class="ms-2 text-warning" title="แก้ไขบันทึก">
-                                <i class="bi bi-pencil-square"></i>
-                            </a>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <p class="mt-2 mb-1">{{ log.note }}</p>
-                    <div class="mt-2">
-                        <small class="text-muted fw-bold">ผู้ดำเนินการ:</small>
-                        <span class="badge rounded-pill bg-light text-dark border">
-                            <i class="bi bi-person-circle text-primary"></i>
-                            {% if log.author %}
-                                {{ log.author.get_full_name|default:log.author.username }}
-                            {% elif ticket.assigned_to %}
-                                {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </span>
-                    </div>
-                </div>
-                {% empty %}
-                <p class="text-muted text-center mb-0">ยังไม่มีประวัติการติดตามงาน</p>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
-    {# ════ Right column: role-based action panel ════ #}
-    <div class="col-lg-5">
-
-        {# ── Terminal state: ticket is closed ── #}
-        {% if is_terminal %}
-            {% if ticket.status == 'APPROVED' %}
-            <div class="alert alert-success text-center shadow-sm">
-                <h4><i class="bi bi-award-fill"></i> อนุมัติแล้ว</h4>
-                <p class="mb-0">Ticket นี้ผ่านการตรวจสอบและอนุมัติเรียบร้อยแล้ว</p>
-            </div>
-            {% else %}
-            <div class="alert alert-secondary text-center shadow-sm">
-                <h4><i class="bi bi-x-circle-fill"></i> ปิด (เหตุการณ์ปลอม)</h4>
-                <p class="mb-0">Ticket นี้ถูกวินิจฉัยว่าเป็น False Positive</p>
-            </div>
-            {% endif %}
-
-        {# ── Assigned admin: containment form (AWAITING_CONTAINMENT only) ── #}
-        {% elif can_submit_containment %}
-            <div class="card shadow-sm border-warning">
-                <div class="card-header bg-warning text-dark text-center">
-                    <h5 class="mb-0"><i class="bi bi-shield-fill-exclamation"></i> ส่งรายงานการควบคุม</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="containment">
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">การวินิจฉัยเหตุการณ์ <span class="text-danger">*</span></label>
-                            <select name="disposition" class="form-select" required>
-                                <option value="">-- เลือกการวินิจฉัย --</option>
-                                {% for code, label in DISPOSITION_CHOICES %}
-                                <option value="{{ code }}">{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">รายงานการควบคุม <span class="text-danger">*</span></label>
-                            <textarea name="containment_report" class="form-control" rows="5"
-                                placeholder="อธิบายขั้นตอนการควบคุมและแก้ไขที่ดำเนินการ..." required>{{ ticket.containment_report }}</textarea>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">บันทึกเพิ่มเติม (ถ้ามี)</label>
-                            <textarea name="note" class="form-control" rows="2"
-                                placeholder="หมายเหตุเพิ่มเติม..."></textarea>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">ผู้ดำเนินการ</label>
-                            <div class="p-2 bg-light border rounded shadow-sm">
-                                <i class="bi bi-person-check-fill text-warning"></i>
-                                <span class="ms-1 fw-bold">{{ request.user.get_full_name|default:request.user.username }}</span>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-warning w-100 fw-bold">
-                            <i class="bi bi-send-fill me-1"></i>ส่งรายงาน
-                        </button>
-                    </form>
-                </div>
-            </div>
-
-        {# ── SOC staff / manager: status + note form ── #}
-        {% elif request.user.is_superuser or profile and profile.is_soc %}
-            <div class="card shadow-sm border-primary">
-                <div class="card-header bg-primary text-white text-center">
-                    <h5 class="mb-0">บันทึกความคืบหน้าใหม่</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="soc_update">
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">อัปเดตสถานะงาน</label>
-                            <select name="status" class="form-select">
-                                {% for code, name in valid_status_choices %}
-                                <option value="{{ code }}" {% if ticket.status == code %}selected{% endif %}>{{ name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">บันทึกสิ่งที่ดำเนินการ <span class="text-danger">*</span></label>
-                            <textarea name="update_notes" class="form-control" rows="4"
-                                placeholder="กรอกข้อมูลการดำเนินการล่าสุด..." required></textarea>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">ผู้ดำเนินการ</label>
-                            <div class="p-2 bg-light border rounded shadow-sm">
-                                <i class="bi bi-person-check-fill text-primary"></i>
-                                <span class="ms-1 fw-bold">{{ request.user.get_full_name|default:request.user.username }}</span>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary w-100">บันทึกความคืบหน้า</button>
-                    </form>
-                </div>
-            </div>
-
-        {# ── Assigned admin in a non-actionable state: read-only notice ── #}
-        {% else %}
-            <div class="alert alert-info text-center shadow-sm">
-                <h5><i class="bi bi-info-circle-fill"></i> ไม่มีการดำเนินการที่รอดำเนินการ</h5>
-                <p class="mb-0">Ticket นี้อยู่ในสถานะ <strong>{{ ticket.get_status_display }}</strong><br>
-                รอให้เจ้าหน้าที่ SOC ดำเนินการต่อ</p>
-            </div>
-        {% endif %}
-
-        <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary w-100 mt-3">
-            <i class="bi bi-arrow-left me-1"></i>กลับรายการแจ้งเหตุ
-        </a>
-    </div>
-
-    {# ════ Sub-tasks: Investigations / Countermeasures (full width) ════ #}
-    <div class="col-12">
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-list-task"></i> งานย่อย (Investigation / Countermeasure)</h5>
-                {% if subtasks %}<span class="badge bg-light text-dark">{{ subtasks|length }}</span>{% endif %}
-            </div>
-            <div class="card-body">
-                {% if subtasks %}
-                <ul class="list-group mb-3">
-                    {% for subtask in subtasks %}
-                    <li class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <span class="badge {% if subtask.subtask_type == 'INVESTIGATION' %}bg-info text-dark{% else %}bg-danger{% endif %}">
-                                    {{ subtask.get_subtask_type_display }}
-                                </span>
-                                <span class="badge {% if subtask.status == 'OPEN' %}bg-secondary{% elif subtask.status == 'IN_PROGRESS' %}bg-primary{% else %}bg-success{% endif %}">
-                                    {{ subtask.get_status_display }}
-                                </span>
-                                <strong class="ms-1">{{ subtask.title }}</strong>
-                                {% if subtask.description %}
-                                <div class="text-muted small mt-1">{{ subtask.description|linebreaks }}</div>
-                                {% endif %}
-                                {% if subtask.result_notes %}
-                                <div class="small mt-1"><strong>ผล:</strong> {{ subtask.result_notes|linebreaks }}</div>
-                                {% endif %}
-                                <div class="small text-muted mt-1">
-                                    ผู้รับผิดชอบ:
-                                    {% if subtask.assigned_to %}
-                                        {{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}
-                                    {% else %}-{% endif %}
-                                </div>
-                            </div>
-                        </div>
-                        {% if not subtask.is_done and not is_terminal %}
-                        {% if request.user.is_superuser or profile and profile.is_soc or subtask.assigned_to_id == request.user.pk %}
-                        <form method="post" action="{% url 'update_subtask' subtask.pk %}" class="row g-2 mt-2 align-items-end">
-                            {% csrf_token %}
-                            <div class="col-auto">
-                                <select name="status" class="form-select form-select-sm">
-                                    {% for code, label in subtask_update_form.fields.status.choices %}
-                                    <option value="{{ code }}" {% if subtask.status == code %}selected{% endif %}>{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col">
-                                <input type="text" name="result_notes" class="form-control form-control-sm"
-                                    placeholder="บันทึกผลการดำเนินการ..." value="{{ subtask.result_notes }}">
-                            </div>
-                            <div class="col-auto">
-                                <button type="submit" class="btn btn-sm btn-outline-primary">บันทึก</button>
-                            </div>
-                        </form>
-                        {% endif %}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-muted small">ยังไม่มีงานย่อย</p>
-                {% endif %}
-
-                {% if can_create_subtask and not is_terminal %}
-                <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="border-top pt-3">
-                    {% csrf_token %}
-                    <div class="row g-2">
-                        <div class="col-md-3">{{ subtask_form.subtask_type }}</div>
-                        <div class="col-md-4">{{ subtask_form.title }}</div>
-                        <div class="col-md-3">{{ subtask_form.assigned_to }}</div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-secondary w-100">+ เพิ่มงานย่อย</button>
-                        </div>
-                        <div class="col-12">{{ subtask_form.description }}</div>
-                    </div>
-                </form>
-                {% endif %}
-            </div>
-        </div>
-    </div>
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+  <div><h4 class="font-monospace fw-bold mb-1">Ticket #{{ ticket.ticket_id }}</h4><div class="d-flex flex-wrap gap-2">{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}{% include 'incidents/_status_badge.html' with ticket=ticket %}{% if ticket.classification %}<span class="badge {% if ticket.is_event %}bg-secondary{% else %}bg-danger{% endif %}">{{ ticket.get_classification_display }}</span>{% endif %}{% if ticket.is_emergency %}<span class="badge bg-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>EMERGENCY</span>{% endif %}</div></div>
+  <a class="btn btn-light border" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
 </div>
 
-<script>
-document.querySelectorAll('.ioc-lookup-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        var ip = btn.dataset.ip;
-        var resultBox = document.getElementById('ioc-lookup-result');
-        resultBox.classList.remove('d-none', 'alert-danger', 'alert-light');
-        resultBox.classList.add('alert-light');
-        resultBox.textContent = 'กำลังค้นหา WHOIS สำหรับ ' + ip + ' ...';
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-4"><div class="card-header bg-dark text-white fw-bold">ข้อมูล Ticket</div><div class="card-body">
+      <dl class="meta-grid">
+        <dt>วันที่ตรวจพบ</dt><dd>{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</dd>
+        <dt>Reference ID</dt><dd>{{ ticket.reference_id|default:"-" }}</dd>
+        <dt>Category / Type</dt><dd>{{ ticket.get_category_display }} / {{ ticket.get_issue_type_display }}</dd>
+        <dt>เหตุการณ์ที่พบ</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
+        <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
+        <dt>ระบบ / บริการ</dt><dd>{{ ticket.device_name }}</dd>
+        <dt>IP Address</dt><dd class="font-monospace">{{ ticket.ip_address }}</dd>
+        {% if ticket.destination_ip %}<dt>Destination IoC</dt><dd class="font-monospace">{{ ticket.destination_ip }}</dd>{% endif %}
+        {% if ticket.mac_address %}<dt>MAC Address</dt><dd class="font-monospace">{{ ticket.mac_address }}</dd>{% endif %}
+        {% if ticket.asset_type %}<dt>Asset type</dt><dd>{{ ticket.get_asset_type_display }}</dd>{% endif %}
+        {% if ticket.mitre_phase %}<dt>MITRE ATT&CK</dt><dd>{{ ticket.mitre_phase }}</dd>{% endif %}
+        <dt>Tier 1 ผู้เปิดเคส</dt><dd>{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}<span class="text-muted">Unknown user</span>{% endif %}</dd>
+        {% if ticket.assigned_admin %}<dt>System Admin</dt><dd>{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}</dd>{% endif %}
+        {% if ticket.system_owner %}<dt>System Owner</dt><dd>{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}</dd>{% endif %}
+      </dl>
+      <hr><h6 class="text-primary">รายละเอียดเหตุการณ์</h6><div class="p-3 bg-light border rounded">{{ ticket.issue_description|linebreaks }}</div>
+      {% if ticket.ioc_details %}<h6 class="text-primary mt-3">Indicators of Compromise</h6><div class="p-3 bg-light border rounded font-monospace small">{{ ticket.ioc_details|linebreaks }}</div>{% endif %}
+      {% if ticket.action_required %}<h6 class="mt-3">สิ่งที่ต้องดำเนินการ</h6><div class="p-3 bg-light border rounded">{{ ticket.action_required|linebreaks }}</div>{% endif %}
+      {% if ticket.action_precautions %}<h6 class="mt-3 text-warning">ข้อควรระวัง</h6><div class="p-3 bg-light border rounded">{{ ticket.action_precautions|linebreaks }}</div>{% endif %}
+      {% if ticket.remediation_summary %}<h6 class="mt-3 text-primary">ผลการตรวจสอบ / Investigation findings</h6><div class="p-3 bg-light border rounded">{{ ticket.remediation_summary|linebreaks }}</div>{% endif %}
+      {% if ticket.containment_report %}<h6 class="mt-3 text-success">มาตรการตอบโต้ / Countermeasure</h6><div class="p-3 bg-light border rounded">{{ ticket.containment_report|linebreaks }}</div>{% endif %}
+    </div></div>
 
-        fetch('{% url "ip_lookup" %}?ip=' + encodeURIComponent(ip))
-            .then(function (resp) { return resp.json(); })
-            .then(function (data) {
-                if (data.error) {
-                    resultBox.classList.remove('alert-light');
-                    resultBox.classList.add('alert-danger');
-                    resultBox.textContent = data.error;
-                    return;
-                }
-                resultBox.innerHTML =
-                    '<strong>WHOIS ' + data.ip + ':</strong> ' +
-                    (data.org ? 'Org: ' + data.org + ' | ' : '') +
-                    (data.network_name ? 'Network: ' + data.network_name + ' | ' : '') +
-                    (data.country ? 'Country: ' + data.country + ' | ' : '') +
-                    (data.cidr ? 'Range: ' + data.cidr : '');
-            })
-            .catch(function () {
-                resultBox.classList.remove('alert-light');
-                resultBox.classList.add('alert-danger');
-                resultBox.textContent = 'เกิดข้อผิดพลาดในการเรียก WHOIS';
-            });
-    });
-});
-</script>
+    <div class="card border-0 shadow-sm mb-4"><div class="card-header bg-white fw-bold"><i class="bi bi-paperclip me-1"></i>ไฟล์แนบ</div><div class="card-body">
+      {% for att in attachments %}<div class="d-flex justify-content-between border-bottom py-2"><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>{% if request.user.is_superuser or profile and profile.is_soc or att.uploaded_by == request.user %}<form method="post" action="{% url 'delete_attachment' att.pk %}">{% csrf_token %}<button class="btn btn-sm btn-link text-danger" type="submit">ลบ</button></form>{% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีไฟล์แนบ</p>{% endfor %}
+      {% if not is_terminal %}<form method="post" action="{% url 'upload_attachment' ticket.pk %}" enctype="multipart/form-data" class="row g-2 mt-2">{% csrf_token %}<div class="col-md-5">{{ attachment_form.file }}</div><div class="col-md-5">{{ attachment_form.description }}</div><div class="col-md-2"><button class="btn btn-outline-secondary btn-sm w-100" type="submit">อัปโหลด</button></div></form>{% endif %}
+    </div></div>
+
+    <div class="card border-0 shadow-sm mb-4"><div class="card-header bg-white fw-bold"><i class="bi bi-clock-history me-1"></i>Audit trail</div><div class="card-body">
+      {% for log in logs %}<div class="border-start border-primary border-3 ps-3 mb-3"><div class="d-flex justify-content-between"><span class="badge bg-light text-dark border">{{ log.status_display }}</span><small class="text-muted">{{ log.created_at|date:"d M Y H:i" }}</small></div><p class="mb-1 mt-2">{{ log.note }}</p><small class="text-muted">{% if log.author %}{{ log.author.get_full_name|default:log.author.username }}{% else %}Unknown user{% endif %}</small></div>{% empty %}<p class="text-muted">ยังไม่มีประวัติ</p>{% endfor %}
+    </div></div>
+
+    <div class="card border-0 shadow-sm"><div class="card-header bg-white fw-bold">งานย่อย Investigation / Countermeasure</div><div class="card-body">
+      {% for subtask in subtasks %}<div class="border-bottom py-2"><strong>{{ subtask.title }}</strong> <span class="badge bg-secondary">{{ subtask.get_subtask_type_display }}</span> <span class="badge bg-light text-dark border">{{ subtask.get_status_display }}</span>{% if subtask.description %}<div class="small text-muted">{{ subtask.description }}</div>{% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีงานย่อย</p>{% endfor %}
+      {% if can_create_subtask and not is_terminal %}<form method="post" action="{% url 'create_subtask' ticket.pk %}" class="row g-2 mt-3">{% csrf_token %}<div class="col-md-3">{{ subtask_form.subtask_type }}</div><div class="col-md-4">{{ subtask_form.title }}</div><div class="col-md-3">{{ subtask_form.assigned_to }}</div><div class="col-md-2"><button class="btn btn-secondary w-100" type="submit">เพิ่ม</button></div><div class="col-12">{{ subtask_form.description }}</div></form>{% endif %}
+    </div></div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-4 {% if ticket.is_emergency %}emergency-card{% else %}border-0{% endif %}"><div class="card-header {% if ticket.is_emergency %}bg-danger text-white{% else %}bg-white{% endif %} fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Emergency</div><div class="card-body">
+      <p class="small text-muted">สถานะฉุกเฉินมีผลต่อการส่งให้ SOC Manager และเปลี่ยนได้ทุกช่วงของ lifecycle</p>
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="toggle_emergency"><input type="hidden" name="emergency_value" value="{% if ticket.is_emergency %}0{% else %}1{% endif %}">
+        <label class="form-label small fw-bold">เหตุผล / หมายเหตุ</label><textarea name="emergency_note" class="form-control mb-2" rows="2" {% if not can_set_emergency %}disabled{% endif %}></textarea>
+        <button class="btn {% if ticket.is_emergency %}btn-outline-danger{% else %}btn-danger{% endif %} w-100" type="submit" {% if not can_set_emergency %}disabled{% endif %}>{% if ticket.is_emergency %}ยกเลิก Emergency{% else %}ตั้งเป็น Emergency{% endif %}</button>
+      </form>
+      {% if not can_set_emergency %}<div class="alert alert-secondary small py-2 mt-2 mb-0">Tier 1 เปิดใช้ Emergency ได้หลังจาก Ticket เคยส่งต่อให้ Tier 2 แล้วเท่านั้น</div>{% endif %}
+    </div></div>
+
+    {% if is_terminal %}<div class="alert {% if ticket.status == 'CLOSED_EVENT' %}alert-secondary{% else %}alert-success{% endif %} text-center"><h5>{% if ticket.status == 'CLOSED_EVENT' %}Event - ปิดเคสแล้ว{% else %}Incident - ปิดเคสแล้ว{% endif %}</h5><p class="mb-0">ยังสามารถเปลี่ยน Emergency ได้ตามสิทธิ์</p></div>
+
+    {% elif can_t2_review %}<div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">Tier 2 Review</h5><small>ตรวจสอบ แก้ไขข้อมูลทั่วไป และยืนยัน Classification</small></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><label class="form-label fw-bold">บันทึกการตัดสินใจ</label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+
+    {% elif can_assign_admin %}<div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">Tier 1 Review</h5><small>Tier 2 ยืนยันว่าเป็น Incident และส่งกลับให้ Tier 1</small></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="assign_admin"><label class="form-label fw-bold">System Admin <span class="text-danger">*</span></label>{{ assignment_form.assigned_admin }}<label class="form-label fw-bold mt-3">บันทึกการทบทวน <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><button class="btn btn-primary w-100" type="submit">Send to System Admin</button></form></div></div>
+
+    {% elif can_submit_containment %}<div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">System Admin Investigation</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="containment"><label class="form-label fw-bold">ผลการตรวจสอบ (Investigation findings)</label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ (Countermeasure) <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit">Return to Tier 1</button></form></div></div>
+
+    {% elif transition_actions %}<div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 1 Verification{% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+    {% else %}<div class="alert alert-light border text-center text-muted">ไม่มี action สำหรับบทบาทของคุณในขั้นตอนนี้</div>{% endif %}
+  </div>
+</div>
 {% endblock %}

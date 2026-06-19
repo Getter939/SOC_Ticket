@@ -1,55 +1,12 @@
 {% extends 'base.html' %}
-
-{% block title %}บันทึกผล Triage — SOC Support System{% endblock %}
-
+{% block title %}เพิ่ม Manual Triage - SOC Support System{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card shadow-sm border-0">
-            <div class="card-header bg-dark text-white py-3">
-                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse-fill me-2"></i>บันทึกผล Triage Alert</h5>
-                <small class="text-white-50">T1 ประเมิน Alert และตัดสินใจ — FP / TP / Escalate ไปยัง T2</small>
-            </div>
-            <div class="card-body p-4">
-                <form method="post">
-                    {% csrf_token %}
-                    {% if triage_id %}
-                    <input type="hidden" name="triage_id" value="{{ triage_id }}">
-                    {% endif %}
-
-                    {% for field in form %}
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">
-                            {{ field.label }}
-                            {% if field.field.required %}<span class="text-danger">*</span>{% endif %}
-                        </label>
-                        {{ field }}
-                        {% if field.help_text %}
-                        <div class="form-text text-muted small">{{ field.help_text }}</div>
-                        {% endif %}
-                        {% if field.errors %}
-                        <div class="text-danger small mt-1">{{ field.errors }}</div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-
-                    <div class="alert alert-info py-2 small mt-3">
-                        <i class="bi bi-info-circle me-1"></i>
-                        <strong>หมายเหตุ:</strong>
-                        เลือก <strong>False Positive</strong> เพื่อปิด Alert โดยไม่สร้าง Ticket |
-                        เลือก <strong>True Positive</strong> เพื่อสร้าง Ticket ต่อไป |
-                        เลือก <strong>Escalate</strong> เพื่อส่งให้ T2 ตัดสินใจ
-                    </div>
-
-                    <div class="mt-4 d-flex gap-2">
-                        <button type="submit" class="btn btn-dark px-4">
-                            <i class="bi bi-send-fill me-1"></i>บันทึกผล Triage
-                        </button>
-                        <a href="{% url 'triage_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
+<div class="row justify-content-center"><div class="col-lg-8"><div class="card shadow-sm border-0">
+  <div class="card-header bg-dark text-white py-3"><h5 class="mb-1"><i class="bi bi-clipboard2-plus me-2"></i>เพิ่มรายการ Manual Triage</h5><small class="text-white-50">บันทึกข้อมูลรับแจ้งเข้าคิว โดยยังไม่จัดประเภท Event/Incident</small></div>
+  <div class="card-body p-4"><form method="post">{% csrf_token %}
+    {% for field in form %}<div class="mb-3"><label class="form-label fw-bold">{{ field.label }}{% if field.field.required %}<span class="text-danger"> *</span>{% endif %}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
+    <div class="alert alert-info small"><i class="bi bi-info-circle me-1"></i>หลังบันทึก Tier 1 ต้อง Claim รายการก่อน จึงจะสร้าง Ticket หรือ Release พร้อมเหตุผลได้ การจัดประเภทและ routing ทำในหน้าสร้าง Ticket เท่านั้น</div>
+    <button class="btn btn-dark" type="submit">เพิ่มเข้าคิว</button><a class="btn btn-light border" href="{% url 'triage_list' %}">ยกเลิก</a>
+  </form></div>
+</div></div></div>
 {% endblock %}

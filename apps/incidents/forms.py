@@ -181,6 +181,59 @@ class TicketForm(forms.ModelForm):
         return cleaned
 
 
+class TicketReviewForm(forms.ModelForm):
+    """General ticket information Tier 2 may correct while reviewing."""
+
+    class Meta:
+        model = Ticket
+        fields = [
+            'classification', 'severity', 'incident_datetime', 'reference_id',
+            'category', 'issue_type', 'detailed_issue', 'detailed_issue2',
+            'device_name', 'issue_description', 'ip_address', 'mac_address',
+            'asset_type', 'spread_to_others', 'destination_ip', 'ioc_details',
+            'mitre_phase', 'action_required', 'action_precautions', 'system_owner',
+        ]
+        widgets = {
+            'classification': forms.RadioSelect(),
+            'incident_datetime': forms.DateTimeInput(
+                attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
+            ),
+            'issue_description': forms.Textarea(attrs={'rows': 4}),
+            'ioc_details': forms.Textarea(attrs={'rows': 3}),
+            'action_required': forms.Textarea(attrs={'rows': 3}),
+            'action_precautions': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['system_owner'].queryset = User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_OWNER,
+            is_active=True,
+        ).order_by('profile__department', 'first_name', 'username')
+        for field in self.fields.values():
+            if not isinstance(field.widget, forms.RadioSelect):
+                field.widget.attrs.setdefault(
+                    'class', 'form-select' if isinstance(field.widget, forms.Select) else 'form-control'
+                )
+        if self.instance and self.instance.incident_datetime:
+            self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+
+
+class AdminAssignmentForm(forms.ModelForm):
+    class Meta:
+        model = Ticket
+        fields = ['assigned_admin']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['assigned_admin'].queryset = User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
+            is_active=True,
+        ).order_by('first_name', 'username')
+        self.fields['assigned_admin'].required = True
+        self.fields['assigned_admin'].widget.attrs['class'] = 'form-select'
+
+
 class TriageForm(forms.ModelForm):
     notes = forms.CharField(
         required=True,
@@ -190,19 +243,11 @@ class TriageForm(forms.ModelForm):
             'placeholder': 'บันทึกเหตุผลประกอบการตัดสินใจ...',
         }),
     )
-    escalated_to = forms.ModelChoiceField(
-        queryset=User.objects.none(),
-        required=False,
-        label='Escalate ไปยัง T2',
-        empty_label='-- เลือก T2 (เฉพาะกรณี Escalate) --',
-        widget=forms.Select(attrs={'class': 'form-select'}),
-    )
-
     class Meta:
         model = TriageRecord
         fields = [
             'source', 'source_reference', 'alert_description', 'source_ip',
-            'decision', 'notes', 'escalated_to',
+            'notes',
         ]
         widgets = {
             'source': forms.Select(attrs={'class': 'form-select'}),
@@ -215,30 +260,13 @@ class TriageForm(forms.ModelForm):
                 'placeholder': 'อธิบายรายละเอียด Alert จากแหล่งข้อมูล — severity, affected asset, evidence...',
             }),
             'source_ip': forms.TextInput(attrs={'class': 'form-control', 'placeholder': '0.0.0.0'}),
-            'decision':  forms.Select(attrs={'class': 'form-select'}),
         }
 
     def __init__(self, *args, **kwargs):
-        user = kwargs.pop('user', None)
+        # Keep the historical call signature while the form no longer uses a
+        # user to select a pre-ticket escalation recipient.
+        kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        recipients = User.objects.filter(
-            profile__role=UserProfile.ROLE_SOC_STAFF,
-            profile__tier=UserProfile.TIER_T2,
-            is_active=True,
-        )
-        if user is not None:
-            recipients = recipients.exclude(pk=user.pk)
-        self.fields['escalated_to'].queryset = recipients.order_by('first_name', 'username')
-
-    def clean(self):
-        cleaned = super().clean()
-        decision = cleaned.get('decision')
-        escalated_to = cleaned.get('escalated_to')
-        if decision == TriageRecord.DECISION_ESCALATED and not escalated_to:
-            self.add_error('escalated_to', 'กรุณาเลือก T2 ที่จะรับช่วงต่อ')
-        elif decision != TriageRecord.DECISION_ESCALATED:
-            cleaned['escalated_to'] = None
-        return cleaned
 
 
 class SubtaskForm(forms.ModelForm):

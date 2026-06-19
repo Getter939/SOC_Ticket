@@ -246,7 +246,7 @@
     {% endif %}
     {% if request.user.is_superuser or not profile.is_system_owner %}
     <div class="nav-section-label">Incidents</div>
-    {% if request.user.is_superuser or profile.is_soc %}
+    {% if request.user.is_superuser or profile.is_tier1 %}
     <a href="{% url 'triage_queue' %}" data-label="Wazuh Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
         <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Triage</span>
@@ -255,9 +255,11 @@
         {% endif %}
     </a>
     <a href="{% url 'triage_list' %}" data-label="Manual Triage"
-       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,respond_escalation' %}active{% endif %}">
+       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,claim_manual_triage,release_manual_triage' %}active{% endif %}">
         <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
+    {% endif %}
+    {% if request.user.is_superuser or profile.is_tier2 %}
     <a href="{% url 'escalation_queue' %}" data-label="Escalation Queue"
        class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
         <i class="bi bi-arrow-up-circle-fill"></i> <span class="nav-label">Escalation Queue</span>
@@ -265,6 +267,8 @@
         <span class="badge bg-warning text-dark ms-auto">{{ escalation_queue_count }}</span>
         {% endif %}
     </a>
+    {% endif %}
+    {% if request.user.is_superuser or profile.is_soc %}
     <a href="{% url 'triage_history' %}" data-label="ประวัติการ Triage Alert"
        class="nav-link {% if request.resolver_match.url_name == 'triage_history' %}active{% endif %}">
         <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติการ Triage Alert</span>
@@ -274,7 +278,7 @@
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
     </a>
-    {% if request.user.is_superuser or profile.is_soc %}
+    {% if request.user.is_superuser or profile.is_tier1 %}
     <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>

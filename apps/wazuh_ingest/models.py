@@ -16,8 +16,8 @@ class WazuhAlert(models.Model):
     TRIAGE_STATUS_CHOICES = [
         (TRIAGE_PENDING, 'Pending'),
         (TRIAGE_TRIAGING, 'Triaging'),
-        (TRIAGE_TRUE_POSITIVE, 'True Positive'),
-        (TRIAGE_FALSE_POSITIVE, 'False Positive'),
+        (TRIAGE_TRUE_POSITIVE, 'Incident'),
+        (TRIAGE_FALSE_POSITIVE, 'Event'),
         (TRIAGE_ESCALATED, 'Escalated'),
     ]
 

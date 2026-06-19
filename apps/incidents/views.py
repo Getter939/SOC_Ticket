@@ -19,7 +19,10 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 from apps.wazuh_ingest.models import WazuhAlert
-from .forms import AttachmentForm, SubtaskForm, SubtaskUpdateForm, TicketForm, TriageForm
+from .forms import (
+    AdminAssignmentForm, AttachmentForm, SubtaskForm, SubtaskUpdateForm,
+    TicketForm, TicketReviewForm, TriageForm,
+)
 from .models import (
     Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
     validate_attachment_size,
@@ -86,6 +89,48 @@ def _valid_soc_status_choices(ticket, user):
     return result
 
 
+def _transition_actions(ticket, user):
+    """Return only legal, permitted forward actions for the current user."""
+    labels = {
+        Ticket.STATUS_CLOSED_EVENT: 'Mark as Event -> Close',
+        Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
+        Ticket.STATUS_PENDING_MANAGER: 'Send to SOC Manager',
+        Ticket.STATUS_APPROVED: (
+            'Verify -> Close'
+            if ticket.status == Ticket.STATUS_PENDING_MANAGER else 'Close case'
+        ),
+    }
+    actions = []
+    for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
+        can_transition = ticket.can_transition_to(next_status)
+        # Tier 2's two decision buttons also set the classification. Ask the
+        # model whether each edge is valid with that proposed classification.
+        if ticket.status == Ticket.STATUS_ESCALATED_T2:
+            proposed = {
+                Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
+                Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
+            }.get(next_status)
+            if proposed:
+                original = ticket.classification
+                ticket.classification = proposed
+                can_transition = ticket.can_transition_to(next_status)
+                ticket.classification = original
+        if not can_transition:
+            continue
+        permission = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
+        if permission == 'ASSIGNED_ADMIN' or not _user_can_drive(ticket, user, permission):
+            continue
+        label = labels.get(next_status, dict(Ticket.STATUS_CHOICES).get(next_status, next_status))
+        if next_status == Ticket.STATUS_AWAITING_CONTAINMENT:
+            label = (
+                'Return to System Admin (not contained)'
+                if ticket.status == Ticket.STATUS_CONTAINMENT_REPORTED
+                else 'Send to System Admin'
+            )
+        actions.append({'status': next_status, 'label': label})
+    return actions
+
+
 def _notify_containment(ticket, reason, request):
     if not ticket.assigned_admin_id:
         messages.warning(request, 'Ticket routed — ไม่สามารถส่งอีเมลแจ้งเตือนได้: ยังไม่ได้กำหนดผู้ดูแลระบบ')
@@ -110,6 +155,11 @@ def _notify_owner_closed(ticket, request):
 def _can_create_ticket_from_triage(triage, user):
     if triage.ticket_id:
         return False
+    if not triage.decision:
+        return (
+            user.is_superuser
+            or (triage.claimed_by_id == user.id and getattr(getattr(user, 'profile', None), 'is_tier1', False))
+        )
     if user.is_superuser:
         return triage.final_decision == TriageRecord.DECISION_TP
     if triage.decision == TriageRecord.DECISION_TP:
@@ -141,11 +191,15 @@ def _can_create_ticket_from_wazuh(alert, user):
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
+    profile = getattr(request.user, 'profile', None)
+    if not request.user.is_superuser and profile and profile.is_soc_manager:
+        visible = visible.filter(status=Ticket.STATUS_PENDING_MANAGER)
     tickets_qs = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES))
 
     search = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
+    emergency_filter = request.GET.get('emergency', '').strip()
     sort = request.GET.get('sort', 'sla').strip()
 
     if search:
@@ -171,14 +225,20 @@ def ticket_list(request):
     else:
         severity_filter = ''
 
+    if emergency_filter in ('1', '0'):
+        tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')
+    else:
+        emergency_filter = ''
+
     sort_map = {
-        'sla':    'sla_deadline',   # most urgent deadline first
-        'newest': '-created_at',
-        'oldest': 'created_at',
+        'sla':       ('sla_deadline',),
+        'emergency': ('-is_emergency', 'sla_deadline'),
+        'newest':    ('-created_at',),
+        'oldest':    ('created_at',),
     }
     if sort not in sort_map:
         sort = 'sla'
-    tickets_qs = tickets_qs.order_by(sort_map[sort])
+    tickets_qs = tickets_qs.order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -195,6 +255,7 @@ def ticket_list(request):
         'search': search,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
+        'emergency_filter': emergency_filter,
         'sort': sort,
         'active_status_choices': active_status_choices,
         'severity_choices': Ticket.SEVERITY_CHOICES,
@@ -272,10 +333,23 @@ def create_ticket(request):
 
                     if locked_triage:
                         locked_triage.ticket = ticket
-                        locked_triage.save(update_fields=['ticket'])
+                        locked_triage.decision = (
+                            TriageRecord.DECISION_FP
+                            if ticket.classification == Ticket.CLASSIFICATION_EVENT
+                            else TriageRecord.DECISION_TP
+                        )
+                        locked_triage.claimed_by = None
+                        locked_triage.claimed_at = None
+                        locked_triage.save(update_fields=[
+                            'ticket', 'decision', 'claimed_by', 'claimed_at',
+                        ])
 
                     if locked_alert:
-                        locked_alert.triage_status = WazuhAlert.TRIAGE_TRUE_POSITIVE
+                        locked_alert.triage_status = (
+                            WazuhAlert.TRIAGE_FALSE_POSITIVE
+                            if ticket.classification == Ticket.CLASSIFICATION_EVENT
+                            else WazuhAlert.TRIAGE_TRUE_POSITIVE
+                        )
                         locked_alert.triaged_by = request.user
                         locked_alert.triaged_at = timezone.now()
                         locked_alert.escalated_to_tier = None
@@ -349,6 +423,18 @@ def ticket_detail(request, pk):
             )
         )
     )
+    transition_actions = _transition_actions(ticket, request.user)
+    transition_codes = {item['status'] for item in transition_actions}
+    can_t2_review = (
+        ticket.status == Ticket.STATUS_ESCALATED_T2
+        and {
+            Ticket.STATUS_CLOSED_EVENT, Ticket.STATUS_T1_REVIEW,
+        }.issubset(transition_codes)
+    )
+    can_assign_admin = (
+        ticket.status == Ticket.STATUS_T1_REVIEW
+        and Ticket.STATUS_AWAITING_CONTAINMENT in transition_codes
+    )
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -362,6 +448,49 @@ def ticket_detail(request, pk):
                 messages.success(request, f'{state}สถานะฉุกเฉิน (Emergency) เรียบร้อยแล้ว')
             except ValidationError as e:
                 messages.error(request, e.message)
+
+        elif action == 't2_review':
+            next_status = request.POST.get('status', '')
+            review_form = TicketReviewForm(request.POST, instance=ticket)
+            expected_classification = {
+                Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
+                Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
+            }.get(next_status)
+            if not can_t2_review or next_status not in transition_codes:
+                messages.error(request, 'This Tier 2 action is not permitted for the ticket.')
+            elif review_form.is_valid() and review_form.cleaned_data['classification'] != expected_classification:
+                messages.error(request, 'Classification must match the selected Tier 2 decision.')
+            elif review_form.is_valid():
+                try:
+                    with transaction.atomic():
+                        ticket = review_form.save()
+                        ticket.transition_to(
+                            next_status, request.user,
+                            request.POST.get('decision_note', '').strip()
+                            or dict((item['status'], item['label']) for item in transition_actions)[next_status],
+                        )
+                    if next_status == Ticket.STATUS_CLOSED_EVENT:
+                        _notify_owner_closed(ticket, request)
+                except ValidationError as e:
+                    messages.error(request, e.message)
+            else:
+                messages.error(request, 'Please correct the Tier 2 review information.')
+
+        elif action == 'assign_admin':
+            assignment_form = AdminAssignmentForm(request.POST, instance=ticket)
+            note = request.POST.get('decision_note', '').strip()
+            if not can_assign_admin:
+                messages.error(request, 'This ticket cannot be assigned by the current user.')
+            elif not note:
+                messages.error(request, 'A review note is required.')
+            elif assignment_form.is_valid():
+                try:
+                    with transaction.atomic():
+                        ticket = assignment_form.save()
+                        ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, request.user, note)
+                    _notify_containment(ticket, None, request)
+                except ValidationError as e:
+                    messages.error(request, e.message)
 
         elif action == 'containment':
             if not can_submit_containment:
@@ -395,14 +524,16 @@ def ticket_detail(request, pk):
                     except ValidationError as e:
                         messages.error(request, e.message)
 
-        elif action == 'soc_update':
+        elif action in ('workflow_action', 'soc_update'):
             new_note = request.POST.get('update_notes', '').strip()
             new_status = request.POST.get('status')
             prev_status = ticket.status
 
             if not new_note:
                 messages.error(request, 'กรุณากรอกบันทึกการดำเนินการ')
-            elif new_status:
+            elif new_status not in transition_codes:
+                messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
+            else:
                 try:
                     ticket.transition_to(new_status, request.user, new_note)
 
@@ -446,6 +577,11 @@ def ticket_detail(request, pk):
         'is_terminal': is_terminal,
         'can_submit_containment': can_submit_containment,
         'valid_status_choices': valid_status_choices,
+        'transition_actions': transition_actions,
+        'can_t2_review': can_t2_review,
+        't2_review_form': TicketReviewForm(instance=ticket),
+        'can_assign_admin': can_assign_admin,
+        'assignment_form': AdminAssignmentForm(instance=ticket),
         'can_set_emergency': ticket.can_set_emergency(request.user),
         'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
         'subtasks': subtasks,
@@ -495,6 +631,8 @@ def ticket_history(request):
     search_ticket = request.GET.get('search_ticket', '').strip()
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
+    emergency_filter = request.GET.get('emergency', '').strip()
+    sort = request.GET.get('sort', 'newest').strip()
     approved_by_filter = request.GET.get('approved_by', '').strip()
     start_date = request.GET.get('start_date', '').strip()
     end_date = request.GET.get('end_date', '').strip()
@@ -520,13 +658,24 @@ def ticket_history(request):
     if severity_filter:
         query_set = query_set.filter(severity=severity_filter)
 
+    if emergency_filter in ('1', '0'):
+        query_set = query_set.filter(is_emergency=emergency_filter == '1')
+    else:
+        emergency_filter = ''
+
     if approved_by_filter:
         try:
             query_set = query_set.filter(approved_by_id=int(approved_by_filter))
         except ValueError:
             approved_by_filter = ''
 
-    tickets_qs = query_set.prefetch_related('logs').order_by('-updated_at')
+    sort_map = {
+        'newest': ('-updated_at',),
+        'emergency': ('-is_emergency', '-updated_at'),
+    }
+    if sort not in sort_map:
+        sort = 'newest'
+    tickets_qs = query_set.prefetch_related('logs').order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -543,6 +692,8 @@ def ticket_history(request):
         'search_ticket': search_ticket,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
+        'emergency_filter': emergency_filter,
+        'sort': sort,
         'approved_by_filter': approved_by_filter,
         'approver_choices': approver_choices,
         'start_date': start_date,
@@ -550,7 +701,7 @@ def ticket_history(request):
         'all_time': all_time,
         'severity_choices': Ticket.SEVERITY_CHOICES,
         'approved_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_APPROVED).count(),
-        'fp_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_EVENT).count(),
+        'event_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_EVENT).count(),
     })
 
 
@@ -559,28 +710,20 @@ def ticket_history(request):
 @login_required
 def triage_list(request):
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (profile is None or not profile.is_soc):
+    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่เข้าถึงหน้านี้ได้')
         return redirect('home')
 
-    if request.user.is_superuser:
-        my_triages = TriageRecord.objects.all().order_by('-created_at')
-        assigned_escalations = TriageRecord.objects.filter(
-            decision=TriageRecord.DECISION_ESCALATED,
-            ticket__isnull=True,
-            t2_decision__in=['', TriageRecord.DECISION_TP],
-        ).order_by('-created_at')
-    else:
-        my_triages = TriageRecord.objects.filter(analyst=request.user).order_by('-created_at')
-        assigned_escalations = TriageRecord.objects.filter(
-            escalated_to=request.user,
-            ticket__isnull=True,
-            t2_decision__in=['', TriageRecord.DECISION_TP],
-        ).order_by('-created_at')
+    queue = TriageRecord.objects.filter(decision='', ticket__isnull=True).select_related(
+        'analyst', 'claimed_by',
+    ).order_by('-created_at')
+    history = TriageRecord.objects.exclude(decision='').select_related(
+        'analyst', 'ticket',
+    ).order_by('-created_at')[:50]
 
     return render(request, 'incidents/triage_list.html', {
-        'my_triages': my_triages,
-        'assigned_escalations': assigned_escalations,
+        'manual_queue': queue,
+        'manual_history': history,
     })
 
 
@@ -596,25 +739,59 @@ def create_triage(request):
         return redirect('home')
 
     if request.method == 'POST':
-        form = TriageForm(request.POST, user=request.user)
+        form = TriageForm(request.POST)
         if form.is_valid():
             triage = form.save(commit=False)
             triage.analyst = request.user
             triage.save()
 
-            if triage.decision == TriageRecord.DECISION_TP:
-                messages.success(request, 'บันทึก True Positive แล้ว — กรุณาสร้าง Ticket สำหรับกรณีนี้')
-                return redirect(f"{reverse('create_ticket')}?triage_id={triage.pk}")
-            elif triage.decision == TriageRecord.DECISION_FP:
-                messages.success(request, 'บันทึก False Positive เรียบร้อยแล้ว — ไม่จำเป็นต้องสร้าง Ticket')
-                return redirect('triage_list')
-            else:
-                messages.success(request, f'Escalate ไปยัง T2 เรียบร้อยแล้ว')
-                return redirect('triage_list')
+            messages.success(request, 'เพิ่มรายการ Manual Triage เข้าคิวแล้ว')
+            return redirect('triage_list')
     else:
-        form = TriageForm(user=request.user)
+        form = TriageForm()
 
     return render(request, 'incidents/triage_form.html', {'form': form})
+
+
+@login_required
+def claim_manual_triage(request, triage_id):
+    profile = getattr(request.user, 'profile', None)
+    if request.method != 'POST' or (
+        not request.user.is_superuser and (profile is None or not profile.is_tier1)
+    ):
+        return redirect('triage_list')
+    updated = TriageRecord.objects.filter(
+        pk=triage_id, decision='', ticket__isnull=True, claimed_by__isnull=True,
+    ).update(claimed_by=request.user, claimed_at=timezone.now())
+    if not updated:
+        messages.error(request, 'รายการนี้ถูกผู้อื่นรับไปแล้วหรือดำเนินการเสร็จแล้ว')
+    return redirect('triage_list')
+
+
+@login_required
+def release_manual_triage(request, triage_id):
+    profile = getattr(request.user, 'profile', None)
+    if request.method != 'POST' or (
+        not request.user.is_superuser and (profile is None or not profile.is_tier1)
+    ):
+        return redirect('triage_list')
+    reason = request.POST.get('release_reason', '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการคืนรายการกลับเข้าคิว')
+        return redirect('triage_list')
+    releasable = TriageRecord.objects.filter(
+        pk=triage_id, decision='', ticket__isnull=True, claimed_by=request.user,
+    )
+    if request.user.is_superuser:
+        releasable = TriageRecord.objects.filter(
+            pk=triage_id, decision='', ticket__isnull=True,
+        )
+    updated = releasable.update(
+        claimed_by=None, claimed_at=None, release_reason=reason,
+    )
+    if not updated:
+        messages.error(request, 'รายการนี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
+    return redirect('triage_list')
 
 
 # ── Full-text search across tickets and triage records ─────────────────── #
@@ -851,8 +1028,21 @@ def system_owner_dashboard(request):
         'sla_breaches':   active_qs.filter(sla_deadline__lt=F('created_at')).count(),
     }
 
-    recent_tickets = active_qs.order_by('-created_at')[:10]
-    closed_tickets = closed_qs.order_by('-updated_at')[:10]
+    emergency_filter = request.GET.get('emergency', '').strip()
+    sort = request.GET.get('sort', 'newest').strip()
+    if emergency_filter in ('1', '0'):
+        emergency_value = emergency_filter == '1'
+        active_qs = active_qs.filter(is_emergency=emergency_value)
+        closed_qs = closed_qs.filter(is_emergency=emergency_value)
+    else:
+        emergency_filter = ''
+    if sort not in ('newest', 'emergency'):
+        sort = 'newest'
+    active_order = ('-is_emergency', '-created_at') if sort == 'emergency' else ('-created_at',)
+    closed_order = ('-is_emergency', '-updated_at') if sort == 'emergency' else ('-updated_at',)
+
+    recent_tickets = active_qs.order_by(*active_order)[:10]
+    closed_tickets = closed_qs.order_by(*closed_order)[:10]
 
     return render(request, 'incidents/system_owner_dashboard.html', {
         'stats':          stats,
@@ -860,53 +1050,12 @@ def system_owner_dashboard(request):
         'closed_tickets': closed_tickets,
         'profile':        profile,
         'is_superuser_view': request.user.is_superuser,
+        'emergency_filter': emergency_filter,
+        'sort': sort,
     })
 
 
 @login_required
 def respond_escalation(request, triage_id):
-    profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (
-        profile is None
-        or not profile.is_soc_staff
-        or profile.tier != profile.TIER_T2
-    ):
-        return redirect('home')
-
-    triage_qs = TriageRecord.objects.all()
-    if not request.user.is_superuser:
-        triage_qs = triage_qs.filter(escalated_to=request.user)
-    triage = get_object_or_404(triage_qs, pk=triage_id)
-    if triage.t2_decision:
-        messages.error(request, 'This escalation has already been decided.')
-        return redirect('triage_list')
-
-    if request.method == 'POST':
-        t2_decision = request.POST.get('t2_decision')
-        t2_notes = request.POST.get('t2_notes', '').strip()
-
-        if t2_decision not in [TriageRecord.DECISION_FP, TriageRecord.DECISION_TP]:
-            messages.error(request, 'กรุณาเลือกการตัดสินใจ')
-        elif not t2_notes:
-            messages.error(request, 'A decision note is required.')
-        else:
-            with transaction.atomic():
-                locked_qs = TriageRecord.objects.select_for_update().filter(
-                    pk=triage_id, t2_decision='',
-                )
-                if not request.user.is_superuser:
-                    locked_qs = locked_qs.filter(escalated_to=request.user)
-                triage = get_object_or_404(locked_qs)
-                triage.t2_decision = t2_decision
-                triage.t2_notes = t2_notes
-                triage.t2_decided_at = timezone.now()
-                triage.save(update_fields=['t2_decision', 't2_notes', 't2_decided_at'])
-
-            if t2_decision == TriageRecord.DECISION_TP:
-                messages.success(request, 'T2 ยืนยัน True Positive — กรุณาสร้าง Ticket')
-                return redirect(f"{reverse('create_ticket')}?triage_id={triage.pk}")
-            else:
-                messages.success(request, 'T2 ยืนยัน False Positive — บันทึกเรียบร้อย ไม่จำเป็นต้องสร้าง Ticket')
-                return redirect('triage_list')
-
-    return render(request, 'incidents/respond_escalation.html', {'triage': triage})
+    messages.info(request, 'Manual Triage no longer escalates before ticket creation.')
+    return redirect('escalation_queue')

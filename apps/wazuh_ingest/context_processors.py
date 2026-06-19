@@ -1,9 +1,9 @@
 from .models import WazuhAlert
-from .views import _user_tier
+from apps.incidents.models import Ticket
 
 
 def pending_triage_count(request):
-    """Expose pending/escalated Wazuh alert counts to SOC staff/manager nav badges."""
+    """Expose Tier 1 intake and Tier 2 ticket queue counts to the navigation."""
     user = getattr(request, 'user', None)
     if user is None or not user.is_authenticated:
         return {}
@@ -18,14 +18,9 @@ def pending_triage_count(request):
         ).count(),
     }
 
-    tier = _user_tier(profile) if profile else None
-    if user.is_superuser:
-        context['escalation_queue_count'] = WazuhAlert.objects.filter(
-            triage_status=WazuhAlert.TRIAGE_ESCALATED,
-        ).count()
-    elif tier:
-        context['escalation_queue_count'] = WazuhAlert.objects.filter(
-            triage_status=WazuhAlert.TRIAGE_ESCALATED, escalated_to_tier=tier,
+    if user.is_superuser or (profile and profile.is_tier2):
+        context['escalation_queue_count'] = Ticket.objects.filter(
+            status=Ticket.STATUS_ESCALATED_T2,
         ).count()
 
     return context

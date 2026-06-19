@@ -265,7 +265,7 @@ def notify_system_owner_created(ticket, attachments=None):
 
 def notify_system_owner_closed(ticket, attachments=None):
     """
-    Stage 11 — Email System Owner when a ticket is APPROVED or CLOSED_FP.
+    Email the System Owner when a ticket is APPROVED or CLOSED_EVENT.
     attachments — optional list of TicketAttachment objects to include.
     """
     if not ticket.system_owner or not ticket.system_owner.email:

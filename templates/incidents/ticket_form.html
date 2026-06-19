@@ -35,13 +35,17 @@
 
   .field-hint { font-size: .75rem; color: #6c757d; margin-top: .25rem; }
   .required-star { color: #dc3545; }
+  .decision-option { border: 1px solid #dee2e6; border-radius: 10px; padding: 1rem; height: 100%; }
+  .decision-option:has(input:checked) { border-color: #dc3545; background: #fff8f8; box-shadow: 0 0 0 2px rgba(220,53,69,.08); }
+  .conditional-panel { display: none; }
+  .conditional-panel.is-visible { display: block; }
 </style>
 
 <div class="row justify-content-center">
 <div class="col-xl-10 col-lg-11">
 
   <div class="d-flex align-items-center gap-3 mb-3">
-    <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-medical-fill text-danger me-2"></i>INCIDENT REPORT</h4>
+    <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-medical-fill text-danger me-2"></i>EVENT / INCIDENT REPORT</h4>
     <span class="text-muted" style="font-size:.8rem;">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</span>
     <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
   </div>
@@ -251,12 +255,28 @@
       </div>
     </div>
 
-    <!-- ── Assignment ── -->
-    <div class="form-section">
-      <div class="section-header"><i class="bi bi-people-fill me-1"></i>การมอบหมายงาน</div>
-      <div class="row g-3">
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">ผู้ดูแลระบบที่รับผิดชอบ (System Admin)</label>
+    <div class="form-section border-danger">
+      <div class="section-header">8. Event or Incident? <small>จัดประเภทและเลือกเส้นทาง</small></div>
+      {% if form.classification.errors %}<div class="alert alert-danger py-2">{{ form.classification.errors }}</div>{% endif %}
+      <div class="row g-3" id="classification-options">
+        {% for radio in form.classification %}
+        <div class="col-md-6"><label class="decision-option d-block" for="{{ radio.id_for_label }}">{{ radio.tag }} <strong class="ms-1">{{ radio.choice_label }}</strong>
+          {% if radio.data.value == 'EVENT' %}<span class="d-block text-muted small mt-2">Event: ปิดเคสโดยไม่ส่งต่อ</span>{% else %}<span class="d-block text-muted small mt-2">Incident: มอบหมาย System Admin หรือส่ง Tier 2</span>{% endif %}
+        </label></div>
+        {% endfor %}
+      </div>
+
+      <div id="event-panel" class="conditional-panel alert alert-secondary mt-3 mb-0">
+        <strong><i class="bi bi-check-circle me-1"></i>ปิดเคส (Close case)</strong>
+        <div class="small">ระบบจะบันทึกเป็น Event และปิด Ticket</div>
+      </div>
+
+      <div id="incident-panel" class="conditional-panel mt-3">
+        <label class="form-label fw-bold">เลือกเส้นทาง Incident <span class="text-danger">*</span></label>
+        {% if form.t1_route.errors %}<div class="text-danger small">{{ form.t1_route.errors }}</div>{% endif %}
+        <div class="row g-2">{% for radio in form.t1_route %}<div class="col-md-6"><label class="decision-option d-block" for="{{ radio.id_for_label }}">{{ radio.tag }} <strong class="ms-1">{{ radio.choice_label }}</strong></label></div>{% endfor %}</div>
+        <div id="admin-panel" class="conditional-panel mt-3">
+          <label class="form-label fw-semibold">ผู้ดูแลระบบที่รับผิดชอบ (System Admin) <span class="text-danger">*</span></label>
           {{ form.assigned_admin }}
           {% if form.assigned_admin.errors %}<div class="text-danger small">{{ form.assigned_admin.errors }}</div>{% endif %}
         </div>
@@ -264,8 +284,8 @@
     </div>
 
     <div class="d-flex gap-2 mt-2 mb-4">
-      <button type="submit" class="btn btn-danger px-4 fw-semibold">
-        <i class="bi bi-save me-1"></i>บันทึกและออกเลข Ticket
+      <button type="submit" id="create-submit" class="btn btn-danger px-4 fw-semibold">
+        <i class="bi bi-save me-1"></i><span>บันทึก Ticket</span>
       </button>
       <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
     </div>
@@ -292,6 +312,18 @@ document.querySelectorAll('#asset-type-group input[type=radio]').forEach(radio =
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
 });
+
+function updateDecisionPanels() {
+  const classification = document.querySelector('input[name="classification"]:checked')?.value;
+  const route = document.querySelector('input[name="t1_route"]:checked')?.value;
+  document.getElementById('event-panel').classList.toggle('is-visible', classification === 'EVENT');
+  document.getElementById('incident-panel').classList.toggle('is-visible', classification === 'INCIDENT');
+  document.getElementById('admin-panel').classList.toggle('is-visible', classification === 'INCIDENT' && route === 'assign_admin');
+  const label = classification === 'EVENT' ? 'ปิดเคส (Close case)' : route === 'assign_admin' ? 'มอบหมายให้ System Admin' : route === 'escalate_t2' ? 'ส่งต่อให้ Tier 2' : 'บันทึก Ticket';
+  document.querySelector('#create-submit span').textContent = label;
+}
+document.querySelectorAll('input[name="classification"], input[name="t1_route"]').forEach(input => input.addEventListener('change', updateDecisionPanels));
+updateDecisionPanels();
 
 // ── Draft autosave (localStorage) ──
 // Saves text/select/radio/checkbox field values as the user types so the
