@@ -1,0 +1,778 @@
+from datetime import timedelta
+
+from django.contrib.auth.models import User
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
+from django.utils import timezone
+
+from apps.accounts.models import UserProfile
+from apps.incidents.models import Ticket, TicketLog, TicketSubtask, TriageRecord
+from apps.wazuh_ingest.models import WazuhAlert
+
+
+class Command(BaseCommand):
+    help = 'Create a realistic, replaceable three-week SOC demonstration dataset.'
+
+    DEMO_PREFIX = 'DEMO-3W-'
+    WAZUH_PREFIX = 'demo-3w-alert-'
+
+    USER_SPECS = [
+        ('demo.t1.somchai', 'Somchai', 'Rattanakul', 'somchai.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001101'),
+        ('demo.t1.narisa', 'Narisa', 'Chantana', 'narisa.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001102'),
+        ('demo.t1.kittipong', 'Kittipong', 'Sae-Tang', 'kittipong.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001103'),
+        ('demo.t1.waranya', 'Waranya', 'Prasert', 'waranya.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001104'),
+        ('demo.t2.pimchanok', 'Pimchanok', 'Viroj', 'pimchanok.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001201'),
+        ('demo.t2.anawat', 'Anawat', 'Kraisorn', 'anawat.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001202'),
+        ('demo.t2.siriporn', 'Siriporn', 'Meechai', 'siriporn.demo@soc.local',
+         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001203'),
+        ('demo.admin.endpoint', 'Nattapong', 'Endpoint', 'endpoint.admin.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_ADMIN, '', 'Endpoint Engineering', '0800001301'),
+        ('demo.admin.server', 'Rachata', 'Server', 'server.admin.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_ADMIN, '', 'Server Operations', '0800001302'),
+        ('demo.admin.network', 'Chalerm', 'Network', 'network.admin.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_ADMIN, '', 'Network Operations', '0800001303'),
+        ('demo.admin.cloud', 'Methinee', 'Cloud', 'cloud.admin.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_ADMIN, '', 'Cloud Platform', '0800001304'),
+        ('demo.owner.finance', 'Araya', 'Finance Owner', 'finance.owner.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_OWNER, '', 'Finance', '0800001401'),
+        ('demo.owner.hr', 'Kanda', 'HR Owner', 'hr.owner.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_OWNER, '', 'Human Resources', '0800001402'),
+        ('demo.owner.operations', 'Prasong', 'Operations Owner', 'operations.owner.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_OWNER, '', 'Operations', '0800001403'),
+        ('demo.owner.digital', 'Lalita', 'Digital Owner', 'digital.owner.demo@soc.local',
+         UserProfile.ROLE_SYSTEM_OWNER, '', 'Digital Services', '0800001404'),
+        ('demo.manager.soc', 'Thana', 'SOC Manager', 'manager.demo@soc.local',
+         UserProfile.ROLE_SOC_MANAGER, '', 'Security Operations Centre', '0800001501'),
+    ]
+
+    SCENARIOS = [
+        {
+            'device': 'HR-LAPTOP-{n:02d}', 'summary': 'Encoded PowerShell launched from an email attachment',
+            'detailed': 'Malicious Logic', 'detail2': 'Suspicious PowerShell', 'type': 'SIEM',
+            'phase': 'Execution', 'ioc': 'SHA256: 97d8...e442\nProcess: powershell.exe -enc\nParent: WINWORD.EXE',
+        },
+        {
+            'device': 'FILE-SHARE-{n:02d}', 'summary': 'Rapid file renaming and encryption behavior on shared storage',
+            'detailed': 'Malicious Logic', 'detail2': 'Ransomware Behavior', 'type': 'SIEM',
+            'phase': 'Impact', 'ioc': 'Extension: .locked\nProcess: updater_tmp.exe\nShare: \\fileserver\\department',
+        },
+        {
+            'device': 'CRM-APP-{n:02d}', 'summary': 'Unusual bulk export of customer records outside business hours',
+            'detailed': 'User Intrusion', 'detail2': 'Data Exfiltration', 'type': 'SIEM',
+            'phase': 'Exfiltration', 'ioc': 'Account: svc_report\nRows exported: 184,220\nDestination ASN: external hosting',
+        },
+        {
+            'device': 'PUBLIC-WEB-{n:02d}', 'summary': 'Repeated administrative endpoint probing from a hostile address',
+            'detailed': 'Unsuccessful Attempt', 'detail2': 'Admin Panel Attempt', 'type': 'External',
+            'phase': 'Reconnaissance', 'ioc': 'Paths: /admin, /backup, /.env\nHTTP: 401/403\nUser-Agent: masscan',
+        },
+        {
+            'device': 'VPN-GATEWAY-{n:02d}', 'summary': 'Successful sign-in from geographically inconsistent locations',
+            'detailed': 'User Intrusion', 'detail2': 'Impossible Travel', 'type': 'SIEM',
+            'phase': 'Initial Access', 'ioc': 'Account: contractor.ops\nLocations: Bangkok / Frankfurt\nInterval: 19 minutes',
+        },
+        {
+            'device': 'EDGE-FW-{n:02d}', 'summary': 'Sustained port scanning against internet-facing services',
+            'detailed': 'Reconnaissance', 'detail2': 'Port Scanning', 'type': 'TI',
+            'phase': 'Reconnaissance', 'ioc': 'Ports: 22, 80, 443, 3389\nPackets: 9,481\nSource reputation: scanner',
+        },
+        {
+            'device': 'FIN-PC-{n:02d}', 'summary': 'Unapproved remote administration utility installed by a user',
+            'detailed': 'Non-Compliance', 'detail2': 'Unauthorized Software', 'type': 'Admin',
+            'phase': 'Persistence', 'ioc': 'Package: remote-help.exe\nPublisher: Unknown\nInstall context: local user',
+        },
+        {
+            'device': 'PAYMENT-API-{n:02d}', 'summary': 'Critical externally reported API authorization weakness',
+            'detailed': 'Vulnerability', 'detail2': 'Vulnerability Found', 'type': 'External',
+            'phase': 'Initial Access', 'ioc': 'Endpoint: /api/v2/invoices/{id}\nFinding: broken object authorization\nCVE: N/A',
+        },
+        {
+            'device': 'CUSTOMER-PORTAL-{n:02d}', 'summary': 'Distributed request flood caused service degradation',
+            'detailed': 'DoS', 'detail2': 'DDoS', 'type': 'SIEM',
+            'phase': 'Impact', 'ioc': 'Peak: 84,000 req/s\nSources: 1,920 IPs\nTarget: /login',
+        },
+        {
+            'device': 'DNS-RESOLVER-{n:02d}', 'summary': 'Threat intelligence match for communication with malicious infrastructure',
+            'detailed': 'Investigating', 'detail2': 'TI Malicious IP', 'type': 'TI',
+            'phase': 'Command and Control', 'ioc': 'Domain: sync-update.example.invalid\nIP: 203.0.113.88\nConfidence: High',
+        },
+        {
+            'device': 'BACKUP-SERVER-{n:02d}', 'summary': 'After-hours privileged maintenance generated an anomaly',
+            'detailed': 'Explained Anomaly', 'detail2': 'Admin Maintenance', 'type': 'Admin',
+            'phase': 'Discovery', 'ioc': 'Change: CHG-DEMO-2204\nAccount: backup.admin\nWindow: approved',
+        },
+        {
+            'device': 'SALES-VDI-{n:02d}', 'summary': 'Endpoint beaconing pattern consistent with command-and-control traffic',
+            'detailed': 'Malicious Logic', 'detail2': 'C2 Server', 'type': 'SIEM',
+            'phase': 'Command and Control', 'ioc': 'Interval: 60 seconds\nJA3: 72a589da586844d7f0818ce684948eea\nBytes: 247',
+        },
+    ]
+
+    GENERIC_STATUS_PLAN = (
+        [Ticket.STATUS_NEW] * 3
+        + [Ticket.STATUS_ESCALATED_T2] * 4
+        + [Ticket.STATUS_T1_REVIEW] * 3
+        + [Ticket.STATUS_AWAITING_CONTAINMENT] * 7
+        + [Ticket.STATUS_CONTAINMENT_REPORTED] * 4
+        + [Ticket.STATUS_PENDING_MANAGER] * 3
+        + [Ticket.STATUS_APPROVED] * 27
+        + [Ticket.STATUS_CLOSED_EVENT] * 16
+    )
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--reset', action='store_true',
+            help='Replace only the records tagged as this three-week demo dataset.',
+        )
+        parser.add_argument(
+            '--password', default='Demo@12345',
+            help='Password assigned to all demo users (default: Demo@12345).',
+        )
+
+    def handle(self, *args, **options):
+        existing = Ticket.objects.filter(reference_id__startswith=self.DEMO_PREFIX).count()
+        if existing and not options['reset']:
+            raise CommandError(
+                f'{existing} demo tickets already exist. Re-run with --reset to replace them.'
+            )
+
+        self.now = timezone.now().replace(second=0, microsecond=0)
+        self.ticket_sequences = {}
+
+        with transaction.atomic():
+            if options['reset']:
+                self._clear_demo_records()
+            users = self._create_users(options['password'])
+            showcase = self._create_showcase_ticket(users)
+            tickets = [showcase]
+            for index, status in enumerate(self.GENERIC_STATUS_PLAN, start=1):
+                tickets.append(self._create_generic_ticket(index, status, users))
+            alerts = self._create_wazuh_alerts(users, tickets)
+            triage_records = self._create_manual_triage(users, tickets)
+
+        active = sum(ticket.status not in Ticket.TERMINAL_STATUSES for ticket in tickets)
+        self.stdout.write(self.style.SUCCESS('Three-week production demo dataset is ready.'))
+        self.stdout.write(
+            str({
+                'tickets': len(tickets),
+                'active': active,
+                'closed': len(tickets) - active,
+                'users': len(users),
+                'wazuh_alerts': len(alerts),
+                'manual_triage': len(triage_records),
+            })
+        )
+        self.stdout.write(f'Dashboard: /')
+        self.stdout.write(f'Active task list: /incidents/')
+        self.stdout.write(f'Emergency showcase: /incidents/ticket/{showcase.pk}/')
+        self.stdout.write(f'Demo password: {options["password"]}')
+        self.stdout.write('Tier 1 login: demo.t1.somchai')
+        self.stdout.write('Tier 2 login: demo.t2.pimchanok')
+        self.stdout.write('System Admin login: demo.admin.server')
+        self.stdout.write('SOC Manager login: demo.manager.soc')
+
+    def _clear_demo_records(self):
+        TriageRecord.objects.filter(source_reference__startswith=self.DEMO_PREFIX).delete()
+        Ticket.objects.filter(reference_id__startswith=self.DEMO_PREFIX).delete()
+        WazuhAlert.objects.filter(opensearch_id__startswith=self.WAZUH_PREFIX).delete()
+
+    def _create_users(self, password):
+        users = {}
+        for spec in self.USER_SPECS:
+            username, first, last, email, role, tier, department, phone = spec
+            user, _ = User.objects.update_or_create(
+                username=username,
+                defaults={
+                    'first_name': first,
+                    'last_name': last,
+                    'email': email,
+                    'is_active': True,
+                },
+            )
+            user.set_password(password)
+            user.save(update_fields=['password'])
+            UserProfile.objects.update_or_create(
+                user=user,
+                defaults={
+                    'role': role,
+                    'tier': tier,
+                    'department': department,
+                    'phone': phone,
+                    'note': 'Three-week production simulation account',
+                },
+            )
+            users[username] = user
+        return users
+
+    def _next_ticket_id(self, opened_at):
+        prefix = f'{opened_at.year % 100:02d}{opened_at.month:02d}'
+        if prefix not in self.ticket_sequences:
+            sequences = []
+            for value in Ticket.objects.filter(
+                ticket_id__startswith=prefix,
+            ).values_list('ticket_id', flat=True):
+                suffix = value[len(prefix):]
+                if suffix.isdigit():
+                    sequences.append(int(suffix))
+            self.ticket_sequences[prefix] = max(sequences, default=0)
+        self.ticket_sequences[prefix] += 1
+        return f'{prefix}{self.ticket_sequences[prefix]:02d}'
+
+    def _create_showcase_ticket(self, users):
+        t1 = users['demo.t1.somchai']
+        t2 = users['demo.t2.pimchanok']
+        admin = users['demo.admin.server']
+        owner = users['demo.owner.finance']
+        manager = users['demo.manager.soc']
+        opened = self.now - timedelta(days=6, hours=4)
+        incident_time = opened - timedelta(minutes=26)
+        escalated = opened + timedelta(minutes=34)
+        approved = opened + timedelta(hours=21, minutes=18)
+
+        ticket = Ticket.objects.create(
+            ticket_id=self._next_ticket_id(opened),
+            severity='Critical',
+            incident_datetime=incident_time,
+            reference_id=f'{self.DEMO_PREFIX}EMERGENCY-001',
+            device_name='FIN-ERP-PROD-DB01 / SAP Finance Database',
+            issue_description=(
+                'The SOC detected a valid service-account login followed by high-volume reads '
+                'from finance tables and encrypted outbound traffic to infrastructure with a '
+                'recent malware reputation. Correlation showed the same account authenticating '
+                'from an application server where an unsigned scheduled task had been created.\n\n'
+                'Business impact assessment: the affected database supports payment approval, '
+                'general ledger posting, and month-end reporting. Initial review identified '
+                'potential exposure of vendor bank details and invoice metadata. No evidence of '
+                'ledger modification was found, but confidentiality risk was considered critical.'
+            ),
+            ip_address='10.42.16.21',
+            mac_address='02:42:16:21:7A:9C',
+            asset_type='Server',
+            spread_to_others=True,
+            destination_ip='185.220.101.47',
+            ioc_details=(
+                'Destination IP: 185.220.101.47 (malware infrastructure, high confidence)\n'
+                'Domain: cdn-finance-sync.example.invalid\n'
+                'Compromised account: svc_finance_etl\n'
+                'Scheduled task: FinanceDataSyncUpdate\n'
+                'Payload SHA256: 9bc3d5405a741c37c1204f9a6b4d2c403e6a0f728f18820ec9b98547a12d9e31\n'
+                'Observed command: rundll32.exe C:\\ProgramData\\fin_sync.dll,Start\n'
+                'Outbound volume: 2.8 GB over 17 minutes'
+            ),
+            mitre_phase='Exfiltration',
+            action_required=(
+                '1. Isolate FIN-ERP-PROD-DB01 from nonessential network segments.\n'
+                '2. Disable and rotate svc_finance_etl credentials and dependent secrets.\n'
+                '3. Block the destination IP/domain at firewall, proxy, DNS, and EDR layers.\n'
+                '4. Preserve volatile evidence, scheduled-task XML, database audit logs, and EDR telemetry.\n'
+                '5. Hunt for the hash, domain, account, and task name across all systems.\n'
+                '6. Validate financial-record integrity with the Finance application owner.'
+            ),
+            action_precautions=(
+                'Coordinate isolation with Finance Operations to avoid interrupting payment '
+                'settlement. Capture memory before reboot. Do not delete the scheduled task or '
+                'payload until forensic copies and hashes have been collected. Rotate credentials '
+                'through the approved privileged-access workflow.'
+            ),
+            remediation_summary=(
+                'Investigation confirmed that svc_finance_etl was used from APP-FIN-02 after an '
+                'internet-facing middleware account was compromised. The attacker created a '
+                'scheduled task that loaded fin_sync.dll and queried invoice/vendor tables. EDR '
+                'and database audit logs confirmed staging and attempted exfiltration. The first '
+                'containment submission blocked the destination but left an active refresh token '
+                'and a second scheduled task on APP-FIN-02; Tier 1 rejected containment.\n\n'
+                'The second investigation pass revoked all sessions, rotated application and '
+                'database secrets, removed both persistence mechanisms after evidence capture, '
+                'rebuilt APP-FIN-02, and found no additional hosts with the indicators. Finance '
+                'validated record integrity and Legal/Privacy received the exposure assessment.'
+            ),
+            containment_report=(
+                'Completed countermeasures:\n'
+                '- Isolated FIN-ERP-PROD-DB01 and APP-FIN-02 using EDR network containment.\n'
+                '- Blocked IP, domain, TLS fingerprint, and payload hash across security controls.\n'
+                '- Disabled svc_finance_etl, revoked tokens, and rotated database, vault, and service credentials.\n'
+                '- Captured memory/disk evidence and exported database, firewall, proxy, and identity logs.\n'
+                '- Rebuilt APP-FIN-02 from the approved image and applied middleware patches.\n'
+                '- Ran enterprise-wide indicator hunt: 2,146 endpoints checked, no further matches.\n'
+                '- Monitored finance traffic for 12 hours with no recurring beaconing or unauthorized query activity.'
+            ),
+            status=Ticket.STATUS_APPROVED,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            escalated_to_t2_at=escalated,
+            is_emergency=True,
+            system_owner=owner,
+            assigned_to=t1,
+            assigned_admin=admin,
+            verified_by=t1,
+            verified_at=opened + timedelta(hours=19, minutes=42),
+            approved_by=manager,
+            approved_at=approved,
+            update_notes=(
+                'Emergency Incident fully contained after one rejected containment cycle. '
+                'Manager verification completed; retain evidence under IR-03 for 365 days.'
+            ),
+            sla_deadline=incident_time + timedelta(hours=4),
+            category='Incident',
+            issue_type='SIEM',
+            detailed_issue='Root Intrusion',
+            detailed_issue2='Data Exfiltration',
+            created_by=t1,
+        )
+        Ticket.objects.filter(pk=ticket.pk).update(created_at=opened, updated_at=approved)
+        ticket.refresh_from_db()
+
+        history = [
+            (opened, Ticket.STATUS_NEW, t1,
+             'Tier 1 opened the case after correlating database-audit, identity, proxy, and EDR alerts. Severity set to Critical because the affected service processes payment and vendor banking data.'),
+            (escalated, Ticket.STATUS_ESCALATED_T2, t1,
+             'Escalated to Tier 2 for confirmation. Evidence package included the suspicious service account, 2.8 GB outbound transfer, new scheduled task, payload hash, and destination reputation.'),
+            (opened + timedelta(minutes=47), Ticket.STATUS_ESCALATED_T2, t2,
+             'Emergency enabled after Tier 2 identified active command-and-control traffic and continuing database reads. Incident commander and Finance duty owner were notified.'),
+            (opened + timedelta(hours=1, minutes=38), Ticket.STATUS_T1_REVIEW, t2,
+             'Tier 2 confirmed Incident classification. Timeline reconstruction tied the service-account session to APP-FIN-02 and identified likely credential compromise plus persistence. Returned to Tier 1 for accountable admin assignment.'),
+            (opened + timedelta(hours=2, minutes=5), Ticket.STATUS_AWAITING_CONTAINMENT, t1,
+             'Tier 1 assigned Server Operations. Requested coordinated isolation, evidence capture, credential revocation, destination blocking, and an enterprise indicator hunt before service restoration.'),
+            (opened + timedelta(hours=8, minutes=16), Ticket.STATUS_CONTAINMENT_REPORTED, admin,
+             'Initial containment report: destination blocked, database host isolated, service account disabled, and memory image collected. APP-FIN-02 remained online for business continuity pending application-owner approval.'),
+            (opened + timedelta(hours=9, minutes=4), Ticket.STATUS_AWAITING_CONTAINMENT, t1,
+             'Containment rejected as incomplete. Identity logs showed an active refresh token and EDR found a second scheduled task on APP-FIN-02. Returned to System Admin with explicit requirements to revoke sessions, capture the second artifact, and rebuild the middleware host.'),
+            (opened + timedelta(hours=17, minutes=20), Ticket.STATUS_CONTAINMENT_REPORTED, admin,
+             'Revised containment report: all tokens revoked; service, database, and vault secrets rotated; both persistence tasks preserved then removed; APP-FIN-02 rebuilt; enterprise hunt completed with no additional matches; finance data integrity checks passed.'),
+            (opened + timedelta(hours=19, minutes=42), Ticket.STATUS_PENDING_MANAGER, t1,
+             'Tier 1 verified containment through fresh EDR telemetry, firewall/proxy review, credential tests, and a 12-hour clean monitoring window. Because the ticket is Critical and Emergency, routed to SOC Manager for final verification.'),
+            (approved, Ticket.STATUS_APPROVED, manager,
+             'SOC Manager verified evidence completeness, containment effectiveness, business-owner confirmation, and follow-up ownership. Incident approved for closure with a 7-day heightened-monitoring action and a lessons-learned review scheduled.'),
+        ]
+        for created_at, status, author, note in history:
+            self._create_log(ticket, status, author, note, created_at)
+
+        subtask_specs = [
+            (TicketSubtask.TYPE_INVESTIGATION, 'Preserve volatile and disk evidence', admin,
+             'Capture memory from both hosts, export scheduled-task definitions, and calculate evidence hashes.',
+             'Memory and disk images stored in IR evidence vault; SHA256 manifest verified.'),
+            (TicketSubtask.TYPE_INVESTIGATION, 'Reconstruct identity and database timeline', t2,
+             'Correlate identity provider, database audit, proxy, and EDR events from 24 hours before detection.',
+             'Timeline confirmed initial access through APP-FIN-02 and 17-minute collection/exfiltration window.'),
+            (TicketSubtask.TYPE_COUNTERMEASURE, 'Revoke sessions and rotate credentials', admin,
+             'Disable the service account, revoke refresh tokens, and rotate all dependent secrets.',
+             'All sessions revoked and six dependent credentials rotated through PAM.'),
+            (TicketSubtask.TYPE_COUNTERMEASURE, 'Block and hunt indicators enterprise-wide', users['demo.admin.network'],
+             'Block infrastructure and search DNS, proxy, firewall, and endpoint telemetry for related indicators.',
+             'Controls updated; 2,146 endpoints and 30 days of network telemetry searched with no further matches.'),
+            (TicketSubtask.TYPE_INVESTIGATION, 'Validate finance data integrity', owner,
+             'Compare ledger and vendor records to signed reconciliation snapshots.',
+             'No unauthorized modification found; potential confidentiality exposure documented for Privacy review.'),
+        ]
+        for offset, spec in enumerate(subtask_specs, start=1):
+            kind, title, assignee, description, result = spec
+            subtask = TicketSubtask.objects.create(
+                ticket=ticket,
+                subtask_type=kind,
+                title=title,
+                description=description,
+                status=TicketSubtask.STATUS_DONE,
+                assigned_to=assignee,
+                result_notes=result,
+                created_by=t1,
+            )
+            sub_created = opened + timedelta(hours=2 + offset)
+            TicketSubtask.objects.filter(pk=subtask.pk).update(
+                created_at=sub_created,
+                updated_at=opened + timedelta(hours=16 + offset),
+            )
+        return ticket
+
+    def _create_generic_ticket(self, index, status, users):
+        scenario = self.SCENARIOS[(index - 1) % len(self.SCENARIOS)]
+        t1_users = [users[name] for name in (
+            'demo.t1.somchai', 'demo.t1.narisa', 'demo.t1.kittipong', 'demo.t1.waranya',
+        )]
+        t2_users = [users[name] for name in (
+            'demo.t2.pimchanok', 'demo.t2.anawat', 'demo.t2.siriporn',
+        )]
+        admins = [users[name] for name in (
+            'demo.admin.endpoint', 'demo.admin.server', 'demo.admin.network', 'demo.admin.cloud',
+        )]
+        owners = [users[name] for name in (
+            'demo.owner.finance', 'demo.owner.hr', 'demo.owner.operations', 'demo.owner.digital',
+        )]
+        manager = users['demo.manager.soc']
+        t1 = t1_users[index % len(t1_users)]
+        t2 = t2_users[index % len(t2_users)]
+        admin = admins[index % len(admins)]
+        owner = owners[index % len(owners)]
+
+        age_days = (index * 8) % 21
+        opened = self.now - timedelta(days=age_days, hours=(index * 3) % 18 + 1)
+        is_event = status == Ticket.STATUS_CLOSED_EVENT
+        classification = (
+            Ticket.CLASSIFICATION_EVENT if is_event else Ticket.CLASSIFICATION_INCIDENT
+        )
+        severity_cycle = ['Medium', 'High', 'Low', 'High', 'Critical']
+        severity = severity_cycle[index % len(severity_cycle)]
+        is_emergency = not is_event and index % 10 == 0
+        if status == Ticket.STATUS_PENDING_MANAGER:
+            severity = 'Critical'
+        requires_manager = severity == 'Critical' or is_emergency
+        escalated = (
+            status in (Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW)
+            or index % 3 == 0
+            or is_emergency
+        )
+        path = self._status_path(status, classification, escalated, requires_manager)
+        span = max(self.now - opened, timedelta(hours=len(path) + 1))
+        interval = min(span / (len(path) + 1), timedelta(hours=12))
+        event_times = [opened + interval * position for position in range(len(path))]
+        last_time = event_times[-1]
+
+        breach_mode = index % 7
+        if breach_mode == 0:
+            incident_time = opened - timedelta(hours=5, minutes=10)
+        elif breach_mode == 1:
+            incident_time = opened - timedelta(hours=3, minutes=35)
+        else:
+            incident_time = opened - timedelta(minutes=35 + (index % 4) * 25)
+
+        has_admin = (
+            classification == Ticket.CLASSIFICATION_INCIDENT
+            and status not in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW)
+        )
+        verified_time = None
+        if Ticket.STATUS_PENDING_MANAGER in path:
+            verified_time = event_times[path.index(Ticket.STATUS_PENDING_MANAGER)]
+        elif status == Ticket.STATUS_APPROVED and classification == Ticket.CLASSIFICATION_INCIDENT:
+            verified_time = event_times[-1]
+        approved_by = None
+        approved_at = None
+        if status == Ticket.STATUS_APPROVED:
+            approved_by = manager if requires_manager else t1
+            approved_at = last_time
+
+        octet = 20 + index
+        ticket = Ticket.objects.create(
+            ticket_id=self._next_ticket_id(opened),
+            severity=severity,
+            incident_datetime=incident_time,
+            reference_id=f'{self.DEMO_PREFIX}TKT-{index:03d}',
+            device_name=scenario['device'].format(n=index),
+            issue_description=(
+                f"{scenario['summary']}. Detection was correlated across the available security "
+                f"telemetry and reviewed by {t1.get_full_name()}. Scope, business impact, and "
+                'required response were recorded so each handoff has clear ownership.'
+            ),
+            ip_address=f'10.{20 + index % 5}.{1 + index // 25}.{octet % 240 + 10}',
+            mac_address=f'02:42:{index % 255:02X}:{(index * 3) % 255:02X}:{(index * 7) % 255:02X}:{(index * 11) % 255:02X}',
+            asset_type=['Computer', 'Server', 'Network Device'][index % 3],
+            spread_to_others=(index % 4 == 0),
+            destination_ip=f'203.0.113.{20 + index % 180}',
+            ioc_details=scenario['ioc'],
+            mitre_phase=scenario['phase'],
+            action_required=(
+                'Validate the alert against endpoint, identity, and network telemetry. Preserve '
+                'relevant logs, contain confirmed indicators, document scope, and notify the '
+                'system owner before any service-impacting action.'
+            ),
+            action_precautions=(
+                'Confirm business dependencies and evidence capture before isolation. Use the '
+                'approved change channel for firewall, identity, or production-host changes.'
+            ),
+            remediation_summary=(
+                f"Investigation by {admin.get_full_name()} reviewed authentication, process, and "
+                'network evidence. Indicators were scoped to the listed asset and related accounts; '
+                'no unrecorded lateral movement was found.'
+                if Ticket.STATUS_CONTAINMENT_REPORTED in path else ''
+            ),
+            containment_report=(
+                'Relevant indicators were blocked, credentials were reviewed or rotated, the '
+                'affected asset was scanned, and post-containment telemetry showed no recurrence.'
+                if Ticket.STATUS_CONTAINMENT_REPORTED in path else ''
+            ),
+            status=status,
+            classification=classification,
+            escalated_to_t2_at=(
+                event_times[path.index(Ticket.STATUS_ESCALATED_T2)]
+                if Ticket.STATUS_ESCALATED_T2 in path else None
+            ),
+            is_emergency=is_emergency,
+            system_owner=owner,
+            assigned_to=t1,
+            assigned_admin=admin if has_admin or status == Ticket.STATUS_APPROVED else None,
+            verified_by=t1 if verified_time else None,
+            verified_at=verified_time,
+            approved_by=approved_by,
+            approved_at=approved_at,
+            update_notes='Production simulation: ownership and the latest workflow decision are recorded in the audit trail.',
+            sla_deadline=incident_time + timedelta(hours=4),
+            category='Cyber Event' if is_event else 'Incident',
+            issue_type=scenario['type'],
+            detailed_issue=scenario['detailed'],
+            detailed_issue2=scenario['detail2'],
+            created_by=t1,
+        )
+        Ticket.objects.filter(pk=ticket.pk).update(created_at=opened, updated_at=last_time)
+        ticket.refresh_from_db()
+
+        for position, path_status in enumerate(path):
+            author = self._author_for_status(path, position, path_status, t1, t2, admin, manager, requires_manager)
+            note = self._generic_log_note(path_status, scenario, t1, t2, admin, owner, is_event)
+            self._create_log(ticket, path_status, author, note, event_times[position])
+
+        if classification == Ticket.CLASSIFICATION_INCIDENT and has_admin:
+            self._create_generic_subtasks(ticket, index, t1, admin, last_time)
+        return ticket
+
+    @staticmethod
+    def _status_path(status, classification, escalated, requires_manager):
+        if status == Ticket.STATUS_NEW:
+            return [Ticket.STATUS_NEW]
+        path = [Ticket.STATUS_NEW]
+        if escalated:
+            path.append(Ticket.STATUS_ESCALATED_T2)
+            if status == Ticket.STATUS_ESCALATED_T2:
+                return path
+            if classification == Ticket.CLASSIFICATION_EVENT:
+                path.append(Ticket.STATUS_CLOSED_EVENT)
+                return path
+            path.append(Ticket.STATUS_T1_REVIEW)
+            if status == Ticket.STATUS_T1_REVIEW:
+                return path
+        elif classification == Ticket.CLASSIFICATION_EVENT:
+            path.append(Ticket.STATUS_CLOSED_EVENT)
+            return path
+
+        path.append(Ticket.STATUS_AWAITING_CONTAINMENT)
+        if status == Ticket.STATUS_AWAITING_CONTAINMENT:
+            return path
+        path.append(Ticket.STATUS_CONTAINMENT_REPORTED)
+        if status == Ticket.STATUS_CONTAINMENT_REPORTED:
+            return path
+        if status == Ticket.STATUS_PENDING_MANAGER:
+            path.append(Ticket.STATUS_PENDING_MANAGER)
+            return path
+        if status == Ticket.STATUS_APPROVED:
+            if requires_manager:
+                path.append(Ticket.STATUS_PENDING_MANAGER)
+            path.append(Ticket.STATUS_APPROVED)
+        return path
+
+    @staticmethod
+    def _author_for_status(path, position, status, t1, t2, admin, manager, requires_manager):
+        if position == 0 or status in (
+            Ticket.STATUS_ESCALATED_T2,
+            Ticket.STATUS_AWAITING_CONTAINMENT,
+            Ticket.STATUS_PENDING_MANAGER,
+        ):
+            return t1
+        if status == Ticket.STATUS_T1_REVIEW:
+            return t2
+        if status == Ticket.STATUS_CONTAINMENT_REPORTED:
+            return admin
+        if status == Ticket.STATUS_CLOSED_EVENT:
+            return t2 if Ticket.STATUS_ESCALATED_T2 in path else t1
+        if status == Ticket.STATUS_APPROVED:
+            return manager if requires_manager else t1
+        return t1
+
+    @staticmethod
+    def _generic_log_note(status, scenario, t1, t2, admin, owner, is_event):
+        notes = {
+            Ticket.STATUS_NEW: (
+                f"{t1.get_full_name()} opened the case after validating the source alert. "
+                f"Recorded affected service, initial IoCs, business owner ({owner.get_full_name()}), severity, and response expectations."
+            ),
+            Ticket.STATUS_ESCALATED_T2: (
+                'Tier 1 requested a second opinion because the activity required deeper correlation. '
+                'Evidence package included the alert timeline, host context, IoCs, and initial scope.'
+            ),
+            Ticket.STATUS_T1_REVIEW: (
+                f"{t2.get_full_name()} completed Tier 2 review, confirmed Incident classification, "
+                'and returned the ticket with correlation findings and recommended containment scope.'
+            ),
+            Ticket.STATUS_AWAITING_CONTAINMENT: (
+                f"Assigned to {admin.get_full_name()} for investigation and containment. "
+                'Tier 1 documented required actions, evidence-preservation precautions, and owner coordination.'
+            ),
+            Ticket.STATUS_CONTAINMENT_REPORTED: (
+                f"{admin.get_full_name()} submitted investigation findings and countermeasures. "
+                'Indicators were scoped, controls updated, and validation evidence returned to Tier 1.'
+            ),
+            Ticket.STATUS_PENDING_MANAGER: (
+                'Tier 1 verified the countermeasures against fresh telemetry and routed the Critical/Emergency '
+                'case to the SOC Manager with sign-off evidence.'
+            ),
+            Ticket.STATUS_APPROVED: (
+                'Final verification completed. Evidence, containment effectiveness, system-owner confirmation, '
+                'and follow-up ownership were reviewed before closure.'
+            ),
+            Ticket.STATUS_CLOSED_EVENT: (
+                f"Activity classified as Event and closed. {scenario['summary']}; available evidence showed "
+                'authorized or unsuccessful activity with no containment requirement.'
+            ),
+        }
+        return notes[status]
+
+    @staticmethod
+    def _create_log(ticket, status, author, note, created_at):
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            note=note,
+            status_at_time=status,
+            author=author,
+        )
+        TicketLog.objects.filter(pk=log.pk).update(created_at=created_at, updated_at=created_at)
+        return log
+
+    def _create_generic_subtasks(self, ticket, index, t1, admin, last_time):
+        specs = [
+            (TicketSubtask.TYPE_INVESTIGATION, 'Collect and correlate supporting logs'),
+            (TicketSubtask.TYPE_COUNTERMEASURE, 'Apply containment controls and validate'),
+        ]
+        for offset, (kind, title) in enumerate(specs):
+            if offset == 1 and index % 2:
+                continue
+            if ticket.status == Ticket.STATUS_APPROVED:
+                sub_status = TicketSubtask.STATUS_DONE
+                result = 'Completed and validated; evidence is recorded in the parent ticket.'
+            elif ticket.status == Ticket.STATUS_CONTAINMENT_REPORTED:
+                sub_status = TicketSubtask.STATUS_DONE if offset == 0 else TicketSubtask.STATUS_IN_PROGRESS
+                result = 'Evidence collected and initial scope documented.' if offset == 0 else ''
+            else:
+                sub_status = TicketSubtask.STATUS_IN_PROGRESS if offset == 0 else TicketSubtask.STATUS_OPEN
+                result = ''
+            subtask = TicketSubtask.objects.create(
+                ticket=ticket,
+                subtask_type=kind,
+                title=title,
+                description=(
+                    'Track this work separately so the analyst, administrator, and system owner can '
+                    'see the responsible person and current result without losing the main case timeline.'
+                ),
+                status=sub_status,
+                assigned_to=admin,
+                result_notes=result,
+                created_by=t1,
+            )
+            created = ticket.created_at + timedelta(hours=offset + 2)
+            TicketSubtask.objects.filter(pk=subtask.pk).update(
+                created_at=created,
+                updated_at=max(created, last_time - timedelta(minutes=30)),
+            )
+
+    def _create_wazuh_alerts(self, users, tickets):
+        t1_users = [users[name] for name in (
+            'demo.t1.somchai', 'demo.t1.narisa', 'demo.t1.kittipong', 'demo.t1.waranya',
+        )]
+        status_plan = (
+            [WazuhAlert.TRIAGE_PENDING] * 10
+            + [WazuhAlert.TRIAGE_TRIAGING] * 6
+            + [WazuhAlert.TRIAGE_TRUE_POSITIVE] * 12
+            + [WazuhAlert.TRIAGE_FALSE_POSITIVE] * 8
+        )
+        linkable = [ticket for ticket in tickets if ticket.is_incident]
+        link_index = 0
+        alerts = []
+        for index, triage_status in enumerate(status_plan, start=1):
+            analyst = t1_users[index % len(t1_users)]
+            timestamp = self.now - timedelta(days=(index * 5) % 21, hours=index % 11)
+            is_claimed = triage_status == WazuhAlert.TRIAGE_TRIAGING
+            is_triaged = triage_status in (
+                WazuhAlert.TRIAGE_TRUE_POSITIVE,
+                WazuhAlert.TRIAGE_FALSE_POSITIVE,
+            )
+            alert = WazuhAlert.objects.create(
+                opensearch_id=f'{self.WAZUH_PREFIX}{index:03d}',
+                alert_id=f'production.demo.{index:04d}',
+                timestamp=timestamp,
+                agent_id=f'{index:03d}',
+                agent_name=f'DEMO-PROD-ENDPOINT-{index:02d}',
+                agent_ip=f'10.60.{index // 20}.{20 + index}',
+                rule_id=str(5700 + index),
+                rule_level=[10, 11, 12, 13, 14, 15][index % 6],
+                rule_description=self.SCENARIOS[index % len(self.SCENARIOS)]['summary'],
+                rule_groups=['production-demo', 'endpoint', 'soc-monitoring'],
+                mitre_techniques=['T1059.001'] if index % 2 else ['T1078'],
+                mitre_tactics=['Execution'] if index % 2 else ['Initial Access'],
+                mitre_ids=['T1059.001'] if index % 2 else ['T1078'],
+                raw_data={
+                    'source': 'three-week production simulation',
+                    'correlation_id': f'DEMO-CORR-{index:04d}',
+                    'event_count': 12 + index * 3,
+                },
+                decoder_name='json',
+                triage_status=triage_status,
+                triaged_by=analyst if is_triaged else None,
+                triaged_at=timestamp + timedelta(minutes=18 + index) if is_triaged else None,
+                triage_note=(
+                    'Reviewed against host and network context; linked to the corresponding case.'
+                    if is_triaged else ''
+                ),
+                incident_category=(
+                    WazuhAlert.CATEGORY_MALWARE if is_triaged else None
+                ),
+                claimed_by=analyst if is_claimed else None,
+                claimed_at=timestamp + timedelta(minutes=8) if is_claimed else None,
+            )
+            WazuhAlert.objects.filter(pk=alert.pk).update(ingested_at=timestamp + timedelta(minutes=2))
+            if triage_status == WazuhAlert.TRIAGE_TRUE_POSITIVE and link_index < len(linkable):
+                ticket = linkable[link_index]
+                if ticket.wazuh_alert_id is None:
+                    Ticket.objects.filter(pk=ticket.pk).update(wazuh_alert=alert)
+                    ticket.wazuh_alert_id = alert.pk
+                link_index += 1
+            alerts.append(alert)
+        return alerts
+
+    def _create_manual_triage(self, users, tickets):
+        t1_users = [users[name] for name in (
+            'demo.t1.somchai', 'demo.t1.narisa', 'demo.t1.kittipong', 'demo.t1.waranya',
+        )]
+        sources = [
+            TriageRecord.SOURCE_EMAIL,
+            TriageRecord.SOURCE_PHONE,
+            TriageRecord.SOURCE_USER_REPORT,
+            TriageRecord.SOURCE_EXTERNAL,
+        ]
+        incident_tickets = [ticket for ticket in tickets if ticket.is_incident][12:18]
+        records = []
+        for index in range(1, 19):
+            analyst = t1_users[index % len(t1_users)]
+            created = self.now - timedelta(days=(index * 4) % 21, hours=index % 8)
+            if index <= 6:
+                decision = ''
+                claimed_by = analyst if index % 2 == 0 else None
+                ticket = None
+            elif index <= 12:
+                decision = TriageRecord.DECISION_FP
+                claimed_by = None
+                ticket = None
+            else:
+                decision = TriageRecord.DECISION_TP
+                claimed_by = None
+                ticket = incident_tickets[index - 13] if index - 13 < len(incident_tickets) else None
+            record = TriageRecord.objects.create(
+                source=sources[index % len(sources)],
+                source_reference=f'{self.DEMO_PREFIX}MANUAL-{index:03d}',
+                analyst=analyst,
+                alert_description=(
+                    f'Manual report #{index:02d}: user or external party reported suspicious '
+                    'authentication, email, endpoint, or network activity for SOC review.'
+                ),
+                source_ip=f'198.51.100.{30 + index}',
+                decision=decision,
+                notes=(
+                    'Intake details validated with the reporter; evidence and contact information recorded.'
+                    if decision else 'Awaiting Tier 1 claim and initial evidence review.'
+                ),
+                claimed_by=claimed_by,
+                claimed_at=created + timedelta(minutes=12) if claimed_by else None,
+                ticket=ticket,
+            )
+            TriageRecord.objects.filter(pk=record.pk).update(created_at=created)
+            records.append(record)
+        return records

@@ -80,6 +80,15 @@ The fixture is idempotent: running the command again skips existing alerts
 using their OpenSearch IDs. Fixture mode makes no HTTP request, needs no
 OpenSearch credentials, and does not advance the production ingest watermark.
 
+To create another batch for repeat workflow testing, use `--fresh`. This keeps
+production duplicate protection intact while assigning the demo alerts unique
+test IDs and current timestamps:
+
+```bash
+python manage.py ingest_wazuh_alerts --fixture --fresh
+python manage.py runserver
+```
+
 To test with an exported OpenSearch response instead:
 
 ```bash

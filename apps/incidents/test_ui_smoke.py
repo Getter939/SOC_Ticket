@@ -52,6 +52,10 @@ class UiSmokeTest(TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.ticket.ticket_id)
+        self.assertContains(resp, 'System Admin')
+        self.assertContains(resp, 'Initial Tier 1')
+        self.assertContains(resp, self.admin.username)
+        self.assertContains(resp, self.soc_staff.username)
 
     def test_ticket_list_status_filter(self):
         self.client.force_login(self.soc_staff)

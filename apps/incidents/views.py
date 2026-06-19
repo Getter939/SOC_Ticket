@@ -194,7 +194,9 @@ def ticket_list(request):
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and profile and profile.is_soc_manager:
         visible = visible.filter(status=Ticket.STATUS_PENDING_MANAGER)
-    tickets_qs = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES))
+    tickets_qs = visible.exclude(
+        status__in=list(Ticket.TERMINAL_STATUSES)
+    ).select_related('assigned_admin', 'created_by')
 
     search = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()

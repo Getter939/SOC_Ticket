@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -175,6 +176,35 @@ class OfflineFixtureIngestionTest(TestCase):
         self.assertEqual(WazuhAlert.objects.count(), 4)
         self.assertIn("'created': 0", output.getvalue())
         self.assertIn("'skipped': 4", output.getvalue())
+        self.assertIn('--fixture --fresh', output.getvalue())
+
+    def test_fresh_fixture_creates_a_new_pending_batch(self):
+        call_command('ingest_wazuh_alerts', '--fixture', stdout=StringIO())
+        started_at = timezone.now()
+        output = StringIO()
+
+        call_command('ingest_wazuh_alerts', '--fixture', '--fresh', stdout=output)
+
+        self.assertEqual(WazuhAlert.objects.count(), 8)
+        fresh_alerts = WazuhAlert.objects.filter(opensearch_id__startswith='fixture-')
+        self.assertEqual(fresh_alerts.count(), 4)
+        self.assertFalse(IngestWatermark.objects.exists())
+        self.assertTrue(all(alert.timestamp >= started_at for alert in fresh_alerts))
+        self.assertTrue(all(
+            alert.triage_status == WazuhAlert.TRIAGE_PENDING
+            for alert in fresh_alerts
+        ))
+        self.assertTrue(all(len(alert.opensearch_id) <= 64 for alert in fresh_alerts))
+        self.assertIn("'created': 4", output.getvalue())
+        self.assertIn("'skipped': 0", output.getvalue())
+        self.assertIn("'fresh': True", output.getvalue())
+
+    def test_fresh_requires_fixture_mode(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            '--fresh can only be used together with --fixture.',
+        ):
+            call_command('ingest_wazuh_alerts', '--fresh', stdout=StringIO())
 
     def test_fixture_respects_minimum_rule_level(self):
         output = StringIO()

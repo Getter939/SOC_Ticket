@@ -85,6 +85,8 @@
                     <th>เรื่องที่แจ้ง</th>
                     <th>ความรุนแรง</th>
                     <th>Category / Type</th>
+                    <th>System Admin</th>
+                    <th>Initial Tier 1</th>
                     <th>วันที่แจ้ง</th>
                     <th>สถานะ</th>
                     <th></th>
@@ -105,6 +107,20 @@
                         <span class="badge bg-info text-dark me-1">{{ ticket.category }}</span>
                         <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
                     </td>
+                    <td class="small">
+                        {% if ticket.assigned_admin %}
+                            <span class="fw-semibold">{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}</span>
+                        {% else %}
+                            <span class="text-muted">ยังไม่มอบหมาย</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">
+                        {% if ticket.created_by %}
+                            <span class="fw-semibold">{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</span>
+                        {% else %}
+                            <span class="text-muted">ไม่ระบุ</span>
+                        {% endif %}
+                    </td>
                     <td class="small text-muted">{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
                     <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
                     <td class="pe-3">
@@ -113,7 +129,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7" class="text-center py-5 text-muted">
+                    <td colspan="9" class="text-center py-5 text-muted">
                         <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                         {% if search or status_filter or severity_filter or emergency_filter %}
                             ไม่พบรายการที่ตรงกับเงื่อนไขการค้นหา
