@@ -137,11 +137,11 @@
     <nav class="mt-3">
       <ul class="pagination pagination-sm justify-content-center">
         {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}">«</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">«</a></li>
         {% endif %}
         <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
         {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}">»</a></li>
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">»</a></li>
         {% endif %}
       </ul>
     </nav>
