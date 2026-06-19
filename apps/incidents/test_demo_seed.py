@@ -1,9 +1,11 @@
+from datetime import timedelta
 from io import StringIO
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketSubtask, TriageRecord
@@ -26,14 +28,14 @@ class ProductionDemoSeedTest(TestCase):
         output = self.seed()
         demo_tickets = Ticket.objects.filter(reference_id__startswith='DEMO-3W-')
 
-        self.assertEqual(demo_tickets.count(), 68)
+        self.assertEqual(demo_tickets.count(), 69)
         self.assertEqual(
             demo_tickets.exclude(status__in=Ticket.TERMINAL_STATUSES).count(),
             24,
         )
         self.assertEqual(
             demo_tickets.filter(status__in=Ticket.TERMINAL_STATUSES).count(),
-            44,
+            45,
         )
         self.assertEqual(WazuhAlert.objects.filter(opensearch_id__startswith='demo-3w-alert-').count(), 36)
         self.assertEqual(TriageRecord.objects.filter(source_reference__startswith='DEMO-3W-').count(), 18)
@@ -79,10 +81,23 @@ class ProductionDemoSeedTest(TestCase):
         self.assertIn(f'/incidents/ticket/{showcase.pk}/', output)
         self.assertEqual(reverse('ticket_detail', args=[showcase.pk]), f'/incidents/ticket/{showcase.pk}/')
 
+        thai_showcase = demo_tickets.get(reference_id='DEMO-3W-THAI-EMERGENCY-001')
+        self.assertTrue(thai_showcase.is_emergency)
+        self.assertEqual(thai_showcase.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(
+            timezone.localtime(thai_showcase.incident_datetime).date(),
+            timezone.localdate() - timedelta(days=1),
+        )
+        self.assertIn('ระบบบริหารคลังสินค้า', thai_showcase.device_name)
+        self.assertIn('ศูนย์เฝ้าระวัง', thai_showcase.issue_description)
+        self.assertIn('มาตรการควบคุม', thai_showcase.containment_report)
+        self.assertTrue(thai_showcase.logs.filter(note__contains='ผู้จัดการ SOC').exists())
+        self.assertIn(f'/incidents/ticket/{thai_showcase.pk}/', output)
+
     def test_reset_replaces_only_one_copy_of_demo_dataset(self):
         self.seed()
         self.seed()
 
-        self.assertEqual(Ticket.objects.filter(reference_id__startswith='DEMO-3W-').count(), 68)
+        self.assertEqual(Ticket.objects.filter(reference_id__startswith='DEMO-3W-').count(), 69)
         self.assertEqual(User.objects.filter(username__startswith='demo.').count(), 16)
         self.assertEqual(WazuhAlert.objects.filter(opensearch_id__startswith='demo-3w-alert-').count(), 36)

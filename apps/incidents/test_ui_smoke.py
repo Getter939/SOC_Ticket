@@ -69,6 +69,9 @@ class UiSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'Critical')           # severity badge
         self.assertContains(resp, 'แจ้งเหตุใหม่')        # status label, not raw code
+        self.assertContains(resp, 'สรุปเหตุการณ์')
+        self.assertContains(resp, 'ขอบเขตและข้อมูลทางเทคนิค')
+        self.assertContains(resp, 'ประวัติการดำเนินการ')
 
     def test_ticket_detail_renders_for_assigned_admin(self):
         self.ticket.transition_to(

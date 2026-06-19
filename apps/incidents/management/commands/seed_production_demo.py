@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
@@ -19,7 +19,7 @@ class Command(BaseCommand):
     USER_SPECS = [
         ('demo.t1.somchai', 'Somchai', 'Rattanakul', 'somchai.demo@soc.local',
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001101'),
-        ('demo.t1.narisa', 'Narisa', 'Chantana', 'narisa.demo@soc.local',
+        ('demo.t1.narisa', 'นริศา', 'จันทนา', 'narisa.demo@soc.local',
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001102'),
         ('demo.t1.kittipong', 'Kittipong', 'Sae-Tang', 'kittipong.demo@soc.local',
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Monitoring', '0800001103'),
@@ -29,13 +29,13 @@ class Command(BaseCommand):
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001201'),
         ('demo.t2.anawat', 'Anawat', 'Kraisorn', 'anawat.demo@soc.local',
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001202'),
-        ('demo.t2.siriporn', 'Siriporn', 'Meechai', 'siriporn.demo@soc.local',
+        ('demo.t2.siriporn', 'ศิริพร', 'มีชัย', 'siriporn.demo@soc.local',
          UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Incident Response', '0800001203'),
         ('demo.admin.endpoint', 'Nattapong', 'Endpoint', 'endpoint.admin.demo@soc.local',
          UserProfile.ROLE_SYSTEM_ADMIN, '', 'Endpoint Engineering', '0800001301'),
         ('demo.admin.server', 'Rachata', 'Server', 'server.admin.demo@soc.local',
          UserProfile.ROLE_SYSTEM_ADMIN, '', 'Server Operations', '0800001302'),
-        ('demo.admin.network', 'Chalerm', 'Network', 'network.admin.demo@soc.local',
+        ('demo.admin.network', 'เฉลิม', 'วงศ์เครือข่าย', 'network.admin.demo@soc.local',
          UserProfile.ROLE_SYSTEM_ADMIN, '', 'Network Operations', '0800001303'),
         ('demo.admin.cloud', 'Methinee', 'Cloud', 'cloud.admin.demo@soc.local',
          UserProfile.ROLE_SYSTEM_ADMIN, '', 'Cloud Platform', '0800001304'),
@@ -43,11 +43,11 @@ class Command(BaseCommand):
          UserProfile.ROLE_SYSTEM_OWNER, '', 'Finance', '0800001401'),
         ('demo.owner.hr', 'Kanda', 'HR Owner', 'hr.owner.demo@soc.local',
          UserProfile.ROLE_SYSTEM_OWNER, '', 'Human Resources', '0800001402'),
-        ('demo.owner.operations', 'Prasong', 'Operations Owner', 'operations.owner.demo@soc.local',
+        ('demo.owner.operations', 'ประสงค์', 'วัฒนกิจ', 'operations.owner.demo@soc.local',
          UserProfile.ROLE_SYSTEM_OWNER, '', 'Operations', '0800001403'),
         ('demo.owner.digital', 'Lalita', 'Digital Owner', 'digital.owner.demo@soc.local',
          UserProfile.ROLE_SYSTEM_OWNER, '', 'Digital Services', '0800001404'),
-        ('demo.manager.soc', 'Thana', 'SOC Manager', 'manager.demo@soc.local',
+        ('demo.manager.soc', 'ธนา', 'ศรีสุวรรณ', 'manager.demo@soc.local',
          UserProfile.ROLE_SOC_MANAGER, '', 'Security Operations Centre', '0800001501'),
     ]
 
@@ -134,23 +134,41 @@ class Command(BaseCommand):
             '--password', default='Demo@12345',
             help='Password assigned to all demo users (default: Demo@12345).',
         )
+        parser.add_argument(
+            '--thai-only', action='store_true',
+            help='Create or replace only the fully Thai Emergency showcase ticket.',
+        )
 
     def handle(self, *args, **options):
+        self.now = timezone.now().replace(second=0, microsecond=0)
+        self.ticket_sequences = {}
+
+        if options['thai_only']:
+            with transaction.atomic():
+                Ticket.objects.filter(
+                    reference_id=f'{self.DEMO_PREFIX}THAI-EMERGENCY-001'
+                ).delete()
+                users = self._create_users(options['password'])
+                thai_showcase = self._create_thai_showcase_ticket(users)
+            self.stdout.write(self.style.SUCCESS('Thai Emergency showcase ticket is ready.'))
+            self.stdout.write(f'Thai Emergency showcase: /incidents/ticket/{thai_showcase.pk}/')
+            self.stdout.write(f'Demo password: {options["password"]}')
+            self.stdout.write('Tier 1 login: demo.t1.narisa')
+            return
+
         existing = Ticket.objects.filter(reference_id__startswith=self.DEMO_PREFIX).count()
         if existing and not options['reset']:
             raise CommandError(
                 f'{existing} demo tickets already exist. Re-run with --reset to replace them.'
             )
 
-        self.now = timezone.now().replace(second=0, microsecond=0)
-        self.ticket_sequences = {}
-
         with transaction.atomic():
             if options['reset']:
                 self._clear_demo_records()
             users = self._create_users(options['password'])
             showcase = self._create_showcase_ticket(users)
-            tickets = [showcase]
+            thai_showcase = self._create_thai_showcase_ticket(users)
+            tickets = [showcase, thai_showcase]
             for index, status in enumerate(self.GENERIC_STATUS_PLAN, start=1):
                 tickets.append(self._create_generic_ticket(index, status, users))
             alerts = self._create_wazuh_alerts(users, tickets)
@@ -171,6 +189,7 @@ class Command(BaseCommand):
         self.stdout.write(f'Dashboard: /')
         self.stdout.write(f'Active task list: /incidents/')
         self.stdout.write(f'Emergency showcase: /incidents/ticket/{showcase.pk}/')
+        self.stdout.write(f'Thai Emergency showcase: /incidents/ticket/{thai_showcase.pk}/')
         self.stdout.write(f'Demo password: {options["password"]}')
         self.stdout.write('Tier 1 login: demo.t1.somchai')
         self.stdout.write('Tier 2 login: demo.t2.pimchanok')
@@ -385,6 +404,170 @@ class Command(BaseCommand):
             TicketSubtask.objects.filter(pk=subtask.pk).update(
                 created_at=sub_created,
                 updated_at=opened + timedelta(hours=16 + offset),
+            )
+        return ticket
+
+    def _create_thai_showcase_ticket(self, users):
+        t1 = users['demo.t1.narisa']
+        t2 = users['demo.t2.siriporn']
+        admin = users['demo.admin.network']
+        owner = users['demo.owner.operations']
+        manager = users['demo.manager.soc']
+        yesterday = timezone.localtime(self.now).date() - timedelta(days=1)
+        current_tz = timezone.get_current_timezone()
+
+        def at(hour, minute):
+            return timezone.make_aware(
+                datetime.combine(yesterday, time(hour, minute)),
+                current_tz,
+            )
+
+        incident_time = at(8, 12)
+        opened = at(8, 34)
+        escalated = at(9, 6)
+        verified = at(17, 42)
+        approved = at(18, 25)
+
+        ticket = Ticket.objects.create(
+            ticket_id=self._next_ticket_id(opened),
+            severity='Critical',
+            incident_datetime=incident_time,
+            reference_id=f'{self.DEMO_PREFIX}THAI-EMERGENCY-001',
+            device_name='ระบบบริหารคลังสินค้า PROD-WMS-01',
+            issue_description=(
+                'ศูนย์เฝ้าระวังความมั่นคงปลอดภัยไซเบอร์ตรวจพบการเข้าสู่ระบบด้วยบัญชีผู้ดูแลคลังสินค้า '
+                'จากหมายเลขไอพีที่ไม่เคยใช้งานมาก่อน หลังจากนั้นมีการเรียกดูข้อมูลสินค้าคงเหลือ '
+                'รายการจัดส่ง และข้อมูลคู่ค้าปริมาณมากผิดปกติภายในช่วงเวลา 14 นาที พร้อมพบการเชื่อมต่อ '
+                'ออกไปยังเครื่องแม่ข่ายภายนอกที่อยู่ในรายการเฝ้าระวังภัยคุกคาม\n\n'
+                'ระบบดังกล่าวเป็นระบบสำคัญที่ใช้ควบคุมการรับสินค้า การจัดเก็บ และการส่งมอบสินค้า '
+                'ให้ลูกค้าทั่วประเทศ หากระบบหยุดให้บริการหรือข้อมูลถูกแก้ไขจะส่งผลต่อการดำเนินงานทันที '
+                'ทีมวิเคราะห์จึงยกระดับเป็นเหตุฉุกเฉิน สั่งจำกัดการเชื่อมต่อ เก็บรักษาหลักฐานดิจิทัล '
+                'และประสานเจ้าของระบบเพื่อยืนยันความถูกต้องของข้อมูลและผลกระทบทางธุรกิจ'
+            ),
+            ip_address='10.35.8.41',
+            mac_address='02:35:08:41:9B:27',
+            asset_type='Server',
+            spread_to_others=True,
+            destination_ip='203.0.113.146',
+            ioc_details=(
+                'หมายเลขไอพีต้นทางที่ผิดปกติ: 198.51.100.217\n'
+                'หมายเลขไอพีปลายทางที่ถูกบล็อก: 203.0.113.146\n'
+                'บัญชีที่ได้รับผลกระทบ: wms_admin_ops\n'
+                'ชื่อไฟล์ที่ตรวจพบ: inventory_sync_update.ps1\n'
+                'ค่าแฮช SHA-256: 42c8aa0fd7b06168cc3d193f5e04982b17283379c53d12210fd4772f18df37a1\n'
+                'งานตามกำหนดเวลาที่ผิดปกติ: WMS_Inventory_Sync_Update\n'
+                'ปริมาณข้อมูลที่ส่งออก: 1.4 กิกะไบต์ ภายใน 14 นาที'
+            ),
+            mitre_phase='Exfiltration',
+            action_required=(
+                '1. จำกัดการเชื่อมต่อของเครื่อง PROD-WMS-01 และเครื่องเชื่อมต่อ WMS-APP-02 ทันที\n'
+                '2. ระงับบัญชี wms_admin_ops เพิกถอนโทเคน และเปลี่ยนรหัสผ่านที่เกี่ยวข้องทั้งหมด\n'
+                '3. บล็อกหมายเลขไอพี ชื่อโดเมน ค่าแฮช และรูปแบบการเชื่อมต่อที่ตรวจพบ\n'
+                '4. เก็บหน่วยความจำ บันทึกเหตุการณ์ และสำเนาไฟล์ต้องสงสัยก่อนดำเนินการลบ\n'
+                '5. ตรวจค้นตัวบ่งชี้เดียวกันในเครื่องแม่ข่ายและเครื่องลูกข่ายทุกระบบ\n'
+                '6. ให้เจ้าของระบบตรวจสอบความถูกต้องของข้อมูลสินค้าคงเหลือและรายการจัดส่ง'
+            ),
+            action_precautions=(
+                'ต้องประสานหัวหน้าฝ่ายปฏิบัติการคลังสินค้าก่อนตัดการเชื่อมต่อ เพื่อหลีกเลี่ยงการหยุดชะงัก '
+                'ของงานจัดส่ง ห้ามลบไฟล์ งานตามกำหนดเวลา หรือบันทึกเหตุการณ์ก่อนจัดเก็บหลักฐานและคำนวณ '
+                'ค่าแฮชเรียบร้อย การเปลี่ยนข้อมูลรับรองต้องดำเนินการผ่านระบบบริหารบัญชีสิทธิ์สูงเท่านั้น'
+            ),
+            remediation_summary=(
+                'ผลการตรวจสอบยืนยันว่าบัญชี wms_admin_ops ถูกนำไปใช้จากเครื่อง WMS-APP-02 '
+                'หลังจากผู้โจมตีอาศัยช่องโหว่ของส่วนเชื่อมต่อเว็บที่ยังไม่ได้ติดตั้งโปรแกรมแก้ไข '
+                'ผู้โจมตีสร้างงานตามกำหนดเวลาเพื่อเรียกใช้สคริปต์ inventory_sync_update.ps1 '
+                'รวบรวมข้อมูลสินค้าคงเหลือและรายการจัดส่ง แล้วพยายามส่งข้อมูลออกไปยังเครื่องแม่ข่ายภายนอก\n\n'
+                'ทีมผู้ดูแลระบบตรวจสอบบันทึกจากระบบยืนยันตัวตน ไฟร์วอลล์ ระบบป้องกันปลายทาง และฐานข้อมูล '
+                'พบกิจกรรมจำกัดอยู่ที่ PROD-WMS-01 และ WMS-APP-02 ไม่พบการเคลื่อนย้ายไปยังระบบอื่น '
+                'เจ้าของระบบตรวจสอบยอดสินค้าคงเหลือและรายการจัดส่งแล้ว ไม่พบการแก้ไขหรือลบข้อมูล '
+                'แต่ประเมินว่ามีความเสี่ยงด้านการเปิดเผยข้อมูลคู่ค้าและแผนการจัดส่ง จึงส่งรายละเอียดให้ '
+                'ฝ่ายกฎหมายและผู้รับผิดชอบด้านข้อมูลส่วนบุคคลพิจารณาต่อ'
+            ),
+            containment_report=(
+                'มาตรการควบคุมและแก้ไขที่ดำเนินการแล้ว:\n'
+                '- จำกัดการเชื่อมต่อ PROD-WMS-01 และ WMS-APP-02 ผ่านระบบป้องกันปลายทาง\n'
+                '- ระงับบัญชี wms_admin_ops เพิกถอนโทเคนทุกชุด และเปลี่ยนข้อมูลรับรองที่เกี่ยวข้อง\n'
+                '- บล็อกหมายเลขไอพีปลายทาง ชื่อโดเมน ค่าแฮช และลายพิมพ์การเชื่อมต่อในทุกจุดควบคุม\n'
+                '- เก็บสำเนาหน่วยความจำ ไฟล์ต้องสงสัย งานตามกำหนดเวลา และบันทึกเหตุการณ์พร้อมค่าแฮช\n'
+                '- ติดตั้งโปรแกรมแก้ไขส่วนเชื่อมต่อเว็บ และสร้าง WMS-APP-02 ใหม่จากแม่แบบที่ได้รับอนุมัติ\n'
+                '- ตรวจค้นตัวบ่งชี้ในเครื่องลูกข่าย 2,146 เครื่องและบันทึกเครือข่ายย้อนหลัง 30 วัน ไม่พบจุดอื่น\n'
+                '- เฝ้าระวังการเชื่อมต่อและพฤติกรรมบัญชีต่อเนื่อง 12 ชั่วโมง ไม่พบกิจกรรมผิดปกติซ้ำ'
+            ),
+            status=Ticket.STATUS_APPROVED,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            escalated_to_t2_at=escalated,
+            is_emergency=True,
+            system_owner=owner,
+            assigned_to=t1,
+            assigned_admin=admin,
+            verified_by=t1,
+            verified_at=verified,
+            approved_by=manager,
+            approved_at=approved,
+            update_notes=(
+                'ยืนยันการควบคุมเหตุฉุกเฉินเรียบร้อยแล้ว ผู้จัดการ SOC อนุมัติปิดเคส '
+                'และกำหนดให้เฝ้าระวังเพิ่มเติม 7 วัน พร้อมจัดประชุมสรุปบทเรียนจากเหตุการณ์'
+            ),
+            sla_deadline=incident_time + timedelta(hours=4),
+            category='Incident',
+            issue_type='SIEM',
+            detailed_issue='Root Intrusion',
+            detailed_issue2='Data Exfiltration',
+            created_by=t1,
+        )
+        Ticket.objects.filter(pk=ticket.pk).update(created_at=opened, updated_at=approved)
+        ticket.refresh_from_db()
+
+        history = [
+            (opened, Ticket.STATUS_NEW, t1,
+             'Tier 1 เปิดเคสหลังเชื่อมโยงข้อมูลจากระบบยืนยันตัวตน ไฟร์วอลล์ ฐานข้อมูล และระบบป้องกันปลายทาง พร้อมบันทึกขอบเขตเบื้องต้น เจ้าของระบบ และผลกระทบต่อการจัดส่งสินค้า'),
+            (escalated, Ticket.STATUS_ESCALATED_T2, t1,
+             'ส่งต่อให้ Tier 2 ตรวจสอบยืนยัน เนื่องจากพบทั้งการใช้บัญชีสิทธิ์สูง การรวบรวมข้อมูลจำนวนมาก และการส่งข้อมูลออกไปยังปลายทางที่มีความเสี่ยง'),
+            (at(9, 18), Ticket.STATUS_ESCALATED_T2, t2,
+             'เปิดสถานะฉุกเฉินหลังยืนยันว่าการเชื่อมต่อออกยังคงเกิดขึ้นและระบบที่ได้รับผลกระทบเป็นระบบสำคัญต่อการปฏิบัติงานคลังสินค้า แจ้งผู้จัดการเวรและเจ้าของระบบแล้ว'),
+            (at(10, 2), Ticket.STATUS_T1_REVIEW, t2,
+             'Tier 2 ยืนยันว่าเป็น Incident จากหลักฐานบัญชีถูกนำไปใช้ งานตามกำหนดเวลาที่ไม่ได้รับอนุญาต และรูปแบบการส่งข้อมูลออก ส่งกลับ Tier 1 เพื่อมอบหมายผู้ดูแลระบบ'),
+            (at(10, 20), Ticket.STATUS_AWAITING_CONTAINMENT, t1,
+             'Tier 1 มอบหมายฝ่ายเครือข่ายและระบบให้จำกัดการเชื่อมต่อ เก็บหลักฐาน ระงับบัญชี บล็อกตัวบ่งชี้ และตรวจสอบการกระจายไปยังระบบอื่น โดยให้ประสานเจ้าของระบบก่อนดำเนินการที่กระทบบริการ'),
+            (at(16, 55), Ticket.STATUS_CONTAINMENT_REPORTED, admin,
+             'ผู้ดูแลระบบส่งผลการตรวจสอบและมาตรการควบคุมครบถ้วน เครื่องที่ได้รับผลกระทบถูกจำกัดการเชื่อมต่อ บัญชีและโทเคนถูกเพิกถอน ระบบเชื่อมต่อถูกสร้างใหม่ และไม่พบตัวบ่งชี้ในเครื่องอื่น'),
+            (verified, Ticket.STATUS_PENDING_MANAGER, t1,
+             'Tier 1 ตรวจสอบหลักฐานหลังควบคุม ทดสอบข้อมูลรับรอง ตรวจบันทึกเครือข่าย และยืนยันกับเจ้าของระบบแล้ว ไม่พบกิจกรรมผิดปกติซ้ำ เนื่องจากเป็นเหตุฉุกเฉินระดับวิกฤตจึงส่งให้ผู้จัดการ SOC ตรวจสอบขั้นสุดท้าย'),
+            (approved, Ticket.STATUS_APPROVED, manager,
+             'ผู้จัดการ SOC ตรวจสอบความครบถ้วนของหลักฐาน ประสิทธิผลของการควบคุม การยืนยันจากเจ้าของระบบ และผู้รับผิดชอบงานติดตามแล้ว อนุมัติปิดเคสและกำหนดเฝ้าระวังเพิ่มเติม 7 วัน'),
+        ]
+        for created_at, status, author, note in history:
+            self._create_log(ticket, status, author, note, created_at)
+
+        subtask_specs = [
+            (TicketSubtask.TYPE_INVESTIGATION, 'จัดเก็บหลักฐานดิจิทัล', admin,
+             'เก็บหน่วยความจำ ไฟล์ต้องสงสัย งานตามกำหนดเวลา และบันทึกเหตุการณ์จากทั้งสองเครื่อง',
+             'จัดเก็บหลักฐานในคลังหลักฐานกลางพร้อมค่าแฮชและบันทึกผู้ครอบครองหลักฐานครบถ้วน'),
+            (TicketSubtask.TYPE_INVESTIGATION, 'ตรวจสอบขอบเขตและลำดับเหตุการณ์', t2,
+             'เชื่อมโยงข้อมูลยืนยันตัวตน ฐานข้อมูล ไฟร์วอลล์ และระบบป้องกันปลายทาง',
+             'ยืนยันขอบเขตอยู่ที่สองเครื่องและจัดทำลำดับเหตุการณ์ตั้งแต่เริ่มเข้าสู่ระบบจนถึงการควบคุม'),
+            (TicketSubtask.TYPE_COUNTERMEASURE, 'เพิกถอนสิทธิ์และเปลี่ยนข้อมูลรับรอง', admin,
+             'ระงับบัญชี เพิกถอนโทเคน และเปลี่ยนรหัสผ่านหรือกุญแจลับของระบบที่เกี่ยวข้อง',
+             'เพิกถอนเซสชันทั้งหมดและเปลี่ยนข้อมูลรับรองที่เกี่ยวข้องจำนวนหกรายการเรียบร้อย'),
+            (TicketSubtask.TYPE_COUNTERMEASURE, 'บล็อกและตรวจค้นตัวบ่งชี้', admin,
+             'บล็อกตัวบ่งชี้ในทุกจุดควบคุมและตรวจค้นย้อนหลังในระบบองค์กร',
+             'ตรวจค้นเครื่องลูกข่าย 2,146 เครื่องและข้อมูลเครือข่ายย้อนหลัง 30 วัน ไม่พบจุดอื่น'),
+        ]
+        for offset, spec in enumerate(subtask_specs, start=1):
+            kind, title, assignee, description, result = spec
+            subtask = TicketSubtask.objects.create(
+                ticket=ticket,
+                subtask_type=kind,
+                title=title,
+                description=description,
+                status=TicketSubtask.STATUS_DONE,
+                assigned_to=assignee,
+                result_notes=result,
+                created_by=t1,
+            )
+            TicketSubtask.objects.filter(pk=subtask.pk).update(
+                created_at=at(10 + offset, 0),
+                updated_at=at(16 + offset // 2, 20),
             )
         return ticket
 
