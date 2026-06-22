@@ -901,11 +901,22 @@ class Command(BaseCommand):
                 claimed_by=analyst if is_claimed else None,
                 claimed_at=timestamp + timedelta(minutes=8) if is_claimed else None,
             )
-            WazuhAlert.objects.filter(pk=alert.pk).update(ingested_at=timestamp + timedelta(minutes=2))
+            ingested_at = timestamp + timedelta(minutes=2)
+            WazuhAlert.objects.filter(pk=alert.pk).update(ingested_at=ingested_at)
             if triage_status == WazuhAlert.TRIAGE_TRUE_POSITIVE and link_index < len(linkable):
                 ticket = linkable[link_index]
                 if ticket.wazuh_alert_id is None:
-                    Ticket.objects.filter(pk=ticket.pk).update(wazuh_alert=alert)
+                    # Stamp analyst response time exactly as the live
+                    # create_ticket path does. In production the ticket is
+                    # raised at the triage moment, so the faithful value is
+                    # triaged_at - ingested_at. We deliberately do NOT use the
+                    # ticket's created_at: the demo pairs alerts and tickets
+                    # without aligning their timelines, so created_at -
+                    # ingested_at would be meaningless (often negative).
+                    Ticket.objects.filter(pk=ticket.pk).update(
+                        wazuh_alert=alert,
+                        alert_conversion_duration=alert.triaged_at - ingested_at,
+                    )
                     ticket.wazuh_alert_id = alert.pk
                 link_index += 1
             alerts.append(alert)

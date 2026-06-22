@@ -257,3 +257,195 @@ class DashboardMetricsTest(TestCase):
         self.assertEqual(s['awaiting_admin'],   0)
         self.assertEqual(s['awaiting_soc'],     0)
         self.assertEqual(s['awaiting_manager'], 0)
+
+
+# ── Enterprise KPI tests (corrected logic) ───────────────────────────────── #
+
+class DashboardEnterpriseKPITest(TestCase):
+    """
+    Corrected enterprise KPIs added to the dashboard stats block:
+      - sla_compliance_rate (100% / 0% / None)
+      - sla_breach_live (live against-deadline, not time-to-file)
+      - sla_at_risk
+      - mttr_median / mttr_mean / mttr_n
+      - backlog_aging buckets
+      - assignee_workload
+      - severity_breakdown
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('soc_kpi', UserProfile.ROLE_SOC_STAFF)
+
+    def _stats(self):
+        self.client.force_login(self.soc)
+        return self.client.get(DASHBOARD_URL).context['stats']
+
+    def _resolve(self, ticket, resolved_at, sla_deadline):
+        """
+        Drive a ticket into a terminal state with a known resolution time.
+
+        Writes a TicketLog row (the dashboard derives resolution time from the
+        first terminal-status log entry) and pins created_at / sla_deadline.
+        created_at is forced via queryset .update() to bypass auto_now_add.
+        """
+        from apps.incidents.models import TicketLog
+        ticket.status = Ticket.STATUS_APPROVED
+        ticket.sla_deadline = sla_deadline
+        ticket.save()
+        # Pin created_at (auto_now_add ignores assignment on save)
+        Ticket.objects.filter(pk=ticket.pk).update(
+            created_at=resolved_at - timedelta(hours=2),
+        )
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            note='resolved',
+            status_at_time=Ticket.STATUS_APPROVED,
+            author=self.soc,
+        )
+        TicketLog.objects.filter(pk=log.pk).update(created_at=resolved_at)
+        return ticket
+
+    # ── sla_compliance_rate ────────────────────────────────────────────── #
+
+    def test_compliance_rate_100(self):
+        """Resolved before deadline → 100%."""
+        now = timezone.now()
+        t = _make_ticket(status=Ticket.STATUS_NEW)
+        # resolved an hour before the deadline
+        self._resolve(t, resolved_at=now - timedelta(hours=2),
+                      sla_deadline=now - timedelta(hours=1))
+        self.assertEqual(self._stats()['sla_compliance_rate'], 100.0)
+
+    def test_compliance_rate_0(self):
+        """Resolved after deadline → 0%."""
+        now = timezone.now()
+        t = _make_ticket(status=Ticket.STATUS_NEW)
+        # resolved an hour AFTER the deadline
+        self._resolve(t, resolved_at=now - timedelta(hours=1),
+                      sla_deadline=now - timedelta(hours=2))
+        self.assertEqual(self._stats()['sla_compliance_rate'], 0.0)
+
+    def test_compliance_rate_none_when_no_resolved(self):
+        """No resolved tickets → None (no ZeroDivisionError)."""
+        _make_ticket(status=Ticket.STATUS_NEW)   # active only
+        self.assertIsNone(self._stats()['sla_compliance_rate'])
+
+    # ── sla_breach_live ────────────────────────────────────────────────── #
+
+    def test_breach_live_counts_overdue_active(self):
+        """Active ticket whose deadline is in the past is counted live."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
+        self.assertEqual(self._stats()['sla_breach_live'], 1)
+
+    def test_breach_live_ignores_future_deadline(self):
+        """Active ticket whose deadline is still in the future is not counted."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=6)
+        self.assertEqual(self._stats()['sla_breach_live'], 0)
+
+    def test_breach_live_ignores_terminal(self):
+        """A resolved/terminal ticket past deadline is not a live breach."""
+        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
+        self.assertEqual(self._stats()['sla_breach_live'], 0)
+
+    # ── sla_at_risk ────────────────────────────────────────────────────── #
+
+    def test_at_risk_within_4h_window(self):
+        """Active, not breached, deadline within next 4h → at risk."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)    # at risk
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # too far out
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # already breached
+        self.assertEqual(self._stats()['sla_at_risk'], 1)
+
+    # ── MTTR ───────────────────────────────────────────────────────────── #
+
+    def test_mttr_median_known_timestamps(self):
+        """Two resolved tickets (2h and 4h) → median 3.0h, mean 3.0h, n=2."""
+        now = timezone.now()
+        t1 = _make_ticket(status=Ticket.STATUS_NEW)
+        t2 = _make_ticket(status=Ticket.STATUS_NEW)
+        # _resolve sets created_at = resolved_at - 2h, giving a 2.0h MTTR.
+        self._resolve(t1, resolved_at=now - timedelta(days=1),
+                      sla_deadline=now)
+        # For t2 craft a 4h gap explicitly.
+        from apps.incidents.models import TicketLog
+        t2.status = Ticket.STATUS_APPROVED
+        t2.sla_deadline = now
+        t2.save()
+        resolved2 = now - timedelta(days=2)
+        Ticket.objects.filter(pk=t2.pk).update(
+            created_at=resolved2 - timedelta(hours=4))
+        log = TicketLog.objects.create(
+            ticket=t2, note='resolved',
+            status_at_time=Ticket.STATUS_APPROVED, author=self.soc)
+        TicketLog.objects.filter(pk=log.pk).update(created_at=resolved2)
+
+        s = self._stats()
+        self.assertEqual(s['mttr_n'], 2)
+        self.assertEqual(s['mttr_median'], 3.0)
+        self.assertEqual(s['mttr_mean'], 3.0)
+
+    def test_mttr_none_when_no_recent_resolved(self):
+        """No resolved tickets in the last 30 days → n=0, median/mean None."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        s = self._stats()
+        self.assertEqual(s['mttr_n'], 0)
+        self.assertIsNone(s['mttr_median'])
+        self.assertIsNone(s['mttr_mean'])
+
+    # ── backlog_aging ──────────────────────────────────────────────────── #
+
+    def test_backlog_aging_one_per_bucket(self):
+        """One active ticket lands in each of fresh / aging / stale."""
+        now = timezone.now()
+        fresh = _make_ticket(status=Ticket.STATUS_NEW)   # ~now → fresh
+        aging = _make_ticket(status=Ticket.STATUS_NEW)
+        stale = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=aging.pk).update(
+            created_at=now - timedelta(days=2))          # 1–3d → aging
+        Ticket.objects.filter(pk=stale.pk).update(
+            created_at=now - timedelta(days=5))          # >3d → stale
+
+        buckets = self._stats()['backlog_aging']
+        self.assertEqual(buckets['fresh'], 1)
+        self.assertEqual(buckets['aging'], 1)
+        self.assertEqual(buckets['stale'], 1)
+
+    # ── assignee_workload ──────────────────────────────────────────────── #
+
+    def test_assignee_workload(self):
+        """Open + breached counts per assignee, sorted by open desc."""
+        from django.contrib.auth.models import User
+        analyst = User.objects.create_user(
+            username='kpi_analyst', password='pw',
+            first_name='Ada', last_name='Lovelace')
+
+        t1 = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)  # breached
+        t2 = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=6)   # ok
+        Ticket.objects.filter(pk__in=[t1.pk, t2.pk]).update(assigned_to=analyst)
+
+        workload = self._stats()['assignee_workload']
+        self.assertEqual(len(workload), 1)
+        row = workload[0]
+        self.assertEqual(row['name'], 'Ada Lovelace')
+        self.assertEqual(row['open'], 2)
+        self.assertEqual(row['breached'], 1)
+
+    # ── severity_breakdown ─────────────────────────────────────────────── #
+
+    def test_severity_breakdown_sorted_critical_first(self):
+        """Active tickets grouped by severity, critical first."""
+        _make_ticket(status=Ticket.STATUS_NEW)                       # default High
+        low = _make_ticket(status=Ticket.STATUS_NEW)
+        crit = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=low.pk).update(severity='Low')
+        Ticket.objects.filter(pk=crit.pk).update(severity='Critical')
+
+        breakdown = self._stats()['severity_breakdown']
+        labels = [b['label'] for b in breakdown]
+        self.assertEqual(labels[0], 'Critical')      # highest rank first
+        self.assertEqual(labels[-1], 'Low')          # lowest rank last
+        counts = {b['label']: b['count'] for b in breakdown}
+        self.assertEqual(counts['Critical'], 1)
+        self.assertEqual(counts['High'], 1)
+        self.assertEqual(counts['Low'], 1)

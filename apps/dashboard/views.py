@@ -1,9 +1,34 @@
+from datetime import timedelta
+from statistics import mean as _mean, median as _median
+
 from django.contrib.auth.decorators import login_required
-from django.db.models import Aggregate, Avg, Count, DurationField, F
+from django.db.models import Aggregate, Avg, Count, DurationField, F, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.shortcuts import render
 from django.utils import timezone
 
-from apps.incidents.models import Ticket
+from apps.incidents.models import Ticket, TicketLog
+
+# ====================================================================== #
+# Data-model facts this view relies on (verified against                 #
+# apps/incidents/models.py — keep in sync if the model changes):         #
+#                                                                        #
+#   a) SLA deadline   → Ticket.sla_deadline (DateTimeField). Auto-set in #
+#      Ticket.save() to (incident_datetime or now()) + SLA_HOURS (4h).   #
+#      It is an absolute resolution deadline, so "breach" = now() past   #
+#      it while still active.                                            #
+#   b) Resolution time→ there is NO resolved_at/closed_at field. The     #
+#      authoritative "moved to a terminal state" timestamp is the first  #
+#      TicketLog row whose status_at_time is in TERMINAL_STATUSES        #
+#      (written by Ticket.transition_to). We Coalesce that with          #
+#      approved_at then updated_at so tickets seeded directly into a     #
+#      terminal state (no log row) still get a sensible timestamp.       #
+#   c) Terminal slugs → 'APPROVED', 'CLOSED_EVENT'                       #
+#      (Ticket.TERMINAL_STATUSES).                                       #
+#   d) Severity       → Ticket.severity, ranked by Ticket.SEVERITY_RANK  #
+#      (Critical=4 … Unknown=0).                                         #
+#   e) Assignee       → Ticket.assigned_to (FK to auth.User).            #
+# ====================================================================== #
 
 
 class PercentileCont(Aggregate):
@@ -33,13 +58,121 @@ def dashboard(request):
         return redirect('ticket_list')
 
     today = timezone.now()
+    now   = today
     terminal = list(Ticket.TERMINAL_STATUSES)
 
     all_tickets = Ticket.objects.all()
     active_qs   = all_tickets.exclude(status__in=terminal)
     closed_qs   = all_tickets.filter(status__in=terminal)
 
+    # Legacy "time-to-file" breach — kept so the existing dashboard.html banner
+    # and breach_tickets list keep working untouched. The corrected, live
+    # against-deadline figure is sla_breach_live below.
     sla_breached_qs = active_qs.filter(sla_deadline__lt=F('created_at'))
+
+    # ── Resolution timestamp (no resolved_at field — derive from TicketLog) ─ #
+    # First time the ticket entered a terminal state. Coalesced with
+    # approved_at / updated_at for rows seeded straight into a terminal state.
+    first_terminal_log = (
+        TicketLog.objects
+        .filter(ticket=OuterRef('pk'), status_at_time__in=terminal)
+        .order_by('created_at')
+        .values('created_at')[:1]
+    )
+    resolved_at_expr = Coalesce(
+        Subquery(first_terminal_log), F('approved_at'), F('updated_at'),
+    )
+    resolved_qs = closed_qs.annotate(resolved_at=resolved_at_expr)
+
+    # ── SLA compliance rate (% resolved within deadline) ──────────────────── #
+    total_resolved = resolved_qs.count()
+    if total_resolved:
+        met = resolved_qs.filter(resolved_at__lte=F('sla_deadline')).count()
+        sla_compliance_rate = round(met / total_resolved * 100, 1)
+    else:
+        sla_compliance_rate = None
+
+    # ── Live SLA breach / at-risk (against the actual deadline, vs now()) ──── #
+    sla_breach_live = active_qs.filter(sla_deadline__lt=now).count()
+    sla_at_risk = active_qs.filter(
+        sla_deadline__gte=now,
+        sla_deadline__lte=now + timedelta(hours=4),
+    ).count()
+
+    # ── MTTR over the last 30 days (hours), median/mean/n ─────────────────── #
+    # resolved_at is derived from TicketLog, so it always exists; median is
+    # computed in Python to stay database-agnostic (PercentileCont is
+    # Postgres-only and awkward to layer over a Subquery annotation).
+    thirty_days_ago = now - timedelta(days=30)
+    mttr_rows = (
+        resolved_qs.filter(resolved_at__gte=thirty_days_ago)
+        .values_list('resolved_at', 'created_at')
+    )
+    mttr_hours = [
+        (resolved - created).total_seconds() / 3600
+        for resolved, created in mttr_rows
+        if resolved and created and resolved >= created
+    ]
+    if mttr_hours:
+        mttr_n      = len(mttr_hours)
+        mttr_median = round(_median(mttr_hours), 1)
+        mttr_mean   = round(_mean(mttr_hours), 1)
+    else:
+        mttr_n      = 0
+        mttr_median = None
+        mttr_mean   = None
+
+    # ── Backlog aging (active tickets bucketed by age) ────────────────────── #
+    fresh_cut = now - timedelta(hours=24)
+    stale_cut = now - timedelta(days=3)
+    backlog_aging = {
+        'fresh': active_qs.filter(created_at__gte=fresh_cut).count(),
+        'aging': active_qs.filter(
+                     created_at__lt=fresh_cut, created_at__gte=stale_cut).count(),
+        'stale': active_qs.filter(created_at__lt=stale_cut).count(),
+    }
+
+    # ── Assignee workload (top 8 by open count, with breach count) ────────── #
+    workload_rows = (
+        active_qs.filter(assigned_to__isnull=False)
+        .values(
+            'assigned_to__first_name',
+            'assigned_to__last_name',
+            'assigned_to__username',
+        )
+        .annotate(
+            open=Count('id'),
+            breached=Count('id', filter=Q(sla_deadline__lt=now)),
+        )
+        .order_by('-open')[:8]
+    )
+    assignee_workload = []
+    for row in workload_rows:
+        name = (f"{row['assigned_to__first_name']} "
+                f"{row['assigned_to__last_name']}").strip() \
+            or row['assigned_to__username']
+        assignee_workload.append({
+            'name':     name,
+            'open':     row['open'],
+            'breached': row['breached'],
+        })
+
+    # ── Severity breakdown (active tickets, critical first) ───────────────── #
+    sev_display = dict(Ticket.SEVERITY_CHOICES)
+    severity_breakdown = sorted(
+        (
+            {
+                'label': sev_display.get(r['severity'], r['severity']),
+                'count': r['count'],
+                '_rank': Ticket.SEVERITY_RANK.get(r['severity'], 0),
+            }
+            for r in active_qs.values('severity').annotate(count=Count('id'))
+        ),
+        key=lambda x: x['_rank'],
+        reverse=True,
+    )
+    for item in severity_breakdown:
+        item.pop('_rank')
 
     # ── Analyst response time (alert actionable → ticket raised) ─────────── #
     # Median is reported as the headline figure (robust to the long tail from
@@ -93,6 +226,16 @@ def dashboard(request):
         'conversion_n':          conv['n'],
         'conversion_median_min': conv_median_min,
         'conversion_mean_min':   conv_mean_min,
+        # ── Enterprise-grade KPIs (corrected) ──────────────────────────── #
+        'sla_compliance_rate': sla_compliance_rate,   # % resolved within deadline (None if no resolved)
+        'sla_breach_live':     sla_breach_live,        # active & now() past deadline
+        'sla_at_risk':         sla_at_risk,            # active & deadline within next 4h, not yet breached
+        'mttr_median':         mttr_median,            # hours, last 30 days (None if none)
+        'mttr_mean':           mttr_mean,              # hours, last 30 days (None if none)
+        'mttr_n':              mttr_n,                 # count of resolved in last 30 days
+        'backlog_aging':       backlog_aging,          # {'fresh','aging','stale'}
+        'assignee_workload':   assignee_workload,      # top 8 [{'name','open','breached'}]
+        'severity_breakdown':  severity_breakdown,     # active [{'label','count'}], critical first
     }
 
     # ── Pipeline chart — all 7 statuses ──────────────────────────────────── #
