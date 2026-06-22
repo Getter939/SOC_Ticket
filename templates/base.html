@@ -268,12 +268,6 @@
         {% endif %}
     </a>
     {% endif %}
-    {% if request.user.is_superuser or profile.is_soc %}
-    <a href="{% url 'triage_history' %}" data-label="ประวัติการ Triage Alert"
-       class="nav-link {% if request.resolver_match.url_name == 'triage_history' %}active{% endif %}">
-        <i class="bi bi-clock-history"></i> <span class="nav-label">ประวัติการ Triage Alert</span>
-    </a>
-    {% endif %}
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>

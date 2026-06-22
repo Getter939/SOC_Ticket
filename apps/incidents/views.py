@@ -347,13 +347,14 @@ def create_ticket(request):
                         ])
 
                     if locked_alert:
+                        now = timezone.now()
                         locked_alert.triage_status = (
                             WazuhAlert.TRIAGE_FALSE_POSITIVE
                             if ticket.classification == Ticket.CLASSIFICATION_EVENT
                             else WazuhAlert.TRIAGE_TRUE_POSITIVE
                         )
                         locked_alert.triaged_by = request.user
-                        locked_alert.triaged_at = timezone.now()
+                        locked_alert.triaged_at = now
                         locked_alert.escalated_to_tier = None
                         locked_alert.claimed_by = None
                         locked_alert.claimed_at = None
@@ -361,6 +362,15 @@ def create_ticket(request):
                             'triage_status', 'triaged_by', 'triaged_at',
                             'escalated_to_tier', 'claimed_by', 'claimed_at',
                         ])
+
+                        # Stamp analyst response time once (alert actionable →
+                        # ticket raised). now() is within sub-second of the
+                        # ticket's auto_now_add created_at. Guard against clock
+                        # skew that would otherwise yield a negative duration.
+                        delta = now - locked_alert.ingested_at
+                        if delta.total_seconds() >= 0:
+                            ticket.alert_conversion_duration = delta
+                            ticket.save(update_fields=['alert_conversion_duration'])
 
                     for evidence_file in request.FILES.getlist('evidence_files'):
                         validate_attachment_size(evidence_file)

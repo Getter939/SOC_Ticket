@@ -46,6 +46,18 @@
             <div class="text-muted" style="font-size:0.7rem;">SLA Breaches</div>
         </div>
     </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100 p-3">
+            <div class="text-muted small fw-bold mb-1">เวลาตอบสนอง (มัธยฐาน)</div>
+            {% if stats.conversion_n %}
+            <div class="fs-2 fw-bold text-primary">{{ stats.conversion_median_min }}<span class="fs-6 fw-normal text-muted"> นาที</span></div>
+            <div class="text-muted" style="font-size:0.7rem;">Median Alert → Ticket · n={{ stats.conversion_n }} (เฉลี่ย {{ stats.conversion_mean_min }} นาที)</div>
+            {% else %}
+            <div class="fs-2 fw-bold text-muted">—</div>
+            <div class="text-muted" style="font-size:0.7rem;">ยังไม่มี Ticket ที่มาจาก Alert</div>
+            {% endif %}
+        </div>
+    </div>
 </div>
 
 <!-- Actionable backlog and Event/Incident ratio -->

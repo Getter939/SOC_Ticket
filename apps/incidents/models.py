@@ -457,6 +457,17 @@ class Ticket(models.Model):
         related_name='ticket', verbose_name='Wazuh Alert',
     )
 
+    # Analyst response time: how long from the source alert becoming actionable
+    # (wazuh_alert.ingested_at) until this ticket was raised (created_at).
+    # Stamped once at creation and never recomputed, so it survives the alert
+    # row being nulled (wazuh_alert is on_delete=SET_NULL). Null for tickets
+    # created manually with no source alert — those have no conversion time.
+    alert_conversion_duration = models.DurationField(
+        null=True, blank=True,
+        verbose_name='เวลาตอบสนอง (Alert พร้อมรับ → เปิด Ticket)',
+        help_text='created_at − wazuh_alert.ingested_at, stamped once at creation.',
+    )
+
     SLA_HOURS = 4
 
     # ------------------------------------------------------------------ #

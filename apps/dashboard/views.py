@@ -1,9 +1,24 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, F
+from django.db.models import Aggregate, Avg, Count, DurationField, F
 from django.shortcuts import render
 from django.utils import timezone
 
 from apps.incidents.models import Ticket
+
+
+class PercentileCont(Aggregate):
+    """Postgres ordered-set aggregate: PERCENTILE_CONT(p) WITHIN GROUP (ORDER BY ...).
+
+    Django has no built-in percentile function; this wraps the native Postgres
+    one. Postgres-only — both prod and dev run Postgres.
+    """
+    function = 'PERCENTILE_CONT'
+    name = 'percentilecont'
+    template = '%(function)s(%(percentile)s) WITHIN GROUP (ORDER BY %(expressions)s)'
+    output_field = DurationField()
+
+    def __init__(self, expression, percentile=0.5, **extra):
+        super().__init__(expression, percentile=percentile, **extra)
 
 
 @login_required
@@ -25,6 +40,20 @@ def dashboard(request):
     closed_qs   = all_tickets.filter(status__in=terminal)
 
     sla_breached_qs = active_qs.filter(sla_deadline__lt=F('created_at'))
+
+    # ── Analyst response time (alert actionable → ticket raised) ─────────── #
+    # Median is reported as the headline figure (robust to the long tail from
+    # ingestion/queue dwell); mean + n give context. Excludes manually-created
+    # tickets, which have no source alert and therefore no conversion time.
+    # PercentileCont is Postgres-only — safe here (prod and dev both Postgres).
+    conv_qs = all_tickets.filter(alert_conversion_duration__isnull=False)
+    conv = conv_qs.aggregate(
+        n=Count('id'),
+        median=PercentileCont('alert_conversion_duration', percentile=0.5),
+        mean=Avg('alert_conversion_duration'),
+    )
+    conv_median_min = round(conv['median'].total_seconds() / 60, 1) if conv['median'] else None
+    conv_mean_min = round(conv['mean'].total_seconds() / 60, 1) if conv['mean'] else None
 
     # ── Event/Incident classification counts (closed tickets only) ───────── #
     # Kept under the legacy tp_*/fp_* stat keys so the dashboard template keeps
@@ -60,6 +89,10 @@ def dashboard(request):
         'fp_count': fp_count,
         'tp_pct':   tp_pct,
         'fp_pct':   fp_pct,
+        # Analyst response time (alert → ticket)
+        'conversion_n':          conv['n'],
+        'conversion_median_min': conv_median_min,
+        'conversion_mean_min':   conv_mean_min,
     }
 
     # ── Pipeline chart — all 7 statuses ──────────────────────────────────── #
