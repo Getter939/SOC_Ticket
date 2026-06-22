@@ -514,18 +514,38 @@ class DashboardManagementViewTest(TestCase):
         html = self._get().content.decode()
         self.assertIn('Avg MTTR by Category', html)
         self.assertIn('Resolved Tickets by Category', html)
-        self.assertIn('Monthly Case Volume', html)
+        self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
 
     # ── New context keys ───────────────────────────────────────────────── #
 
-    def test_monthly_trend_filtered_is_list_of_six(self):
+    def test_daily_trend_filtered_zero_filled_no_gaps(self):
+        """daily_trend_filtered is a ≤31-item list with no date gaps (zero-fill)."""
+        from datetime import datetime
         ctx = self._get().context
-        self.assertIn('monthly_trend_filtered', ctx)
-        self.assertIsInstance(ctx['monthly_trend_filtered'], list)
-        self.assertEqual(len(ctx['monthly_trend_filtered']), 6)
-        self.assertIn('month', ctx['monthly_trend_filtered'][0])
-        self.assertIn('count', ctx['monthly_trend_filtered'][0])
+        self.assertIn('daily_trend_filtered', ctx)
+        trend = ctx['daily_trend_filtered']
+        self.assertIsInstance(trend, list)
+        self.assertLessEqual(len(trend), 31)
+        self.assertIn('date', trend[0])
+        self.assertIn('count', trend[0])
+        # Default (all-time) → daily mode covering 30 days.
+        self.assertEqual(len(trend), 30)
+        # Consecutive dates differ by exactly one day (proves zero-fill).
+        dates = [datetime.strptime(d['date'], '%Y-%m-%d').date() for d in trend]
+        for earlier, later in zip(dates, dates[1:]):
+            self.assertEqual((later - earlier).days, 1)
+
+    def test_daily_trend_week_filter_is_seven_days(self):
+        """date_range=week → 7 daily buckets."""
+        trend = self._get(date_range='week').context['daily_trend_filtered']
+        self.assertEqual(len(trend), 7)
+
+    def test_daily_trend_today_filter_is_hourly(self):
+        """date_range=today → hourly buckets labelled 'YYYY-MM-DD HH:00'."""
+        trend = self._get(date_range='today').context['daily_trend_filtered']
+        self.assertTrue(trend)
+        self.assertRegex(trend[0]['date'], r'^\d{4}-\d{2}-\d{2} \d{2}:00$')
 
     def test_recent_tickets_capped_at_15(self):
         for _ in range(20):

@@ -299,17 +299,17 @@
     <div class="col-12">
         <div class="panel p-3">
             <div class="panel-title mb-2">
-                <i class="bi bi-graph-up me-1"></i>Monthly Case Volume (6 months) — ปริมาณคดีต่อเดือน
+                <i class="bi bi-graph-up me-1"></i>Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน
             </div>
             <div style="height:200px;">
-                <canvas id="chartMonthly" role="img" aria-label="ปริมาณคดีต่อเดือน ย้อนหลัง 6 เดือน"></canvas>
+                <canvas id="chartDaily" role="img" aria-label="ปริมาณคดีรายวัน"></canvas>
             </div>
             <table class="visually-hidden">
-                <caption>Monthly case volume</caption>
-                <thead><tr><th>เดือน</th><th>จำนวน</th></tr></thead>
+                <caption>Daily case volume</caption>
+                <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
                 <tbody>
-                    {% for row in monthly_trend_filtered %}
-                    <tr><td>{{ row.month }}</td><td>{{ row.count }}</td></tr>
+                    {% for row in daily_trend_filtered %}
+                    <tr><td>{{ row.date }}</td><td>{{ row.count }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -384,8 +384,8 @@
 {{ by_category_data|json_script:"by-category-data" }}
 {{ mttr_by_category|json_script:"mttr-by-category" }}
 {{ resolved_by_category|json_script:"resolved-by-category" }}
-{{ monthly_filtered_labels|json_script:"monthly-labels" }}
-{{ monthly_filtered_data|json_script:"monthly-data" }}
+{{ daily_trend_labels|json_script:"daily-labels" }}
+{{ daily_trend_data|json_script:"daily-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
@@ -451,22 +451,44 @@ new Chart(document.getElementById('chartByCategory'), {
 })();
 {% endif %}
 
-// ── Monthly trend (line, blue with light fill) ──
-new Chart(document.getElementById('chartMonthly'), {
-    type: 'line',
-    data: {
-        labels: readJSON('monthly-labels'),
-        datasets: [{
-            label: 'Cases', data: readJSON('monthly-data'),
-            borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.15)',
-            fill: true, tension: 0.3, pointRadius: 4,
-        }]
-    },
-    options: {
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
-        responsive: true,
-    }
-});
+// ── Daily trend (line, blue with gradient fill) ──
+(function () {
+    const labels = readJSON('daily-labels');
+    const data   = readJSON('daily-data');
+    const canvas = document.getElementById('chartDaily');
+    const grad = canvas.getContext('2d').createLinearGradient(0, 0, 0, 200);
+    grad.addColorStop(0, 'rgba(13,110,253,0.30)');
+    grad.addColorStop(1, 'rgba(13,110,253,0.02)');
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'จำนวนคดี', data: data,
+                borderColor: '#0d6efd', backgroundColor: grad,
+                fill: true, tension: 0.3, pointRadius: 4,
+            }]
+        },
+        options: {
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: items => items[0].label,
+                        label: item => 'จำนวนคดี: ' + item.parsed.y,
+                    }
+                }
+            },
+            scales: {
+                // Avoid label collision on the 30-day window.
+                x: { ticks: { autoSkip: true,
+                              maxTicksLimit: labels.length > 20 ? 10 : undefined } },
+                y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 },
+                     title: { display: true, text: 'จำนวนคดี', font: { size: 13 } } },
+            },
+            responsive: true,
+        }
+    });
+})();
 </script>
 {% endblock %}

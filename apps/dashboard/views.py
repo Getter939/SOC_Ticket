@@ -3,7 +3,7 @@ from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Aggregate, Avg, Count, DurationField, F, OuterRef, Q, Subquery
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -437,18 +437,48 @@ def dashboard(request):
                   .values('category').annotate(c=Count('id')).order_by('-c')[:8])
     ]
 
-    # 6-month volume trend scoped to the active GET filters.
-    monthly_trend_filtered = []
-    for i in range(5, -1, -1):
-        m = (now.month - i - 1) % 12 + 1
-        y = now.year if now.month - i > 0 else now.year - 1
-        cnt = all_tickets.filter(created_at__month=m, created_at__year=y).count()
-        monthly_trend_filtered.append({'month': f"{y}-{m:02d}", 'count': cnt})
-    monthly_filtered_labels = [
-        f"{MONTH_ABBR[int(mt['month'][5:7])]} {mt['month'][:4]}"
-        for mt in monthly_trend_filtered
-    ]
-    monthly_filtered_data = [mt['count'] for mt in monthly_trend_filtered]
+    # Daily volume trend scoped to the active GET filters. Zero-filled so the
+    # line has no gaps. Window depends on date_range:
+    #   today → hourly buckets (00:00 … current hour, local time)
+    #   week  → last 7 days
+    #   else  → last 30 days
+    # All bucketing uses the active timezone (TruncDate/TruncHour + localdate).
+    today_local = timezone.localdate()
+    daily_trend_filtered = []
+    daily_trend_labels   = []
+
+    if date_range == 'today':
+        current_hour = timezone.localtime(now).hour
+        rows = (
+            all_tickets.filter(created_at__date=today_local)
+            .annotate(h=TruncHour('created_at'))
+            .values('h').annotate(c=Count('id'))
+        )
+        hour_counts = {}
+        for r in rows:
+            hh = timezone.localtime(r['h']).hour if timezone.is_aware(r['h']) else r['h'].hour
+            hour_counts[hh] = hour_counts.get(hh, 0) + r['c']
+        for h in range(current_hour + 1):
+            daily_trend_filtered.append(
+                {'date': f"{today_local:%Y-%m-%d} {h:02d}:00",
+                 'count': hour_counts.get(h, 0)})
+            daily_trend_labels.append(f"{h:02d}:00")
+    else:
+        ndays = 7 if date_range == 'week' else 30
+        start_date = today_local - timedelta(days=ndays - 1)
+        rows = (
+            all_tickets.filter(created_at__date__gte=start_date)
+            .annotate(d=TruncDate('created_at'))
+            .values('d').annotate(c=Count('id'))
+        )
+        day_counts = {r['d']: r['c'] for r in rows}
+        for i in range(ndays):
+            day = start_date + timedelta(days=i)
+            daily_trend_filtered.append(
+                {'date': day.strftime('%Y-%m-%d'), 'count': day_counts.get(day, 0)})
+            daily_trend_labels.append(f"{day.day:02d} {MONTH_ABBR[day.month]}")
+
+    daily_trend_data = [d['count'] for d in daily_trend_filtered]
 
     return render(request, 'dashboard/dashboard.html', {
         'stats':               stats,
@@ -481,9 +511,9 @@ def dashboard(request):
         'assignee_heatmap_statuses': assignee_heatmap_statuses,
         'mttr_by_category':          mttr_by_category,
         'resolved_by_category':      resolved_by_category,
-        'monthly_trend_filtered':    monthly_trend_filtered,
-        'monthly_filtered_labels':   monthly_filtered_labels,
-        'monthly_filtered_data':     monthly_filtered_data,
+        'daily_trend_filtered':      daily_trend_filtered,
+        'daily_trend_labels':        daily_trend_labels,
+        'daily_trend_data':          daily_trend_data,
         # Filter bar state
         'status_choices':      Ticket.STATUS_CHOICES,
         'severity_choices':    Ticket.SEVERITY_CHOICES,
