@@ -6,29 +6,64 @@
 {% block content %}
 
 <style>
-    /* Sticky filter bar sits just under the fixed topbar */
+    /* ── Sticky filter bar (sits just under the fixed topbar) ── */
     .dash-filterbar {
         position: sticky;
         top: var(--header-height);
         z-index: 1020;
         background: #f4f6f9;
-        padding: 0.6rem 0;
+        padding: 0.5rem 0;
         margin: -0.25rem 0 1rem;
         border-bottom: 1px solid #e3e6ea;
     }
-    .dash-filterbar .btn-group .btn { font-size: 0.78rem; }
-    .dash-filterbar select.form-select-sm { font-size: 0.78rem; min-width: 150px; }
-    .kpi-card .kpi-label { font-size: 0.78rem; }
-    .kpi-card .kpi-sub   { font-size: 0.75rem; }
-    .kpi-value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
-    .section-label { font-size: 0.78rem; }
-    .mini-label { font-size: 0.75rem; }
+    .dash-filterbar .btn-group .btn { font-size: 13px; }
+    .dash-filterbar select.form-select-sm { font-size: 13px; min-width: 150px; }
+    .mini-label { font-size: 13px; }
+
+    /* ── Flat bordered stat cards (border-only, top accent, no shadow) ── */
+    .stat-card {
+        background: #fff;
+        border: 1px solid #e3e6ea;
+        border-top-width: 3px;
+        border-radius: 6px;
+        padding: 0.7rem 0.9rem;
+        height: 100%;
+    }
+    .stat-card.b-blue   { border-top-color: #0d6efd; }
+    .stat-card.b-red    { border-top-color: #dc3545; }
+    .stat-card.b-green  { border-top-color: #198754; }
+    .stat-card.b-orange { border-top-color: #fd7e14; }
+    .stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+    .stat-card .stat-label { font-size: 13px; color: #6c757d; font-weight: 600; }
+    .stat-card .stat-sub   { font-size: 13px; margin-top: 0.15rem; }
+
+    /* ── Section card / titles ── */
+    .panel { background:#fff; border:1px solid #e3e6ea; border-radius:6px; }
+    .panel-title { font-size: 13px; font-weight: 700; text-transform: uppercase;
+                   letter-spacing: .02em; color:#495057; }
+
+    /* ── Heatmap table ── */
+    .heat-table { font-size: 13px; border-collapse: collapse; width: 100%; }
+    .heat-table th {
+        background: #343a40; color: #fff; font-weight: 600;
+        padding: 5px 8px; white-space: nowrap; font-size: 13px; text-align: center;
+    }
+    .heat-table td { padding: 5px 8px; text-align: center; border: 1px solid #e9ecef; }
+    .heat-table td.name { text-align: left; white-space: nowrap; }
+    .heat-table tr.heat-top td { font-weight: 700; }
+    .heat-zero { color: #aaa; }
+
+    /* ── Detail table ── */
+    .detail-table { font-size: 13px; }
+    .detail-table thead th { font-size: 13px; white-space: nowrap; }
+    .detail-table td { vertical-align: middle; }
+    .sev-pill { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; color:#fff; }
 </style>
 
 <!-- ── Header + last-updated timestamp ─────────────────────────────────────── -->
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <h4 class="mb-0 fw-bold">Dashboard</h4>
-    <span class="text-muted" style="font-size:0.8rem;">
+    <span class="text-muted" style="font-size:13px;">
         <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
     </span>
 </div>
@@ -36,263 +71,155 @@
 <!-- ── Sticky filter bar ───────────────────────────────────────────────────── -->
 <div class="dash-filterbar">
     <div class="d-flex flex-wrap align-items-center gap-3">
-
-        <!-- Date-range presets (links preserve the other two filters) -->
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
             {% with q_status=filters.status q_sev=filters.severity %}
             <a href="?date_range=today{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">วันนี้</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">Today</a>
             <a href="?date_range=week{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">สัปดาห์นี้</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">This Week</a>
             <a href="?date_range=month{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">เดือนนี้</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">This Month</a>
             <a href="?date_range=all{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">ทั้งหมด</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">All Time</a>
             {% endwith %}
         </div>
 
-        <!-- Status + Severity selects (auto-submit; carry the date range) -->
         <form method="get" class="d-flex align-items-center gap-2 mb-0">
             <input type="hidden" name="date_range" value="{{ filters.date_range }}">
-            <label class="mini-label text-muted mb-0">สถานะ</label>
+            <label class="mini-label text-muted mb-0">Status</label>
             <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
-                <option value="">ทั้งหมด</option>
+                <option value="">All</option>
                 {% for code, label in status_choices %}
                 <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <label class="mini-label text-muted mb-0">ความรุนแรง</label>
+            <label class="mini-label text-muted mb-0">Severity</label>
             <select name="severity" class="form-select form-select-sm" onchange="this.form.submit()">
-                <option value="">ทั้งหมด</option>
+                <option value="">All</option>
                 {% for code, label in severity_choices %}
                 <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <noscript><button type="submit" class="btn btn-sm btn-primary">กรอง</button></noscript>
+            <noscript><button type="submit" class="btn btn-sm btn-primary">Filter</button></noscript>
         </form>
     </div>
 </div>
 
-<!-- ── Live SLA breach alert ───────────────────────────────────────────────── -->
-{% if stats.sla_breach_live %}
-<div class="alert alert-danger d-flex align-items-center mb-4 py-2">
-    <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
-    <strong>SLA BREACH ALERT: {{ stats.sla_breach_live|intcomma }} เคส</strong>&nbsp;เกินกำหนด SLA แล้ว —
-    <a href="{% url 'ticket_list' %}" class="alert-link ms-1">ดูรายการ</a>
-</div>
-{% endif %}
+<!-- ══ ROW 1: Stat cards ════════════════════════════════════════════════════ -->
+<div class="row row-cols-2 row-cols-md-4 g-3 mb-3">
 
-<!-- ── Primary KPI cards (operational priority order) ──────────────────────── -->
-<div class="row row-cols-2 row-cols-md-5 g-3 mb-2">
-
-    <!-- 1. Active tickets -->
+    <!-- 1. Total Active Cases -->
     <div class="col">
-        <div class="card kpi-card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted fw-bold kpi-label mb-1">รอดำเนินการ (Active)</div>
-            <div class="kpi-value">{{ stats.active|intcomma }}</div>
-            <div class="text-muted kpi-sub">เคสที่ยังไม่ปิด</div>
+        <div class="stat-card b-blue">
+            <div class="stat-value">{{ active_total|intcomma }}</div>
+            <div class="stat-label">Total Active Cases / คดีที่กำลังดำเนินการ</div>
         </div>
     </div>
 
-    <!-- 2. SLA breach (live) -->
+    <!-- 2. Critical Cases -->
     <div class="col">
-        <div class="card kpi-card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted fw-bold kpi-label mb-1">เกิน SLA (Live)</div>
-            <div class="kpi-value {% if stats.sla_breach_live %}text-danger{% endif %}">
-                {{ stats.sla_breach_live|intcomma }}
-                {% if stats.sla_breach_live %}<span class="badge bg-danger align-middle" style="font-size:0.65rem;">BREACH</span>{% endif %}
+        <div class="stat-card b-red">
+            <div class="stat-value text-danger">{{ active_critical|intcomma }}</div>
+            <div class="stat-label">Critical Severity</div>
+            {% if critical_soonest_deadline %}
+            {% with m=critical_soonest_deadline.minutes_remaining %}
+            <div class="stat-sub fw-bold
+                {% if m < 60 %}text-danger{% elif m < 240 %}text-warning{% else %}text-success{% endif %}">
+                Soonest: {{ m|intcomma }}m left
             </div>
-            <div class="text-muted kpi-sub">Active &amp; เลยกำหนดแล้ว</div>
-        </div>
-    </div>
-
-    <!-- 3. SLA at risk -->
-    <div class="col">
-        <div class="card kpi-card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted fw-bold kpi-label mb-1">ใกล้เกิน SLA</div>
-            <div class="kpi-value {% if stats.sla_at_risk %}text-warning{% endif %}">
-                {{ stats.sla_at_risk|intcomma }}
-                {% if stats.sla_at_risk %}<span class="badge bg-warning text-dark align-middle" style="font-size:0.65rem;">≤ 4h</span>{% endif %}
-            </div>
-            <div class="text-muted kpi-sub">ครบกำหนดใน 4 ชม.</div>
-        </div>
-    </div>
-
-    <!-- 4. SLA compliance % -->
-    <div class="col">
-        <div class="card kpi-card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted fw-bold kpi-label mb-1">SLA Compliance</div>
-            {% if stats.sla_compliance_rate is None %}
-            <div class="kpi-value text-muted">—</div>
-            <div class="text-muted kpi-sub">ยังไม่มีเคสที่ปิด</div>
-            {% else %}
-            <div class="kpi-value
-                {% if stats.sla_compliance_rate >= 90 %}text-success
-                {% elif stats.sla_compliance_rate < 80 %}text-danger
-                {% else %}text-warning{% endif %}">
-                {{ stats.sla_compliance_rate|floatformat:1 }}<span class="fs-6 fw-normal">%</span>
-            </div>
-            <div class="text-muted kpi-sub">ปิดภายในกำหนด</div>
+            {% endwith %}
             {% endif %}
         </div>
     </div>
 
-    <!-- 5. MTTR median -->
+    <!-- 3. Closed This Month -->
     <div class="col">
-        <div class="card kpi-card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted fw-bold kpi-label mb-1">MTTR (มัธยฐาน)</div>
-            {% if stats.mttr_median is None %}
-            <div class="kpi-value text-muted">—</div>
-            <div class="text-muted kpi-sub">30 วันล่าสุด · ไม่มีข้อมูล</div>
+        <div class="stat-card b-green">
+            <div class="stat-value text-success">{{ closed_this_month|intcomma }}</div>
+            <div class="stat-label">Closed This Month / ปิดเดือนนี้</div>
+            {% if closed_delta > 0 %}
+            <div class="stat-sub text-success">+{{ closed_delta|intcomma }} vs last month</div>
+            {% elif closed_delta < 0 %}
+            <div class="stat-sub text-danger">{{ closed_delta|intcomma }} vs last month</div>
             {% else %}
-            <div class="kpi-value text-primary">
-                {{ stats.mttr_median|floatformat:1 }}<span class="fs-6 fw-normal text-muted"> ชม.</span>
-            </div>
-            <div class="text-muted kpi-sub">30 วัน · เฉลี่ย {{ stats.mttr_mean|floatformat:1 }} ชม. · n={{ stats.mttr_n|intcomma }}</div>
+            <div class="stat-sub text-muted">Same as last month</div>
             {% endif %}
         </div>
     </div>
-</div>
 
-<!-- Secondary (non-operational) figures — demoted from the primary row -->
-<div class="text-muted mb-4" style="font-size:0.75rem;">
-    <i class="bi bi-archive me-1"></i>ทั้งหมด (ตามตัวกรอง): {{ stats.total|intcomma }}
-    &nbsp;·&nbsp; ปิดแล้ว: {{ stats.closed|intcomma }}
-    &nbsp;·&nbsp; ปิดเดือนนี้: {{ stats.resolved_month|intcomma }}
-    {% if stats.conversion_n %}
-    &nbsp;·&nbsp; Alert→Ticket (มัธยฐาน): {{ stats.conversion_median_min|floatformat:1 }} นาที
-    {% endif %}
-</div>
-
-<!-- ── Actionable backlog + Event/Incident ratio ───────────────────────────── -->
-<div class="row g-3 mb-4">
-
-    <div class="col-md-8">
-        <div class="card border-0 shadow-sm h-100 p-4">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">
-                <i class="bi bi-person-check me-1"></i>คิวงานตามผู้รับผิดชอบ — Actionable Backlog
+    <!-- 4. MTTR -->
+    <div class="col">
+        <div class="stat-card b-orange">
+            <div class="stat-value text-warning">{{ stats.mttr_median|default:"—" }} hrs</div>
+            <div class="stat-label">Mean Time to Resolve (MTTR)</div>
+            <div class="stat-sub text-muted">
+                Avg {{ stats.mttr_mean|default:"—" }} hrs · n={{ stats.mttr_n|default:0 }} · last 30d
             </div>
-            <div class="row g-3 text-center">
-                <div class="col-4">
-                    <div class="card border-0 h-100 p-3" style="background:rgba(255,193,7,0.12);">
-                        <div class="fw-bold text-warning mb-1" style="font-size:0.78rem;">
-                            <i class="bi bi-shield-exclamation me-1"></i>รอผู้ดูแลระบบ
-                        </div>
-                        <div class="display-5 fw-bold text-warning">{{ stats.awaiting_admin|intcomma }}</div>
-                        <div class="text-muted mt-1" style="font-size:0.75rem;">Awaiting Admin</div>
-                    </div>
-                </div>
-                <div class="col-4">
-                    <div class="card border-0 h-100 p-3" style="background:rgba(13,202,240,0.12);">
-                        <div class="fw-bold mb-1" style="color:#0aa2c0; font-size:0.78rem;">
-                            <i class="bi bi-search me-1"></i>รอ SOC วิเคราะห์
-                        </div>
-                        <div class="display-5 fw-bold" style="color:#0aa2c0;">{{ stats.awaiting_soc|intcomma }}</div>
-                        <div class="text-muted mt-1" style="font-size:0.75rem;">Awaiting SOC</div>
-                    </div>
-                </div>
-                <div class="col-4">
-                    <div class="card border-0 h-100 p-3" style="background:rgba(13,110,253,0.10);">
-                        <div class="fw-bold text-primary mb-1" style="font-size:0.78rem;">
-                            <i class="bi bi-check2-circle me-1"></i>รอผู้จัดการอนุมัติ
-                        </div>
-                        <div class="display-5 fw-bold text-primary">{{ stats.awaiting_manager|intcomma }}</div>
-                        <div class="text-muted mt-1" style="font-size:0.75rem;">Awaiting Manager</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Event/Incident ratio -->
-    <div class="col-md-4">
-        <div class="card border-0 shadow-sm h-100 p-4">
-            <div class="fw-bold mb-2 section-label text-uppercase text-muted">
-                <i class="bi bi-pie-chart me-1"></i>สัดส่วน Event / Incident
-            </div>
-            {% if stats.tp_count or stats.fp_count %}
-            <canvas id="chartClassification" height="160" role="img"
-                    aria-label="สัดส่วน Incident ต่อ Event"></canvas>
-            <table class="visually-hidden">
-                <caption>สัดส่วน Event / Incident</caption>
-                <thead><tr><th>ประเภท</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.classification %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            <div class="d-flex justify-content-around mt-3">
-                <div class="text-center">
-                    <div class="fw-bold fs-5" style="color:#198754;">{{ stats.tp_count|intcomma }}</div>
-                    <div class="text-muted" style="font-size:0.75rem;">
-                        Incident&nbsp;<span class="badge bg-success">{{ stats.tp_pct|floatformat:1 }}%</span>
-                    </div>
-                </div>
-                <div class="text-center">
-                    <div class="fw-bold fs-5" style="color:#e63946;">{{ stats.fp_count|intcomma }}</div>
-                    <div class="text-muted" style="font-size:0.75rem;">
-                        Event&nbsp;<span class="badge bg-secondary">{{ stats.fp_pct|floatformat:1 }}%</span>
-                    </div>
-                </div>
-            </div>
-            {% else %}
-            <div class="d-flex align-items-center justify-content-center h-75 text-center text-muted">
-                <div>
-                    <i class="bi bi-info-circle fs-3 d-block mb-2 opacity-50"></i>
-                    <span class="small">ยังไม่มีข้อมูลการจัดประเภท<br>(Event/Incident)</span>
-                </div>
-            </div>
-            {% endif %}
         </div>
     </div>
 </div>
 
-<!-- ── Status pipeline ─────────────────────────────────────────────────────── -->
-<div class="row g-3 mb-4">
-    <div class="col-12">
-        <div class="card border-0 shadow-sm p-4">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">
-                <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด — Pipeline View
-            </div>
-            <canvas id="chartPipeline" height="110" role="img"
-                    aria-label="จำนวน Ticket แยกตามสถานะในกระบวนการ"></canvas>
-            <table class="visually-hidden">
-                <caption>จำนวน Ticket แยกตามสถานะ</caption>
-                <thead><tr><th>สถานะ</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.pipeline %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
+<!-- ══ ROW 2: Assignee heatmap (60%) + Incident status doughnut (40%) ═══════ -->
+<div class="row g-3 mb-3">
 
-<!-- ── Charts row: type / category / monthly ───────────────────────────────── -->
-<div class="row g-3 mb-4">
-    <div class="col-md-5">
-        <div class="card border-0 shadow-sm p-4 h-100">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">Tickets by Type</div>
-            <canvas id="chartByType" height="200" role="img" aria-label="จำนวน Ticket แยกตามประเภท"></canvas>
-            <table class="visually-hidden">
-                <caption>Tickets by Type</caption>
-                <thead><tr><th>ประเภท</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.by_type %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+    <!-- 2L — Analyst workload heatmap -->
+    <div class="col-lg-7">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-people me-1"></i>Analyst Workload — ผู้รับผิดชอบและสถานะ
+            </div>
+            <div class="table-responsive">
+                <table class="heat-table">
+                    <thead>
+                        <tr>
+                            <th class="text-start">Analyst</th>
+                            {% for slug, display in assignee_heatmap_statuses %}
+                            <th>{{ display }}</th>
+                            {% endfor %}
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in assignee_heatmap %}
+                        <tr class="{% if forloop.first %}heat-top{% endif %}">
+                            <td class="name">{{ row.name }}</td>
+                            {% for cell in row.cells %}
+                            <td style="background:
+                                {% if cell == 0 %}#fff
+                                {% elif cell <= 2 %}#fff3cd
+                                {% elif cell <= 5 %}rgba(253,126,20,0.40)
+                                {% else %}rgba(220,53,69,0.60){% endif %};">
+                                {% if cell == 0 %}<span class="heat-zero">—</span>{% else %}{{ cell|intcomma }}{% endif %}
+                            </td>
+                            {% endfor %}
+                            <td>{{ row.total|intcomma }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td class="name text-muted" colspan="{{ assignee_heatmap_statuses|length|add:2 }}">
+                                ไม่มีงานที่มอบหมาย (No assigned active cases)
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 shadow-sm p-4 h-100">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">Category Distribution</div>
-            <canvas id="chartByCategory" height="200" role="img" aria-label="สัดส่วน Ticket แยกตามหมวดหมู่ (5 อันดับแรก)"></canvas>
+
+    <!-- 2R — Incident status doughnut by category -->
+    <div class="col-lg-5">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-pie-chart me-1"></i>Incident Status / สัดส่วนหมวดหมู่
+            </div>
+            {% if by_category_labels %}
+            <div style="height:230px;">
+                <canvas id="chartByCategory" role="img"
+                        aria-label="สัดส่วน Ticket แยกตามหมวดหมู่ (5 อันดับแรก + อื่นๆ)"></canvas>
+            </div>
             <table class="visually-hidden">
-                <caption>Category Distribution (top 5 + others)</caption>
+                <caption>Incident status by category</caption>
                 <thead><tr><th>หมวดหมู่</th><th>จำนวน</th></tr></thead>
                 <tbody>
                     {% for label, value in chart_tables.by_category %}
@@ -300,291 +227,246 @@
                     {% endfor %}
                 </tbody>
             </table>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="card border-0 shadow-sm p-4 h-100">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">Tickets per Month (6 เดือน)</div>
-            <canvas id="chartMonthly" height="200" role="img" aria-label="จำนวน Ticket ต่อเดือน ย้อนหลัง 6 เดือน"></canvas>
-            <table class="visually-hidden">
-                <caption>Tickets per Month</caption>
-                <thead><tr><th>เดือน</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.monthly %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- ── NEW: Backlog aging + Severity breakdown ─────────────────────────────── -->
-<div class="row g-3 mb-4">
-    <div class="col-md-6">
-        <div class="card border-0 shadow-sm p-4 h-100">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">
-                <i class="bi bi-hourglass-split me-1"></i>Backlog Aging (Active)
-            </div>
-            <canvas id="chartBacklog" height="150" role="img"
-                    aria-label="จำนวนเคส Active แยกตามอายุงาน: Fresh, Aging, Stale"></canvas>
-            <table class="visually-hidden">
-                <caption>Backlog aging buckets</caption>
-                <thead><tr><th>ช่วงอายุ</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.backlog %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card border-0 shadow-sm p-4 h-100">
-            <div class="fw-bold mb-3 section-label text-uppercase text-muted">
-                <i class="bi bi-bar-chart-steps me-1"></i>Severity Breakdown (Active)
-            </div>
-            {% if severity_labels %}
-            <canvas id="chartSeverity" height="150" role="img"
-                    aria-label="จำนวนเคส Active แยกตามระดับความรุนแรง"></canvas>
-            <table class="visually-hidden">
-                <caption>Severity breakdown</caption>
-                <thead><tr><th>ระดับความรุนแรง</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.severity %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
             {% else %}
-            <div class="d-flex align-items-center justify-content-center h-75 text-center text-muted">
-                <span class="small">ไม่มีเคส Active</span>
+            <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
+                <span style="font-size:13px;">No data</span>
             </div>
             {% endif %}
         </div>
     </div>
 </div>
 
-<!-- ── NEW: Assignee workload table ────────────────────────────────────────── -->
-<div class="row g-3 mb-4">
-    <div class="col-12">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white py-3">
-                <span class="fw-bold section-label text-uppercase text-muted">
-                    <i class="bi bi-people me-1"></i>Assignee Workload (Top 8)
-                </span>
+<!-- ══ ROW 3: MTTR by category (50%) + Resolved by category (50%) ═══════════ -->
+<div class="row g-3 mb-3">
+
+    <!-- 3L — Avg MTTR by category -->
+    <div class="col-md-6">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-stopwatch me-1"></i>Avg MTTR by Category (30d) — เวลาแก้ไขเฉลี่ยต่อหมวด
             </div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 align-middle">
-                    <thead class="thead-brand">
-                        <tr>
-                            <th>Analyst</th>
-                            <th class="text-end">Open Tickets</th>
-                            <th class="text-end">Breached</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in stats.assignee_workload %}
-                        <tr class="{% if row.breached %}table-danger{% endif %}">
-                            <td>{{ row.name }}</td>
-                            <td class="text-end">{{ row.open|intcomma }}</td>
-                            <td class="text-end">
-                                {% if row.breached %}
-                                <span class="badge bg-danger">{{ row.breached|intcomma }}</span>
-                                {% else %}
-                                <span class="text-muted">0</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="3" class="text-center text-muted py-4 small">No data</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            {% if mttr_by_category %}
+            <div style="height:260px;">
+                <canvas id="chartMttrCat" role="img" aria-label="เวลาแก้ไขเฉลี่ย (ชั่วโมง) ต่อหมวดหมู่"></canvas>
             </div>
+            <table class="visually-hidden">
+                <caption>Average MTTR by category (hours)</caption>
+                <thead><tr><th>หมวดหมู่</th><th>ชั่วโมง</th></tr></thead>
+                <tbody>
+                    {% for row in mttr_by_category %}
+                    <tr><td>{{ row.label }}</td><td>{{ row.avg_hours }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="d-flex align-items-center justify-content-center text-muted" style="height:260px;">
+                <span style="font-size:13px;">No data for the last 30 days</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 3R — Resolved tickets by category -->
+    <div class="col-md-6">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-check2-square me-1"></i>Resolved Tickets by Category — ปิดแล้วต่อหมวด
+            </div>
+            {% if resolved_by_category %}
+            <div style="height:260px;">
+                <canvas id="chartResolvedCat" role="img" aria-label="จำนวนเคสที่ปิดแล้วต่อหมวดหมู่"></canvas>
+            </div>
+            <table class="visually-hidden">
+                <caption>Resolved tickets by category</caption>
+                <thead><tr><th>หมวดหมู่</th><th>จำนวน</th></tr></thead>
+                <tbody>
+                    {% for row in resolved_by_category %}
+                    <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="d-flex align-items-center justify-content-center text-muted" style="height:260px;">
+                <span style="font-size:13px;">No resolved data</span>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
-<!-- ── Bottom row: recent + breach lists ───────────────────────────────────── -->
-<div class="row g-3">
-    <div class="col-md-8">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white py-3 d-flex justify-content-between">
-                <span class="fw-bold small">เคสล่าสุด (Active)</span>
-                <a href="{% url 'ticket_list' %}" class="small text-primary">ดูทั้งหมด →</a>
+<!-- ══ ROW 4: Monthly trend (full width) ════════════════════════════════════ -->
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="panel p-3">
+            <div class="panel-title mb-2">
+                <i class="bi bi-graph-up me-1"></i>Monthly Case Volume (6 months) — ปริมาณคดีต่อเดือน
             </div>
-            <div class="list-group list-group-flush">
-                {% for ticket in recent_tickets %}
-                <a href="{% url 'ticket_detail' ticket.pk %}"
-                   class="list-group-item list-group-item-action px-4 py-2 {% if ticket.is_sla_breached %}list-group-item-danger{% endif %}">
-                    <div class="d-flex justify-content-between align-items-center gap-2">
-                        <span class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</span>
-                        <span class="d-flex gap-1 align-items-center" style="font-size:0.75rem;">
-                            {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
-                            {% include 'incidents/_status_badge.html' with ticket=ticket %}
-                        </span>
-                    </div>
-                    <div class="text-muted small text-truncate">{{ ticket.get_detailed_issue2_display }}</div>
-                </a>
-                {% empty %}
-                <div class="list-group-item text-center text-muted py-4 small">ไม่มีเคสที่รอดำเนินการ</div>
-                {% endfor %}
+            <div style="height:200px;">
+                <canvas id="chartMonthly" role="img" aria-label="ปริมาณคดีต่อเดือน ย้อนหลัง 6 เดือน"></canvas>
             </div>
+            <table class="visually-hidden">
+                <caption>Monthly case volume</caption>
+                <thead><tr><th>เดือน</th><th>จำนวน</th></tr></thead>
+                <tbody>
+                    {% for row in monthly_trend_filtered %}
+                    <tr><td>{{ row.month }}</td><td>{{ row.count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
+</div>
 
-    <div class="col-md-4">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-danger text-white py-3">
-                <span class="fw-bold small"><i class="bi bi-alarm-fill me-1"></i>SLA Breach</span>
+<!-- ══ ROW 5: Detail table — recent active cases (full width) ═══════════════ -->
+<div class="row g-3">
+    <div class="col-12">
+        <div class="panel">
+            <div class="p-3 pb-2 panel-title">
+                <i class="bi bi-list-ul me-1"></i>Recent Active Cases — รายละเอียดคดี
             </div>
-            <div class="list-group list-group-flush">
-                {% for ticket in breach_tickets %}
-                <a href="{% url 'ticket_detail' ticket.pk %}"
-                   class="list-group-item list-group-item-action list-group-item-danger px-4 py-2">
-                    <div class="font-monospace fw-bold small">#{{ ticket.ticket_id }}</div>
-                    <div class="small text-muted">{{ ticket.created_at|timesince }} ago</div>
-                </a>
-                {% empty %}
-                <div class="list-group-item text-center text-muted py-4 small">
-                    <i class="bi bi-check-circle text-success me-1"></i>ไม่มี SLA Breach
-                </div>
-                {% endfor %}
+            <div class="table-responsive">
+                <table class="table table-sm detail-table mb-0 align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>#</th>
+                            <th>Ticket ID</th>
+                            <th>Severity</th>
+                            <th>Created (ICT)</th>
+                            <th>Category</th>
+                            <th>Assignee</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ticket in recent_tickets %}
+                        <tr>
+                            <td class="text-muted">{{ forloop.counter }}</td>
+                            <td>
+                                <a href="{% url 'ticket_detail' ticket.pk %}"
+                                   class="font-monospace fw-bold text-decoration-none">#{{ ticket.ticket_id }}</a>
+                            </td>
+                            <td>
+                                <span class="sev-pill" style="background:
+                                    {% if ticket.severity == 'Critical' %}#dc3545
+                                    {% elif ticket.severity == 'High' %}#fd7e14
+                                    {% elif ticket.severity == 'Medium' %}#ffc107;color:#212529
+                                    {% elif ticket.severity == 'Low' %}#198754
+                                    {% else %}#6c757d{% endif %};">{{ ticket.get_severity_display }}</span>
+                            </td>
+                            <td class="text-nowrap">{{ ticket.created_at|date:"d M Y H:i" }}</td>
+                            <td>{{ ticket.get_category_display }}</td>
+                            <td>
+                                {% if ticket.assigned_to %}
+                                    {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ticket.get_status_display }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7" class="text-center text-muted py-4">ไม่มีคดีที่กำลังดำเนินการ</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
+            {% if recent_tickets %}
+            <div class="text-end text-muted px-3 py-2" style="font-size:13px;">
+                1–{{ recent_tickets|length }} of {{ active_total|intcomma }}
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
 <!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
-{{ status_labels|json_script:"status-labels" }}
-{{ status_data|json_script:"status-data" }}
-{{ classification_labels|json_script:"classification-labels" }}
-{{ classification_data|json_script:"classification-data" }}
-{{ by_type_labels|json_script:"by-type-labels" }}
-{{ by_type_data|json_script:"by-type-data" }}
 {{ by_category_labels|json_script:"by-category-labels" }}
 {{ by_category_data|json_script:"by-category-data" }}
-{{ monthly_labels|json_script:"monthly-labels" }}
-{{ monthly_data|json_script:"monthly-data" }}
-{{ backlog_labels|json_script:"backlog-labels" }}
-{{ backlog_data|json_script:"backlog-data" }}
-{{ severity_labels|json_script:"severity-labels" }}
-{{ severity_data|json_script:"severity-data" }}
+{{ mttr_by_category|json_script:"mttr-by-category" }}
+{{ resolved_by_category|json_script:"resolved-by-category" }}
+{{ monthly_filtered_labels|json_script:"monthly-labels" }}
+{{ monthly_filtered_data|json_script:"monthly-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const DARK   = '#1a1a2e';
 const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
 
-// Accessibility / legibility: floor every chart font at 12px (STEP 6a/6b).
-Chart.defaults.font.size = 12;
-Chart.defaults.plugins.legend.labels.font = { size: 12 };
-Chart.defaults.plugins.tooltip.bodyFont   = { size: 12 };
+// Legibility floor: every chart label ≥ 13px.
+Chart.defaults.font.size = 13;
+Chart.defaults.plugins.legend.labels.font = { size: 13 };
+Chart.defaults.plugins.tooltip.bodyFont   = { size: 13 };
+Chart.defaults.maintainAspectRatio = false;
 
-function readJSON(id) {
-    return JSON.parse(document.getElementById(id).textContent);
-}
-const statusLabels         = readJSON('status-labels');
-const statusData           = readJSON('status-data');
-const classificationLabels = readJSON('classification-labels');
-const classificationData   = readJSON('classification-data');
-const byTypeLabels         = readJSON('by-type-labels');
-const byTypeData           = readJSON('by-type-data');
-const byCategoryLabels     = readJSON('by-category-labels');
-const byCategoryData       = readJSON('by-category-data');
-const monthlyLabels        = readJSON('monthly-labels');
-const monthlyData          = readJSON('monthly-data');
-const backlogLabels        = readJSON('backlog-labels');
-const backlogData          = readJSON('backlog-data');
-const severityLabels       = readJSON('severity-labels');
-const severityData         = readJSON('severity-data');
+function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
 
-// Colors follow Ticket.STATUS_CHOICES order.
-const PIPELINE_COLORS = [
-    '#e63946', '#ffc107', '#0d6efd', '#fd7e14',
-    '#0dcaf0', '#6f42c1', '#198754', '#6c757d',
-];
-
-// Status pipeline (horizontal bar)
-new Chart(document.getElementById('chartPipeline'), {
-    type: 'bar',
-    data: { labels: statusLabels, datasets: [{ data: statusData, backgroundColor: PIPELINE_COLORS, borderRadius: 4 }] },
-    options: {
-        indexAxis: 'y',
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
-        responsive: true,
-    }
-});
-
-// Event/Incident doughnut
-{% if stats.tp_count or stats.fp_count %}
-new Chart(document.getElementById('chartClassification'), {
+// ── Incident status doughnut (top 5 + Others, capped in the view) ──
+{% if by_category_labels %}
+new Chart(document.getElementById('chartByCategory'), {
     type: 'doughnut',
-    data: { labels: classificationLabels, datasets: [{ data: classificationData, backgroundColor: ['#198754', '#6c757d'], borderWidth: 2 }] },
+    data: {
+        labels: readJSON('by-category-labels'),
+        datasets: [{ data: readJSON('by-category-data'), backgroundColor: COLORS, borderWidth: 2 }]
+    },
     options: { plugins: { legend: { position: 'bottom' } }, responsive: true, cutout: '60%' }
 });
 {% endif %}
 
-// By type bar
-new Chart(document.getElementById('chartByType'), {
-    type: 'bar',
-    data: { labels: byTypeLabels, datasets: [{ data: byTypeData, backgroundColor: COLORS, borderRadius: 4 }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }, responsive: true }
-});
+// ── Avg MTTR by category (horizontal bar, single orange) ──
+{% if mttr_by_category %}
+(function () {
+    const rows = readJSON('mttr-by-category');
+    new Chart(document.getElementById('chartMttrCat'), {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.label),
+            datasets: [{ data: rows.map(r => r.avg_hours), backgroundColor: '#fd7e14', borderRadius: 4 }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false },
+                       tooltip: { callbacks: { label: c => c.parsed.x + ' hrs' } } },
+            scales: { x: { beginAtZero: true, title: { display: true, text: 'Hours', font: { size: 13 } } } },
+            responsive: true,
+        }
+    });
+})();
+{% endif %}
 
-// By category doughnut (top 5 + Others, capped in the view)
-new Chart(document.getElementById('chartByCategory'), {
-    type: 'doughnut',
-    data: { labels: byCategoryLabels, datasets: [{ data: byCategoryData, backgroundColor: COLORS, borderWidth: 2 }] },
-    options: { plugins: { legend: { position: 'bottom' } }, responsive: true, cutout: '60%' }
-});
+// ── Resolved tickets by category (horizontal bar, single green) ──
+{% if resolved_by_category %}
+(function () {
+    const rows = readJSON('resolved-by-category');
+    new Chart(document.getElementById('chartResolvedCat'), {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.label),
+            datasets: [{ data: rows.map(r => r.count), backgroundColor: '#198754', borderRadius: 4 }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
+            responsive: true,
+        }
+    });
+})();
+{% endif %}
 
-// Monthly trend line
+// ── Monthly trend (line, blue with light fill) ──
 new Chart(document.getElementById('chartMonthly'), {
     type: 'line',
-    data: { labels: monthlyLabels, datasets: [{ label: 'Tickets', data: monthlyData, borderColor: DARK, backgroundColor: 'rgba(26,26,46,0.08)', fill: true, tension: 0.3, pointRadius: 4 }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }, responsive: true }
-});
-
-// Backlog aging (horizontal bar — green / amber / red)
-new Chart(document.getElementById('chartBacklog'), {
-    type: 'bar',
-    data: { labels: backlogLabels, datasets: [{ data: backlogData, backgroundColor: ['#198754', '#ffc107', '#e63946'], borderRadius: 4 }] },
-    options: {
-        indexAxis: 'y',
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
-        responsive: true,
-    }
-});
-
-// Severity breakdown (horizontal bar — highest severity at top, comes pre-sorted)
-{% if severity_labels %}
-const SEVERITY_COLOR = {
-    'Critical': '#e63946', 'High': '#fd7e14', 'Medium': '#ffc107',
-    'Low': '#198754', 'Unknown': '#6c757d',
-};
-new Chart(document.getElementById('chartSeverity'), {
-    type: 'bar',
     data: {
-        labels: severityLabels,
+        labels: readJSON('monthly-labels'),
         datasets: [{
-            data: severityData,
-            backgroundColor: severityLabels.map(l => SEVERITY_COLOR[l] || '#6c757d'),
-            borderRadius: 4,
+            label: 'Cases', data: readJSON('monthly-data'),
+            borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.15)',
+            fill: true, tension: 0.3, pointRadius: 4,
         }]
     },
     options: {
-        indexAxis: 'y',
         plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
         responsive: true,
     }
 });
-{% endif %}
 </script>
 {% endblock %}
-</content>
-</invoke>

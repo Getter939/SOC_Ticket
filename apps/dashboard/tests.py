@@ -451,86 +451,130 @@ class DashboardEnterpriseKPITest(TestCase):
         self.assertEqual(counts['Low'], 1)
 
 
-# ── Template rendering / filter-bar tests (this session's UI wiring) ─────── #
+# ── Management dashboard (Session 3) — template + context tests ──────────── #
 
-class DashboardTemplateRenderTest(TestCase):
-    """The dashboard.html updates render and the new GET filters scope data."""
+class DashboardManagementViewTest(TestCase):
+    """The redesigned management dashboard renders and exposes the new keys."""
 
     @classmethod
     def setUpTestData(cls):
-        cls.soc = _make_user('soc_render', UserProfile.ROLE_SOC_STAFF)
+        cls.soc = _make_user('soc_mgmt', UserProfile.ROLE_SOC_STAFF)
 
     def setUp(self):
         self.client.force_login(self.soc)
 
-    def test_new_kpi_sections_render(self):
-        """Header timestamp, filter bar, new KPI cards and tables are present."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
-        html = self.client.get(DASHBOARD_URL).content.decode()
+    def _get(self, **params):
+        return self.client.get(DASHBOARD_URL, params)
 
-        # Last-updated timestamp (STEP 5a)
-        self.assertIn('ข้อมูล ณ เวลา:', html)
-        self.assertIn('ICT', html)
-        # Filter bar presets (STEP 4)
-        self.assertIn('date_range=today', html)
-        self.assertIn('name="severity"', html)
-        self.assertIn('name="status"', html)
-        # New KPI cards (STEP 2)
-        self.assertIn('SLA Compliance', html)
-        self.assertIn('MTTR', html)
-        self.assertIn('ใกล้เกิน SLA', html)
-        # New sections (STEP 3)
-        self.assertIn('Backlog Aging', html)
-        self.assertIn('Assignee Workload', html)
-        self.assertIn('Severity Breakdown', html)
-        # New chart canvases
-        self.assertIn('chartBacklog', html)
-        self.assertIn('chartSeverity', html)
-        # A11y: visually-hidden data tables + role=img (STEP 6d)
-        self.assertIn('visually-hidden', html)
-        self.assertIn('role="img"', html)
+    # ── Stat cards ─────────────────────────────────────────────────────── #
 
-    def test_legacy_breach_key_not_referenced(self):
-        """The banner reads sla_breach_live; no stats.sla_breaches in template."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
-        html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertNotIn('sla_breaches', html)
-        # Live breach banner is shown for the overdue active ticket
-        self.assertIn('SLA BREACH ALERT', html)
-
-    def test_humanize_intcomma_applied(self):
-        """Large counts render with a thousands separator (STEP 5b)."""
-        # 1000 active tickets → "1,000" must appear somewhere in the cards.
-        # bulk_create bypasses Ticket.save(), so assign unique ticket_ids here.
-        Ticket.objects.bulk_create([
-            Ticket(ticket_id=f'BULK{i:05d}', device_name='d',
-                   ip_address='10.0.0.1', issue_description='x',
-                   status=Ticket.STATUS_NEW,
-                   sla_deadline=timezone.now() + timedelta(hours=5))
-            for i in range(1000)
-        ])
-        html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertIn('1,000', html)
-
-    def test_status_filter_scopes_data(self):
-        """?status=NEW narrows the active count to NEW-status tickets only."""
+    def test_four_stat_card_labels_present(self):
+        """All four management card labels render (STEP 2A)."""
         _make_ticket(status=Ticket.STATUS_NEW)
-        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
-        s = self.client.get(DASHBOARD_URL, {'status': Ticket.STATUS_NEW}).context['stats']
-        self.assertEqual(s['active'], 1)
+        html = self._get().content.decode()
+        self.assertIn('Total Active Cases', html)
+        self.assertIn('Critical Severity', html)
+        self.assertIn('Closed This Month', html)
+        self.assertIn('Mean Time to Resolve (MTTR)', html)
+        # Header timestamp + filter bar still present
+        self.assertIn('ข้อมูล ณ เวลา:', html)
+        self.assertIn('date_range=today', html)
 
-    def test_severity_filter_scopes_data(self):
-        """?severity=Critical narrows to Critical tickets only."""
+    # ── Removed sections must be gone ──────────────────────────────────── #
+
+    def test_removed_sections_absent(self):
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertNotIn('Backlog Aging', html)
+        self.assertNotIn('สัดส่วน Event / Incident', html)
+        self.assertNotIn('Severity Breakdown', html)
+        self.assertNotIn('Pipeline View', html)
+        self.assertNotIn('chartBacklog', html)
+
+    # ── New sections render ────────────────────────────────────────────── #
+
+    def test_assignee_heatmap_renders(self):
+        """Heatmap table + analyst name render when assignee_heatmap is non-empty."""
+        from django.contrib.auth.models import User
+        analyst = User.objects.create_user(
+            username='heat_a', password='pw',
+            first_name='Grace', last_name='Hopper')
+        t = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=t.pk).update(assigned_to=analyst)
+
+        resp = self._get()
+        self.assertTrue(resp.context['assignee_heatmap'])
+        html = resp.content.decode()
+        self.assertIn('Analyst Workload', html)
+        self.assertIn('Grace Hopper', html)
+
+    def test_category_sections_render_even_without_data(self):
+        """MTTR-by-category and resolved-by-category sections render as placeholders."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertIn('Avg MTTR by Category', html)
+        self.assertIn('Resolved Tickets by Category', html)
+        self.assertIn('Monthly Case Volume', html)
+        self.assertIn('Recent Active Cases', html)
+
+    # ── New context keys ───────────────────────────────────────────────── #
+
+    def test_monthly_trend_filtered_is_list_of_six(self):
+        ctx = self._get().context
+        self.assertIn('monthly_trend_filtered', ctx)
+        self.assertIsInstance(ctx['monthly_trend_filtered'], list)
+        self.assertEqual(len(ctx['monthly_trend_filtered']), 6)
+        self.assertIn('month', ctx['monthly_trend_filtered'][0])
+        self.assertIn('count', ctx['monthly_trend_filtered'][0])
+
+    def test_recent_tickets_capped_at_15(self):
+        for _ in range(20):
+            _make_ticket(status=Ticket.STATUS_NEW)
+        ctx = self._get().context
+        self.assertIn('recent_tickets', ctx)
+        self.assertLessEqual(len(ctx['recent_tickets']), 15)
+
+    def test_active_critical_counts_critical_only(self):
         a = _make_ticket(status=Ticket.STATUS_NEW)
         b = _make_ticket(status=Ticket.STATUS_NEW)
         Ticket.objects.filter(pk=a.pk).update(severity='Critical')
         Ticket.objects.filter(pk=b.pk).update(severity='Low')
-        s = self.client.get(DASHBOARD_URL, {'severity': 'Critical'}).context['stats']
-        self.assertEqual(s['active'], 1)
+        ctx = self._get().context
+        self.assertEqual(ctx['active_critical'], 1)
+        self.assertEqual(ctx['active_total'], 2)
 
-    def test_default_no_filter_unchanged(self):
-        """No GET params → unfiltered (all tickets counted)."""
+    def test_critical_soonest_deadline_structure(self):
+        t = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)
+        Ticket.objects.filter(pk=t.pk).update(severity='Critical')
+        d = self._get().context['critical_soonest_deadline']
+        self.assertIsNotNone(d)
+        self.assertEqual(set(d), {'ticket_id', 'minutes_remaining'})
+        self.assertGreater(d['minutes_remaining'], 0)
+
+    def test_critical_soonest_deadline_none_without_critical(self):
+        _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
+        self.assertIsNone(self._get().context['critical_soonest_deadline'])
+
+    def test_resolved_by_category_ignores_status_filter(self):
+        """Closed tickets survive a non-terminal status filter (date+severity only)."""
+        _make_ticket(status=Ticket.STATUS_APPROVED)
+        rbc = self._get(status=Ticket.STATUS_NEW).context['resolved_by_category']
+        self.assertTrue(rbc)
+
+    # ── Filters still scope the active counts ──────────────────────────── #
+
+    def test_status_filter_scopes_active_total(self):
         _make_ticket(status=Ticket.STATUS_NEW)
         _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
-        s = self.client.get(DASHBOARD_URL).context['stats']
-        self.assertEqual(s['active'], 2)
+        self.assertEqual(
+            self._get(status=Ticket.STATUS_NEW).context['active_total'], 1)
+
+    def test_intcomma_applied(self):
+        """Large counts render with a thousands separator (STEP 5)."""
+        Ticket.objects.bulk_create([
+            Ticket(ticket_id=f'BULK{i:05d}', device_name='d', ip_address='10.0.0.1',
+                   issue_description='x', status=Ticket.STATUS_NEW,
+                   sla_deadline=timezone.now() + timedelta(hours=5))
+            for i in range(1000)
+        ])
+        self.assertIn('1,000', self._get().content.decode())

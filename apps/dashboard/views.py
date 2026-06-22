@@ -26,8 +26,25 @@ from apps.incidents.models import Ticket, TicketLog
 #   c) Terminal slugs → 'APPROVED', 'CLOSED_EVENT'                       #
 #      (Ticket.TERMINAL_STATUSES).                                       #
 #   d) Severity       → Ticket.severity, ranked by Ticket.SEVERITY_RANK  #
-#      (Critical=4 … Unknown=0).                                         #
+#      (Critical=4 … Unknown=0). HIGHEST rank slug is 'Critical' (=4),   #
+#      so "active_critical" filters severity == 'Critical'.              #
 #   e) Assignee       → Ticket.assigned_to (FK to auth.User).            #
+#                                                                        #
+# STEP 0 findings (Session 3):                                           #
+#   STATUS_CHOICES (order / slug → display):                            #
+#     NEW                  → แจ้งเหตุใหม่                                  #
+#     ESCALATED_T2         → ส่งต่อให้ Tier 2                             #
+#     T1_REVIEW            → รอ Tier 1 ทบทวน                             #
+#     AWAITING_CONTAINMENT → รอการจัดการจากผู้ดูแลระบบ                    #
+#     CONTAINMENT_REPORTED → รายงานการควบคุมแล้ว                          #
+#     PENDING_MANAGER      → รอผู้จัดการตรวจสอบ                           #
+#     APPROVED             → อนุมัติแล้ว        (terminal)                #
+#     CLOSED_EVENT         → ปิด (Event)        (terminal)               #
+#   Non-terminal = the first 6; terminal = {APPROVED, CLOSED_EVENT}.     #
+#   Category field → Ticket.category (CATEGORY_CHOICES: 'Cyber Event',   #
+#     'Incident', 'Cyber Event/Incident'); secondary type → issue_type.  #
+#   Containment deadline → NONE. The only deadline field is sla_deadline #
+#     (there is no separate containment_deadline).                       #
 # ====================================================================== #
 
 
@@ -80,10 +97,16 @@ def dashboard(request):
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         all_tickets = all_tickets.filter(created_at__gte=month_start)
 
-    if status_filter:
-        all_tickets = all_tickets.filter(status=status_filter)
     if severity_filter:
         all_tickets = all_tickets.filter(severity=severity_filter)
+
+    # date_range + severity WITHOUT the status filter — used by
+    # resolved_by_category, where a non-terminal status filter would
+    # otherwise hide every closed ticket.
+    date_sev_qs = all_tickets
+
+    if status_filter:
+        all_tickets = all_tickets.filter(status=status_filter)
 
     active_qs   = all_tickets.exclude(status__in=terminal)
     closed_qs   = all_tickets.filter(status__in=terminal)
@@ -308,7 +331,12 @@ def dashboard(request):
     monthly_data   = [m['count'] for m in monthly]
 
     # ── Recent & breach lists ─────────────────────────────────────────────── #
-    recent_tickets = active_qs.order_by('-created_at')[:8]
+    # Top 15 active cases, most urgent first (nearest SLA deadline). NULL
+    # deadlines sort last under Postgres ASC. select_related avoids N+1 on the
+    # assignee column rendered in the detail table.
+    recent_tickets = (
+        active_qs.select_related('assigned_to').order_by('sla_deadline')[:15]
+    )
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
     # ── Backlog-aging & severity chart series (derived from stats above) ──── #
@@ -327,6 +355,100 @@ def dashboard(request):
         'backlog':        list(zip(backlog_labels, backlog_data)),
         'severity':       list(zip(severity_labels, severity_data)),
     }
+
+    # ====================================================================== #
+    # Management dashboard KPIs (Session 3) — additive.                       #
+    # Audience: management. Everything respects the active GET filters        #
+    # (date_range / status / severity) EXCEPT resolved_by_category, which     #
+    # respects date_range + severity only (see date_sev_qs above).           #
+    # ====================================================================== #
+    cat_display = dict(Ticket.CATEGORY_CHOICES)
+    MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+    active_total    = active_qs.count()
+    active_critical = active_qs.filter(severity='Critical').count()  # highest rank
+
+    crit_soonest = (
+        active_qs.filter(severity='Critical', sla_deadline__isnull=False)
+        .order_by('sla_deadline')
+        .values('ticket_id', 'sla_deadline')
+        .first()
+    )
+    if crit_soonest:
+        critical_soonest_deadline = {
+            'ticket_id': crit_soonest['ticket_id'],
+            'minutes_remaining': round(
+                (crit_soonest['sla_deadline'] - now).total_seconds() / 60),
+        }
+    else:
+        critical_soonest_deadline = None
+
+    # Closed this / last calendar month — terminal-entry time from the log.
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_start = (this_month_start - timedelta(days=1)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0)
+    closed_this_month = resolved_qs.filter(resolved_at__gte=this_month_start).count()
+    closed_last_month = resolved_qs.filter(
+        resolved_at__gte=last_month_start, resolved_at__lt=this_month_start).count()
+    closed_delta = closed_this_month - closed_last_month
+
+    # Assignee heatmap — ALL analysts, counts per non-terminal status.
+    assignee_heatmap_statuses = [
+        (s, status_map[s]) for s in status_order if s not in terminal
+    ]
+    heatmap_slugs = [s for s, _ in assignee_heatmap_statuses]
+    heat = {}
+    for r in (active_qs.filter(assigned_to__isnull=False)
+              .values('assigned_to', 'assigned_to__first_name',
+                      'assigned_to__last_name', 'assigned_to__username', 'status')
+              .annotate(c=Count('id'))):
+        uid = r['assigned_to']
+        if uid not in heat:
+            name = (f"{r['assigned_to__first_name']} "
+                    f"{r['assigned_to__last_name']}").strip() \
+                or r['assigned_to__username']
+            heat[uid] = {'name': name, 'counts': {}, 'total': 0}
+        heat[uid]['counts'][r['status']] = r['c']
+        heat[uid]['total'] += r['c']
+    assignee_heatmap = sorted(heat.values(), key=lambda x: x['total'], reverse=True)
+    # Template can't index a dict by a loop variable — pre-build status-ordered
+    # cell lists aligned to assignee_heatmap_statuses.
+    for a in assignee_heatmap:
+        a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
+
+    # Avg MTTR by category (hours), last 30 days, ≥2 resolved per category.
+    cat_durations = {}
+    for cat, r_at, c_at in (resolved_qs.filter(resolved_at__gte=thirty_days_ago)
+                            .values_list('category', 'resolved_at', 'created_at')):
+        if r_at and c_at and r_at >= c_at:
+            cat_durations.setdefault(cat, []).append(
+                (r_at - c_at).total_seconds() / 3600)
+    mttr_by_category = [
+        {'label': cat_display.get(cat, cat), 'avg_hours': round(_mean(durs), 1)}
+        for cat, durs in cat_durations.items() if len(durs) >= 2
+    ]
+    mttr_by_category.sort(key=lambda x: x['avg_hours'], reverse=True)
+
+    # Resolved tickets by category (date_range + severity, NOT status), top 8.
+    resolved_by_category = [
+        {'label': cat_display.get(r['category'], r['category']), 'count': r['c']}
+        for r in (date_sev_qs.filter(status__in=terminal)
+                  .values('category').annotate(c=Count('id')).order_by('-c')[:8])
+    ]
+
+    # 6-month volume trend scoped to the active GET filters.
+    monthly_trend_filtered = []
+    for i in range(5, -1, -1):
+        m = (now.month - i - 1) % 12 + 1
+        y = now.year if now.month - i > 0 else now.year - 1
+        cnt = all_tickets.filter(created_at__month=m, created_at__year=y).count()
+        monthly_trend_filtered.append({'month': f"{y}-{m:02d}", 'count': cnt})
+    monthly_filtered_labels = [
+        f"{MONTH_ABBR[int(mt['month'][5:7])]} {mt['month'][:4]}"
+        for mt in monthly_trend_filtered
+    ]
+    monthly_filtered_data = [mt['count'] for mt in monthly_trend_filtered]
 
     return render(request, 'dashboard/dashboard.html', {
         'stats':               stats,
@@ -348,6 +470,20 @@ def dashboard(request):
         'chart_tables':        chart_tables,
         'recent_tickets':      recent_tickets,
         'breach_tickets':      breach_tickets,
+        # ── Management KPIs (Session 3) ────────────────────────────────── #
+        'active_total':              active_total,
+        'active_critical':           active_critical,
+        'critical_soonest_deadline': critical_soonest_deadline,
+        'closed_this_month':         closed_this_month,
+        'closed_last_month':         closed_last_month,
+        'closed_delta':              closed_delta,
+        'assignee_heatmap':          assignee_heatmap,
+        'assignee_heatmap_statuses': assignee_heatmap_statuses,
+        'mttr_by_category':          mttr_by_category,
+        'resolved_by_category':      resolved_by_category,
+        'monthly_trend_filtered':    monthly_trend_filtered,
+        'monthly_filtered_labels':   monthly_filtered_labels,
+        'monthly_filtered_data':     monthly_filtered_data,
         # Filter bar state
         'status_choices':      Ticket.STATUS_CHOICES,
         'severity_choices':    Ticket.SEVERITY_CHOICES,
