@@ -7,6 +7,13 @@
       "runtimeArgs": ["manage.py", "runserver", "0.0.0.0:8088", "--settings=config.settings_local"],
       "port": 8088,
       "autoPort": false
+    },
+    {
+      "name": "SOC Ticket (Postgres)",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["manage.py", "runserver", "8099"],
+      "port": 8099,
+      "autoPort": false
     }
   ]
 }

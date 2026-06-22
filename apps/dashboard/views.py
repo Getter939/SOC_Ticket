@@ -61,7 +61,30 @@ def dashboard(request):
     now   = today
     terminal = list(Ticket.TERMINAL_STATUSES)
 
+    # ── GET filters: date_range / status / severity ──────────────────────── #
+    # Presentation-level scoping only. Default 'all' / '' preserves the
+    # original unfiltered behavior, so existing callers are unaffected.
+    date_range      = request.GET.get('date_range', 'all')
+    status_filter   = request.GET.get('status', '')
+    severity_filter = request.GET.get('severity', '')
+
     all_tickets = Ticket.objects.all()
+
+    if date_range == 'today':
+        all_tickets = all_tickets.filter(created_at__date=now.date())
+    elif date_range == 'week':
+        week_start = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        all_tickets = all_tickets.filter(created_at__gte=week_start)
+    elif date_range == 'month':
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        all_tickets = all_tickets.filter(created_at__gte=month_start)
+
+    if status_filter:
+        all_tickets = all_tickets.filter(status=status_filter)
+    if severity_filter:
+        all_tickets = all_tickets.filter(severity=severity_filter)
+
     active_qs   = all_tickets.exclude(status__in=terminal)
     closed_qs   = all_tickets.filter(status__in=terminal)
 
@@ -263,8 +286,15 @@ def dashboard(request):
     by_category = list(
         all_tickets.values('category').annotate(count=Count('id')).order_by('-count')
     )
-    by_category_labels = [b['category'] for b in by_category]
-    by_category_data   = [b['count']    for b in by_category]
+    # Cap to top 5 + an aggregated "อื่นๆ" (Others) bucket so the doughnut
+    # stays readable (presentation only — see STEP 6c).
+    top_cat = by_category[:5]
+    rest_cat = by_category[5:]
+    by_category_labels = [b['category'] for b in top_cat]
+    by_category_data   = [b['count']    for b in top_cat]
+    if rest_cat:
+        by_category_labels.append('อื่นๆ')
+        by_category_data.append(sum(b['count'] for b in rest_cat))
 
     # ── Monthly trend (last 6 months) ────────────────────────────────────── #
     monthly = []
@@ -281,8 +311,26 @@ def dashboard(request):
     recent_tickets = active_qs.order_by('-created_at')[:8]
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
+    # ── Backlog-aging & severity chart series (derived from stats above) ──── #
+    backlog_labels = ['Fresh (0–24h)', 'Aging (1–3d)', 'Stale (>3d)']
+    backlog_data   = [backlog_aging['fresh'], backlog_aging['aging'], backlog_aging['stale']]
+    severity_labels = [s['label'] for s in severity_breakdown]
+    severity_data   = [s['count'] for s in severity_breakdown]
+
+    # ── Pre-zipped (label, value) pairs for the visually-hidden a11y tables ─ #
+    chart_tables = {
+        'pipeline':       list(zip(status_labels, status_data)),
+        'classification': list(zip(classification_labels, classification_data)),
+        'by_type':        list(zip(by_type_labels, by_type_data)),
+        'by_category':    list(zip(by_category_labels, by_category_data)),
+        'monthly':        list(zip(monthly_labels, monthly_data)),
+        'backlog':        list(zip(backlog_labels, backlog_data)),
+        'severity':       list(zip(severity_labels, severity_data)),
+    }
+
     return render(request, 'dashboard/dashboard.html', {
         'stats':               stats,
+        'now':                 now,
         'status_labels':       status_labels,
         'status_data':         status_data,
         'classification_labels': classification_labels,
@@ -293,6 +341,19 @@ def dashboard(request):
         'by_category_data':    by_category_data,
         'monthly_labels':      monthly_labels,
         'monthly_data':        monthly_data,
+        'backlog_labels':      backlog_labels,
+        'backlog_data':        backlog_data,
+        'severity_labels':     severity_labels,
+        'severity_data':       severity_data,
+        'chart_tables':        chart_tables,
         'recent_tickets':      recent_tickets,
         'breach_tickets':      breach_tickets,
+        # Filter bar state
+        'status_choices':      Ticket.STATUS_CHOICES,
+        'severity_choices':    Ticket.SEVERITY_CHOICES,
+        'filters': {
+            'date_range': date_range,
+            'status':     status_filter,
+            'severity':   severity_filter,
+        },
     })

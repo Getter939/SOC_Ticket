@@ -449,3 +449,88 @@ class DashboardEnterpriseKPITest(TestCase):
         self.assertEqual(counts['Critical'], 1)
         self.assertEqual(counts['High'], 1)
         self.assertEqual(counts['Low'], 1)
+
+
+# ── Template rendering / filter-bar tests (this session's UI wiring) ─────── #
+
+class DashboardTemplateRenderTest(TestCase):
+    """The dashboard.html updates render and the new GET filters scope data."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('soc_render', UserProfile.ROLE_SOC_STAFF)
+
+    def setUp(self):
+        self.client.force_login(self.soc)
+
+    def test_new_kpi_sections_render(self):
+        """Header timestamp, filter bar, new KPI cards and tables are present."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+
+        # Last-updated timestamp (STEP 5a)
+        self.assertIn('ข้อมูล ณ เวลา:', html)
+        self.assertIn('ICT', html)
+        # Filter bar presets (STEP 4)
+        self.assertIn('date_range=today', html)
+        self.assertIn('name="severity"', html)
+        self.assertIn('name="status"', html)
+        # New KPI cards (STEP 2)
+        self.assertIn('SLA Compliance', html)
+        self.assertIn('MTTR', html)
+        self.assertIn('ใกล้เกิน SLA', html)
+        # New sections (STEP 3)
+        self.assertIn('Backlog Aging', html)
+        self.assertIn('Assignee Workload', html)
+        self.assertIn('Severity Breakdown', html)
+        # New chart canvases
+        self.assertIn('chartBacklog', html)
+        self.assertIn('chartSeverity', html)
+        # A11y: visually-hidden data tables + role=img (STEP 6d)
+        self.assertIn('visually-hidden', html)
+        self.assertIn('role="img"', html)
+
+    def test_legacy_breach_key_not_referenced(self):
+        """The banner reads sla_breach_live; no stats.sla_breaches in template."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertNotIn('sla_breaches', html)
+        # Live breach banner is shown for the overdue active ticket
+        self.assertIn('SLA BREACH ALERT', html)
+
+    def test_humanize_intcomma_applied(self):
+        """Large counts render with a thousands separator (STEP 5b)."""
+        # 1000 active tickets → "1,000" must appear somewhere in the cards.
+        # bulk_create bypasses Ticket.save(), so assign unique ticket_ids here.
+        Ticket.objects.bulk_create([
+            Ticket(ticket_id=f'BULK{i:05d}', device_name='d',
+                   ip_address='10.0.0.1', issue_description='x',
+                   status=Ticket.STATUS_NEW,
+                   sla_deadline=timezone.now() + timedelta(hours=5))
+            for i in range(1000)
+        ])
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn('1,000', html)
+
+    def test_status_filter_scopes_data(self):
+        """?status=NEW narrows the active count to NEW-status tickets only."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        s = self.client.get(DASHBOARD_URL, {'status': Ticket.STATUS_NEW}).context['stats']
+        self.assertEqual(s['active'], 1)
+
+    def test_severity_filter_scopes_data(self):
+        """?severity=Critical narrows to Critical tickets only."""
+        a = _make_ticket(status=Ticket.STATUS_NEW)
+        b = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=a.pk).update(severity='Critical')
+        Ticket.objects.filter(pk=b.pk).update(severity='Low')
+        s = self.client.get(DASHBOARD_URL, {'severity': 'Critical'}).context['stats']
+        self.assertEqual(s['active'], 1)
+
+    def test_default_no_filter_unchanged(self):
+        """No GET params → unfiltered (all tickets counted)."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        s = self.client.get(DASHBOARD_URL).context['stats']
+        self.assertEqual(s['active'], 2)
