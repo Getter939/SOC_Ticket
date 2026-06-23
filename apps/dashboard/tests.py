@@ -509,13 +509,47 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Grace Hopper', html)
 
     def test_category_sections_render_even_without_data(self):
-        """MTTR-by-category and resolved-by-category sections render as placeholders."""
+        """Pipeline and resolved-by-category sections render (latter as placeholder)."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
-        self.assertIn('Avg MTTR by Category', html)
+        self.assertNotIn('Avg MTTR by Category', html)   # removed in Session 3C
         self.assertIn('Resolved Tickets by Category', html)
         self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
+
+    def test_pipeline_chart_renders(self):
+        """Pipeline stacked-bar replaces the MTTR chart in Row 3L."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertIn('chartPipeline', html)
+        self.assertIn('Pipeline', html)
+
+    def test_pipeline_by_severity_structure_and_zero_fill(self):
+        """pipeline_by_severity has statuses/severities/matrix; matrix is zero-filled."""
+        # One ticket only touches a single (severity, status) cell — every other
+        # status must still be present under every severity (no gaps).
+        c = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=c.pk).update(severity='Critical')
+        pbs = self._get().context['pipeline_by_severity']
+
+        self.assertEqual(set(pbs), {'statuses', 'severities', 'matrix'})
+        status_slugs = [slug for slug, _ in pbs['statuses']]
+        # Severities are highest rank first.
+        self.assertEqual([s for s, _ in pbs['severities']][0], 'Critical')
+        # Every status slug appears under every severity (zero-fill).
+        for sev_slug, _ in pbs['severities']:
+            self.assertEqual(set(pbs['matrix'][sev_slug]), set(status_slugs))
+        # The one ticket landed in exactly its cell.
+        self.assertEqual(pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(pbs['matrix']['Low'][Ticket.STATUS_NEW], 0)
+
+    def test_pipeline_includes_terminal_statuses(self):
+        """Pipeline covers the full funnel, including terminal statuses."""
+        _make_ticket(status=Ticket.STATUS_APPROVED)
+        pbs = self._get().context['pipeline_by_severity']
+        status_slugs = [slug for slug, _ in pbs['statuses']]
+        self.assertIn(Ticket.STATUS_APPROVED, status_slugs)
+        self.assertIn(Ticket.STATUS_CLOSED_EVENT, status_slugs)
 
     # ── New context keys ───────────────────────────────────────────────── #
 

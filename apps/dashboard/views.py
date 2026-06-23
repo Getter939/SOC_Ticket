@@ -294,6 +294,37 @@ def dashboard(request):
     status_labels = [status_map[s] for s in status_order]
     status_data   = [counts_by_status.get(s, 0) for s in status_order]
 
+    # ── Pipeline by severity × status (stacked-bar source) ───────────────── #
+    # STEP 0 findings: the only pre-existing pipeline data is status_data
+    # (totals per status — NOT broken down by severity), so this is a new key.
+    # statuses: STATUS_CHOICES progression order (earliest → terminal).
+    # severities: SEVERITY_RANK order, HIGHEST first (Critical=4 … Unknown=0).
+    # All tickets (incl. terminal) so the funnel is complete; respects the
+    # active GET filters via all_tickets. Single group-by query (no N+1);
+    # the matrix is zero-filled so every status appears under every severity.
+    sev_display      = dict(Ticket.SEVERITY_CHOICES)
+    severity_order   = sorted(
+        sev_display, key=lambda s: Ticket.SEVERITY_RANK.get(s, 0), reverse=True)
+    pipeline_matrix  = {
+        sev: {st: 0 for st in status_order} for sev in severity_order
+    }
+    for row in all_tickets.values('severity', 'status').annotate(c=Count('id')):
+        sev, st = row['severity'], row['status']
+        if sev in pipeline_matrix and st in pipeline_matrix[sev]:
+            pipeline_matrix[sev][st] = row['c']
+    pipeline_by_severity = {
+        'statuses':   [(s, status_map[s]) for s in status_order],
+        'severities': [(s, sev_display[s]) for s in severity_order],
+        'matrix':     pipeline_matrix,
+    }
+    # Status-ordered rows for the visually-hidden a11y table (templates can't
+    # index a dict by a loop variable). Cells align to status_order.
+    pipeline_rows = [
+        {'severity': sev_display[sev],
+         'cells':    [pipeline_matrix[sev][st] for st in status_order]}
+        for sev in severity_order
+    ]
+
     # Event / Incident doughnut
     classification_labels = ['Incident', 'Event']
     classification_data   = [tp_count, fp_count]
@@ -485,6 +516,8 @@ def dashboard(request):
         'now':                 now,
         'status_labels':       status_labels,
         'status_data':         status_data,
+        'pipeline_by_severity': pipeline_by_severity,
+        'pipeline_rows':        pipeline_rows,
         'classification_labels': classification_labels,
         'classification_data': classification_data,
         'by_type_labels':      by_type_labels,

@@ -239,30 +239,37 @@
 <!-- ══ ROW 3: MTTR by category (50%) + Resolved by category (50%) ═══════════ -->
 <div class="row g-3 mb-3">
 
-    <!-- 3L — Avg MTTR by category -->
+    <!-- 3L — Pipeline by status × severity (stacked bar) -->
     <div class="col-md-6">
         <div class="panel p-3 h-100">
-            <div class="panel-title mb-2">
-                <i class="bi bi-stopwatch me-1"></i>Avg MTTR by Category (30d) — เวลาแก้ไขเฉลี่ยต่อหมวด
-            </div>
-            {% if mttr_by_category %}
+            <h6 class="panel-title mb-2">
+                <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะ Ticket ทั้งหมด
+            </h6>
             <div style="height:260px;">
-                <canvas id="chartMttrCat" role="img" aria-label="เวลาแก้ไขเฉลี่ย (ชั่วโมง) ต่อหมวดหมู่"></canvas>
+                <canvas id="chartPipeline" role="img"
+                        aria-label="Pipeline chart showing ticket counts by workflow status and severity"></canvas>
             </div>
             <table class="visually-hidden">
-                <caption>Average MTTR by category (hours)</caption>
-                <thead><tr><th>หมวดหมู่</th><th>ชั่วโมง</th></tr></thead>
+                <caption>Ticket counts by workflow status and severity</caption>
+                <thead>
+                    <tr>
+                        <th>ความรุนแรง</th>
+                        {% for slug, display in pipeline_by_severity.statuses %}
+                        <th>{{ display }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
                 <tbody>
-                    {% for row in mttr_by_category %}
-                    <tr><td>{{ row.label }}</td><td>{{ row.avg_hours }}</td></tr>
+                    {% for row in pipeline_rows %}
+                    <tr>
+                        <td>{{ row.severity }}</td>
+                        {% for cell in row.cells %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
                     {% endfor %}
                 </tbody>
             </table>
-            {% else %}
-            <div class="d-flex align-items-center justify-content-center text-muted" style="height:260px;">
-                <span style="font-size:13px;">No data for the last 30 days</span>
-            </div>
-            {% endif %}
         </div>
     </div>
 
@@ -382,7 +389,7 @@
 <!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
 {{ by_category_labels|json_script:"by-category-labels" }}
 {{ by_category_data|json_script:"by-category-data" }}
-{{ mttr_by_category|json_script:"mttr-by-category" }}
+{{ pipeline_by_severity|json_script:"pipeline-by-severity" }}
 {{ resolved_by_category|json_script:"resolved-by-category" }}
 {{ daily_trend_labels|json_script:"daily-labels" }}
 {{ daily_trend_data|json_script:"daily-data" }}
@@ -410,26 +417,82 @@ new Chart(document.getElementById('chartByCategory'), {
 });
 {% endif %}
 
-// ── Avg MTTR by category (horizontal bar, single orange) ──
-{% if mttr_by_category %}
+// ── Pipeline by status × severity (stacked vertical bar) ──
 (function () {
-    const rows = readJSON('mttr-by-category');
-    new Chart(document.getElementById('chartMttrCat'), {
-        type: 'bar',
-        data: {
-            labels: rows.map(r => r.label),
-            datasets: [{ data: rows.map(r => r.avg_hours), backgroundColor: '#fd7e14', borderRadius: 4 }]
-        },
-        options: {
-            indexAxis: 'y',
-            plugins: { legend: { display: false },
-                       tooltip: { callbacks: { label: c => c.parsed.x + ' hrs' } } },
-            scales: { x: { beginAtZero: true, title: { display: true, text: 'Hours', font: { size: 13 } } } },
-            responsive: true,
+    const pbs = readJSON('pipeline-by-severity');
+    const statuses   = pbs.statuses;    // [[slug, display], ...] STATUS order
+    const severities = pbs.severities;  // [[slug, display], ...] highest rank first
+    const matrix     = pbs.matrix;      // { sev_slug: { status_slug: count } }
+
+    const SEV_COLOR = {
+        'Critical': '#dc3545', 'High': '#fd7e14', 'Medium': '#ffc107',
+        'Low': '#198754', 'Unknown': '#adb5bd',
+    };
+    const trunc = s => s.length > 10 ? s.slice(0, 10) + '…' : s;
+
+    const fullLabels = statuses.map(s => s[1]);
+    const datasets = severities.map(([sevSlug, sevDisplay]) => ({
+        label: sevDisplay,
+        data: statuses.map(([stSlug]) => matrix[sevSlug][stSlug]),
+        backgroundColor: SEV_COLOR[sevSlug] || '#adb5bd',
+        borderRadius: 3,
+    }));
+
+    // Column totals (sum across severities) for the above-bar labels.
+    const totals = statuses.map((_, i) =>
+        datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
+    const maxTotal = Math.max(0, ...totals);
+
+    // afterDraw plugin: draw the stack total above each column.
+    const totalLabelPlugin = {
+        id: 'pipelineTotals',
+        afterDatasetsDraw(chart) {
+            const { ctx, scales: { x, y } } = chart;
+            ctx.save();
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillStyle = '#343a40';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            totals.forEach((t, i) => {
+                if (t === 0) return;
+                ctx.fillText(t, x.getPixelForValue(i), y.getPixelForValue(t) - 4);
+            });
+            ctx.restore();
         }
+    };
+
+    new Chart(document.getElementById('chartPipeline'), {
+        type: 'bar',
+        data: { labels: fullLabels.map(trunc), datasets },
+        options: {
+            responsive: true,
+            // Headroom so the above-bar total isn't clipped.
+            scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: {
+                    stacked: true, beginAtZero: true,
+                    suggestedMax: maxTotal + 1,
+                    grid: { color: '#e9ecef' },
+                    ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
+                    title: { display: true, text: 'จำนวนคดี', font: { size: 13 } },
+                }
+            },
+            plugins: {
+                legend: { position: 'top', labels: { font: { size: 13 } } },
+                tooltip: {
+                    callbacks: {
+                        // Full (untruncated) status name as the title.
+                        title: items => fullLabels[items[0].dataIndex],
+                        label: item => `${item.dataset.label}: ${item.parsed.y}`,
+                        // Full column total (sum across severities) for that status.
+                        footer: items => 'Total: ' + totals[items[0].dataIndex],
+                    }
+                }
+            },
+        },
+        plugins: [totalLabelPlugin],
     });
 })();
-{% endif %}
 
 // ── Resolved tickets by category (horizontal bar, single green) ──
 {% if resolved_by_category %}
