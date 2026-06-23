@@ -104,3 +104,39 @@ mocked:
 ```bash
 python manage.py test apps.wazuh_ingest
 ```
+
+## Development — Seeding test data
+
+To populate the database with synthetic ticket data for dashboard testing:
+
+```bash
+python manage.py seed_data
+```
+
+This creates 100 tickets spread over the last 30 days, covering all 8 ticket
+statuses, both `INCIDENT` and `EVENT` classifications, and all severity levels.
+Five seed users are created automatically (T1 analyst, T2 analyst, SOC manager,
+system admin, system owner), each with a matching `UserProfile`.
+
+**Options**
+
+| Flag          | Default | Description                                  |
+|---------------|---------|----------------------------------------------|
+| `--tickets N` | 100     | Number of tickets to generate                |
+| `--days N`    | 30      | Time window (days) to spread tickets across  |
+| `--flush`     | off     | Wipe existing seed data before seeding       |
+
+**Reset and re-seed**
+
+```bash
+python manage.py seed_data --flush
+```
+
+**Wipe seed data only (no re-seed)**
+
+```bash
+python manage.py seed_data --flush --tickets 0
+```
+
+All seeded rows are tagged with the `seed_` username prefix, so seed data can
+always be identified or removed cleanly without affecting real data.
