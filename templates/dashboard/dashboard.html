@@ -245,7 +245,7 @@
             <h6 class="panel-title mb-2">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะ Ticket ทั้งหมด
             </h6>
-            <div style="height:260px;">
+            <div style="height:320px;">
                 <canvas id="chartPipeline" role="img"
                         aria-label="Pipeline chart showing ticket counts by workflow status and severity"></canvas>
             </div>
@@ -428,9 +428,7 @@ new Chart(document.getElementById('chartByCategory'), {
         'Critical': '#dc3545', 'High': '#fd7e14', 'Medium': '#ffc107',
         'Low': '#198754', 'Unknown': '#adb5bd',
     };
-    const trunc = s => s.length > 10 ? s.slice(0, 10) + '…' : s;
-
-    const fullLabels = statuses.map(s => s[1]);
+    const labels = statuses.map(s => s[1]);   // full status display names
     const datasets = severities.map(([sevSlug, sevDisplay]) => ({
         label: sevDisplay,
         data: statuses.map(([stSlug]) => matrix[sevSlug][stSlug]),
@@ -463,12 +461,21 @@ new Chart(document.getElementById('chartByCategory'), {
 
     new Chart(document.getElementById('chartPipeline'), {
         type: 'bar',
-        data: { labels: fullLabels.map(trunc), datasets },
+        data: { labels, datasets },
         options: {
             responsive: true,
             // Headroom so the above-bar total isn't clipped.
             scales: {
-                x: { stacked: true, grid: { display: false } },
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45,
+                        font: { size: 12 },
+                        autoSkip: false,   // show every label, never skip
+                    },
+                },
                 y: {
                     stacked: true, beginAtZero: true,
                     suggestedMax: maxTotal + 1,
@@ -481,8 +488,8 @@ new Chart(document.getElementById('chartByCategory'), {
                 legend: { position: 'top', labels: { font: { size: 13 } } },
                 tooltip: {
                     callbacks: {
-                        // Full (untruncated) status name as the title.
-                        title: items => fullLabels[items[0].dataIndex],
+                        // Labels are already the full status names.
+                        title: items => items[0].label,
                         label: item => `${item.dataset.label}: ${item.parsed.y}`,
                         // Full column total (sum across severities) for that status.
                         footer: items => 'Total: ' + totals[items[0].dataIndex],
