@@ -101,6 +101,10 @@ SESSION_COOKIE_SAMESITE = 'Lax'      # CSRF defense-in-depth
 CSRF_COOKIE_SAMESITE    = 'Lax'
 SECURE_CONTENT_TYPE_NOSNIFF = True   # X-Content-Type-Options: nosniff
 X_FRAME_OPTIONS = 'DENY'             # clickjacking (with XFrameOptionsMiddleware)
+# Session/auth cookie must be a SESSION cookie (no Expires/Max-Age) so it is
+# discarded when the browser closes — there is no "remember me" feature here.
+# Prevents a persistent auth cookie lingering on shared workstations (CWE-539).
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # HTTPS-dependent — turn these ON in production behind TLS via .env. They
 # default OFF so an internal HTTP deployment keeps working: enabling secure
@@ -112,10 +116,15 @@ SECURE_SSL_REDIRECT   = config('SECURE_SSL_REDIRECT',   default=False, cast=bool
 SECURE_HSTS_SECONDS   = config('SECURE_HSTS_SECONDS',   default=0,     cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
 SECURE_HSTS_PRELOAD            = config('SECURE_HSTS_PRELOAD',            default=True, cast=bool)
-# If deployed behind a TLS-terminating reverse proxy (nginx/traefik) that sets
-# X-Forwarded-Proto, uncomment so Django trusts it. Only enable when the proxy
-# strips any client-supplied X-Forwarded-Proto, otherwise it is spoofable.
-# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# Deployed behind a TLS-terminating reverse proxy (nginx/traefik) that sets
+# X-Forwarded-Proto? Set USE_PROXY_SSL_HEADER=True so Django trusts it and
+# request.is_secure() reflects the client→proxy leg. This is REQUIRED for
+# SECURE_SSL_REDIRECT/HSTS to work behind a proxy — without it Django sees the
+# proxy→app HTTP leg, never redirects (or loops). Only enable when the proxy
+# strips any client-supplied X-Forwarded-Proto, otherwise the header is
+# spoofable. The bundled nginx.conf sets X-Forwarded-Proto $scheme.
+if config('USE_PROXY_SSL_HEADER', default=False, cast=bool):
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # ── Content-Security-Policy (applied by config.middleware) ─────────────────
 # Defense-in-depth against XSS / clickjacking / data exfiltration. Scripts and
