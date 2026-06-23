@@ -513,7 +513,7 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertNotIn('Avg MTTR by Category', html)   # removed in Session 3C
-        self.assertIn('Resolved Tickets by Category', html)
+        self.assertIn('Resolved Tickets by Incident Category', html)
         self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
 
@@ -614,6 +614,33 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_APPROVED)
         rbc = self._get(status=Ticket.STATUS_NEW).context['resolved_by_category']
         self.assertTrue(rbc)
+
+    def test_resolved_by_category_groups_by_incident_category(self):
+        """resolved_by_category groups by detailed_issue with display labels."""
+        # Two closed Malicious Logic + one closed DoS.
+        for di in ('Malicious Logic', 'Malicious Logic', 'DoS'):
+            t = _make_ticket(status=Ticket.STATUS_APPROVED)
+            Ticket.objects.filter(pk=t.pk).update(detailed_issue=di)
+
+        rbc = self._get().context['resolved_by_category']
+        self.assertIsInstance(rbc, list)
+        # No noisy null/blank labels.
+        for row in rbc:
+            self.assertNotIn(row['label'], (None, ''))
+        labels = {row['label']: row['count'] for row in rbc}
+        detail_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
+        # Display name (not the raw slug) is used, with correct counts.
+        self.assertEqual(labels[detail_display['Malicious Logic']], 2)
+        self.assertEqual(labels[detail_display['DoS']], 1)
+        # The old Event/Incident classification value must NOT be a label.
+        self.assertNotIn('Cyber Event', labels)
+
+    def test_resolved_by_category_excludes_blank_detailed_issue(self):
+        """Tickets with blank detailed_issue are dropped (no 'Unknown' bar)."""
+        t = _make_ticket(status=Ticket.STATUS_APPROVED)
+        Ticket.objects.filter(pk=t.pk).update(detailed_issue='')
+        rbc = self._get().context['resolved_by_category']
+        self.assertEqual(rbc, [])
 
     # ── Filters still scope the active counts ──────────────────────────── #
 

@@ -461,11 +461,20 @@ def dashboard(request):
     ]
     mttr_by_category.sort(key=lambda x: x['avg_hours'], reverse=True)
 
-    # Resolved tickets by category (date_range + severity, NOT status), top 8.
+    # Resolved tickets grouped by INCIDENT CATEGORY (detailed_issue), not the
+    # Event/Incident classification. STEP 0: detailed_issue is a CharField with
+    # DETAILED_ISSUE_CHOICES (Malicious Logic, Reconnaissance, DoS, …) — the
+    # actual threat/incident category. Respects date_range + severity (NOT
+    # status, since we count closed tickets). Null/blank excluded so management
+    # doesn't see a noisy "Unknown" bar. Top 8, count desc.
+    detail_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
     resolved_by_category = [
-        {'label': cat_display.get(r['category'], r['category']), 'count': r['c']}
+        {'label': detail_display.get(r['detailed_issue'], r['detailed_issue']),
+         'count': r['c']}
         for r in (date_sev_qs.filter(status__in=terminal)
-                  .values('category').annotate(c=Count('id')).order_by('-c')[:8])
+                  .exclude(detailed_issue__isnull=True)
+                  .exclude(detailed_issue='')
+                  .values('detailed_issue').annotate(c=Count('id')).order_by('-c')[:8])
     ]
 
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
