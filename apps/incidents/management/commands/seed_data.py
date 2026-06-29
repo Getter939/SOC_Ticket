@@ -59,7 +59,6 @@ LIFECYCLE_PATHS = {
 }
 
 # ── Valid choice strings read from apps/incidents/models.py ───────────────────
-CATEGORY_POOL       = ["Cyber Event", "Incident", "Cyber Event/Incident"]
 ISSUE_TYPE_POOL     = ["SIEM", "Admin", "TI", "External"]
 DETAILED_ISSUE_POOL = [
     "Investigating", "Reconnaissance", "Malicious Logic", "User Intrusion",
@@ -224,7 +223,6 @@ class Command(BaseCommand):
             "Anomalous login from an unfamiliar country.",
         ])
 
-        category        = random.choice(CATEGORY_POOL)
         issue_type      = random.choice(ISSUE_TYPE_POOL)
         detailed_issue  = random.choice(DETAILED_ISSUE_POOL)
         detailed_issue2 = random.choice(DETAILED_ISSUE2_POOL)
@@ -240,7 +238,6 @@ class Command(BaseCommand):
             ip_address         = rand_ip(),
             device_name        = device,
             issue_description  = description,
-            category           = category,
             issue_type         = issue_type,
             detailed_issue     = detailed_issue,
             detailed_issue2    = detailed_issue2,

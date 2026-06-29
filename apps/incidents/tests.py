@@ -80,7 +80,6 @@ def _ticket_post_data(**overrides):
         'classification': Ticket.CLASSIFICATION_INCIDENT,
         't1_route': TicketForm.ROUTE_ESCALATE_T2,
         'severity': 'High',
-        'category': 'Cyber Event',
         'issue_type': 'SIEM',
         'detailed_issue': 'Investigating',
         'detailed_issue2': 'Investigating Other',

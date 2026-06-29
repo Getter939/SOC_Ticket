@@ -121,7 +121,7 @@ def notify_containment_required(ticket, reason=None):
         'Ticket {ticket_id} has been routed to you for containment action.\n'
         '\n'
         '  Ticket ID : {ticket_id}\n'
-        '  Category  : {category} / {issue_type}\n'
+        '  Type      : {issue_type}\n'
         '  Summary   : {summary}\n'
         '\n'
         '{reason_block}\n'
@@ -135,7 +135,6 @@ def notify_containment_required(ticket, reason=None):
     context = {
         'ticket_id': ticket.ticket_id,
         'ticket_url': ticket_url,
-        'category': ticket.get_category_display(),
         'issue_type': ticket.get_issue_type_display(),
         'summary': summary,
         'reason_block': reason_block,
@@ -174,7 +173,7 @@ def notify_containment_submitted(ticket):
         'The assigned admin has submitted a containment report for ticket {ticket_id}.\n'
         '\n'
         '  Ticket ID      : {ticket_id}\n'
-        '  Category       : {category} / {issue_type}\n'
+        '  Type           : {issue_type}\n'
         '  Summary        : {summary}\n'
         '  Submitted by   : {admin_name}\n'
         '  Classification : {classification}\n'
@@ -193,7 +192,6 @@ def notify_containment_submitted(ticket):
     context = {
         'ticket_id': ticket.ticket_id,
         'ticket_url': ticket_url,
-        'category': ticket.get_category_display(),
         'issue_type': ticket.get_issue_type_display(),
         'summary': summary,
         'admin_name': admin_name,
@@ -235,7 +233,7 @@ def notify_system_owner_created(ticket, attachments=None):
         'และได้เปิด Ticket เพื่อดำเนินการแก้ไขแล้ว\n'
         '\n'
         '  Ticket ID      : {ticket_id}\n'
-        '  ประเภทเหตุการณ์ : {category} / {issue_type}\n'
+        '  ประเภทเหตุการณ์ : {issue_type}\n'
         '  IP Source       : {device_name}\n'
         '  สรุปเหตุการณ์   : {summary}\n'
         '\n'
@@ -251,7 +249,6 @@ def notify_system_owner_created(ticket, attachments=None):
         'owner_name': owner_name,
         'department': dept,
         'department_suffix': f' ({dept})' if dept else '',
-        'category': ticket.get_category_display(),
         'issue_type': ticket.get_issue_type_display(),
         'device_name': ticket.device_name,
         'summary': summary,
@@ -299,7 +296,7 @@ def notify_system_owner_closed(ticket, attachments=None):
         'Ticket ความปลอดภัย [{ticket_id}] ที่แจ้งเกี่ยวกับระบบของท่านได้รับการปิดแล้ว\n'
         '\n'
         '  Ticket ID      : {ticket_id}\n'
-        '  ประเภทเหตุการณ์ : {category} / {issue_type}\n'
+        '  ประเภทเหตุการณ์ : {issue_type}\n'
         '  IP Source       : {device_name}\n'
         '\n'
         '{outcome}\n'
@@ -314,7 +311,6 @@ def notify_system_owner_closed(ticket, attachments=None):
         'owner_name': owner_name,
         'department': dept,
         'department_suffix': f' ({dept})' if dept else '',
-        'category': ticket.get_category_display(),
         'issue_type': ticket.get_issue_type_display(),
         'device_name': ticket.device_name,
         'outcome': outcome,
@@ -359,7 +355,6 @@ def notify_containment_alert(ticket, reason=None):
             'id': ticket.ticket_id,
             'ticket_id': ticket.ticket_id,
             'summary': ticket.issue_description,
-            'category': ticket.get_category_display(),
             'severity': SEVERITY_TH.get(ticket.severity, ticket.severity),
             'assigned_to': assigned_to,
             'created_at': ticket.created_at,

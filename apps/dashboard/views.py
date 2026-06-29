@@ -41,8 +41,8 @@ from apps.incidents.models import Ticket, TicketLog
 #     APPROVED             → อนุมัติแล้ว        (terminal)                #
 #     CLOSED_EVENT         → ปิด (Event)        (terminal)               #
 #   Non-terminal = the first 6; terminal = {APPROVED, CLOSED_EVENT}.     #
-#   Category field → Ticket.category (CATEGORY_CHOICES: 'Cyber Event',   #
-#     'Incident', 'Cyber Event/Incident'); secondary type → issue_type.  #
+#   Threat type → Ticket.detailed_issue (DETAILED_ISSUE_CHOICES); source #
+#     channel → issue_type. (The Event/Incident axis is classification.)  #
 #   Containment deadline → NONE. The only deadline field is sla_deadline #
 #     (there is no separate containment_deadline).                       #
 # ====================================================================== #
@@ -336,16 +336,21 @@ def dashboard(request):
     by_type_labels = [b['issue_type'] for b in by_type]
     by_type_data   = [b['count']      for b in by_type]
 
-    # ── By Category doughnut ─────────────────────────────────────────────── #
+    # ── By Threat Type doughnut ──────────────────────────────────────────── #
+    # Distribution of all tickets by detailed_issue (the threat type —
+    # Malicious Logic, Reconnaissance, DoS, …). Display labels via
+    # DETAILED_ISSUE_CHOICES; blank/unset excluded so the chart stays clean.
+    detailed_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
     by_category = list(
-        all_tickets.values('category').annotate(count=Count('id')).order_by('-count')
+        all_tickets.exclude(detailed_issue__isnull=True).exclude(detailed_issue='')
+                   .values('detailed_issue').annotate(count=Count('id')).order_by('-count')
     )
     # Cap to top 5 + an aggregated "อื่นๆ" (Others) bucket so the doughnut
     # stays readable (presentation only — see STEP 6c).
     top_cat = by_category[:5]
     rest_cat = by_category[5:]
-    by_category_labels = [b['category'] for b in top_cat]
-    by_category_data   = [b['count']    for b in top_cat]
+    by_category_labels = [detailed_display.get(b['detailed_issue'], b['detailed_issue']) for b in top_cat]
+    by_category_data   = [b['count'] for b in top_cat]
     if rest_cat:
         by_category_labels.append('อื่นๆ')
         by_category_data.append(sum(b['count'] for b in rest_cat))
@@ -393,7 +398,6 @@ def dashboard(request):
     # (date_range / status / severity) EXCEPT resolved_by_category, which     #
     # respects date_range + severity only (see date_sev_qs above).           #
     # ====================================================================== #
-    cat_display = dict(Ticket.CATEGORY_CHOICES)
     MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -448,15 +452,18 @@ def dashboard(request):
     for a in assignee_heatmap:
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
 
-    # Avg MTTR by category (hours), last 30 days, ≥2 resolved per category.
+    # Avg MTTR by threat type (hours), last 30 days, ≥2 resolved per type.
+    # NOTE: computed but not currently rendered (the Row 3 MTTR panel was
+    # removed in Session 3C); kept available should the panel return.
     cat_durations = {}
     for cat, r_at, c_at in (resolved_qs.filter(resolved_at__gte=thirty_days_ago)
-                            .values_list('category', 'resolved_at', 'created_at')):
+                            .exclude(detailed_issue__isnull=True).exclude(detailed_issue='')
+                            .values_list('detailed_issue', 'resolved_at', 'created_at')):
         if r_at and c_at and r_at >= c_at:
             cat_durations.setdefault(cat, []).append(
                 (r_at - c_at).total_seconds() / 3600)
     mttr_by_category = [
-        {'label': cat_display.get(cat, cat), 'avg_hours': round(_mean(durs), 1)}
+        {'label': detailed_display.get(cat, cat), 'avg_hours': round(_mean(durs), 1)}
         for cat, durs in cat_durations.items() if len(durs) >= 2
     ]
     mttr_by_category.sort(key=lambda x: x['avg_hours'], reverse=True)
@@ -467,9 +474,8 @@ def dashboard(request):
     # actual threat/incident category. Respects date_range + severity (NOT
     # status, since we count closed tickets). Null/blank excluded so management
     # doesn't see a noisy "Unknown" bar. Top 8, count desc.
-    detail_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
     resolved_by_category = [
-        {'label': detail_display.get(r['detailed_issue'], r['detailed_issue']),
+        {'label': detailed_display.get(r['detailed_issue'], r['detailed_issue']),
          'count': r['c']}
         for r in (date_sev_qs.filter(status__in=terminal)
                   .exclude(detailed_issue__isnull=True)

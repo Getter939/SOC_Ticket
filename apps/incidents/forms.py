@@ -74,7 +74,6 @@ class TicketForm(forms.ModelForm):
             'incident_datetime',
             'reference_id',
             # Section 2
-            'category',
             'issue_type',
             'detailed_issue',
             'detailed_issue2',
@@ -105,7 +104,6 @@ class TicketForm(forms.ModelForm):
                 format='%Y-%m-%dT%H:%M',
             ),
             'reference_id':       forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น INC-2026-0001'}),
-            'category':           forms.Select(attrs={'class': 'form-select'}),
             'issue_type':         forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
@@ -188,7 +186,7 @@ class TicketReviewForm(forms.ModelForm):
         model = Ticket
         fields = [
             'classification', 'severity', 'incident_datetime', 'reference_id',
-            'category', 'issue_type', 'detailed_issue', 'detailed_issue2',
+            'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'spread_to_others', 'destination_ip', 'ioc_details',
             'mitre_phase', 'action_required', 'action_precautions', 'system_owner',

@@ -168,7 +168,6 @@ class WorkflowUiContractTest(TestCase):
             'status': Ticket.STATUS_T1_REVIEW,
             'classification': Ticket.CLASSIFICATION_INCIDENT,
             'severity': 'High',
-            'category': 'Cyber Event',
             'issue_type': 'SIEM',
             'detailed_issue': 'Investigating',
             'detailed_issue2': 'Investigating Other',

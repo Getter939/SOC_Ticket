@@ -337,7 +337,6 @@ class Command(BaseCommand):
                 'Manager verification completed; retain evidence under IR-03 for 365 days.'
             ),
             sla_deadline=incident_time + timedelta(hours=4),
-            category='Incident',
             issue_type='SIEM',
             detailed_issue='Root Intrusion',
             detailed_issue2='Data Exfiltration',
@@ -509,7 +508,6 @@ class Command(BaseCommand):
                 'และกำหนดให้เฝ้าระวังเพิ่มเติม 7 วัน พร้อมจัดประชุมสรุปบทเรียนจากเหตุการณ์'
             ),
             sla_deadline=incident_time + timedelta(hours=4),
-            category='Incident',
             issue_type='SIEM',
             detailed_issue='Root Intrusion',
             detailed_issue2='Data Exfiltration',
@@ -692,7 +690,6 @@ class Command(BaseCommand):
             approved_at=approved_at,
             update_notes='Production simulation: ownership and the latest workflow decision are recorded in the audit trail.',
             sla_deadline=incident_time + timedelta(hours=4),
-            category='Cyber Event' if is_event else 'Incident',
             issue_type=scenario['type'],
             detailed_issue=scenario['detailed'],
             detailed_issue2=scenario['detail2'],

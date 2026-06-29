@@ -84,7 +84,7 @@
                     <th class="ps-4">Ticket ID</th>
                     <th>เรื่องที่แจ้ง</th>
                     <th>ความรุนแรง</th>
-                    <th>Category / Type</th>
+                    <th>Type</th>
                     <th>System Admin</th>
                     <th>Initial Tier 1</th>
                     <th>วันที่แจ้ง</th>
@@ -104,7 +104,6 @@
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
                     <td>
-                        <span class="badge bg-info text-dark me-1">{{ ticket.category }}</span>
                         <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
                     </td>
                     <td class="small">

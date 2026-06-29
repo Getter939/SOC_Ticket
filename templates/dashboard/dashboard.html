@@ -207,20 +207,20 @@
         </div>
     </div>
 
-    <!-- 2R — Incident status doughnut by category -->
+    <!-- 2R — Ticket distribution doughnut by threat type -->
     <div class="col-lg-5">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
-                <i class="bi bi-pie-chart me-1"></i>Incident Status / สัดส่วนหมวดหมู่
+                <i class="bi bi-pie-chart me-1"></i>Threat Types / สัดส่วนประเภทเหตุการณ์
             </div>
             {% if by_category_labels %}
             <div style="height:230px;">
                 <canvas id="chartByCategory" role="img"
-                        aria-label="สัดส่วน Ticket แยกตามหมวดหมู่ (5 อันดับแรก + อื่นๆ)"></canvas>
+                        aria-label="สัดส่วน Ticket แยกตามประเภทเหตุการณ์ (5 อันดับแรก + อื่นๆ)"></canvas>
             </div>
             <table class="visually-hidden">
-                <caption>Incident status by category</caption>
-                <thead><tr><th>หมวดหมู่</th><th>จำนวน</th></tr></thead>
+                <caption>Tickets by threat type</caption>
+                <thead><tr><th>ประเภทเหตุการณ์</th><th>จำนวน</th></tr></thead>
                 <tbody>
                     {% for label, value in chart_tables.by_category %}
                     <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
@@ -236,7 +236,7 @@
     </div>
 </div>
 
-<!-- ══ ROW 3: MTTR by category (50%) + Resolved by category (50%) ═══════════ -->
+<!-- ══ ROW 3: Pipeline (50%) + Resolved by threat type (50%) ════════════════ -->
 <div class="row g-3 mb-3">
 
     <!-- 3L — Pipeline by status × severity (stacked bar) -->
@@ -339,7 +339,7 @@
                             <th>Ticket ID</th>
                             <th>Severity</th>
                             <th>Created (ICT)</th>
-                            <th>Category</th>
+                            <th>Type</th>
                             <th>Assignee</th>
                             <th>Status</th>
                         </tr>
@@ -361,7 +361,7 @@
                                     {% else %}#6c757d{% endif %};">{{ ticket.get_severity_display }}</span>
                             </td>
                             <td class="text-nowrap">{{ ticket.created_at|date:"d M Y H:i" }}</td>
-                            <td>{{ ticket.get_category_display }}</td>
+                            <td>{{ ticket.get_detailed_issue_display }}</td>
                             <td>
                                 {% if ticket.assigned_to %}
                                     {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}

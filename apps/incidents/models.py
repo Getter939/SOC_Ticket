@@ -177,12 +177,6 @@ class Ticket(models.Model):
         ('Network Device', 'Network Device'),
     ]
 
-    CATEGORY_CHOICES = [
-        ('Cyber Event', 'Cyber Event'),
-        ('Incident', 'Incident'),
-        ('Cyber Event/Incident', 'Cyber Event/Incident'),
-    ]
-
     TYPE_CHOICES = [
         ('SIEM', 'ระบบเฝ้าระวัง (SIEM)'),
         ('Admin', 'ผู้ดูแลระบบ (Admin)'),
@@ -430,10 +424,6 @@ class Ticket(models.Model):
 
     update_notes = models.TextField(blank=True, null=True, verbose_name='บันทึกการติดตามงาน')
     sla_deadline = models.DateTimeField(null=True, blank=True, verbose_name='SLA Deadline')
-    category = models.CharField(
-        max_length=50, choices=CATEGORY_CHOICES, default='Cyber Event',
-        verbose_name='Category',
-    )
     issue_type = models.CharField(
         max_length=50, choices=TYPE_CHOICES, default='SIEM',
         verbose_name='Type',
@@ -993,19 +983,19 @@ class NotificationTemplate(models.Model):
     # Placeholders available to each template key, shown to admins as a hint.
     PLACEHOLDERS = {
         KEY_CONTAINMENT_REQUIRED: [
-            'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary', 'reason_block',
+            'ticket_id', 'ticket_url', 'issue_type', 'summary', 'reason_block',
         ],
         KEY_CONTAINMENT_SUBMITTED: [
-            'ticket_id', 'ticket_url', 'category', 'issue_type', 'summary',
+            'ticket_id', 'ticket_url', 'issue_type', 'summary',
             'admin_name', 'classification', 'containment_report',
         ],
         KEY_OWNER_CREATED: [
             'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',
-            'category', 'issue_type', 'device_name', 'summary',
+            'issue_type', 'device_name', 'summary',
         ],
         KEY_OWNER_CLOSED: [
             'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',
-            'category', 'issue_type', 'device_name', 'outcome',
+            'issue_type', 'device_name', 'outcome',
         ],
     }
 

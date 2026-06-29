@@ -6,11 +6,11 @@ from .models import NotificationTemplate, Ticket, TicketLog, TicketSubtask, Tria
 class TicketAdmin(admin.ModelAdmin):
     list_display = (
         'ticket_id', 'device_name', 'status', 'classification', 'is_emergency',
-        'category', 'issue_type',
+        'issue_type',
         'assigned_to', 'assigned_admin', 'created_by', 'created_at',
         'system_owner',
     )
-    list_filter = ('status', 'classification', 'is_emergency', 'category', 'issue_type', 'created_at')
+    list_filter = ('status', 'classification', 'is_emergency', 'issue_type', 'created_at')
     search_fields = (
         'ticket_id', 'device_name', 'ip_address',
         'assigned_to__username', 'assigned_admin__username',
@@ -27,7 +27,7 @@ class TicketAdmin(admin.ModelAdmin):
         ('ข้อมูลทั่วไป', {
             'fields': (
                 'ticket_id', 'device_name', 'ip_address',
-                'category', 'issue_type', 'detailed_issue', 'detailed_issue2',
+                'issue_type', 'detailed_issue', 'detailed_issue2',
                 'issue_description', 'update_notes',
             ),
         }),
