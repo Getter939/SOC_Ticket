@@ -9,7 +9,49 @@ from .models import (
 )
 
 
-class TicketForm(forms.ModelForm):
+class _DetailedIssueCascade:
+    """Shared cascade behaviour for forms exposing detailed_issue/detailed_issue2.
+
+    Restricts both selects to the clean threat hierarchy
+    (Ticket.DETAILED_ISSUE_HIERARCHY) so impossible combinations can't be
+    chosen, while preserving whatever (possibly legacy) value an edited
+    instance already holds. Call ``_restrict_detailed_issue_fields`` from
+    ``__init__`` and ``_validate_detailed_issue_pair`` from ``clean``.
+    """
+
+    @staticmethod
+    def _with_current(choices, value, labels):
+        """Append the instance's current value if the clean list omits it."""
+        if value and value not in {code for code, _ in choices}:
+            return list(choices) + [(value, labels.get(value, value))]
+        return choices
+
+    def _restrict_detailed_issue_fields(self):
+        parents = Ticket.detailed_issue_form_choices()
+        children = Ticket.detailed_issue2_form_choices()
+        inst = getattr(self, 'instance', None)
+        if inst is not None and inst.pk:
+            parents = self._with_current(
+                parents, inst.detailed_issue, dict(Ticket.DETAILED_ISSUE_CHOICES))
+            children = self._with_current(
+                children, inst.detailed_issue2, dict(Ticket.DETAILED_ISSUE_CHOICES2))
+        self.fields['detailed_issue'].choices = parents
+        self.fields['detailed_issue2'].choices = children
+
+    def _validate_detailed_issue_pair(self, cleaned):
+        parent = cleaned.get('detailed_issue')
+        child = cleaned.get('detailed_issue2')
+        valid = Ticket.DETAILED_ISSUE_HIERARCHY.get(parent)
+        # Only enforce consistency within the clean taxonomy; a legacy parent
+        # (not in the hierarchy) is left alone so old tickets save unchanged.
+        if valid is not None and child and child not in valid:
+            self.add_error(
+                'detailed_issue2',
+                'รายการที่เลือกไม่อยู่ในประเภทเหตุการณ์ (detailed issue) ที่เลือกไว้',
+            )
+
+
+class TicketForm(_DetailedIssueCascade, forms.ModelForm):
     # ── Tier 1 disposition (set at creation) ─────────────────────────────── #
     # The Event/Incident decision IS the disposition. Required — every ticket
     # carries an explicit value; it is never derived.
@@ -160,9 +202,11 @@ class TicketForm(forms.ModelForm):
             f"{u.profile.department} — {u.get_full_name() or u.username}"
             if hasattr(u, 'profile') else u.username
         )
+        self._restrict_detailed_issue_fields()
 
     def clean(self):
         cleaned = super().clean()
+        self._validate_detailed_issue_pair(cleaned)
         classification = cleaned.get('classification')
         route = cleaned.get('t1_route')
 
@@ -179,7 +223,7 @@ class TicketForm(forms.ModelForm):
         return cleaned
 
 
-class TicketReviewForm(forms.ModelForm):
+class TicketReviewForm(_DetailedIssueCascade, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
 
     class Meta:
@@ -215,6 +259,12 @@ class TicketReviewForm(forms.ModelForm):
                 )
         if self.instance and self.instance.incident_datetime:
             self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+        self._restrict_detailed_issue_fields()
+
+    def clean(self):
+        cleaned = super().clean()
+        self._validate_detailed_issue_pair(cleaned)
+        return cleaned
 
 
 class AdminAssignmentForm(forms.ModelForm):

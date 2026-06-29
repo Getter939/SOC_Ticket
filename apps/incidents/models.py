@@ -296,6 +296,55 @@ class Ticket(models.Model):
 
     DETAILED_ISSUE_CHOICES2 = sorted(RAW_DETAILED_ISSUES, key=lambda x: x[1])
 
+    # ── Threat-type hierarchy: detailed_issue → detailed_issue2 ──────── #
+    # The 10 "clean" threat categories and their specific sub-types. Only
+    # these are offered on the forms; the source-flavoured legacy categories
+    # in DETAILED_ISSUE_CHOICES (SIEM Other, Admin *, TI *, External *) are
+    # kept solely so existing tickets still display, and are hidden from new
+    # selection. Single source of truth for the form choices, the create-form
+    # parent auto-fill, and the JS cascade in _detailed_issue_cascade.html.
+    DETAILED_ISSUE_HIERARCHY = {
+        'Training':             ['Simulated Phishing', 'Brute Force', 'Internal Scan', 'Whitelisted Log', 'Training Other'],
+        'Unsuccessful Attempt': ['Failed Login', 'Admin Panel Attempt', 'Firewall Block', 'SSH Failed', 'Unsuccessful Other'],
+        'Reconnaissance':       ['Port Scanning', 'DNS Enumeration', 'Web Scanning', 'User Enumeration', 'Recon Other'],
+        'Non-Compliance':       ['USB Policy', 'Unauthorized Software', 'Antivirus Off', 'Weak Password', 'Compliance Other'],
+        'Malicious Logic':      ['Malware EDR', 'C2 Server', 'Ransomware Behavior', 'Suspicious PowerShell', 'Malicious Other'],
+        'User Intrusion':       ['Impossible Travel', 'Abnormal Account', 'Data Exfiltration', 'Spam Account', 'User Level Other'],
+        'Root Intrusion':       ['Privilege Escalation', 'Unauthorized Admin', 'System Config Change', 'Log Service Off', 'Root Level Other'],
+        'DoS':                  ['HTTP Flood', 'SYN Flood', 'Server Spike', 'DDoS', 'DoS Other'],
+        'Investigating':        ['Unconfirmed Login', 'Anomaly Correlation', 'SOC Escalate', 'Log Gathering', 'Investigating Other'],
+        'Explained Anomaly':    ['VPN Login', 'Deploy Traffic', 'Vulnerability Scanner', 'Admin Maintenance', 'Explained Other'],
+    }
+
+    @classmethod
+    def detailed_issue_form_choices(cls):
+        """(code, label) for the clean threat categories offered on forms."""
+        labels = dict(cls.DETAILED_ISSUE_CHOICES)
+        return [(p, labels.get(p, p)) for p in cls.DETAILED_ISSUE_HIERARCHY]
+
+    @classmethod
+    def detailed_issue2_form_choices(cls):
+        """(code, label) for every specific sub-type under a clean category."""
+        labels = dict(cls.DETAILED_ISSUE_CHOICES2)
+        return [(c, labels.get(c, c))
+                for children in cls.DETAILED_ISSUE_HIERARCHY.values()
+                for c in children]
+
+    @classmethod
+    def parent_of_detailed_issue2(cls, child):
+        """The detailed_issue category a given detailed_issue2 belongs to."""
+        for parent, children in cls.DETAILED_ISSUE_HIERARCHY.items():
+            if child in children:
+                return parent
+        return None
+
+    @classmethod
+    def detailed_issue_cascade(cls):
+        """{parent: [[child_code, child_label], …]} consumed by the JS cascade."""
+        labels = dict(cls.DETAILED_ISSUE_CHOICES2)
+        return {p: [[c, labels.get(c, c)] for c in children]
+                for p, children in cls.DETAILED_ISSUE_HIERARCHY.items()}
+
     # ------------------------------------------------------------------ #
     # Fields                                                              #
     # ------------------------------------------------------------------ #

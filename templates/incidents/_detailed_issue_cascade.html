@@ -1,0 +1,36 @@
+{# Client-side cascade for detailed_issue → detailed_issue2.            #}
+{# Requires `detailed_issue_cascade` in context (Ticket.detailed_issue_cascade) #}
+{# and the two selects rendered with the default ids id_detailed_issue / #}
+{# id_detailed_issue2. Server-side validation still enforces the pairing.#}
+{{ detailed_issue_cascade|json_script:"detailed-issue-cascade" }}
+<script>
+(function () {
+  var el = document.getElementById('detailed-issue-cascade');
+  if (!el) return;
+  var cascade = JSON.parse(el.textContent);
+  var parent = document.getElementById('id_detailed_issue');
+  var child = document.getElementById('id_detailed_issue2');
+  if (!parent || !child) return;
+
+  function rebuild(preserve) {
+    var options = cascade[parent.value];
+    // Legacy/hidden category (not in the clean hierarchy): leave the
+    // server-rendered options untouched so existing tickets still work.
+    if (!options) return;
+    var keep = preserve ? child.value : null;
+    child.innerHTML = '';
+    options.forEach(function (pair) {
+      var opt = document.createElement('option');
+      opt.value = pair[0];
+      opt.textContent = pair[1];
+      if (pair[0] === keep) opt.selected = true;
+      child.appendChild(opt);
+    });
+  }
+
+  // Narrow to the selected category on load (keeping the current sub-type if it
+  // fits), then re-narrow whenever the category changes.
+  rebuild(true);
+  parent.addEventListener('change', function () { rebuild(false); });
+})();
+</script>

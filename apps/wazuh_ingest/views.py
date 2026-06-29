@@ -17,15 +17,18 @@ CATEGORY_CHOICES = dict(WazuhAlert.CATEGORY_CHOICES)
 
 # Best-effort mapping from a WazuhAlert incident category to the closest
 # Ticket.DETAILED_ISSUE_CHOICES2 value, used to pre-fill the ticket form.
+# Maps a Wazuh alert category to a detailed_issue2 code within the clean threat
+# hierarchy (Ticket.DETAILED_ISSUE_HIERARCHY). create_ticket derives the parent
+# detailed_issue from this, so every code here must be a selectable child.
 CATEGORY_TO_DETAILED_ISSUE2 = {
     WazuhAlert.CATEGORY_MALWARE: 'Malware EDR',
-    WazuhAlert.CATEGORY_PHISHING: 'SIEM Other Detail',
+    WazuhAlert.CATEGORY_PHISHING: 'Malicious Other',
     WazuhAlert.CATEGORY_UNAUTHORIZED_ACCESS: 'Unauthorized Admin',
     WazuhAlert.CATEGORY_DATA_EXFILTRATION: 'Data Exfiltration',
     WazuhAlert.CATEGORY_DOS: 'DDoS',
     WazuhAlert.CATEGORY_RECONNAISSANCE: 'Recon Other',
     WazuhAlert.CATEGORY_POLICY_VIOLATION: 'Compliance Other',
-    WazuhAlert.CATEGORY_OTHER: 'SIEM Other Detail',
+    WazuhAlert.CATEGORY_OTHER: 'Investigating Other',
 }
 
 

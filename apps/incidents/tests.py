@@ -1291,3 +1291,60 @@ class UnknownSeverityTest(TestCase):
         # Sanity: the Unknown badge must not borrow an existing severity colour.
         for other_colour in ('bg-danger', '#fd7e14', 'bg-warning', 'bg-success'):
             self.assertNotIn(other_colour, html)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# Threat-type cascade: detailed_issue → detailed_issue2                         #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class DetailedIssueCascadeTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('cascade_t1')
+
+    def test_form_hides_legacy_source_flavoured_categories(self):
+        """Only the 10 clean threat categories are offered; leftovers hidden."""
+        form = TicketForm(user=self.t1)
+        codes = [c for c, _ in form.fields['detailed_issue'].choices]
+        self.assertIn('Malicious Logic', codes)
+        self.assertNotIn('SIEM Other', codes)
+        self.assertNotIn('TI IOC', codes)
+        self.assertNotIn('External Other', codes)
+
+    def test_mismatched_detailed_issue_pair_is_rejected(self):
+        form = TicketForm(
+            data=_ticket_post_data(
+                detailed_issue='Malicious Logic',
+                detailed_issue2='Port Scanning',  # belongs to Reconnaissance
+            ),
+            user=self.t1,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('detailed_issue2', form.errors)
+
+    def test_matching_detailed_issue_pair_is_accepted(self):
+        form = TicketForm(
+            data=_ticket_post_data(
+                detailed_issue='Malicious Logic',
+                detailed_issue2='Ransomware Behavior',
+            ),
+            user=self.t1,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_create_form_prefills_parent_from_detailed_issue2(self):
+        """A detailed_issue2 passed in the URL (e.g. from Wazuh) sets its parent."""
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'), {'detailed_issue2': 'Malware EDR'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['form'].initial.get('detailed_issue'), 'Malicious Logic')
+        self.assertEqual(response.context['form'].initial.get('detailed_issue2'), 'Malware EDR')
+
+    def test_create_form_renders_cascade_wiring(self):
+        """The cascade include renders: JSON payload + the ids the JS targets."""
+        self.client.force_login(self.t1)
+        html = self.client.get(reverse('create_ticket')).content.decode()
+        self.assertIn('id="detailed-issue-cascade"', html)   # json_script payload
+        self.assertIn('Malicious Logic', html)               # a hierarchy key is embedded
+        self.assertIn('id="id_detailed_issue"', html)        # parent select
+        self.assertIn('id="id_detailed_issue2"', html)       # child select

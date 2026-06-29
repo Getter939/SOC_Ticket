@@ -411,12 +411,18 @@ def create_ticket(request):
         if request.GET.get('severity'):
             initial['severity'] = request.GET['severity']
         if request.GET.get('detailed_issue2') in dict(Ticket.DETAILED_ISSUE_CHOICES2):
-            initial['detailed_issue2'] = request.GET['detailed_issue2']
+            di2 = request.GET['detailed_issue2']
+            initial['detailed_issue2'] = di2
+            # Keep the parent category in step so the cascade stays consistent.
+            parent = Ticket.parent_of_detailed_issue2(di2)
+            if parent:
+                initial['detailed_issue'] = parent
         form = TicketForm(initial=initial, user=request.user)
 
     return render(request, 'incidents/ticket_form.html', {
         'form': form,
         'triage_id': triage_id or '',
+        'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
     })
 
 
@@ -595,6 +601,7 @@ def ticket_detail(request, pk):
         'transition_actions': transition_actions,
         'can_t2_review': can_t2_review,
         't2_review_form': TicketReviewForm(instance=ticket),
+        'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'can_assign_admin': can_assign_admin,
         'assignment_form': AdminAssignmentForm(instance=ticket),
         'can_set_emergency': ticket.can_set_emergency(request.user),
