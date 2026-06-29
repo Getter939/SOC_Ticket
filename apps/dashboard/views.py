@@ -7,7 +7,7 @@ from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import render
 from django.utils import timezone
 
-from apps.incidents.models import Ticket, TicketLog
+from apps.incidents.models import SOURCE_CHOICES, Ticket, TicketLog
 
 # ====================================================================== #
 # Data-model facts this view relies on (verified against                 #
@@ -329,11 +329,14 @@ def dashboard(request):
     classification_labels = ['Incident', 'Event']
     classification_data   = [tp_count, fp_count]
 
-    # ── By Type bar chart ─────────────────────────────────────────────────── #
+    # ── By Source bar chart ──────────────────────────────────────────────── #
+    # issue_type holds the reporting channel (SOURCE_CHOICES); map codes to
+    # their human labels for display.
+    source_display = dict(SOURCE_CHOICES)
     by_type = list(
         all_tickets.values('issue_type').annotate(count=Count('id')).order_by('-count')
     )
-    by_type_labels = [b['issue_type'] for b in by_type]
+    by_type_labels = [source_display.get(b['issue_type'], b['issue_type']) for b in by_type]
     by_type_data   = [b['count']      for b in by_type]
 
     # ── By Threat Type doughnut ──────────────────────────────────────────── #

@@ -97,7 +97,7 @@
           <div class="col-md-6">
             <dl class="detail-grid mb-0">
               <dt>Reference ID</dt><dd>{{ ticket.reference_id|default:"-" }}</dd>
-              <dt>Type</dt><dd>{{ ticket.get_issue_type_display }}</dd>
+              <dt>Source</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>เหตุการณ์ที่พบ</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
               <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
               <dt>ประเภททรัพย์สิน</dt><dd>{{ ticket.get_asset_type_display|default:"-" }}</dd>

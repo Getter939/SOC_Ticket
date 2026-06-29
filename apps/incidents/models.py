@@ -6,6 +6,33 @@ from django.utils import timezone
 from datetime import timedelta
 
 
+# ── Unified source / reporting-channel vocabulary ────────────────────────── #
+# "How an incident reached the SOC." Shared by Ticket.issue_type (the channel
+# recorded on a ticket) and TriageRecord.source (the manual-intake channel), so
+# a triage record maps 1:1 onto the ticket it spawns (see create_ticket
+# auto-fill). SIEM counts as a reporting channel. Values are UPPER_SNAKE codes;
+# the labels are what users see.
+SOURCE_SIEM        = 'SIEM'
+SOURCE_ADMIN       = 'ADMIN'
+SOURCE_TI          = 'TI'
+SOURCE_EMAIL       = 'EMAIL'
+SOURCE_PHONE       = 'PHONE'
+SOURCE_USER_REPORT = 'USER_REPORT'
+SOURCE_EXTERNAL    = 'EXTERNAL'
+SOURCE_OTHER       = 'OTHER'
+
+SOURCE_CHOICES = [
+    (SOURCE_SIEM,        'ระบบเฝ้าระวัง (SIEM)'),
+    (SOURCE_ADMIN,       'ผู้ดูแลระบบ (Admin)'),
+    (SOURCE_TI,          'Threat Intelligence (TI)'),
+    (SOURCE_EMAIL,       'Email'),
+    (SOURCE_PHONE,       'Phone / Hotline'),
+    (SOURCE_USER_REPORT, 'User / Internal Report'),
+    (SOURCE_EXTERNAL,    'หน่วยงานภายนอก (External Organization)'),
+    (SOURCE_OTHER,       'Other'),
+]
+
+
 class TicketQuerySet(models.QuerySet):
     def visible_to(self, user):
         """
@@ -175,13 +202,6 @@ class Ticket(models.Model):
         ('Computer',       'Computer'),
         ('Server',         'Server'),
         ('Network Device', 'Network Device'),
-    ]
-
-    TYPE_CHOICES = [
-        ('SIEM', 'ระบบเฝ้าระวัง (SIEM)'),
-        ('Admin', 'ผู้ดูแลระบบ (Admin)'),
-        ('TI', 'Threat Intelligence (TI)'),
-        ('External', 'หน่วยงานภายนอก (External organization)'),
     ]
 
     DETAILED_ISSUE_CHOICES = [
@@ -424,9 +444,12 @@ class Ticket(models.Model):
 
     update_notes = models.TextField(blank=True, null=True, verbose_name='บันทึกการติดตามงาน')
     sla_deadline = models.DateTimeField(null=True, blank=True, verbose_name='SLA Deadline')
+    # Reporting channel the incident arrived through. Shares SOURCE_CHOICES
+    # with TriageRecord.source so a manual-triage record maps straight onto the
+    # ticket it creates.
     issue_type = models.CharField(
-        max_length=50, choices=TYPE_CHOICES, default='SIEM',
-        verbose_name='Type',
+        max_length=50, choices=SOURCE_CHOICES, default=SOURCE_SIEM,
+        verbose_name='Source',
     )
     detailed_issue = models.CharField(
         max_length=255, choices=DETAILED_ISSUE_CHOICES, default='Investigating',
@@ -793,19 +816,17 @@ class TriageRecord(models.Model):
     DECISION_TP        = 'TP'
     DECISION_ESCALATED = 'ESCALATED'
 
-    SOURCE_EMAIL = 'EMAIL'
-    SOURCE_PHONE = 'PHONE'
+    # Source vocabulary is shared with Ticket.issue_type — the field below uses
+    # the module-level SOURCE_CHOICES. These class constants are kept as aliases
+    # for code that references TriageRecord.SOURCE_* (tests, seeders, views).
+    SOURCE_SIEM        = 'SIEM'
+    SOURCE_ADMIN       = 'ADMIN'
+    SOURCE_TI          = 'TI'
+    SOURCE_EMAIL       = 'EMAIL'
+    SOURCE_PHONE       = 'PHONE'
     SOURCE_USER_REPORT = 'USER_REPORT'
-    SOURCE_EXTERNAL = 'EXTERNAL'
-    SOURCE_OTHER = 'OTHER'
-
-    SOURCE_CHOICES = [
-        (SOURCE_EMAIL, 'Email'),
-        (SOURCE_PHONE, 'Phone / Hotline'),
-        (SOURCE_USER_REPORT, 'User / Internal Report'),
-        (SOURCE_EXTERNAL, 'External Organization'),
-        (SOURCE_OTHER, 'Other'),
-    ]
+    SOURCE_EXTERNAL    = 'EXTERNAL'
+    SOURCE_OTHER       = 'OTHER'
 
     T1_DECISION_CHOICES = [
         (DECISION_FP,        'Event — ปิดเคส'),

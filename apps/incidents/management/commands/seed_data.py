@@ -59,7 +59,7 @@ LIFECYCLE_PATHS = {
 }
 
 # ── Valid choice strings read from apps/incidents/models.py ───────────────────
-ISSUE_TYPE_POOL     = ["SIEM", "Admin", "TI", "External"]
+ISSUE_TYPE_POOL     = ["SIEM", "ADMIN", "TI", "EMAIL", "PHONE", "USER_REPORT", "EXTERNAL", "OTHER"]
 DETAILED_ISSUE_POOL = [
     "Investigating", "Reconnaissance", "Malicious Logic", "User Intrusion",
     "Root Intrusion", "DoS", "Non-Compliance", "Unsuccessful Attempt",

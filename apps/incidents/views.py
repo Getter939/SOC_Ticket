@@ -401,6 +401,9 @@ def create_ticket(request):
         if triage:
             initial['device_name'] = triage.source_ip
             initial['issue_description'] = triage.alert_description
+            # Source channel carries straight over — issue_type and triage
+            # source now share the SOURCE_CHOICES vocabulary, so it maps 1:1.
+            initial['issue_type'] = triage.source
         if request.GET.get('wazuh_alert'):
             initial['wazuh_alert'] = request.GET['wazuh_alert']
         if request.GET.get('issue_description'):

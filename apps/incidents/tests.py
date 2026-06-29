@@ -950,6 +950,25 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertRedirects(response, reverse('triage_list'))
         self.assertFalse(Ticket.objects.exists())
 
+    def test_create_ticket_from_manual_triage_prefills_source(self):
+        """The triage source channel auto-fills the ticket's Source (issue_type).
+
+        issue_type and TriageRecord.source share the SOURCE_CHOICES vocabulary,
+        so the value carries straight over on the create form's GET.
+        """
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Reported suspicious login.', source_ip='192.0.2.50',
+            decision=TriageRecord.DECISION_TP, notes='Confirmed by T1.',
+        )
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'), {'triage_id': triage.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context['form'].initial.get('issue_type'),
+            TriageRecord.SOURCE_PHONE,
+        )
+
     def test_wazuh_alert_becomes_true_positive_after_ticket_save(self):
         alert = WazuhAlert.objects.create(
             opensearch_id='ticket-finalize-alert', timestamp=timezone.now(),

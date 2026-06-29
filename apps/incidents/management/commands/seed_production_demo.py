@@ -69,7 +69,7 @@ class Command(BaseCommand):
         },
         {
             'device': 'PUBLIC-WEB-{n:02d}', 'summary': 'Repeated administrative endpoint probing from a hostile address',
-            'detailed': 'Unsuccessful Attempt', 'detail2': 'Admin Panel Attempt', 'type': 'External',
+            'detailed': 'Unsuccessful Attempt', 'detail2': 'Admin Panel Attempt', 'type': 'EXTERNAL',
             'phase': 'Reconnaissance', 'ioc': 'Paths: /admin, /backup, /.env\nHTTP: 401/403\nUser-Agent: masscan',
         },
         {
@@ -84,12 +84,12 @@ class Command(BaseCommand):
         },
         {
             'device': 'FIN-PC-{n:02d}', 'summary': 'Unapproved remote administration utility installed by a user',
-            'detailed': 'Non-Compliance', 'detail2': 'Unauthorized Software', 'type': 'Admin',
+            'detailed': 'Non-Compliance', 'detail2': 'Unauthorized Software', 'type': 'ADMIN',
             'phase': 'Persistence', 'ioc': 'Package: remote-help.exe\nPublisher: Unknown\nInstall context: local user',
         },
         {
             'device': 'PAYMENT-API-{n:02d}', 'summary': 'Critical externally reported API authorization weakness',
-            'detailed': 'Vulnerability', 'detail2': 'Vulnerability Found', 'type': 'External',
+            'detailed': 'Vulnerability', 'detail2': 'Vulnerability Found', 'type': 'EXTERNAL',
             'phase': 'Initial Access', 'ioc': 'Endpoint: /api/v2/invoices/{id}\nFinding: broken object authorization\nCVE: N/A',
         },
         {
@@ -104,7 +104,7 @@ class Command(BaseCommand):
         },
         {
             'device': 'BACKUP-SERVER-{n:02d}', 'summary': 'After-hours privileged maintenance generated an anomaly',
-            'detailed': 'Explained Anomaly', 'detail2': 'Admin Maintenance', 'type': 'Admin',
+            'detailed': 'Explained Anomaly', 'detail2': 'Admin Maintenance', 'type': 'ADMIN',
             'phase': 'Discovery', 'ioc': 'Change: CHG-DEMO-2204\nAccount: backup.admin\nWindow: approved',
         },
         {
