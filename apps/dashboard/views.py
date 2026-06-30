@@ -1,11 +1,9 @@
 from datetime import timedelta
 from statistics import mean as _mean, median as _median
-from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
-from django.core.paginator import Paginator
 from django.db.models import (
-    Aggregate, Avg, Case, Count, DurationField, F, IntegerField,
+    Aggregate, Avg, Case, CharField, Count, DurationField, F, IntegerField,
     OuterRef, Q, Subquery, Value, When,
 )
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
@@ -104,11 +102,6 @@ def dashboard(request):
 
     if severity_filter:
         all_tickets = all_tickets.filter(severity=severity_filter)
-
-    # date_range + severity WITHOUT the status filter — used by
-    # resolved_by_category, where a non-terminal status filter would
-    # otherwise hide every closed ticket.
-    date_sev_qs = all_tickets
 
     if status_filter:
         all_tickets = all_tickets.filter(status=status_filter)
@@ -374,91 +367,26 @@ def dashboard(request):
     monthly_labels = [m['month'] for m in monthly]
     monthly_data   = [m['count'] for m in monthly]
 
-    # ── Recent active cases — sortable, paginated detail table ────────────── #
-    # Shows EVERY active case (not a top-15 slice) so management can browse the
-    # whole queue. Sorting applies to the full queryset *before* pagination.
-    # Default order: severity DESC (Critical first), then created_at DESC.
-    # Column headers toggle asc/desc via ?sort=<col>&dir=asc|desc.
+    # ── Recent active cases — full active queue for the detail table ──────── #
+    # The ENTIRE active queue is sent to the template (not a 15-row slice) so
+    # the client-side script can sort + paginate the whole dataset without a
+    # page reload (see the recent-cases <script> in dashboard.html). Default
+    # server-side order — severity DESC (Critical first), then created_at DESC —
+    # is also the table's initial order and the no-JS fallback.
     #
     # severity is a CharField, so ordering on it alphabetically would be wrong
     # (Critical < High < Low …). Annotate the SEVERITY_RANK weight and sort on
-    # that instead.
-    RECENT_SORT_COLUMNS = {
-        'ticket_id':      ('ticket_id',),
-        'severity':       ('_sev_rank',),
-        'created':        ('created_at',),
-        'type':           ('detailed_issue',),
-        'assignee':       ('assigned_to__first_name',
-                           'assigned_to__last_name',
-                           'assigned_to__username'),
-        'status':         ('status',),
-        'status_changed': ('status_changed_at',),
-    }
-    recent_sort = request.GET.get('sort', 'severity')
-    recent_dir  = request.GET.get('dir', 'desc')
-    if recent_sort not in RECENT_SORT_COLUMNS:
-        recent_sort = 'severity'
-    if recent_dir not in ('asc', 'desc'):
-        recent_dir = 'desc'
-
+    # that instead; the weight is also emitted as a data-attribute for the JS.
     sev_rank_whens = [
         When(severity=slug, then=Value(rank))
         for slug, rank in Ticket.SEVERITY_RANK.items()
     ]
-    recent_qs = (
+    recent_tickets = list(
         active_qs.select_related('assigned_to')
-        .annotate(_sev_rank=Case(
+        .annotate(sev_rank=Case(
             *sev_rank_whens, default=Value(0), output_field=IntegerField()))
+        .order_by('-sev_rank', '-created_at')
     )
-
-    prefix = '' if recent_dir == 'asc' else '-'
-    order_fields = [f'{prefix}{f}' for f in RECENT_SORT_COLUMNS[recent_sort]]
-    # Deterministic tiebreaker — newest first — unless we're already sorting on
-    # created_at (avoids a redundant ORDER BY clause).
-    if 'created_at' not in [f.lstrip('-') for f in order_fields]:
-        order_fields.append('-created_at')
-    recent_qs = recent_qs.order_by(*order_fields)
-
-    recent_paginator = Paginator(recent_qs, 15)
-    recent_page = recent_paginator.get_page(request.GET.get('page'))
-
-    # Persistent params every sort/page link must carry (the dashboard filters).
-    recent_base_params = {}
-    if date_range and date_range != 'all':
-        recent_base_params['date_range'] = date_range
-    if status_filter:
-        recent_base_params['status'] = status_filter
-    if severity_filter:
-        recent_base_params['severity'] = severity_filter
-
-    # Header descriptors with ready-made sort links + active-direction marker.
-    RECENT_COLUMN_LABELS = [
-        ('ticket_id',      'Ticket ID'),
-        ('severity',       'Severity'),
-        ('created',        'Created (ICT)'),
-        ('type',           'Type'),
-        ('assignee',       'Assignee'),
-        ('status',         'Status'),
-        ('status_changed', 'Status Updated (ICT)'),
-    ]
-    recent_columns = []
-    for key, label in RECENT_COLUMN_LABELS:
-        is_active = key == recent_sort
-        if is_active:
-            next_dir  = 'asc' if recent_dir == 'desc' else 'desc'
-            indicator = '▼' if recent_dir == 'desc' else '▲'
-        else:
-            next_dir, indicator = 'asc', ''
-        params = dict(recent_base_params, sort=key, dir=next_dir)
-        recent_columns.append({
-            'label':     label,
-            'is_active': is_active,
-            'indicator': indicator,
-            'url':       '?' + urlencode(params),
-        })
-
-    # Querystring for pagination links (filters + current sort; page added in tpl).
-    recent_page_qs = urlencode(dict(recent_base_params, sort=recent_sort, dir=recent_dir))
 
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
@@ -482,8 +410,7 @@ def dashboard(request):
     # ====================================================================== #
     # Management dashboard KPIs (Session 3) — additive.                       #
     # Audience: management. Everything respects the active GET filters        #
-    # (date_range / status / severity) EXCEPT resolved_by_category, which     #
-    # respects date_range + severity only (see date_sev_qs above).           #
+    # (date_range / status / severity).                                       #
     # ====================================================================== #
     MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -555,20 +482,51 @@ def dashboard(request):
     ]
     mttr_by_category.sort(key=lambda x: x['avg_hours'], reverse=True)
 
-    # Resolved tickets grouped by INCIDENT CATEGORY (detailed_issue), not the
-    # Event/Incident classification. STEP 0: detailed_issue is a CharField with
-    # DETAILED_ISSUE_CHOICES (Malicious Logic, Reconnaissance, DoS, …) — the
-    # actual threat/incident category. Respects date_range + severity (NOT
-    # status, since we count closed tickets). Null/blank excluded so management
-    # doesn't see a noisy "Unknown" bar. Top 8, count desc.
-    resolved_by_category = [
-        {'label': detailed_display.get(r['detailed_issue'], r['detailed_issue']),
-         'count': r['c']}
-        for r in (date_sev_qs.filter(status__in=terminal)
-                  .exclude(detailed_issue__isnull=True)
-                  .exclude(detailed_issue='')
-                  .values('detailed_issue').annotate(c=Count('id')).order_by('-c')[:8])
+    # SLA pressure — active queue bucketed by time-to-deadline. Answers the
+    # manager's "what needs attention now?" The 4h "at-risk" window from
+    # sla_at_risk is split into a ≤1h urgent sub-bucket. Each bucket carries its
+    # severity mix so a Critical that's overdue stands out (sub-label + tooltip).
+    # Respects the same active GET filters as the other active panels (a NULL
+    # sla_deadline — rare, since save() auto-sets it — falls into On-track).
+    sla_t1 = now + timedelta(hours=1)
+    sla_t4 = now + timedelta(hours=4)
+    sla_bucket_case = Case(
+        When(sla_deadline__lt=now,    then=Value('overdue')),
+        When(sla_deadline__lte=sla_t1, then=Value('due_1h')),
+        When(sla_deadline__lte=sla_t4, then=Value('due_4h')),
+        default=Value('on_track'),
+        output_field=CharField(),
+    )
+    SLA_BUCKETS = [
+        ('overdue',  'Overdue',   '#dc3545'),
+        ('due_1h',   'Due ≤ 1h',  '#fd7e14'),
+        ('due_4h',   'Due 1–4h',  '#ffc107'),
+        ('on_track', 'On-track',  '#198754'),
     ]
+    sla_sev_order = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
+    sla_counts = {key: {} for key, _, _ in SLA_BUCKETS}
+    for r in (active_qs.annotate(sla_bucket=sla_bucket_case)
+              .values('sla_bucket', 'severity').annotate(c=Count('id'))):
+        bucket = sla_counts.get(r['sla_bucket'])
+        if bucket is not None:
+            sev = r['severity'] if r['severity'] in sla_sev_order else 'Unknown'
+            bucket[sev] = bucket.get(sev, 0) + r['c']
+    sla_pressure = [
+        {
+            'key':   key,
+            'label': label,
+            'color': color,
+            'count': sum(sla_counts[key].values()),
+            'severities': [
+                {'label': sev, 'count': sla_counts[key][sev]}
+                for sev in sla_sev_order if sla_counts[key].get(sev)
+            ],
+        }
+        for key, label, color in SLA_BUCKETS
+    ]
+    # Headline: active cases needing attention now (overdue + due within 1h).
+    sla_attention = next(b['count'] for b in sla_pressure if b['key'] == 'overdue') \
+        + next(b['count'] for b in sla_pressure if b['key'] == 'due_1h')
 
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
     # line has no gaps. Window depends on date_range:
@@ -633,11 +591,7 @@ def dashboard(request):
         'severity_labels':     severity_labels,
         'severity_data':       severity_data,
         'chart_tables':        chart_tables,
-        'recent_page':         recent_page,
-        'recent_columns':      recent_columns,
-        'recent_sort':         recent_sort,
-        'recent_dir':          recent_dir,
-        'recent_page_qs':      recent_page_qs,
+        'recent_tickets':      recent_tickets,
         'breach_tickets':      breach_tickets,
         # ── Management KPIs (Session 3) ────────────────────────────────── #
         'active_total':              active_total,
@@ -649,7 +603,8 @@ def dashboard(request):
         'assignee_heatmap':          assignee_heatmap,
         'assignee_heatmap_statuses': assignee_heatmap_statuses,
         'mttr_by_category':          mttr_by_category,
-        'resolved_by_category':      resolved_by_category,
+        'sla_pressure':              sla_pressure,
+        'sla_attention':             sla_attention,
         'daily_trend_filtered':      daily_trend_filtered,
         'daily_trend_labels':        daily_trend_labels,
         'daily_trend_data':          daily_trend_data,

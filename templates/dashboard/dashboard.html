@@ -273,28 +273,32 @@
         </div>
     </div>
 
-    <!-- 3R — Resolved tickets by category -->
+    <!-- 3R — SLA pressure: active queue bucketed by time-to-deadline -->
     <div class="col-md-6">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
-                <i class="bi bi-check2-square me-1"></i>Resolved Tickets by Incident Category — ปิดแล้วต่อประเภทเหตุการณ์
+                <i class="bi bi-stopwatch me-1"></i>SLA Pressure — สถานะ SLA ของคดีที่กำลังดำเนินการ
             </div>
-            {% if resolved_by_category %}
-            <div style="height:260px;">
-                <canvas id="chartResolvedCat" role="img" aria-label="จำนวนเคสที่ปิดแล้วต่อหมวดหมู่"></canvas>
+            {% if stats.active %}
+            <div class="text-muted mb-2" style="font-size:12px;">
+                {{ stats.active|intcomma }} active · {{ sla_attention|intcomma }} need attention (overdue + ≤1h)
+            </div>
+            <div style="height:230px;">
+                <canvas id="chartSla" role="img"
+                        aria-label="คดีที่กำลังดำเนินการแยกตามเวลาที่เหลือก่อนครบกำหนด SLA"></canvas>
             </div>
             <table class="visually-hidden">
-                <caption>Resolved tickets by category</caption>
-                <thead><tr><th>หมวดหมู่</th><th>จำนวน</th></tr></thead>
+                <caption>Active tickets by time to SLA deadline</caption>
+                <thead><tr><th>สถานะ SLA</th><th>จำนวน</th></tr></thead>
                 <tbody>
-                    {% for row in resolved_by_category %}
-                    <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+                    {% for b in sla_pressure %}
+                    <tr><td>{{ b.label }}</td><td>{{ b.count }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% else %}
-            <div class="d-flex align-items-center justify-content-center text-muted" style="height:260px;">
-                <span style="font-size:13px;">No resolved data</span>
+            <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
+                <span style="font-size:13px;">No active cases</span>
             </div>
             {% endif %}
         </div>
@@ -326,22 +330,19 @@
 
 <!-- ══ ROW 5: Detail table — recent active cases (full width) ═══════════════ -->
 <style>
-    /* Sortable headers in the recent-cases detail table */
-    .detail-table thead th a.sort-link {
-        color: #fff;
-        text-decoration: none;
-        white-space: nowrap;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-    }
-    .detail-table thead th a.sort-link:hover { text-decoration: underline; }
-    .detail-table thead th.sort-active { background: rgba(255,255,255,.12); }
-    .detail-table thead th .sort-ind { font-size: 11px; opacity: .85; }
+    /* Recent-cases detail table — explicit dark header so it can never render
+       white-on-white (the row stays dark regardless of Bootstrap state). */
+    .detail-table thead th { background:#212529; color:#fff; }
+    .detail-table thead th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+    .detail-table thead th.sortable:hover { background:#2c3137; }
+    .detail-table thead th.sort-active { background:#34404a; }
+    .detail-table thead th .sort-ind { font-size:11px; margin-left:4px; opacity:.9; }
+    .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
+                   border-radius:10px; color:#fff; white-space:nowrap; }
 </style>
 <div class="row g-3">
     <div class="col-12">
-        <div class="panel">
+        <div class="panel" id="recent-cases">
             <div class="p-3 pb-2 panel-title">
                 <i class="bi bi-list-ul me-1"></i>Recent Active Cases — รายละเอียดคดี
             </div>
@@ -350,19 +351,26 @@
                     <thead class="table-dark">
                         <tr>
                             <th>#</th>
-                            {% for col in recent_columns %}
-                            <th class="{% if col.is_active %}sort-active{% endif %}">
-                                <a class="sort-link" href="{{ col.url }}">
-                                    {{ col.label }}<span class="sort-ind">{{ col.indicator }}</span>
-                                </a>
-                            </th>
-                            {% endfor %}
+                            <th class="sortable" data-key="ticket" data-num="1" role="button" tabindex="0">Ticket ID<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="sev" data-num="1" role="button" tabindex="0">Severity<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="created" data-num="1" role="button" tabindex="0">Created (ICT)<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="type" role="button" tabindex="0">Type<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="assignee" role="button" tabindex="0">Assignee<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="sc" data-num="1" role="button" tabindex="0">Status Updated (ICT)<span class="sort-ind"></span></th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for ticket in recent_page %}
-                        <tr>
-                            <td class="text-muted">{{ recent_page.start_index|add:forloop.counter0 }}</td>
+                        {% for ticket in recent_tickets %}
+                        <tr data-row
+                            data-ticket="{{ ticket.ticket_id }}"
+                            data-sev="{{ ticket.sev_rank }}"
+                            data-created="{{ ticket.created_at|date:'U' }}"
+                            data-type="{{ ticket.get_detailed_issue_display }}"
+                            data-assignee="{% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% endif %}"
+                            data-status="{{ ticket.get_status_display }}"
+                            data-sc="{% if ticket.status_changed_at %}{{ ticket.status_changed_at|date:'U' }}{% else %}0{% endif %}">
+                            <td class="text-muted" data-role="num"></td>
                             <td>
                                 <a href="{% url 'ticket_detail' ticket.pk %}"
                                    class="font-monospace fw-bold text-decoration-none">#{{ ticket.ticket_id }}</a>
@@ -384,7 +392,18 @@
                                     <span class="text-muted">—</span>
                                 {% endif %}
                             </td>
-                            <td>{{ ticket.get_status_display }}</td>
+                            <td>
+                                <span class="status-pill" style="background:
+                                    {% if ticket.status == 'NEW' %}#0d6efd
+                                    {% elif ticket.status == 'ESCALATED_T2' %}#6f42c1
+                                    {% elif ticket.status == 'T1_REVIEW' %}#0dcaf0;color:#212529
+                                    {% elif ticket.status == 'AWAITING_CONTAINMENT' %}#fd7e14
+                                    {% elif ticket.status == 'CONTAINMENT_REPORTED' %}#20c997;color:#212529
+                                    {% elif ticket.status == 'PENDING_MANAGER' %}#ffc107;color:#212529
+                                    {% elif ticket.status == 'APPROVED' %}#198754
+                                    {% elif ticket.status == 'CLOSED_EVENT' %}#6c757d
+                                    {% else %}#6c757d{% endif %};">{{ ticket.get_status_display }}</span>
+                            </td>
                             <td class="text-nowrap">
                                 {% if ticket.status_changed_at %}
                                     {{ ticket.status_changed_at|date:"d M Y H:i" }}
@@ -399,46 +418,117 @@
                     </tbody>
                 </table>
             </div>
-            {% if recent_page.paginator.count %}
+            {% if recent_tickets %}
             <div class="d-flex flex-wrap justify-content-between align-items-center px-3 py-2 gap-2">
-                <div class="text-muted" style="font-size:13px;">
-                    Showing {{ recent_page.start_index }}–{{ recent_page.end_index }}
-                    of {{ recent_page.paginator.count|intcomma }}
-                </div>
-                {% if recent_page.paginator.num_pages > 1 %}
-                <nav aria-label="Recent active cases pages">
+                <div class="text-muted" style="font-size:13px;" data-role="showing"></div>
+                <nav data-role="pager" aria-label="Recent active cases pages" hidden>
                     <ul class="pagination pagination-sm mb-0">
-                        <li class="page-item {% if not recent_page.has_previous %}disabled{% endif %}">
-                            {% if recent_page.has_previous %}
-                            <a class="page-link" href="?page={{ recent_page.previous_page_number }}&{{ recent_page_qs }}">«</a>
-                            {% else %}
-                            <span class="page-link">«</span>
-                            {% endif %}
-                        </li>
-                        <li class="page-item disabled">
-                            <span class="page-link">{{ recent_page.number }} / {{ recent_page.paginator.num_pages }}</span>
-                        </li>
-                        <li class="page-item {% if not recent_page.has_next %}disabled{% endif %}">
-                            {% if recent_page.has_next %}
-                            <a class="page-link" href="?page={{ recent_page.next_page_number }}&{{ recent_page_qs }}">»</a>
-                            {% else %}
-                            <span class="page-link">»</span>
-                            {% endif %}
-                        </li>
+                        <li class="page-item"><a class="page-link" href="#" data-role="prev" aria-label="Previous">«</a></li>
+                        <li class="page-item disabled"><span class="page-link" data-role="page-info">1 / 1</span></li>
+                        <li class="page-item"><a class="page-link" href="#" data-role="next" aria-label="Next">»</a></li>
                     </ul>
                 </nav>
-                {% endif %}
             </div>
             {% endif %}
         </div>
     </div>
 </div>
 
+<!-- Client-side sort + pagination for the recent-cases table (no page reload) -->
+<script>
+(function () {
+    const panel = document.getElementById('recent-cases');
+    if (!panel) return;
+    const tbody = panel.querySelector('tbody');
+    const rows  = Array.from(tbody.querySelectorAll('tr[data-row]'));
+    if (!rows.length) return;
+
+    const headers  = Array.from(panel.querySelectorAll('th.sortable'));
+    const showing  = panel.querySelector('[data-role="showing"]');
+    const pager    = panel.querySelector('[data-role="pager"]');
+    const pageInfo = panel.querySelector('[data-role="page-info"]');
+    const prevBtn  = panel.querySelector('[data-role="prev"]');
+    const nextBtn  = panel.querySelector('[data-role="next"]');
+    const PAGE = 15;
+
+    // Initial state mirrors the server default: severity DESC, created DESC tiebreak.
+    let sortKey = 'sev', sortNum = true, sortDir = 'desc', page = 1;
+
+    const val = (tr, key, num) => {
+        const v = tr.dataset[key] || '';
+        return num ? (parseFloat(v) || 0) : v.toLowerCase();
+    };
+
+    function compare(a, b) {
+        const av = val(a, sortKey, sortNum), bv = val(b, sortKey, sortNum);
+        let c = av < bv ? -1 : av > bv ? 1 : 0;
+        if (sortDir === 'desc') c = -c;
+        if (c !== 0) return c;
+        // Deterministic tiebreaker: newest first.
+        return (parseFloat(b.dataset.created) || 0) - (parseFloat(a.dataset.created) || 0);
+    }
+
+    function render() {
+        const sorted = rows.slice().sort(compare);
+        sorted.forEach(tr => tbody.appendChild(tr));   // re-order the DOM
+
+        const total = sorted.length;
+        const pages = Math.max(1, Math.ceil(total / PAGE));
+        if (page > pages) page = pages;
+        const start = (page - 1) * PAGE;
+        const end   = Math.min(start + PAGE, total);
+
+        sorted.forEach((tr, i) => {
+            const visible = i >= start && i < end;
+            tr.classList.toggle('d-none', !visible);
+            if (visible) tr.querySelector('[data-role="num"]').textContent = i + 1;
+        });
+
+        showing.textContent = 'Showing ' + (total ? start + 1 : 0) + '–' + end + ' of ' + total;
+        pageInfo.textContent = page + ' / ' + pages;
+        prevBtn.parentElement.classList.toggle('disabled', page <= 1);
+        nextBtn.parentElement.classList.toggle('disabled', page >= pages);
+        pager.hidden = pages <= 1;
+
+        headers.forEach(th => {
+            const active = th.dataset.key === sortKey;
+            th.classList.toggle('sort-active', active);
+            th.querySelector('.sort-ind').textContent =
+                active ? (sortDir === 'desc' ? '▼' : '▲') : '';
+        });
+    }
+
+    function sortByHeader(th) {
+        const key = th.dataset.key;
+        if (key === sortKey) {
+            sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortKey = key;
+            sortNum = th.dataset.num === '1';
+            sortDir = 'asc';
+        }
+        page = 1;
+        render();
+    }
+
+    headers.forEach(th => {
+        th.addEventListener('click', () => sortByHeader(th));
+        th.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortByHeader(th); }
+        });
+    });
+    prevBtn.addEventListener('click', e => { e.preventDefault(); if (page > 1) { page--; render(); } });
+    nextBtn.addEventListener('click', e => { e.preventDefault(); page++; render(); });
+
+    render();
+})();
+</script>
+
 <!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
 {{ by_category_labels|json_script:"by-category-labels" }}
 {{ by_category_data|json_script:"by-category-data" }}
 {{ pipeline_by_severity|json_script:"pipeline-by-severity" }}
-{{ resolved_by_category|json_script:"resolved-by-category" }}
+{{ sla_pressure|json_script:"sla-pressure" }}
 {{ daily_trend_labels|json_script:"daily-labels" }}
 {{ daily_trend_data|json_script:"daily-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -549,22 +639,65 @@ new Chart(document.getElementById('chartByCategory'), {
     });
 })();
 
-// ── Resolved tickets by category (horizontal bar, single green) ──
-{% if resolved_by_category %}
+// ── SLA pressure (active queue by time-to-deadline, urgency ramp) ──
+{% if stats.active %}
 (function () {
-    const rows = readJSON('resolved-by-category');
-    new Chart(document.getElementById('chartResolvedCat'), {
+    const rows = readJSON('sla-pressure');
+    const data = rows.map(r => r.count);
+
+    // Draw the count at the end of each bar. Severity mix lives in the tooltip.
+    const endLabel = {
+        id: 'slaEnd',
+        afterDatasetsDraw(chart) {
+            const { ctx, scales: { x, y } } = chart;
+            ctx.save();
+            ctx.font = 'bold 13px sans-serif';
+            ctx.fillStyle = '#343a40';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            data.forEach((v, i) => {
+                if (!v) return;
+                ctx.fillText(v, x.getPixelForValue(v) + 8, y.getPixelForValue(i));
+            });
+            ctx.restore();
+        }
+    };
+
+    new Chart(document.getElementById('chartSla'), {
         type: 'bar',
         data: {
             labels: rows.map(r => r.label),
-            datasets: [{ data: rows.map(r => r.count), backgroundColor: '#198754', borderRadius: 4 }]
+            datasets: [{
+                data,
+                backgroundColor: rows.map(r => r.color),
+                borderRadius: 4, borderSkipped: false, maxBarThickness: 30,
+            }]
         },
         options: {
             indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } },
             responsive: true,
-        }
+            layout: { padding: { right: 36 } },
+            scales: {
+                x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e9ecef' } },
+                y: { grid: { display: false }, ticks: { font: { size: 13 } } },
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: items => items[0].label,
+                        // Total + per-severity breakdown for the hovered bucket.
+                        label: item => {
+                            const r = rows[item.dataIndex];
+                            const lines = ['Total: ' + r.count];
+                            r.severities.forEach(s => lines.push('  ' + s.label + ': ' + s.count));
+                            return lines;
+                        },
+                    }
+                }
+            },
+        },
+        plugins: [endLabel],
     });
 })();
 {% endif %}

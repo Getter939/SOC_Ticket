@@ -509,11 +509,14 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Grace Hopper', html)
 
     def test_category_sections_render_even_without_data(self):
-        """Pipeline and resolved-by-category sections render (latter as placeholder)."""
+        """Pipeline, SLA pressure, and the trend/table sections all render."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertNotIn('Avg MTTR by Category', html)   # removed in Session 3C
-        self.assertIn('Resolved Tickets by Incident Category', html)
+        # The redundant resolved-by-category chart was replaced by SLA pressure.
+        self.assertNotIn('Resolved Tickets by Incident Category', html)
+        self.assertIn('SLA Pressure', html)
+        self.assertIn('Threat Types', html)              # the kept category chart
         self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
 
@@ -581,48 +584,38 @@ class DashboardManagementViewTest(TestCase):
         self.assertTrue(trend)
         self.assertRegex(trend[0]['date'], r'^\d{4}-\d{2}-\d{2} \d{2}:00$')
 
-    def test_recent_cases_page_size_is_15(self):
-        """Detail table paginates the FULL active queryset at 15 rows/page."""
+    def test_recent_cases_sends_full_active_queue(self):
+        """Every active case is sent to the template (sort/paginate is client-side),
+        and each gets a data-row so the JS can sort + page the whole dataset."""
         for _ in range(20):
             _make_ticket(status=Ticket.STATUS_NEW)
-        page = self._get().context['recent_page']
-        self.assertEqual(len(page), 15)             # page 1 shows 15
-        self.assertEqual(page.paginator.count, 20)  # but all 20 are reachable
-        self.assertEqual(page.paginator.num_pages, 2)
-
-    def test_recent_cases_second_page(self):
-        """Page 2 is reachable and holds the remainder."""
-        for _ in range(20):
-            _make_ticket(status=Ticket.STATUS_NEW)
-        page = self._get(page=2).context['recent_page']
-        self.assertEqual(page.number, 2)
-        self.assertEqual(len(page), 5)
+        resp = self._get()
+        self.assertEqual(len(resp.context['recent_tickets']), 20)
+        self.assertEqual(resp.content.decode().count('<tr data-row'), 20)
 
     def test_recent_cases_default_sort_severity_then_created(self):
-        """Default order: severity DESC (Critical first), then created_at DESC."""
+        """Initial order: severity DESC (Critical first), then created_at DESC."""
         low = _make_ticket(status=Ticket.STATUS_NEW)
         Ticket.objects.filter(pk=low.pk).update(severity='Low')
         crit = _make_ticket(status=Ticket.STATUS_NEW)
         Ticket.objects.filter(pk=crit.pk).update(severity='Critical')
         crit_newer = _make_ticket(status=Ticket.STATUS_NEW)
         Ticket.objects.filter(pk=crit_newer.pk).update(severity='Critical')
-        rows = list(self._get().context['recent_page'])
+        rows = list(self._get().context['recent_tickets'])
         # Critical before Low; among Criticals, newest before older.
         self.assertEqual([r.pk for r in rows], [crit_newer.pk, crit.pk, low.pk])
-
-    def test_recent_cases_header_sort_applies_to_full_queryset(self):
-        """?sort=created&dir=asc orders oldest-first across the whole queryset."""
-        first = _make_ticket(status=Ticket.STATUS_NEW)
-        second = _make_ticket(status=Ticket.STATUS_NEW)
-        rows = list(self._get(sort='created', dir='asc').context['recent_page'])
-        self.assertEqual([r.pk for r in rows], [first.pk, second.pk])
 
     def test_recent_cases_status_updated_column(self):
         """Status Updated column renders and status_changed_at is populated."""
         _make_ticket(status=Ticket.STATUS_NEW)
         resp = self._get()
         self.assertIn('Status Updated', resp.content.decode())
-        self.assertIsNotNone(resp.context['recent_page'][0].status_changed_at)
+        self.assertIsNotNone(resp.context['recent_tickets'][0].status_changed_at)
+
+    def test_recent_cases_status_color_pill(self):
+        """Each row carries a status-pill (color-coded status badge)."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        self.assertIn('status-pill', self._get().content.decode())
 
     def test_active_critical_counts_critical_only(self):
         a = _make_ticket(status=Ticket.STATUS_NEW)
@@ -645,38 +638,40 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
         self.assertIsNone(self._get().context['critical_soonest_deadline'])
 
-    def test_resolved_by_category_ignores_status_filter(self):
-        """Closed tickets survive a non-terminal status filter (date+severity only)."""
-        _make_ticket(status=Ticket.STATUS_APPROVED)
-        rbc = self._get(status=Ticket.STATUS_NEW).context['resolved_by_category']
-        self.assertTrue(rbc)
+    def test_sla_pressure_buckets_active_by_deadline(self):
+        """Active tickets land in the correct time-to-deadline bucket."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # overdue
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=0.5)  # due ≤1h
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)    # due 1–4h
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # on-track
+        buckets = {b['key']: b['count'] for b in self._get().context['sla_pressure']}
+        self.assertEqual(buckets['overdue'], 1)
+        self.assertEqual(buckets['due_1h'], 1)
+        self.assertEqual(buckets['due_4h'], 1)
+        self.assertEqual(buckets['on_track'], 1)
 
-    def test_resolved_by_category_groups_by_incident_category(self):
-        """resolved_by_category groups by detailed_issue with display labels."""
-        # Two closed Malicious Logic + one closed DoS.
-        for di in ('Malicious Logic', 'Malicious Logic', 'DoS'):
-            t = _make_ticket(status=Ticket.STATUS_APPROVED)
-            Ticket.objects.filter(pk=t.pk).update(detailed_issue=di)
+    def test_sla_pressure_counts_active_only(self):
+        """Terminal tickets are excluded, even if their deadline is in the past."""
+        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
+        buckets = {b['key']: b['count'] for b in self._get().context['sla_pressure']}
+        self.assertEqual(sum(buckets.values()), 0)
 
-        rbc = self._get().context['resolved_by_category']
-        self.assertIsInstance(rbc, list)
-        # No noisy null/blank labels.
-        for row in rbc:
-            self.assertNotIn(row['label'], (None, ''))
-        labels = {row['label']: row['count'] for row in rbc}
-        detail_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
-        # Display name (not the raw slug) is used, with correct counts.
-        self.assertEqual(labels[detail_display['Malicious Logic']], 2)
-        self.assertEqual(labels[detail_display['DoS']], 1)
-        # The old Event/Incident classification value must NOT be a label.
-        self.assertNotIn('Cyber Event', labels)
+    def test_sla_pressure_severity_breakdown(self):
+        """Each bucket carries its per-severity mix (for the tooltip / sub-label)."""
+        t = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
+        Ticket.objects.filter(pk=t.pk).update(severity='Critical')
+        overdue = next(b for b in self._get().context['sla_pressure']
+                       if b['key'] == 'overdue')
+        self.assertEqual(overdue['count'], 1)
+        sevs = {s['label']: s['count'] for s in overdue['severities']}
+        self.assertEqual(sevs.get('Critical'), 1)
 
-    def test_resolved_by_category_excludes_blank_detailed_issue(self):
-        """Tickets with blank detailed_issue are dropped (no 'Unknown' bar)."""
-        t = _make_ticket(status=Ticket.STATUS_APPROVED)
-        Ticket.objects.filter(pk=t.pk).update(detailed_issue='')
-        rbc = self._get().context['resolved_by_category']
-        self.assertEqual(rbc, [])
+    def test_sla_attention_is_overdue_plus_due_1h(self):
+        """Headline 'need attention' count = overdue + due-within-1h (not on-track)."""
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # overdue
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=0.5)  # due ≤1h
+        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # on-track
+        self.assertEqual(self._get().context['sla_attention'], 2)
 
     # ── Filters still scope the active counts ──────────────────────────── #
 
