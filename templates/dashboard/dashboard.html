@@ -677,6 +677,14 @@ new Chart(document.getElementById('chartByCategory'), {
             indexAxis: 'y',
             responsive: true,
             layout: { padding: { right: 36 } },
+            // Click a bar → open the ticket list filtered to that SLA bucket.
+            onClick: (evt, els) => {
+                if (els.length) window.location =
+                    "{% url 'ticket_list' %}?sla=" + rows[els[0].index].key;
+            },
+            onHover: (evt, els) => {
+                evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+            },
             scales: {
                 x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e9ecef' } },
                 y: { grid: { display: false }, ticks: { font: { size: 13 } } },
@@ -689,7 +697,7 @@ new Chart(document.getElementById('chartByCategory'), {
                         // Total + per-severity breakdown for the hovered bucket.
                         label: item => {
                             const r = rows[item.dataIndex];
-                            const lines = ['Total: ' + r.count];
+                            const lines = ['Total: ' + r.count, 'คลิกเพื่อดูรายการ'];
                             r.severities.forEach(s => lines.push('  ' + s.label + ': ' + s.count));
                             return lines;
                         },

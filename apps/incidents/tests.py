@@ -26,6 +26,8 @@ import shutil
 import tempfile
 from unittest.mock import patch
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
@@ -1364,3 +1366,45 @@ class DetailedIssueCascadeTest(TestCase):
         self.assertIn('Malicious Logic', html)               # a hierarchy key is embedded
         self.assertIn('id="id_detailed_issue"', html)        # parent select
         self.assertIn('id="id_detailed_issue2"', html)       # child select
+
+
+class TicketListSlaFilterTest(TestCase):
+    """The ticket-list ?sla= filter buckets the active queue by time-to-deadline,
+    sharing thresholds with the dashboard SLA chart (apps.incidents.sla)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('sla_filter_t1')  # SOC staff → sees all tickets
+        now = timezone.now()
+        cls.overdue  = _make_ticket(sla_deadline=now - timedelta(hours=1))
+        cls.due_1h   = _make_ticket(sla_deadline=now + timedelta(minutes=30))
+        cls.due_4h   = _make_ticket(sla_deadline=now + timedelta(hours=2))
+        cls.on_track = _make_ticket(sla_deadline=now + timedelta(hours=10))
+
+    def _list(self, **params):
+        self.client.force_login(self.t1)
+        resp = self.client.get(reverse('ticket_list'), params)
+        return {t.pk for t in resp.context['page_obj']}, resp
+
+    def test_overdue_filter_returns_only_overdue(self):
+        ids, resp = self._list(sla='overdue')
+        self.assertEqual(ids, {self.overdue.pk})
+        self.assertEqual(resp.context['sla_filter'], 'overdue')
+
+    def test_due_1h_filter_returns_only_due_within_1h(self):
+        ids, _ = self._list(sla='due_1h')
+        self.assertEqual(ids, {self.due_1h.pk})
+
+    def test_on_track_filter_returns_only_on_track(self):
+        ids, _ = self._list(sla='on_track')
+        self.assertEqual(ids, {self.on_track.pk})
+
+    def test_no_filter_returns_all_active(self):
+        ids, _ = self._list()
+        self.assertEqual(
+            ids, {self.overdue.pk, self.due_1h.pk, self.due_4h.pk, self.on_track.pk})
+
+    def test_invalid_bucket_is_ignored(self):
+        ids, resp = self._list(sla='bogus')
+        self.assertEqual(resp.context['sla_filter'], '')
+        self.assertEqual(len(ids), 4)

@@ -54,6 +54,15 @@
                 </select>
             </div>
             <div class="col-md-2">
+                <label class="form-label small fw-bold mb-1">SLA</label>
+                <select name="sla" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    {% for code, label, color in sla_bucket_choices %}
+                    <option value="{{ code }}" {% if sla_filter == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label small fw-bold mb-1">เรียงตาม</label>
                 <select name="sort" class="form-select form-select-sm">
                     <option value="sla" {% if sort == 'sla' %}selected{% endif %}>SLA ใกล้ครบกำหนด</option>
@@ -65,7 +74,7 @@
             <div class="col-md-1 d-grid">
                 <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
             </div>
-            {% if search or status_filter or severity_filter or emergency_filter %}
+            {% if search or status_filter or severity_filter or emergency_filter or sla_filter %}
             <div class="col-12">
                 <a href="{% url 'ticket_list' %}" class="small text-decoration-none">
                     <i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด
@@ -147,11 +156,11 @@
 <nav class="mt-3" aria-label="Ticket pages">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">«</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if sla_filter %}&sla={{ sla_filter }}{% endif %}&sort={{ sort }}">«</a></li>
     {% endif %}
     <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">»</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if sla_filter %}&sla={{ sla_filter }}{% endif %}&sort={{ sort }}">»</a></li>
     {% endif %}
   </ul>
 </nav>

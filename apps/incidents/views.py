@@ -16,6 +16,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.incidents import sla as sla_buckets
+
 logger = logging.getLogger(__name__)
 
 from apps.wazuh_ingest.models import WazuhAlert
@@ -232,6 +234,16 @@ def ticket_list(request):
     else:
         emergency_filter = ''
 
+    # SLA-pressure bucket filter — shares thresholds with the dashboard chart
+    # (apps.incidents.sla) so the dashboard's "Overdue/Due ≤1h/…" bars can
+    # deep-link straight to the matching slice of this list.
+    sla_filter = request.GET.get('sla', '').strip()
+    if sla_filter in sla_buckets.BUCKET_KEYS:
+        tickets_qs = tickets_qs.filter(
+            sla_buckets.bucket_filter(sla_filter, timezone.now()))
+    else:
+        sla_filter = ''
+
     sort_map = {
         'sla':       ('sla_deadline',),
         'emergency': ('-is_emergency', 'sla_deadline'),
@@ -258,9 +270,11 @@ def ticket_list(request):
         'status_filter': status_filter,
         'severity_filter': severity_filter,
         'emergency_filter': emergency_filter,
+        'sla_filter': sla_filter,
         'sort': sort,
         'active_status_choices': active_status_choices,
         'severity_choices': Ticket.SEVERITY_CHOICES,
+        'sla_bucket_choices': sla_buckets.SLA_BUCKETS,
     })
 
 

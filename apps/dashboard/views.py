@@ -3,13 +3,14 @@ from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import (
-    Aggregate, Avg, Case, CharField, Count, DurationField, F, IntegerField,
+    Aggregate, Avg, Case, Count, DurationField, F, IntegerField,
     OuterRef, Q, Subquery, Value, When,
 )
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import render
 from django.utils import timezone
 
+from apps.incidents import sla as sla_buckets
 from apps.incidents.models import SOURCE_CHOICES, Ticket, TicketLog
 
 # ====================================================================== #
@@ -483,29 +484,13 @@ def dashboard(request):
     mttr_by_category.sort(key=lambda x: x['avg_hours'], reverse=True)
 
     # SLA pressure — active queue bucketed by time-to-deadline. Answers the
-    # manager's "what needs attention now?" The 4h "at-risk" window from
-    # sla_at_risk is split into a ≤1h urgent sub-bucket. Each bucket carries its
-    # severity mix so a Critical that's overdue stands out (sub-label + tooltip).
-    # Respects the same active GET filters as the other active panels (a NULL
-    # sla_deadline — rare, since save() auto-sets it — falls into On-track).
-    sla_t1 = now + timedelta(hours=1)
-    sla_t4 = now + timedelta(hours=4)
-    sla_bucket_case = Case(
-        When(sla_deadline__lt=now,    then=Value('overdue')),
-        When(sla_deadline__lte=sla_t1, then=Value('due_1h')),
-        When(sla_deadline__lte=sla_t4, then=Value('due_4h')),
-        default=Value('on_track'),
-        output_field=CharField(),
-    )
-    SLA_BUCKETS = [
-        ('overdue',  'Overdue',   '#dc3545'),
-        ('due_1h',   'Due ≤ 1h',  '#fd7e14'),
-        ('due_4h',   'Due 1–4h',  '#ffc107'),
-        ('on_track', 'On-track',  '#198754'),
-    ]
+    # manager's "what needs attention now?" Each bucket carries its severity mix
+    # so a Critical that's overdue stands out (tooltip). Respects the same active
+    # GET filters as the other active panels. Bucket thresholds live in
+    # apps.incidents.sla (single source of truth, shared with the list filter).
     sla_sev_order = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
-    sla_counts = {key: {} for key, _, _ in SLA_BUCKETS}
-    for r in (active_qs.annotate(sla_bucket=sla_bucket_case)
+    sla_counts = {key: {} for key, _, _ in sla_buckets.SLA_BUCKETS}
+    for r in (active_qs.annotate(sla_bucket=sla_buckets.bucket_case(now))
               .values('sla_bucket', 'severity').annotate(c=Count('id'))):
         bucket = sla_counts.get(r['sla_bucket'])
         if bucket is not None:
@@ -522,11 +507,11 @@ def dashboard(request):
                 for sev in sla_sev_order if sla_counts[key].get(sev)
             ],
         }
-        for key, label, color in SLA_BUCKETS
+        for key, label, color in sla_buckets.SLA_BUCKETS
     ]
     # Headline: active cases needing attention now (overdue + due within 1h).
-    sla_attention = next(b['count'] for b in sla_pressure if b['key'] == 'overdue') \
-        + next(b['count'] for b in sla_pressure if b['key'] == 'due_1h')
+    sla_attention = (sum(sla_counts[sla_buckets.OVERDUE].values())
+                     + sum(sla_counts[sla_buckets.DUE_1H].values()))
 
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
     # line has no gaps. Window depends on date_range:
