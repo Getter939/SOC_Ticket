@@ -231,6 +231,22 @@ class WorkflowTransitionTest(TestCase):
         t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t1, 'benign')
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
 
+    def test_transition_stamps_status_changed_at(self):
+        t = self._incident()
+        before = t.status_changed_at
+        self.assertIsNotNone(before)  # seeded on creation
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign')
+        t.refresh_from_db()
+        self.assertGreater(t.status_changed_at, before)
+
+    def test_same_status_note_does_not_bump_status_changed_at(self):
+        t = self._incident()
+        stamp = t.status_changed_at
+        # Same-status, note-only update — not a lifecycle move.
+        t.transition_to(Ticket.STATUS_NEW, self.t1, 'just a note')
+        t.refresh_from_db()
+        self.assertEqual(t.status_changed_at, stamp)
+
     def test_escalated_incident_returns_to_t1_review(self):
         t = self._incident()
         t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')

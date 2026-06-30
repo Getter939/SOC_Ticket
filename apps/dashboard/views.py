@@ -1,8 +1,13 @@
 from datetime import timedelta
 from statistics import mean as _mean, median as _median
+from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Aggregate, Avg, Count, DurationField, F, OuterRef, Q, Subquery
+from django.core.paginator import Paginator
+from django.db.models import (
+    Aggregate, Avg, Case, Count, DurationField, F, IntegerField,
+    OuterRef, Q, Subquery, Value, When,
+)
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import render
 from django.utils import timezone
@@ -369,13 +374,92 @@ def dashboard(request):
     monthly_labels = [m['month'] for m in monthly]
     monthly_data   = [m['count'] for m in monthly]
 
-    # ── Recent & breach lists ─────────────────────────────────────────────── #
-    # Top 15 active cases, most urgent first (nearest SLA deadline). NULL
-    # deadlines sort last under Postgres ASC. select_related avoids N+1 on the
-    # assignee column rendered in the detail table.
-    recent_tickets = (
-        active_qs.select_related('assigned_to').order_by('sla_deadline')[:15]
+    # ── Recent active cases — sortable, paginated detail table ────────────── #
+    # Shows EVERY active case (not a top-15 slice) so management can browse the
+    # whole queue. Sorting applies to the full queryset *before* pagination.
+    # Default order: severity DESC (Critical first), then created_at DESC.
+    # Column headers toggle asc/desc via ?sort=<col>&dir=asc|desc.
+    #
+    # severity is a CharField, so ordering on it alphabetically would be wrong
+    # (Critical < High < Low …). Annotate the SEVERITY_RANK weight and sort on
+    # that instead.
+    RECENT_SORT_COLUMNS = {
+        'ticket_id':      ('ticket_id',),
+        'severity':       ('_sev_rank',),
+        'created':        ('created_at',),
+        'type':           ('detailed_issue',),
+        'assignee':       ('assigned_to__first_name',
+                           'assigned_to__last_name',
+                           'assigned_to__username'),
+        'status':         ('status',),
+        'status_changed': ('status_changed_at',),
+    }
+    recent_sort = request.GET.get('sort', 'severity')
+    recent_dir  = request.GET.get('dir', 'desc')
+    if recent_sort not in RECENT_SORT_COLUMNS:
+        recent_sort = 'severity'
+    if recent_dir not in ('asc', 'desc'):
+        recent_dir = 'desc'
+
+    sev_rank_whens = [
+        When(severity=slug, then=Value(rank))
+        for slug, rank in Ticket.SEVERITY_RANK.items()
+    ]
+    recent_qs = (
+        active_qs.select_related('assigned_to')
+        .annotate(_sev_rank=Case(
+            *sev_rank_whens, default=Value(0), output_field=IntegerField()))
     )
+
+    prefix = '' if recent_dir == 'asc' else '-'
+    order_fields = [f'{prefix}{f}' for f in RECENT_SORT_COLUMNS[recent_sort]]
+    # Deterministic tiebreaker — newest first — unless we're already sorting on
+    # created_at (avoids a redundant ORDER BY clause).
+    if 'created_at' not in [f.lstrip('-') for f in order_fields]:
+        order_fields.append('-created_at')
+    recent_qs = recent_qs.order_by(*order_fields)
+
+    recent_paginator = Paginator(recent_qs, 15)
+    recent_page = recent_paginator.get_page(request.GET.get('page'))
+
+    # Persistent params every sort/page link must carry (the dashboard filters).
+    recent_base_params = {}
+    if date_range and date_range != 'all':
+        recent_base_params['date_range'] = date_range
+    if status_filter:
+        recent_base_params['status'] = status_filter
+    if severity_filter:
+        recent_base_params['severity'] = severity_filter
+
+    # Header descriptors with ready-made sort links + active-direction marker.
+    RECENT_COLUMN_LABELS = [
+        ('ticket_id',      'Ticket ID'),
+        ('severity',       'Severity'),
+        ('created',        'Created (ICT)'),
+        ('type',           'Type'),
+        ('assignee',       'Assignee'),
+        ('status',         'Status'),
+        ('status_changed', 'Status Updated (ICT)'),
+    ]
+    recent_columns = []
+    for key, label in RECENT_COLUMN_LABELS:
+        is_active = key == recent_sort
+        if is_active:
+            next_dir  = 'asc' if recent_dir == 'desc' else 'desc'
+            indicator = '▼' if recent_dir == 'desc' else '▲'
+        else:
+            next_dir, indicator = 'asc', ''
+        params = dict(recent_base_params, sort=key, dir=next_dir)
+        recent_columns.append({
+            'label':     label,
+            'is_active': is_active,
+            'indicator': indicator,
+            'url':       '?' + urlencode(params),
+        })
+
+    # Querystring for pagination links (filters + current sort; page added in tpl).
+    recent_page_qs = urlencode(dict(recent_base_params, sort=recent_sort, dir=recent_dir))
+
     breach_tickets = sla_breached_qs.order_by('sla_deadline')[:5]
 
     # ── Backlog-aging & severity chart series (derived from stats above) ──── #
@@ -549,7 +633,11 @@ def dashboard(request):
         'severity_labels':     severity_labels,
         'severity_data':       severity_data,
         'chart_tables':        chart_tables,
-        'recent_tickets':      recent_tickets,
+        'recent_page':         recent_page,
+        'recent_columns':      recent_columns,
+        'recent_sort':         recent_sort,
+        'recent_dir':          recent_dir,
+        'recent_page_qs':      recent_page_qs,
         'breach_tickets':      breach_tickets,
         # ── Management KPIs (Session 3) ────────────────────────────────── #
         'active_total':              active_total,

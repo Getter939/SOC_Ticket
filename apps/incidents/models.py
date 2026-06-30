@@ -468,6 +468,14 @@ class Ticket(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Timestamp of the last *status change* (set on creation, then updated by
+    # transition_to whenever the status actually changes). Unlike updated_at
+    # (auto_now — bumps on any save, incl. note edits / emergency toggles),
+    # this tracks only lifecycle transitions, so it answers "when did this
+    # ticket last move state?".
+    status_changed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่อัปเดตสถานะ',
+    )
 
     assigned_to = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -610,6 +618,11 @@ class Ticket(models.Model):
             # the ticket is filed — fall back to now() if T1 left it blank.
             base_time = self.incident_datetime or timezone.now()
             self.sla_deadline = base_time + timedelta(hours=self.SLA_HOURS)
+
+        if not self.pk and not self.status_changed_at:
+            # A brand-new ticket enters its initial status now; seed the
+            # status-change clock so the field is never null going forward.
+            self.status_changed_at = timezone.now()
 
         if not self.ticket_id or self.ticket_id.strip() == '':
             now = timezone.now()
@@ -754,6 +767,12 @@ class Ticket(models.Model):
         # ── 7. Apply transition ───────────────────────────────────────── #
         self.status = new_status
         now = timezone.now()
+
+        # Record when the status actually changed. We only reach here for a real
+        # transition (the same-status note-only path returns at step 2), so this
+        # field tracks lifecycle moves exactly — never note edits or emergency
+        # toggles, which both keep the status unchanged.
+        self.status_changed_at = now
 
         # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
         if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:

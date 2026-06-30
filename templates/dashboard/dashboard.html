@@ -325,6 +325,20 @@
 </div>
 
 <!-- ══ ROW 5: Detail table — recent active cases (full width) ═══════════════ -->
+<style>
+    /* Sortable headers in the recent-cases detail table */
+    .detail-table thead th a.sort-link {
+        color: #fff;
+        text-decoration: none;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .detail-table thead th a.sort-link:hover { text-decoration: underline; }
+    .detail-table thead th.sort-active { background: rgba(255,255,255,.12); }
+    .detail-table thead th .sort-ind { font-size: 11px; opacity: .85; }
+</style>
 <div class="row g-3">
     <div class="col-12">
         <div class="panel">
@@ -336,18 +350,19 @@
                     <thead class="table-dark">
                         <tr>
                             <th>#</th>
-                            <th>Ticket ID</th>
-                            <th>Severity</th>
-                            <th>Created (ICT)</th>
-                            <th>Type</th>
-                            <th>Assignee</th>
-                            <th>Status</th>
+                            {% for col in recent_columns %}
+                            <th class="{% if col.is_active %}sort-active{% endif %}">
+                                <a class="sort-link" href="{{ col.url }}">
+                                    {{ col.label }}<span class="sort-ind">{{ col.indicator }}</span>
+                                </a>
+                            </th>
+                            {% endfor %}
                         </tr>
                     </thead>
                     <tbody>
-                        {% for ticket in recent_tickets %}
+                        {% for ticket in recent_page %}
                         <tr>
-                            <td class="text-muted">{{ forloop.counter }}</td>
+                            <td class="text-muted">{{ recent_page.start_index|add:forloop.counter0 }}</td>
                             <td>
                                 <a href="{% url 'ticket_detail' ticket.pk %}"
                                    class="font-monospace fw-bold text-decoration-none">#{{ ticket.ticket_id }}</a>
@@ -370,16 +385,49 @@
                                 {% endif %}
                             </td>
                             <td>{{ ticket.get_status_display }}</td>
+                            <td class="text-nowrap">
+                                {% if ticket.status_changed_at %}
+                                    {{ ticket.status_changed_at|date:"d M Y H:i" }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="7" class="text-center text-muted py-4">ไม่มีคดีที่กำลังดำเนินการ</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4">ไม่มีคดีที่กำลังดำเนินการ</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            {% if recent_tickets %}
-            <div class="text-end text-muted px-3 py-2" style="font-size:13px;">
-                1–{{ recent_tickets|length }} of {{ active_total|intcomma }}
+            {% if recent_page.paginator.count %}
+            <div class="d-flex flex-wrap justify-content-between align-items-center px-3 py-2 gap-2">
+                <div class="text-muted" style="font-size:13px;">
+                    Showing {{ recent_page.start_index }}–{{ recent_page.end_index }}
+                    of {{ recent_page.paginator.count|intcomma }}
+                </div>
+                {% if recent_page.paginator.num_pages > 1 %}
+                <nav aria-label="Recent active cases pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item {% if not recent_page.has_previous %}disabled{% endif %}">
+                            {% if recent_page.has_previous %}
+                            <a class="page-link" href="?page={{ recent_page.previous_page_number }}&{{ recent_page_qs }}">«</a>
+                            {% else %}
+                            <span class="page-link">«</span>
+                            {% endif %}
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">{{ recent_page.number }} / {{ recent_page.paginator.num_pages }}</span>
+                        </li>
+                        <li class="page-item {% if not recent_page.has_next %}disabled{% endif %}">
+                            {% if recent_page.has_next %}
+                            <a class="page-link" href="?page={{ recent_page.next_page_number }}&{{ recent_page_qs }}">»</a>
+                            {% else %}
+                            <span class="page-link">»</span>
+                            {% endif %}
+                        </li>
+                    </ul>
+                </nav>
+                {% endif %}
             </div>
             {% endif %}
         </div>

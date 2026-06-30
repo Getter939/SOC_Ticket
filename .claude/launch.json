@@ -10,8 +10,8 @@
     },
     {
       "name": "SOC Ticket (Postgres)",
-      "runtimeExecutable": "py",
-      "runtimeArgs": ["manage.py", "runserver", "8099"],
+      "runtimeExecutable": "C:\\Users\\NT\\Documents\\SOC_Ticket\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["manage.py", "runserver", "8099", "--noreload"],
       "port": 8099,
       "autoPort": false
     }

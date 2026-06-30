@@ -581,12 +581,48 @@ class DashboardManagementViewTest(TestCase):
         self.assertTrue(trend)
         self.assertRegex(trend[0]['date'], r'^\d{4}-\d{2}-\d{2} \d{2}:00$')
 
-    def test_recent_tickets_capped_at_15(self):
+    def test_recent_cases_page_size_is_15(self):
+        """Detail table paginates the FULL active queryset at 15 rows/page."""
         for _ in range(20):
             _make_ticket(status=Ticket.STATUS_NEW)
-        ctx = self._get().context
-        self.assertIn('recent_tickets', ctx)
-        self.assertLessEqual(len(ctx['recent_tickets']), 15)
+        page = self._get().context['recent_page']
+        self.assertEqual(len(page), 15)             # page 1 shows 15
+        self.assertEqual(page.paginator.count, 20)  # but all 20 are reachable
+        self.assertEqual(page.paginator.num_pages, 2)
+
+    def test_recent_cases_second_page(self):
+        """Page 2 is reachable and holds the remainder."""
+        for _ in range(20):
+            _make_ticket(status=Ticket.STATUS_NEW)
+        page = self._get(page=2).context['recent_page']
+        self.assertEqual(page.number, 2)
+        self.assertEqual(len(page), 5)
+
+    def test_recent_cases_default_sort_severity_then_created(self):
+        """Default order: severity DESC (Critical first), then created_at DESC."""
+        low = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=low.pk).update(severity='Low')
+        crit = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=crit.pk).update(severity='Critical')
+        crit_newer = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=crit_newer.pk).update(severity='Critical')
+        rows = list(self._get().context['recent_page'])
+        # Critical before Low; among Criticals, newest before older.
+        self.assertEqual([r.pk for r in rows], [crit_newer.pk, crit.pk, low.pk])
+
+    def test_recent_cases_header_sort_applies_to_full_queryset(self):
+        """?sort=created&dir=asc orders oldest-first across the whole queryset."""
+        first = _make_ticket(status=Ticket.STATUS_NEW)
+        second = _make_ticket(status=Ticket.STATUS_NEW)
+        rows = list(self._get(sort='created', dir='asc').context['recent_page'])
+        self.assertEqual([r.pk for r in rows], [first.pk, second.pk])
+
+    def test_recent_cases_status_updated_column(self):
+        """Status Updated column renders and status_changed_at is populated."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        resp = self._get()
+        self.assertIn('Status Updated', resp.content.decode())
+        self.assertIsNotNone(resp.context['recent_page'][0].status_changed_at)
 
     def test_active_critical_counts_critical_only(self):
         a = _make_ticket(status=Ticket.STATUS_NEW)
