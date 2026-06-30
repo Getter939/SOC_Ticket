@@ -520,6 +520,14 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
 
+    def test_dashboard_auto_refresh_script_renders_with_visibility_guard(self):
+        """The dashboard refreshes periodically without interrupting hidden tabs."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertIn('const AUTO_REFRESH_MS = 120000', html)
+        self.assertIn("document.visibilityState !== 'visible'", html)
+        self.assertIn('window.location.reload()', html)
+
     def test_pipeline_chart_renders(self):
         """Pipeline stacked-bar replaces the MTTR chart in Row 3L."""
         _make_ticket(status=Ticket.STATUS_NEW)

@@ -58,6 +58,51 @@
     .detail-table thead th { font-size: 13px; white-space: nowrap; }
     .detail-table td { vertical-align: middle; }
     .sev-pill { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; color:#fff; }
+
+    .threat-chart-layout {
+        display: grid;
+        grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+        align-items: center;
+        gap: 0.75rem 1rem;
+        min-height: 230px;
+    }
+    .threat-chart-canvas {
+        width: 190px;
+        height: 190px;
+        justify-self: start;
+    }
+    .threat-legend {
+        display: grid;
+        gap: 0.45rem;
+        align-content: center;
+        font-size: 12px;
+        line-height: 1.25;
+    }
+    .threat-legend-item {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 0.5rem;
+        color: #495057;
+    }
+    .threat-legend-swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        margin-top: 1px;
+    }
+    .threat-legend-label {
+        overflow-wrap: anywhere;
+    }
+    .threat-legend-value {
+        color: #212529;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+    @media (max-width: 575.98px) {
+        .threat-chart-layout { grid-template-columns: 1fr; }
+        .threat-chart-canvas { justify-self: center; }
+    }
 </style>
 
 <!-- ── Header + last-updated timestamp ─────────────────────────────────────── -->
@@ -214,9 +259,13 @@
                 <i class="bi bi-pie-chart me-1"></i>Threat Types / สัดส่วนประเภทเหตุการณ์
             </div>
             {% if by_category_labels %}
-            <div style="height:230px;">
-                <canvas id="chartByCategory" role="img"
-                        aria-label="สัดส่วน Ticket แยกตามประเภทเหตุการณ์ (5 อันดับแรก + อื่นๆ)"></canvas>
+            <div class="threat-chart-layout">
+                <div class="threat-chart-canvas">
+                    <canvas id="chartByCategory" role="img"
+                            aria-label="สัดส่วน Ticket แยกตามประเภทเหตุการณ์ (5 อันดับแรก + อื่นๆ)"></canvas>
+                </div>
+                <div id="threatTypesLegend" class="threat-legend"
+                     aria-label="Threat type legend"></div>
             </div>
             <table class="visually-hidden">
                 <caption>Tickets by threat type</caption>
@@ -524,6 +573,41 @@
 })();
 </script>
 
+<!-- Quiet dashboard auto-refresh. Skips hidden tabs and active interactions. -->
+<script>
+(function () {
+    const AUTO_REFRESH_MS = 120000;
+    const IDLE_GRACE_MS = 15000;
+    const interactiveSelector = [
+        'a', 'button', 'input', 'select', 'textarea',
+        '[role="button"]', '[contenteditable="true"]',
+    ].join(',');
+    let userActiveUntil = 0;
+    let formSubmitting = false;
+
+    function markUserActive() {
+        userActiveUntil = Date.now() + IDLE_GRACE_MS;
+    }
+
+    ['pointerdown', 'keydown', 'input', 'change', 'focusin'].forEach(eventName => {
+        document.addEventListener(eventName, markUserActive, { capture: true, passive: true });
+    });
+    document.addEventListener('submit', () => { formSubmitting = true; }, { capture: true });
+
+    setInterval(() => {
+        if (formSubmitting) return;
+        if (document.visibilityState !== 'visible') return;
+        if (Date.now() < userActiveUntil) return;
+        if (navigator.onLine === false) return;
+
+        const active = document.activeElement;
+        if (active && active !== document.body && active.matches(interactiveSelector)) return;
+
+        window.location.reload();
+    }, AUTO_REFRESH_MS);
+})();
+</script>
+
 <!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
 {{ by_category_labels|json_script:"by-category-labels" }}
 {{ by_category_data|json_script:"by-category-data" }}
@@ -533,7 +617,7 @@
 {{ daily_trend_data|json_script:"daily-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-const COLORS = ['#1a1a2e','#e63946','#0dcaf0','#198754','#ffc107','#6c757d'];
+const THREAT_COLORS = ['#2f4858', '#6d5f8d', '#21889b', '#9b5f7e', '#59677c', '#8a8f98'];
 
 // Legibility floor: every chart label ≥ 13px.
 Chart.defaults.font.size = 13;
@@ -543,16 +627,68 @@ Chart.defaults.maintainAspectRatio = false;
 
 function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
 
-// ── Incident status doughnut (top 5 + Others, capped in the view) ──
+// ── Threat type doughnut (top 5 + Others, capped in the view) ──
 {% if by_category_labels %}
-new Chart(document.getElementById('chartByCategory'), {
-    type: 'doughnut',
-    data: {
-        labels: readJSON('by-category-labels'),
-        datasets: [{ data: readJSON('by-category-data'), backgroundColor: COLORS, borderWidth: 2 }]
-    },
-    options: { plugins: { legend: { position: 'bottom' } }, responsive: true, cutout: '60%' }
-});
+(function () {
+    const labels = readJSON('by-category-labels');
+    const values = readJSON('by-category-data');
+    const total = values.reduce((sum, value) => sum + value, 0);
+    const colors = labels.map((_, i) => THREAT_COLORS[i % THREAT_COLORS.length]);
+
+    new Chart(document.getElementById('chartByCategory'), {
+        type: 'doughnut',
+        data: {
+            labels,
+            datasets: [{
+                data: values,
+                backgroundColor: colors,
+                borderColor: '#ffffff',
+                borderWidth: 2,
+                hoverOffset: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            cutout: '58%',
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: item => {
+                            const value = item.parsed || 0;
+                            const pct = total ? Math.round((value / total) * 100) : 0;
+                            return `${item.label}: ${value} (${pct}%)`;
+                        },
+                    }
+                }
+            },
+        }
+    });
+
+    const legend = document.getElementById('threatTypesLegend');
+    labels.forEach((label, i) => {
+        const value = values[i] || 0;
+        const pct = total ? Math.round((value / total) * 100) : 0;
+        const item = document.createElement('div');
+        item.className = 'threat-legend-item';
+
+        const swatch = document.createElement('span');
+        swatch.className = 'threat-legend-swatch';
+        swatch.style.backgroundColor = colors[i];
+        swatch.setAttribute('aria-hidden', 'true');
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'threat-legend-label';
+        labelEl.textContent = label;
+
+        const valueEl = document.createElement('span');
+        valueEl.className = 'threat-legend-value';
+        valueEl.textContent = value.toLocaleString() + ' (' + pct + '%)';
+
+        item.append(swatch, labelEl, valueEl);
+        legend.appendChild(item);
+    });
+})();
 {% endif %}
 
 // ── Pipeline by status × severity (stacked vertical bar) ──
