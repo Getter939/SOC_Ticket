@@ -17,9 +17,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.incidents import sla as sla_buckets
-
-logger = logging.getLogger(__name__)
-
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, SubtaskForm, SubtaskUpdateForm,
@@ -35,6 +32,8 @@ from .notifications import (
     notify_system_owner_created,
     notify_system_owner_closed,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── Private helpers ──────────────────────────────────────────────────── #

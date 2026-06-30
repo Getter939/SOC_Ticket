@@ -4,10 +4,8 @@ Dashboard tests — Change 5.
 Coverage:
   - Access control: SOC (staff + manager) sees dashboard; system admin is
     redirected; unauthenticated user hits the login redirect.
-  - SLA-breach query: overdue active ticket counted; overdue terminal ticket
-    NOT counted; not-yet-due active ticket NOT counted.
-  - Metrics: active vs closed split, FP/TP counts and percentages, and the
-    who-must-act backlog are correct given known fixture data.
+  - Metrics: active count and retained MTTR stats are correct given known
+    fixture data.
 
 These tests use Django's TestCase (each test wrapped in its own DB
 transaction, rolled back on teardown), so ticket data created in one test
@@ -115,56 +113,11 @@ class DashboardAccessTest(TestCase):
 
 # ── SLA-breach counting tests ────────────────────────────────────────────── #
 
-class DashboardSLABreachTest(TestCase):
-    """
-    Change 2: SLA breach count is pure-DB and excludes terminal tickets.
-
-    Each test creates its own tickets; Django's TestCase rolls them back
-    automatically, so tests are independent.
-    """
-
-    @classmethod
-    def setUpTestData(cls):
-        cls.soc = _make_user('soc_sla', UserProfile.ROLE_SOC_STAFF)
-
-    def _get_sla_count(self):
-        self.client.force_login(self.soc)
-        return self.client.get(DASHBOARD_URL).context['stats']['sla_breaches']
-
-    def test_overdue_active_ticket_is_counted(self):
-        """An active ticket whose sla_deadline is in the past must be counted."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
-        self.assertEqual(self._get_sla_count(), 1)
-
-    def test_overdue_ticket_in_terminal_state_not_counted(self):
-        """A terminal ticket whose sla_deadline is in the past must NOT be counted."""
-        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
-        self.assertEqual(self._get_sla_count(), 0)
-
-    def test_overdue_closed_event_ticket_not_counted(self):
-        """CLOSED_EVENT is also a terminal state — must not appear in SLA breach count."""
-        _make_ticket(status=Ticket.STATUS_CLOSED_EVENT, sla_offset_hours=-1)
-        self.assertEqual(self._get_sla_count(), 0)
-
-    def test_not_yet_due_active_ticket_not_counted(self):
-        """An active ticket with sla_deadline still in the future must NOT be counted."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=24)
-        self.assertEqual(self._get_sla_count(), 0)
-
-    def test_mixed_tickets_only_active_overdue_counted(self):
-        """Only the overdue-and-active subset contributes to the breach count."""
-        _make_ticket(status=Ticket.STATUS_NEW,      sla_offset_hours=-2)   # counted
-        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-2)   # NOT counted (terminal)
-        _make_ticket(status=Ticket.STATUS_NEW,      sla_offset_hours=48)   # NOT counted (future)
-        self.assertEqual(self._get_sla_count(), 1)
-
-
 # ── Metrics accuracy tests ───────────────────────────────────────────────── #
 
 class DashboardMetricsTest(TestCase):
     """
-    Change 3: active/closed split, FP/TP counts, and actionable backlog
-    all match the known fixture data.
+    The slim dashboard stats block keeps only the active count plus MTTR.
     """
 
     @classmethod
@@ -178,7 +131,7 @@ class DashboardMetricsTest(TestCase):
     # ── active / closed split ──────────────────────────────────────────── #
 
     def test_active_vs_closed_split(self):
-        """active = non-terminal; closed = APPROVED + CLOSED_EVENT."""
+        """active = non-terminal; terminal tickets are excluded."""
         _make_ticket(status=Ticket.STATUS_NEW)                  # active
         _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT) # active
         _make_ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED) # active
@@ -187,90 +140,19 @@ class DashboardMetricsTest(TestCase):
 
         s = self._stats()
         self.assertEqual(s['active'], 3)
-        self.assertEqual(s['closed'], 2)
-        self.assertEqual(s['total'],  5)
 
     def test_all_active_no_closed(self):
         _make_ticket(status=Ticket.STATUS_NEW)
         _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
         s = self._stats()
         self.assertEqual(s['active'], 2)
-        self.assertEqual(s['closed'], 0)
-        self.assertEqual(s['total'],  2)
-
-    # ── Event/Incident counts and percentages ──────────────────────────── #
-
-    def test_incident_event_counts_and_percentages(self):
-        """2 Incident + 1 Event → tp_pct=67 (Incident), fp_pct=33 (Event)."""
-        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
-        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
-        _make_ticket(classification=Ticket.CLASSIFICATION_EVENT,    status=Ticket.STATUS_CLOSED_EVENT)
-        _make_ticket(status=Ticket.STATUS_NEW)  # unclassified — not counted in ratio
-
-        s = self._stats()
-        self.assertEqual(s['tp_count'], 2)
-        self.assertEqual(s['fp_count'], 1)
-        self.assertEqual(s['tp_pct'],  67)
-        self.assertEqual(s['fp_pct'],  33)
-
-    def test_counts_zero_when_no_classifications(self):
-        """No closed/classified tickets → all zeros; no ZeroDivisionError."""
-        _make_ticket(status=Ticket.STATUS_NEW)
-        s = self._stats()
-        self.assertEqual(s['tp_count'], 0)
-        self.assertEqual(s['fp_count'], 0)
-        self.assertEqual(s['tp_pct'],  0)
-        self.assertEqual(s['fp_pct'],  0)
-
-    def test_all_incident(self):
-        """100% Incident: fp_count=0, tp_pct=100, fp_pct=0."""
-        _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT, status=Ticket.STATUS_APPROVED)
-        s = self._stats()
-        self.assertEqual(s['tp_count'], 1)
-        self.assertEqual(s['fp_count'], 0)
-        self.assertEqual(s['tp_pct'],  100)
-        self.assertEqual(s['fp_pct'],  0)
-
-    # ── Actionable backlog ─────────────────────────────────────────────── #
-
-    def test_actionable_backlog_correct(self):
-        """
-        awaiting_admin   = AWAITING_CONTAINMENT count
-        awaiting_soc     = CONTAINMENT_REPORTED + T1_REVIEW + ESCALATED_T2
-        awaiting_manager = PENDING_MANAGER
-        """
-        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)  # → admin (×2)
-        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
-        _make_ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)  # → soc (×1)
-        _make_ticket(status=Ticket.STATUS_T1_REVIEW)             # → soc (×1)
-        _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)       # → manager (×1)
-        _make_ticket(status=Ticket.STATUS_NEW)                   # counted nowhere
-
-        s = self._stats()
-        self.assertEqual(s['awaiting_admin'],   2)
-        self.assertEqual(s['awaiting_soc'],     2)
-        self.assertEqual(s['awaiting_manager'], 1)
-
-    def test_backlog_zero_when_no_tickets(self):
-        """All backlog counters are 0 when there are no tickets."""
-        s = self._stats()
-        self.assertEqual(s['awaiting_admin'],   0)
-        self.assertEqual(s['awaiting_soc'],     0)
-        self.assertEqual(s['awaiting_manager'], 0)
-
 
 # ── Enterprise KPI tests (corrected logic) ───────────────────────────────── #
 
 class DashboardEnterpriseKPITest(TestCase):
     """
-    Corrected enterprise KPIs added to the dashboard stats block:
-      - sla_compliance_rate (100% / 0% / None)
-      - sla_breach_live (live against-deadline, not time-to-file)
-      - sla_at_risk
+    MTTR values retained in the slim dashboard stats block:
       - mttr_median / mttr_mean / mttr_n
-      - backlog_aging buckets
-      - assignee_workload
-      - severity_breakdown
     """
 
     @classmethod
@@ -305,57 +187,6 @@ class DashboardEnterpriseKPITest(TestCase):
         )
         TicketLog.objects.filter(pk=log.pk).update(created_at=resolved_at)
         return ticket
-
-    # ── sla_compliance_rate ────────────────────────────────────────────── #
-
-    def test_compliance_rate_100(self):
-        """Resolved before deadline → 100%."""
-        now = timezone.now()
-        t = _make_ticket(status=Ticket.STATUS_NEW)
-        # resolved an hour before the deadline
-        self._resolve(t, resolved_at=now - timedelta(hours=2),
-                      sla_deadline=now - timedelta(hours=1))
-        self.assertEqual(self._stats()['sla_compliance_rate'], 100.0)
-
-    def test_compliance_rate_0(self):
-        """Resolved after deadline → 0%."""
-        now = timezone.now()
-        t = _make_ticket(status=Ticket.STATUS_NEW)
-        # resolved an hour AFTER the deadline
-        self._resolve(t, resolved_at=now - timedelta(hours=1),
-                      sla_deadline=now - timedelta(hours=2))
-        self.assertEqual(self._stats()['sla_compliance_rate'], 0.0)
-
-    def test_compliance_rate_none_when_no_resolved(self):
-        """No resolved tickets → None (no ZeroDivisionError)."""
-        _make_ticket(status=Ticket.STATUS_NEW)   # active only
-        self.assertIsNone(self._stats()['sla_compliance_rate'])
-
-    # ── sla_breach_live ────────────────────────────────────────────────── #
-
-    def test_breach_live_counts_overdue_active(self):
-        """Active ticket whose deadline is in the past is counted live."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
-        self.assertEqual(self._stats()['sla_breach_live'], 1)
-
-    def test_breach_live_ignores_future_deadline(self):
-        """Active ticket whose deadline is still in the future is not counted."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=6)
-        self.assertEqual(self._stats()['sla_breach_live'], 0)
-
-    def test_breach_live_ignores_terminal(self):
-        """A resolved/terminal ticket past deadline is not a live breach."""
-        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
-        self.assertEqual(self._stats()['sla_breach_live'], 0)
-
-    # ── sla_at_risk ────────────────────────────────────────────────────── #
-
-    def test_at_risk_within_4h_window(self):
-        """Active, not breached, deadline within next 4h → at risk."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)    # at risk
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # too far out
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # already breached
-        self.assertEqual(self._stats()['sla_at_risk'], 1)
 
     # ── MTTR ───────────────────────────────────────────────────────────── #
 
@@ -392,64 +223,6 @@ class DashboardEnterpriseKPITest(TestCase):
         self.assertEqual(s['mttr_n'], 0)
         self.assertIsNone(s['mttr_median'])
         self.assertIsNone(s['mttr_mean'])
-
-    # ── backlog_aging ──────────────────────────────────────────────────── #
-
-    def test_backlog_aging_one_per_bucket(self):
-        """One active ticket lands in each of fresh / aging / stale."""
-        now = timezone.now()
-        fresh = _make_ticket(status=Ticket.STATUS_NEW)   # ~now → fresh
-        aging = _make_ticket(status=Ticket.STATUS_NEW)
-        stale = _make_ticket(status=Ticket.STATUS_NEW)
-        Ticket.objects.filter(pk=aging.pk).update(
-            created_at=now - timedelta(days=2))          # 1–3d → aging
-        Ticket.objects.filter(pk=stale.pk).update(
-            created_at=now - timedelta(days=5))          # >3d → stale
-
-        buckets = self._stats()['backlog_aging']
-        self.assertEqual(buckets['fresh'], 1)
-        self.assertEqual(buckets['aging'], 1)
-        self.assertEqual(buckets['stale'], 1)
-
-    # ── assignee_workload ──────────────────────────────────────────────── #
-
-    def test_assignee_workload(self):
-        """Open + breached counts per assignee, sorted by open desc."""
-        from django.contrib.auth.models import User
-        analyst = User.objects.create_user(
-            username='kpi_analyst', password='pw',
-            first_name='Ada', last_name='Lovelace')
-
-        t1 = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)  # breached
-        t2 = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=6)   # ok
-        Ticket.objects.filter(pk__in=[t1.pk, t2.pk]).update(assigned_to=analyst)
-
-        workload = self._stats()['assignee_workload']
-        self.assertEqual(len(workload), 1)
-        row = workload[0]
-        self.assertEqual(row['name'], 'Ada Lovelace')
-        self.assertEqual(row['open'], 2)
-        self.assertEqual(row['breached'], 1)
-
-    # ── severity_breakdown ─────────────────────────────────────────────── #
-
-    def test_severity_breakdown_sorted_critical_first(self):
-        """Active tickets grouped by severity, critical first."""
-        _make_ticket(status=Ticket.STATUS_NEW)                       # default High
-        low = _make_ticket(status=Ticket.STATUS_NEW)
-        crit = _make_ticket(status=Ticket.STATUS_NEW)
-        Ticket.objects.filter(pk=low.pk).update(severity='Low')
-        Ticket.objects.filter(pk=crit.pk).update(severity='Critical')
-
-        breakdown = self._stats()['severity_breakdown']
-        labels = [b['label'] for b in breakdown]
-        self.assertEqual(labels[0], 'Critical')      # highest rank first
-        self.assertEqual(labels[-1], 'Low')          # lowest rank last
-        counts = {b['label']: b['count'] for b in breakdown}
-        self.assertEqual(counts['Critical'], 1)
-        self.assertEqual(counts['High'], 1)
-        self.assertEqual(counts['Low'], 1)
-
 
 # ── Management dashboard (Session 3) — template + context tests ──────────── #
 
