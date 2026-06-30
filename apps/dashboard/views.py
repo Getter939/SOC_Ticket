@@ -601,4 +601,11 @@ def dashboard(request):
             'status':     status_filter,
             'severity':   severity_filter,
         },
+        # SOC managers are scoped to their own queue in the ticket list, so the
+        # SLA deep-link can land on a shorter list than the team-wide chart
+        # counts. Flag it so the template can note the difference (managers only).
+        'is_manager_view': bool(
+            profile and not request.user.is_superuser
+            and getattr(profile, 'is_soc_manager', False)
+        ),
     })

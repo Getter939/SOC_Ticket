@@ -336,6 +336,11 @@
                 <canvas id="chartSla" role="img"
                         aria-label="คดีที่กำลังดำเนินการแยกตามเวลาที่เหลือก่อนครบกำหนด SLA"></canvas>
             </div>
+            {% if is_manager_view %}
+            <div class="text-muted mt-2" style="font-size:11px;">
+                <i class="bi bi-info-circle me-1"></i>นับจากทั้งทีม — รายการที่เปิดจะแสดงเฉพาะคิวที่รอผู้จัดการตรวจสอบ
+            </div>
+            {% endif %}
             <table class="visually-hidden">
                 <caption>Active tickets by time to SLA deadline</caption>
                 <thead><tr><th>สถานะ SLA</th><th>จำนวน</th></tr></thead>
@@ -503,6 +508,20 @@
     // Initial state mirrors the server default: severity DESC, created DESC tiebreak.
     let sortKey = 'sev', sortNum = true, sortDir = 'desc', page = 1;
 
+    // Restore the manager's sort/page so the dashboard auto-refresh (a full
+    // page reload) doesn't bounce the table back to defaults. Per-tab session.
+    const STORE_KEY = 'recentCasesTableState';
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(STORE_KEY) || '{}');
+        const savedTh = headers.find(th => th.dataset.key === saved.sortKey);
+        if (savedTh) {
+            sortKey = saved.sortKey;
+            sortNum = savedTh.dataset.num === '1';
+            sortDir = saved.sortDir === 'asc' ? 'asc' : 'desc';
+        }
+        if (Number.isInteger(saved.page) && saved.page > 0) page = saved.page;
+    } catch (e) { /* malformed/unavailable storage — fall back to defaults */ }
+
     const val = (tr, key, num) => {
         const v = tr.dataset[key] || '';
         return num ? (parseFloat(v) || 0) : v.toLowerCase();
@@ -545,6 +564,11 @@
             th.querySelector('.sort-ind').textContent =
                 active ? (sortDir === 'desc' ? '▼' : '▲') : '';
         });
+
+        // Persist so a reload (incl. the auto-refresh) restores this view.
+        try {
+            sessionStorage.setItem(STORE_KEY, JSON.stringify({ sortKey, sortDir, page }));
+        } catch (e) { /* storage unavailable — non-fatal */ }
     }
 
     function sortByHeader(th) {
@@ -576,7 +600,7 @@
 <!-- Quiet dashboard auto-refresh. Skips hidden tabs and active interactions. -->
 <script>
 (function () {
-    const AUTO_REFRESH_MS = 120000;
+    const AUTO_REFRESH_MS = 300000;
     const IDLE_GRACE_MS = 15000;
     const interactiveSelector = [
         'a', 'button', 'input', 'select', 'textarea',

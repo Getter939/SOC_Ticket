@@ -524,9 +524,30 @@ class DashboardManagementViewTest(TestCase):
         """The dashboard refreshes periodically without interrupting hidden tabs."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
-        self.assertIn('const AUTO_REFRESH_MS = 120000', html)
+        self.assertIn('const AUTO_REFRESH_MS = 300000', html)
         self.assertIn("document.visibilityState !== 'visible'", html)
         self.assertIn('window.location.reload()', html)
+
+    def test_recent_cases_table_persists_state_across_reload(self):
+        """The detail table saves its sort/page so the auto-refresh reload
+        doesn't reset the manager's view back to defaults."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertIn("recentCasesTableState", html)
+        self.assertIn("sessionStorage.setItem(STORE_KEY", html)
+        self.assertIn("sessionStorage.getItem(STORE_KEY", html)
+
+    def test_sla_scope_note_shown_only_to_managers(self):
+        """The 'team-wide count, queue-scoped list' SLA note appears for SOC
+        managers (whose deep-linked list is restricted) but not other roles."""
+        note = 'นับจากทั้งทีม'
+        _make_ticket(status=Ticket.STATUS_NEW)
+        # SOC staff (self.soc) — list isn't restricted, so no note.
+        self.assertNotIn(note, self._get().content.decode())
+        # SOC manager — list is scoped to their queue, so the note shows.
+        mgr = _make_user('soc_mgr_note', UserProfile.ROLE_SOC_MANAGER)
+        self.client.force_login(mgr)
+        self.assertIn(note, self.client.get(DASHBOARD_URL).content.decode())
 
     def test_pipeline_chart_renders(self):
         """Pipeline stacked-bar replaces the MTTR chart in Row 3L."""
