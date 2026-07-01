@@ -10,7 +10,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Q
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -256,8 +256,11 @@ def ticket_list(request):
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
+    # Live SLA breach: active ticket whose absolute deadline is already past
+    # (vs now() — sla_deadline is created_at + 4h, so the old < created_at test
+    # never matched).
     sla_breach_count = visible.filter(
-        sla_deadline__lt=F('created_at')
+        sla_deadline__lt=timezone.now()
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
 
     return render(request, 'incidents/ticket_list.html', {
@@ -1056,11 +1059,15 @@ def system_owner_dashboard(request):
     active_qs  = my_tickets.exclude(status__in=terminal)
     closed_qs  = my_tickets.filter(status__in=terminal)
 
+    # Live SLA breach: active ticket whose absolute deadline is already past.
+    # (Comparing to now(), not created_at — sla_deadline is created_at + 4h, so
+    # the old sla_deadline < created_at test was always false.)
+    now = timezone.now()
     stats = {
         'total':          my_tickets.count(),
         'active':         active_qs.count(),
         'closed':         closed_qs.count(),
-        'sla_breaches':   active_qs.filter(sla_deadline__lt=F('created_at')).count(),
+        'sla_breaches':   active_qs.filter(sla_deadline__lt=now).count(),
     }
 
     emergency_filter = request.GET.get('emergency', '').strip()
