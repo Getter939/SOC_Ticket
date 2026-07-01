@@ -36,15 +36,15 @@ def _make_user(username, role, email=''):
 
 def _make_ticket(
     status=Ticket.STATUS_NEW,
-    sla_offset_hours=None,
+    ola_offset_hours=None,
     classification='',
 ):
     """
     Create a Ticket directly (bypassing the state machine).
 
-    sla_offset_hours — if given, overrides the auto-set sla_deadline.
+    ola_offset_hours — if given, overrides the auto-set ola_contain_deadline.
       Positive = future (not breached); negative = past (breached).
-      If not given, Ticket.save() auto-sets sla_deadline = now + 48 h.
+      If not given, Ticket.save() auto-sets ola_contain_deadline = now + 48 h.
     """
     kwargs = {
         'device_name':      '192.168.1.1',
@@ -53,8 +53,8 @@ def _make_ticket(
         'status':           status,
         'classification':   classification,
     }
-    if sla_offset_hours is not None:
-        kwargs['sla_deadline'] = timezone.now() + timedelta(hours=sla_offset_hours)
+    if ola_offset_hours is not None:
+        kwargs['ola_contain_deadline'] = timezone.now() + timedelta(hours=ola_offset_hours)
     return Ticket.objects.create(**kwargs)
 
 
@@ -111,7 +111,7 @@ class DashboardAccessTest(TestCase):
         self.assertTemplateUsed(response, 'dashboard/dashboard.html')
 
 
-# ── SLA-breach counting tests ────────────────────────────────────────────── #
+# ── OLA-breach counting tests ────────────────────────────────────────────── #
 
 # ── Metrics accuracy tests ───────────────────────────────────────────────── #
 
@@ -163,17 +163,17 @@ class DashboardEnterpriseKPITest(TestCase):
         self.client.force_login(self.soc)
         return self.client.get(DASHBOARD_URL).context['stats']
 
-    def _resolve(self, ticket, resolved_at, sla_deadline):
+    def _resolve(self, ticket, resolved_at, ola_contain_deadline):
         """
         Drive a ticket into a terminal state with a known resolution time.
 
         Writes a TicketLog row (the dashboard derives resolution time from the
-        first terminal-status log entry) and pins created_at / sla_deadline.
+        first terminal-status log entry) and pins created_at / ola_contain_deadline.
         created_at is forced via queryset .update() to bypass auto_now_add.
         """
         from apps.incidents.models import TicketLog
         ticket.status = Ticket.STATUS_APPROVED
-        ticket.sla_deadline = sla_deadline
+        ticket.ola_contain_deadline = ola_contain_deadline
         ticket.save()
         # Pin created_at (auto_now_add ignores assignment on save)
         Ticket.objects.filter(pk=ticket.pk).update(
@@ -197,11 +197,11 @@ class DashboardEnterpriseKPITest(TestCase):
         t2 = _make_ticket(status=Ticket.STATUS_NEW)
         # _resolve sets created_at = resolved_at - 2h, giving a 2.0h MTTR.
         self._resolve(t1, resolved_at=now - timedelta(days=1),
-                      sla_deadline=now)
+                      ola_contain_deadline=now)
         # For t2 craft a 4h gap explicitly.
         from apps.incidents.models import TicketLog
         t2.status = Ticket.STATUS_APPROVED
-        t2.sla_deadline = now
+        t2.ola_contain_deadline = now
         t2.save()
         resolved2 = now - timedelta(days=2)
         Ticket.objects.filter(pk=t2.pk).update(
@@ -282,13 +282,13 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Grace Hopper', html)
 
     def test_category_sections_render_even_without_data(self):
-        """Pipeline, SLA pressure, and the trend/table sections all render."""
+        """Pipeline, OLA pressure, and the trend/table sections all render."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertNotIn('Avg MTTR by Category', html)   # removed in Session 3C
-        # The redundant resolved-by-category chart was replaced by SLA pressure.
+        # The redundant resolved-by-category chart was replaced by OLA pressure.
         self.assertNotIn('Resolved Tickets by Incident Category', html)
-        self.assertIn('SLA Pressure', html)
+        self.assertIn('OLA Pressure', html)
         self.assertIn('Threat Types', html)              # the kept category chart
         self.assertIn('Daily Case Volume', html)
         self.assertIn('Recent Active Cases', html)
@@ -310,8 +310,8 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn("sessionStorage.setItem(STORE_KEY", html)
         self.assertIn("sessionStorage.getItem(STORE_KEY", html)
 
-    def test_sla_scope_note_shown_only_to_managers(self):
-        """The 'team-wide count, queue-scoped list' SLA note appears for SOC
+    def test_ola_scope_note_shown_only_to_managers(self):
+        """The 'team-wide count, queue-scoped list' OLA note appears for SOC
         managers (whose deep-linked list is restricted) but not other roles."""
         note = 'นับจากทั้งทีม'
         _make_ticket(status=Ticket.STATUS_NEW)
@@ -429,7 +429,7 @@ class DashboardManagementViewTest(TestCase):
         self.assertEqual(ctx['active_total'], 2)
 
     def test_critical_soonest_deadline_structure(self):
-        t = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)
+        t = _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=2)
         Ticket.objects.filter(pk=t.pk).update(severity='Critical')
         d = self._get().context['critical_soonest_deadline']
         self.assertIsNotNone(d)
@@ -440,40 +440,40 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
         self.assertIsNone(self._get().context['critical_soonest_deadline'])
 
-    def test_sla_pressure_buckets_active_by_deadline(self):
+    def test_ola_pressure_buckets_active_by_deadline(self):
         """Active tickets land in the correct time-to-deadline bucket."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # overdue
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=0.5)  # due ≤1h
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=2)    # due 1–4h
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # on-track
-        buckets = {b['key']: b['count'] for b in self._get().context['sla_pressure']}
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)   # overdue
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=0.5)  # due ≤1h
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=2)    # due 1–4h
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=10)   # on-track
+        buckets = {b['key']: b['count'] for b in self._get().context['ola_pressure']}
         self.assertEqual(buckets['overdue'], 1)
         self.assertEqual(buckets['due_1h'], 1)
         self.assertEqual(buckets['due_4h'], 1)
         self.assertEqual(buckets['on_track'], 1)
 
-    def test_sla_pressure_counts_active_only(self):
+    def test_ola_pressure_counts_active_only(self):
         """Terminal tickets are excluded, even if their deadline is in the past."""
-        _make_ticket(status=Ticket.STATUS_APPROVED, sla_offset_hours=-1)
-        buckets = {b['key']: b['count'] for b in self._get().context['sla_pressure']}
+        _make_ticket(status=Ticket.STATUS_APPROVED, ola_offset_hours=-1)
+        buckets = {b['key']: b['count'] for b in self._get().context['ola_pressure']}
         self.assertEqual(sum(buckets.values()), 0)
 
-    def test_sla_pressure_severity_breakdown(self):
+    def test_ola_pressure_severity_breakdown(self):
         """Each bucket carries its per-severity mix (for the tooltip / sub-label)."""
-        t = _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)
+        t = _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)
         Ticket.objects.filter(pk=t.pk).update(severity='Critical')
-        overdue = next(b for b in self._get().context['sla_pressure']
+        overdue = next(b for b in self._get().context['ola_pressure']
                        if b['key'] == 'overdue')
         self.assertEqual(overdue['count'], 1)
         sevs = {s['label']: s['count'] for s in overdue['severities']}
         self.assertEqual(sevs.get('Critical'), 1)
 
-    def test_sla_attention_is_overdue_plus_due_1h(self):
+    def test_ola_attention_is_overdue_plus_due_1h(self):
         """Headline 'need attention' count = overdue + due-within-1h (not on-track)."""
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=-1)   # overdue
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=0.5)  # due ≤1h
-        _make_ticket(status=Ticket.STATUS_NEW, sla_offset_hours=10)   # on-track
-        self.assertEqual(self._get().context['sla_attention'], 2)
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)   # overdue
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=0.5)  # due ≤1h
+        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=10)   # on-track
+        self.assertEqual(self._get().context['ola_attention'], 2)
 
     # ── Filters still scope the active counts ──────────────────────────── #
 
@@ -488,7 +488,7 @@ class DashboardManagementViewTest(TestCase):
         Ticket.objects.bulk_create([
             Ticket(ticket_id=f'BULK{i:05d}', device_name='d', ip_address='10.0.0.1',
                    issue_description='x', status=Ticket.STATUS_NEW,
-                   sla_deadline=timezone.now() + timedelta(hours=5))
+                   ola_contain_deadline=timezone.now() + timedelta(hours=5))
             for i in range(1000)
         ])
         self.assertIn('1,000', self._get().content.decode())

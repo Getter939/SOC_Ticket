@@ -227,7 +227,7 @@ class Command(BaseCommand):
         detailed_issue  = random.choice(DETAILED_ISSUE_POOL)
         detailed_issue2 = random.choice(DETAILED_ISSUE2_POOL)
 
-        # Create via ORM — save() auto-mints ticket_id and sla_deadline.
+        # Create via ORM — save() auto-mints ticket_id and ola_deadline.
         # Do NOT call transition_to(); it enforces role checks and would reject
         # most direct state assignments.
         ticket = Ticket.objects.create(

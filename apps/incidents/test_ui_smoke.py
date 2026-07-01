@@ -48,7 +48,7 @@ class UiSmokeTest(TestCase):
     def test_ticket_list_renders_with_filters(self):
         self.client.force_login(self.soc_staff)
         resp = self.client.get(reverse('ticket_list'), {
-            'q': 'Test', 'severity': 'Critical', 'sort': 'sla',
+            'q': 'Test', 'severity': 'Critical', 'sort': 'ola',
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.ticket.ticket_id)

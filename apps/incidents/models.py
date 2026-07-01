@@ -500,7 +500,10 @@ class Ticket(models.Model):
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name='วันที่อนุมัติ')
 
     update_notes = models.TextField(blank=True, null=True, verbose_name='บันทึกการติดตามงาน')
-    sla_deadline = models.DateTimeField(null=True, blank=True, verbose_name='SLA Deadline')
+    ola_triage_deadline = models.DateTimeField(
+        null=True, blank=True, verbose_name='OLA Triage Deadline')
+    ola_contain_deadline = models.DateTimeField(
+        null=True, blank=True, verbose_name='OLA Contain Deadline')
     # Reporting channel the incident arrived through. Shares SOURCE_CHOICES
     # with TriageRecord.source so a manual-triage record maps straight onto the
     # ticket it creates.
@@ -538,7 +541,18 @@ class Ticket(models.Model):
         help_text='created_at − wazuh_alert.ingested_at, stamped once at creation.',
     )
 
-    SLA_HOURS = 4
+    # OLA policy per severity: (triage_target, contain_target).
+    #   triage  = time to raise/send the ticket (measured from incident time).
+    #   contain = time to resolve; None = notification-only (no resolve deadline).
+    # Unknown mirrors Critical. This dict is the single place to change the OLA
+    # policy values.
+    OLA_TARGETS = {
+        'Critical': (timedelta(minutes=30), timedelta(hours=4)),
+        'High':     (timedelta(hours=2),    timedelta(hours=24)),
+        'Medium':   (timedelta(hours=24),   None),
+        'Low':      (timedelta(hours=24),   None),
+        'Unknown':  (timedelta(minutes=30), timedelta(hours=4)),
+    }
 
     # ------------------------------------------------------------------ #
     # Properties                                                          #
@@ -576,28 +590,43 @@ class Ticket(models.Model):
         return severity_meets_floor or self.is_emergency
 
     @property
-    def is_sla_breached(self):
+    def is_ola_triage_breached(self):
         """
-        SLA clock stops once the ticket is issued (created) — containment
-        progress afterwards no longer affects this. Breach is therefore a
-        fixed fact about whether the ticket was raised within SLA, not a
-        live countdown against now().
+        Triage OLA: was the ticket raised later than its triage/send deadline?
+        Fixed at issue time (created_at), not a live countdown against now().
         """
-        if self.sla_deadline and self.created_at:
-            return self.created_at > self.sla_deadline
+        if self.ola_triage_deadline and self.created_at:
+            return self.created_at > self.ola_triage_deadline
+        return False
+
+    # Backwards-compatible alias — "OLA breached" has always meant the
+    # raise-in-time (triage) breach that templates highlight.
+    @property
+    def is_ola_breached(self):
+        return self.is_ola_triage_breached
+
+    @property
+    def is_ola_contain_breached(self):
+        """
+        Contain OLA: an active ticket now past its contain/resolve deadline
+        (live vs now()). False when there is no contain deadline (Medium/Low
+        are notification-only) or the ticket is already terminal.
+        """
+        if self.ola_contain_deadline and self.status not in self.TERMINAL_STATUSES:
+            return timezone.now() > self.ola_contain_deadline
         return False
 
     @property
-    def sla_remaining(self):
-        """Time margin left at the moment the ticket was issued (fixed, not live)."""
-        if self.sla_deadline and self.created_at:
-            return self.sla_deadline - self.created_at
+    def ola_remaining(self):
+        """Triage margin left at the moment the ticket was issued (fixed, not live)."""
+        if self.ola_triage_deadline and self.created_at:
+            return self.ola_triage_deadline - self.created_at
         return None
 
     @property
-    def is_sla_urgent(self):
-        """Issued within SLA, but with less than 1 hour of margin to spare."""
-        remaining = self.sla_remaining
+    def is_ola_urgent(self):
+        """Triaged within OLA, but with less than 1 hour of margin to spare."""
+        remaining = self.ola_remaining
         if remaining is None:
             return False
         return timedelta() < remaining <= timedelta(hours=1)
@@ -613,11 +642,17 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
 
     def save(self, *args, **kwargs):
-        if not self.pk and not self.sla_deadline:
-            # SLA clock starts when the alert/incident occurred, not when
-            # the ticket is filed — fall back to now() if T1 left it blank.
+        if not self.pk:
+            # OLA clocks start when the alert/incident occurred, not when the
+            # ticket is filed — fall back to now() if T1 left it blank. Targets
+            # are per-severity (OLA_TARGETS); Medium/Low have no contain target.
             base_time = self.incident_datetime or timezone.now()
-            self.sla_deadline = base_time + timedelta(hours=self.SLA_HOURS)
+            triage_target, contain_target = self.OLA_TARGETS.get(
+                self.severity, self.OLA_TARGETS['Unknown'])
+            if not self.ola_triage_deadline and triage_target is not None:
+                self.ola_triage_deadline = base_time + triage_target
+            if not self.ola_contain_deadline and contain_target is not None:
+                self.ola_contain_deadline = base_time + contain_target
 
         if not self.pk and not self.status_changed_at:
             # A brand-new ticket enters its initial status now; seed the

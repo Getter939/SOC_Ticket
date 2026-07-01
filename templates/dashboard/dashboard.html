@@ -322,19 +322,19 @@
         </div>
     </div>
 
-    <!-- 3R — SLA pressure: active queue bucketed by time-to-deadline -->
+    <!-- 3R — OLA pressure: active queue bucketed by time-to-deadline -->
     <div class="col-md-6">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
-                <i class="bi bi-stopwatch me-1"></i>SLA Pressure — สถานะ SLA ของคดีที่กำลังดำเนินการ
+                <i class="bi bi-stopwatch me-1"></i>OLA Pressure — สถานะ OLA ของคดีที่กำลังดำเนินการ
             </div>
             {% if stats.active %}
             <div class="text-muted mb-2" style="font-size:12px;">
-                {{ stats.active|intcomma }} active · {{ sla_attention|intcomma }} need attention (overdue + ≤1h)
+                {{ stats.active|intcomma }} active · {{ ola_attention|intcomma }} need attention (overdue + ≤1h)
             </div>
             <div style="height:230px;">
-                <canvas id="chartSla" role="img"
-                        aria-label="คดีที่กำลังดำเนินการแยกตามเวลาที่เหลือก่อนครบกำหนด SLA"></canvas>
+                <canvas id="chartOla" role="img"
+                        aria-label="คดีที่กำลังดำเนินการแยกตามเวลาที่เหลือก่อนครบกำหนด OLA"></canvas>
             </div>
             {% if is_manager_view %}
             <div class="text-muted mt-2" style="font-size:11px;">
@@ -342,10 +342,10 @@
             </div>
             {% endif %}
             <table class="visually-hidden">
-                <caption>Active tickets by time to SLA deadline</caption>
-                <thead><tr><th>สถานะ SLA</th><th>จำนวน</th></tr></thead>
+                <caption>Active tickets by time to OLA deadline</caption>
+                <thead><tr><th>สถานะ OLA</th><th>จำนวน</th></tr></thead>
                 <tbody>
-                    {% for b in sla_pressure %}
+                    {% for b in ola_pressure %}
                     <tr><td>{{ b.label }}</td><td>{{ b.count }}</td></tr>
                     {% endfor %}
                 </tbody>
@@ -636,7 +636,7 @@
 {{ by_category_labels|json_script:"by-category-labels" }}
 {{ by_category_data|json_script:"by-category-data" }}
 {{ pipeline_by_severity|json_script:"pipeline-by-severity" }}
-{{ sla_pressure|json_script:"sla-pressure" }}
+{{ ola_pressure|json_script:"ola-pressure" }}
 {{ daily_trend_labels|json_script:"daily-labels" }}
 {{ daily_trend_data|json_script:"daily-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -799,15 +799,15 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
     });
 })();
 
-// ── SLA pressure (active queue by time-to-deadline, urgency ramp) ──
+// ── OLA pressure (active queue by time-to-deadline, urgency ramp) ──
 {% if stats.active %}
 (function () {
-    const rows = readJSON('sla-pressure');
+    const rows = readJSON('ola-pressure');
     const data = rows.map(r => r.count);
 
     // Draw the count at the end of each bar. Severity mix lives in the tooltip.
     const endLabel = {
-        id: 'slaEnd',
+        id: 'olaEnd',
         afterDatasetsDraw(chart) {
             const { ctx, scales: { x, y } } = chart;
             ctx.save();
@@ -823,7 +823,7 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
         }
     };
 
-    new Chart(document.getElementById('chartSla'), {
+    new Chart(document.getElementById('chartOla'), {
         type: 'bar',
         data: {
             labels: rows.map(r => r.label),
@@ -837,10 +837,10 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
             indexAxis: 'y',
             responsive: true,
             layout: { padding: { right: 36 } },
-            // Click a bar → open the ticket list filtered to that SLA bucket.
+            // Click a bar → open the ticket list filtered to that OLA bucket.
             onClick: (evt, els) => {
                 if (els.length) window.location =
-                    "{% url 'ticket_list' %}?sla=" + rows[els[0].index].key;
+                    "{% url 'ticket_list' %}?ola=" + rows[els[0].index].key;
             },
             onHover: (evt, els) => {
                 evt.native.target.style.cursor = els.length ? 'pointer' : 'default';

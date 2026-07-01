@@ -41,8 +41,8 @@
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100 p-3">
-            <div class="text-muted small fw-bold mb-1">เกิน SLA</div>
-            <div class="fs-2 fw-bold text-danger">{{ stats.sla_breaches }}</div>
+            <div class="text-muted small fw-bold mb-1">เกิน OLA</div>
+            <div class="fs-2 fw-bold text-danger">{{ stats.ola_breaches }}</div>
         </div>
     </div>
 </div>
@@ -67,7 +67,7 @@
                     </thead>
                     <tbody>
                         {% for t in recent_tickets %}
-                        <tr class="{% if t.is_sla_breached %}table-danger{% endif %}">
+                        <tr class="{% if t.is_ola_breached %}table-danger{% endif %}">
                             <td>
                                 <a href="{% url 'ticket_detail' t.pk %}" class="font-monospace fw-bold text-primary">
                                     #{{ t.ticket_id }}

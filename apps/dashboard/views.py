@@ -9,17 +9,18 @@ from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import render
 from django.utils import timezone
 
-from apps.incidents import sla as sla_buckets
+from apps.incidents import ola as ola_buckets
 from apps.incidents.models import Ticket, TicketLog
 
 # ====================================================================== #
 # Data-model facts this view relies on (verified against                 #
 # apps/incidents/models.py — keep in sync if the model changes):         #
 #                                                                        #
-#   a) SLA deadline   → Ticket.sla_deadline (DateTimeField). Auto-set in #
-#      Ticket.save() to (incident_datetime or now()) + SLA_HOURS (4h).   #
-#      It is an absolute resolution deadline, so "breach" = now() past   #
-#      it while still active.                                            #
+#   a) OLA deadlines  → Ticket.ola_triage_deadline (raise-in-time) and    #
+#      Ticket.ola_contain_deadline (resolve). Auto-set in Ticket.save()   #
+#      from (incident_datetime or now()) + per-severity Ticket.OLA_TARGETS.#
+#      This view buckets on the CONTAIN deadline; Medium/Low have none    #
+#      (notification-only) and are excluded from the pressure chart.      #
 #   b) Resolution time→ there is NO resolved_at/closed_at field. The     #
 #      authoritative "moved to a terminal state" timestamp is the first  #
 #      TicketLog row whose status_at_time is in TERMINAL_STATUSES        #
@@ -46,8 +47,8 @@ from apps.incidents.models import Ticket, TicketLog
 #   Non-terminal = the first 6; terminal = {APPROVED, CLOSED_EVENT}.     #
 #   Threat type → Ticket.detailed_issue (DETAILED_ISSUE_CHOICES); source #
 #     channel → issue_type. (The Event/Incident axis is classification.)  #
-#   Containment deadline → NONE. The only deadline field is sla_deadline #
-#     (there is no separate containment_deadline).                       #
+#   Containment deadline → Ticket.ola_contain_deadline (per-severity;     #
+#     null for Medium/Low = notification-only).                          #
 # ====================================================================== #
 
 @login_required
@@ -225,16 +226,16 @@ def dashboard(request):
     active_critical = active_qs.filter(severity='Critical').count()  # highest rank
 
     crit_soonest = (
-        active_qs.filter(severity='Critical', sla_deadline__isnull=False)
-        .order_by('sla_deadline')
-        .values('ticket_id', 'sla_deadline')
+        active_qs.filter(severity='Critical', ola_contain_deadline__isnull=False)
+        .order_by('ola_contain_deadline')
+        .values('ticket_id', 'ola_contain_deadline')
         .first()
     )
     if crit_soonest:
         critical_soonest_deadline = {
             'ticket_id': crit_soonest['ticket_id'],
             'minutes_remaining': round(
-                (crit_soonest['sla_deadline'] - now).total_seconds() / 60),
+                (crit_soonest['ola_contain_deadline'] - now).total_seconds() / 60),
         }
     else:
         critical_soonest_deadline = None
@@ -275,35 +276,38 @@ def dashboard(request):
     # Avg MTTR by threat type (hours), last 30 days, ≥2 resolved per type.
     # NOTE: computed but not currently rendered (the Row 3 MTTR panel was
     # removed in Session 3C); kept available should the panel return.
-    # SLA pressure — active queue bucketed by time-to-deadline. Answers the
+    # OLA pressure — active queue bucketed by time-to-deadline. Answers the
     # manager's "what needs attention now?" Each bucket carries its severity mix
     # so a Critical that's overdue stands out (tooltip). Respects the same active
     # GET filters as the other active panels. Bucket thresholds live in
-    # apps.incidents.sla (single source of truth, shared with the list filter).
-    sla_sev_order = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
-    sla_counts = {key: {} for key, _, _ in sla_buckets.SLA_BUCKETS}
-    for r in (active_qs.annotate(sla_bucket=sla_buckets.bucket_case(now))
-              .values('sla_bucket', 'severity').annotate(c=Count('id'))):
-        bucket = sla_counts.get(r['sla_bucket'])
+    # apps.incidents.ola (single source of truth, shared with the list filter).
+    # Only tickets WITH a contain deadline are bucketed — Medium/Low are
+    # notification-only (no contain OLA), so they're excluded from the chart.
+    ola_sev_order = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
+    ola_counts = {key: {} for key, _, _ in ola_buckets.OLA_BUCKETS}
+    for r in (active_qs.filter(ola_contain_deadline__isnull=False)
+              .annotate(ola_bucket=ola_buckets.bucket_case(now))
+              .values('ola_bucket', 'severity').annotate(c=Count('id'))):
+        bucket = ola_counts.get(r['ola_bucket'])
         if bucket is not None:
-            sev = r['severity'] if r['severity'] in sla_sev_order else 'Unknown'
+            sev = r['severity'] if r['severity'] in ola_sev_order else 'Unknown'
             bucket[sev] = bucket.get(sev, 0) + r['c']
-    sla_pressure = [
+    ola_pressure = [
         {
             'key':   key,
             'label': label,
             'color': color,
-            'count': sum(sla_counts[key].values()),
+            'count': sum(ola_counts[key].values()),
             'severities': [
-                {'label': sev, 'count': sla_counts[key][sev]}
-                for sev in sla_sev_order if sla_counts[key].get(sev)
+                {'label': sev, 'count': ola_counts[key][sev]}
+                for sev in ola_sev_order if ola_counts[key].get(sev)
             ],
         }
-        for key, label, color in sla_buckets.SLA_BUCKETS
+        for key, label, color in ola_buckets.OLA_BUCKETS
     ]
     # Headline: active cases needing attention now (overdue + due within 1h).
-    sla_attention = (sum(sla_counts[sla_buckets.OVERDUE].values())
-                     + sum(sla_counts[sla_buckets.DUE_1H].values()))
+    ola_attention = (sum(ola_counts[ola_buckets.OVERDUE].values())
+                     + sum(ola_counts[ola_buckets.DUE_1H].values()))
 
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
     # line has no gaps. Window depends on date_range:
@@ -366,8 +370,8 @@ def dashboard(request):
         'closed_delta':              closed_delta,
         'assignee_heatmap':          assignee_heatmap,
         'assignee_heatmap_statuses': assignee_heatmap_statuses,
-        'sla_pressure':              sla_pressure,
-        'sla_attention':             sla_attention,
+        'ola_pressure':              ola_pressure,
+        'ola_attention':             ola_attention,
         'daily_trend_filtered':      daily_trend_filtered,
         'daily_trend_labels':        daily_trend_labels,
         'daily_trend_data':          daily_trend_data,
@@ -380,7 +384,7 @@ def dashboard(request):
             'severity':   severity_filter,
         },
         # SOC managers are scoped to their own queue in the ticket list, so the
-        # SLA deep-link can land on a shorter list than the team-wide chart
+        # OLA deep-link can land on a shorter list than the team-wide chart
         # counts. Flag it so the template can note the difference (managers only).
         'is_manager_view': bool(
             profile and not request.user.is_superuser

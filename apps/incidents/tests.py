@@ -1368,18 +1368,18 @@ class DetailedIssueCascadeTest(TestCase):
         self.assertIn('id="id_detailed_issue2"', html)       # child select
 
 
-class TicketListSlaFilterTest(TestCase):
-    """The ticket-list ?sla= filter buckets the active queue by time-to-deadline,
-    sharing thresholds with the dashboard SLA chart (apps.incidents.sla)."""
+class TicketListOlaFilterTest(TestCase):
+    """The ticket-list ?ola= filter buckets the active queue by time-to-deadline,
+    sharing thresholds with the dashboard OLA chart (apps.incidents.ola)."""
 
     @classmethod
     def setUpTestData(cls):
-        cls.t1 = _make_t1('sla_filter_t1')  # SOC staff → sees all tickets
+        cls.t1 = _make_t1('ola_filter_t1')  # SOC staff → sees all tickets
         now = timezone.now()
-        cls.overdue  = _make_ticket(sla_deadline=now - timedelta(hours=1))
-        cls.due_1h   = _make_ticket(sla_deadline=now + timedelta(minutes=30))
-        cls.due_4h   = _make_ticket(sla_deadline=now + timedelta(hours=2))
-        cls.on_track = _make_ticket(sla_deadline=now + timedelta(hours=10))
+        cls.overdue  = _make_ticket(ola_contain_deadline=now - timedelta(hours=1))
+        cls.due_1h   = _make_ticket(ola_contain_deadline=now + timedelta(minutes=30))
+        cls.due_4h   = _make_ticket(ola_contain_deadline=now + timedelta(hours=2))
+        cls.on_track = _make_ticket(ola_contain_deadline=now + timedelta(hours=10))
 
     def _list(self, **params):
         self.client.force_login(self.t1)
@@ -1387,16 +1387,16 @@ class TicketListSlaFilterTest(TestCase):
         return {t.pk for t in resp.context['page_obj']}, resp
 
     def test_overdue_filter_returns_only_overdue(self):
-        ids, resp = self._list(sla='overdue')
+        ids, resp = self._list(ola='overdue')
         self.assertEqual(ids, {self.overdue.pk})
-        self.assertEqual(resp.context['sla_filter'], 'overdue')
+        self.assertEqual(resp.context['ola_filter'], 'overdue')
 
     def test_due_1h_filter_returns_only_due_within_1h(self):
-        ids, _ = self._list(sla='due_1h')
+        ids, _ = self._list(ola='due_1h')
         self.assertEqual(ids, {self.due_1h.pk})
 
     def test_on_track_filter_returns_only_on_track(self):
-        ids, _ = self._list(sla='on_track')
+        ids, _ = self._list(ola='on_track')
         self.assertEqual(ids, {self.on_track.pk})
 
     def test_no_filter_returns_all_active(self):
@@ -1405,6 +1405,55 @@ class TicketListSlaFilterTest(TestCase):
             ids, {self.overdue.pk, self.due_1h.pk, self.due_4h.pk, self.on_track.pk})
 
     def test_invalid_bucket_is_ignored(self):
-        ids, resp = self._list(sla='bogus')
-        self.assertEqual(resp.context['sla_filter'], '')
+        ids, resp = self._list(ola='bogus')
+        self.assertEqual(resp.context['ola_filter'], '')
         self.assertEqual(len(ids), 4)
+
+
+class OlaPolicyTest(TestCase):
+    """Per-severity OLA targets (triage + contain) applied by Ticket.save().
+
+    Policy: Critical 30m/4h, High 2h/24h, Medium & Low 24h/none (notify-only),
+    Unknown mirrors Critical.
+    """
+
+    def _make(self, severity):
+        base = timezone.now()
+        return _make_ticket(severity=severity, incident_datetime=base), base
+
+    def test_critical_targets(self):
+        t, base = self._make('Critical')
+        self.assertEqual(t.ola_triage_deadline, base + timedelta(minutes=30))
+        self.assertEqual(t.ola_contain_deadline, base + timedelta(hours=4))
+
+    def test_high_targets(self):
+        t, base = self._make('High')
+        self.assertEqual(t.ola_triage_deadline, base + timedelta(hours=2))
+        self.assertEqual(t.ola_contain_deadline, base + timedelta(hours=24))
+
+    def test_medium_triage_only_no_contain(self):
+        t, base = self._make('Medium')
+        self.assertEqual(t.ola_triage_deadline, base + timedelta(hours=24))
+        self.assertIsNone(t.ola_contain_deadline)
+
+    def test_low_triage_only_no_contain(self):
+        t, base = self._make('Low')
+        self.assertEqual(t.ola_triage_deadline, base + timedelta(hours=24))
+        self.assertIsNone(t.ola_contain_deadline)
+
+    def test_unknown_mirrors_critical(self):
+        t, base = self._make('Unknown')
+        self.assertEqual(t.ola_triage_deadline, base + timedelta(minutes=30))
+        self.assertEqual(t.ola_contain_deadline, base + timedelta(hours=4))
+
+    def test_triage_breach_vs_contain_breach_are_independent(self):
+        base = timezone.now() - timedelta(hours=10)   # long ago
+        t = _make_ticket(severity='Critical', incident_datetime=base,
+                         status=Ticket.STATUS_NEW)
+        # created_at is ~now, well past triage (base+30m) and contain (base+4h).
+        self.assertTrue(t.is_ola_triage_breached)   # raised late
+        self.assertTrue(t.is_ola_contain_breached)  # active + past contain
+        # Notification-only severities never register a contain breach.
+        low = _make_ticket(severity='Low', incident_datetime=base,
+                           status=Ticket.STATUS_NEW)
+        self.assertFalse(low.is_ola_contain_breached)

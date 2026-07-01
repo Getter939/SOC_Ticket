@@ -16,7 +16,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.incidents import sla as sla_buckets
+from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, SubtaskForm, SubtaskUpdateForm,
@@ -203,7 +203,7 @@ def ticket_list(request):
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
     emergency_filter = request.GET.get('emergency', '').strip()
-    sort = request.GET.get('sort', 'sla').strip()
+    sort = request.GET.get('sort', 'ola').strip()
 
     if search:
         tickets_qs = tickets_qs.filter(
@@ -233,50 +233,49 @@ def ticket_list(request):
     else:
         emergency_filter = ''
 
-    # SLA-pressure bucket filter — shares thresholds with the dashboard chart
-    # (apps.incidents.sla) so the dashboard's "Overdue/Due ≤1h/…" bars can
+    # OLA-pressure bucket filter — shares thresholds with the dashboard chart
+    # (apps.incidents.ola) so the dashboard's "Overdue/Due ≤1h/…" bars can
     # deep-link straight to the matching slice of this list.
-    sla_filter = request.GET.get('sla', '').strip()
-    if sla_filter in sla_buckets.BUCKET_KEYS:
+    ola_filter = request.GET.get('ola', '').strip()
+    if ola_filter in ola_buckets.BUCKET_KEYS:
         tickets_qs = tickets_qs.filter(
-            sla_buckets.bucket_filter(sla_filter, timezone.now()))
+            ola_buckets.bucket_filter(ola_filter, timezone.now()))
     else:
-        sla_filter = ''
+        ola_filter = ''
 
     sort_map = {
-        'sla':       ('sla_deadline',),
-        'emergency': ('-is_emergency', 'sla_deadline'),
+        'ola':       ('ola_contain_deadline',),
+        'emergency': ('-is_emergency', 'ola_contain_deadline'),
         'newest':    ('-created_at',),
         'oldest':    ('created_at',),
     }
     if sort not in sort_map:
-        sort = 'sla'
+        sort = 'ola'
     tickets_qs = tickets_qs.order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    # Live SLA breach: active ticket whose absolute deadline is already past
-    # (vs now() — sla_deadline is created_at + 4h, so the old < created_at test
-    # never matched).
-    sla_breach_count = visible.filter(
-        sla_deadline__lt=timezone.now()
+    # Live OLA breach: active ticket already past its contain/resolve deadline
+    # (vs now()). Medium/Low have no contain deadline, so they never count here.
+    ola_breach_count = visible.filter(
+        ola_contain_deadline__lt=timezone.now()
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
 
     return render(request, 'incidents/ticket_list.html', {
         'tickets': page_obj,
         'page_obj': page_obj,
         'result_count': paginator.count,
-        'sla_breach_count': sla_breach_count,
+        'ola_breach_count': ola_breach_count,
         'search': search,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
         'emergency_filter': emergency_filter,
-        'sla_filter': sla_filter,
+        'ola_filter': ola_filter,
         'sort': sort,
         'active_status_choices': active_status_choices,
         'severity_choices': Ticket.SEVERITY_CHOICES,
-        'sla_bucket_choices': sla_buckets.SLA_BUCKETS,
+        'ola_bucket_choices': ola_buckets.OLA_BUCKETS,
     })
 
 
@@ -1059,15 +1058,14 @@ def system_owner_dashboard(request):
     active_qs  = my_tickets.exclude(status__in=terminal)
     closed_qs  = my_tickets.filter(status__in=terminal)
 
-    # Live SLA breach: active ticket whose absolute deadline is already past.
-    # (Comparing to now(), not created_at — sla_deadline is created_at + 4h, so
-    # the old sla_deadline < created_at test was always false.)
+    # Live OLA breach: active ticket already past its contain/resolve deadline
+    # (vs now()). Medium/Low are notification-only (no contain deadline).
     now = timezone.now()
     stats = {
         'total':          my_tickets.count(),
         'active':         active_qs.count(),
         'closed':         closed_qs.count(),
-        'sla_breaches':   active_qs.filter(sla_deadline__lt=now).count(),
+        'ola_breaches':   active_qs.filter(ola_contain_deadline__lt=now).count(),
     }
 
     emergency_filter = request.GET.get('emergency', '').strip()

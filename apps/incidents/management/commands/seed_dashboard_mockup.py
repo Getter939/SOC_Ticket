@@ -514,7 +514,7 @@ class Command(BaseCommand):
         current_owner = self._current_owner(status, t1, t2)
         incident_time = opened - self._triage_delay(severity, spec['index'])
         terminal_time = self._terminal_time(opened, severity, status, spec['index'])
-        sla_deadline = self._sla_deadline(spec, incident_time, opened, terminal_time)
+        ola_deadline = self._ola_deadline(spec, incident_time, opened, terminal_time)
         path = self._status_path(status, classification, severity)
         timeline = self._timeline(opened, terminal_time, path, spec['active'])
         source_ref = f'{self.REFERENCE_PREFIX}{spec["index"]:04d}'
@@ -555,7 +555,7 @@ class Command(BaseCommand):
             approved_by=self._approved_by(status, severity, manager, t1),
             approved_at=terminal_time if status == Ticket.STATUS_APPROVED else None,
             update_notes=self._update_notes(spec),
-            sla_deadline=sla_deadline,
+            ola_contain_deadline=ola_deadline,
             issue_type=scenario['source'],
             detailed_issue=scenario['detailed'],
             detailed_issue2=scenario['detail2'],
@@ -613,7 +613,7 @@ class Command(BaseCommand):
             return opened + timedelta(hours=9 + (index % 6), minutes=20)
         return opened + timedelta(hours=14 + (index % 5), minutes=30)
 
-    def _sla_deadline(self, spec, incident_time, opened, terminal_time):
+    def _ola_deadline(self, spec, incident_time, opened, terminal_time):
         if spec['active']:
             offsets = [
                 timedelta(minutes=45), timedelta(hours=2), timedelta(hours=3, minutes=20),
@@ -939,7 +939,7 @@ class Command(BaseCommand):
     @staticmethod
     def _update_notes(spec):
         if spec['active']:
-            return 'Mockup active case: work is in progress and still within SLA.'
+            return 'Mockup active case: work is in progress and still within OLA.'
         if spec['status'] == Ticket.STATUS_CLOSED_EVENT:
             return 'Mockup event closure: reviewed and closed without containment.'
         return 'Mockup incident closure: containment verified and case closed within target.'

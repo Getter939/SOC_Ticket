@@ -101,9 +101,10 @@ class WazuhAlert(models.Model):
     )
     claimed_at = models.DateTimeField(null=True, blank=True)
 
-    # Must match incidents.Ticket.SLA_HOURS — the triage decision must be
-    # made within this window of the alert appearing (alert.timestamp).
-    SLA_HOURS = 4
+    # Alert-triage OLA (separate from the ticket OLA policy in
+    # incidents.Ticket.OLA_TARGETS): the triage decision must be made within
+    # this flat window of the alert appearing (alert.timestamp).
+    OLA_HOURS = 4
 
     UNTRIAGED_STATUSES = (TRIAGE_PENDING, TRIAGE_TRIAGING)
 
@@ -114,26 +115,26 @@ class WazuhAlert(models.Model):
         return f'[{self.rule_level}] {self.rule_description} ({self.agent_name})'
 
     # ------------------------------------------------------------------ #
-    # SLA — clock runs from the alert appearing until it is triaged       #
+    # OLA — clock runs from the alert appearing until it is triaged       #
     # ------------------------------------------------------------------ #
 
     @property
-    def sla_deadline(self):
-        return self.timestamp + timedelta(hours=self.SLA_HOURS)
+    def ola_deadline(self):
+        return self.timestamp + timedelta(hours=self.OLA_HOURS)
 
     @property
-    def is_sla_breached(self):
-        """Still untriaged and past the SLA deadline (live — counts up until triaged)."""
+    def is_ola_breached(self):
+        """Still untriaged and past the OLA deadline (live — counts up until triaged)."""
         if self.triage_status not in self.UNTRIAGED_STATUSES:
             return False
-        return timezone.now() > self.sla_deadline
+        return timezone.now() > self.ola_deadline
 
     @property
-    def is_sla_urgent(self):
+    def is_ola_urgent(self):
         """Still untriaged, not yet breached, but less than 1 hour of margin left."""
         if self.triage_status not in self.UNTRIAGED_STATUSES:
             return False
-        remaining = self.sla_deadline - timezone.now()
+        remaining = self.ola_deadline - timezone.now()
         return timedelta() < remaining <= timedelta(hours=1)
 
     @property
@@ -144,11 +145,11 @@ class WazuhAlert(models.Model):
         return None
 
     @property
-    def triage_within_sla(self):
+    def triage_within_ola(self):
         duration = self.triage_duration
         if duration is None:
             return None
-        return duration <= timedelta(hours=self.SLA_HOURS)
+        return duration <= timedelta(hours=self.OLA_HOURS)
 
 
 class IngestWatermark(models.Model):

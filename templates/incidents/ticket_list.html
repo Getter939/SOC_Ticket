@@ -8,10 +8,10 @@
     <span class="text-muted small">{{ result_count }} เคส</span>
 </div>
 
-{% if sla_breach_count %}
+{% if ola_breach_count %}
 <div class="alert alert-danger d-flex align-items-center mb-3 py-2" role="alert">
     <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
-    <strong>SLA BREACH: {{ sla_breach_count }} เคส</strong>&nbsp;เกินกำหนด SLA แล้ว — ดำเนินการทันที
+    <strong>OLA BREACH: {{ ola_breach_count }} เคส</strong>&nbsp;เกินกำหนด OLA แล้ว — ดำเนินการทันที
 </div>
 {% endif %}
 
@@ -54,18 +54,18 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <label class="form-label small fw-bold mb-1">SLA</label>
-                <select name="sla" class="form-select form-select-sm">
+                <label class="form-label small fw-bold mb-1">OLA</label>
+                <select name="ola" class="form-select form-select-sm">
                     <option value="">ทั้งหมด</option>
-                    {% for code, label, color in sla_bucket_choices %}
-                    <option value="{{ code }}" {% if sla_filter == code %}selected{% endif %}>{{ label }}</option>
+                    {% for code, label, color in ola_bucket_choices %}
+                    <option value="{{ code }}" {% if ola_filter == code %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label small fw-bold mb-1">เรียงตาม</label>
                 <select name="sort" class="form-select form-select-sm">
-                    <option value="sla" {% if sort == 'sla' %}selected{% endif %}>SLA ใกล้ครบกำหนด</option>
+                    <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
                     <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
                     <option value="newest" {% if sort == 'newest' %}selected{% endif %}>ใหม่สุดก่อน</option>
                     <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>เก่าสุดก่อน</option>
@@ -74,7 +74,7 @@
             <div class="col-md-1 d-grid">
                 <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
             </div>
-            {% if search or status_filter or severity_filter or emergency_filter or sla_filter %}
+            {% if search or status_filter or severity_filter or emergency_filter or ola_filter %}
             <div class="col-12">
                 <a href="{% url 'ticket_list' %}" class="small text-decoration-none">
                     <i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด
@@ -103,7 +103,7 @@
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr {% if ticket.is_emergency or ticket.is_sla_breached %}class="table-danger"{% endif %}>
+                <tr {% if ticket.is_emergency or ticket.is_ola_breached %}class="table-danger"{% endif %}>
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
                     </td>
@@ -156,11 +156,11 @@
 <nav class="mt-3" aria-label="Ticket pages">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if sla_filter %}&sla={{ sla_filter }}{% endif %}&sort={{ sort }}">«</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">«</a></li>
     {% endif %}
     <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if sla_filter %}&sla={{ sla_filter }}{% endif %}&sort={{ sort }}">»</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">»</a></li>
     {% endif %}
   </ul>
 </nav>

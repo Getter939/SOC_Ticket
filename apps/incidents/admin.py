@@ -44,8 +44,9 @@ class TicketAdmin(admin.ModelAdmin):
         ('การรับรอง / อนุมัติ (อ่านอย่างเดียว)', {
             'fields': ('verified_by', 'verified_at', 'approved_by', 'approved_at'),
         }),
-        ('SLA และวันที่', {
-            'fields': ('sla_deadline', 'created_at', 'updated_at'),
+        ('OLA และวันที่', {
+            'fields': ('ola_triage_deadline', 'ola_contain_deadline',
+                       'created_at', 'updated_at'),
         }),
     )
 

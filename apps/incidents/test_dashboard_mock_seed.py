@@ -100,9 +100,9 @@ class DashboardMockupSeedTest(TestCase):
 
         now = timezone.now()
         active = tickets.exclude(status__in=Ticket.TERMINAL_STATUSES)
-        self.assertFalse(active.filter(sla_deadline__lt=now).exists())
+        self.assertFalse(active.filter(ola_contain_deadline__lt=now).exists())
 
-    def test_terminal_tickets_close_within_targets_and_sla_deadline(self):
+    def test_terminal_tickets_close_within_targets_and_ola_contain_deadline(self):
         self._seed()
         terminal_tickets = Ticket.objects.filter(status__in=Ticket.TERMINAL_STATUSES)
         self.assertTrue(terminal_tickets.exists())
@@ -113,7 +113,7 @@ class DashboardMockupSeedTest(TestCase):
             ).order_by('created_at').values_list('created_at', flat=True).first()
             self.assertIsNotNone(resolved)
             self.assertLessEqual(resolved - ticket.created_at, timedelta(days=1))
-            self.assertLessEqual(resolved, ticket.sla_deadline)
+            self.assertLessEqual(resolved, ticket.ola_contain_deadline)
             if ticket.severity == 'Critical':
                 self.assertLessEqual(ticket.created_at - ticket.incident_datetime, timedelta(minutes=30))
                 self.assertLessEqual(resolved - ticket.created_at, timedelta(hours=4))
