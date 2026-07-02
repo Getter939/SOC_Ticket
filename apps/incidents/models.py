@@ -369,7 +369,11 @@ class Ticket(models.Model):
     issue_description = models.TextField(verbose_name='รายละเอียดเหตุการณ์')
 
     # ── Section 4: Scope / Affected Asset ───────────────────────────── #
-    ip_address = models.GenericIPAddressField(verbose_name='IP Address ของทรัพย์สิน')
+    # null=True with blank=False: forms still require an IP, but tickets
+    # imported from the pre-system TrendMicro tracker have none to give.
+    ip_address = models.GenericIPAddressField(
+        null=True, verbose_name='IP Address ของทรัพย์สิน',
+    )
     mac_address = models.CharField(
         max_length=50, blank=True, default='',
         verbose_name='MAC Address',
@@ -475,6 +479,28 @@ class Ticket(models.Model):
     # ticket last move state?".
     status_changed_at = models.DateTimeField(
         null=True, blank=True, verbose_name='วันที่อัปเดตสถานะ',
+    )
+
+    # ── Lifecycle timestamps (dashboard metrics) ─────────────────────── #
+    # acknowledged_at — when an analyst picked the case up (วันที่รับเคส).
+    #   Backfilled by the TrendMicro import; for tickets born in this system
+    #   creation is the ack, so queries coalesce to created_at.
+    # report_issued_at — first hand-off to the system admin (วันที่ออกรายงาน).
+    #   Stamped by transition_to on first entry to AWAITING_CONTAINMENT.
+    # closed_at — terminal close on EITHER path. approved_at only covers
+    #   APPROVED; CLOSED_EVENT tickets would otherwise have no close time.
+    acknowledged_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่รับเคส',
+    )
+    report_issued_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่ออกรายงาน',
+    )
+    closed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่ปิดเคส',
+    )
+    # Raw detection score from the source alert (TrendMicro Workbench 0–100).
+    alert_score = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name='คะแนน Alert (TrendMicro)',
     )
 
     assigned_to = models.ForeignKey(
@@ -812,6 +838,16 @@ class Ticket(models.Model):
         # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
         if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:
             self.escalated_to_t2_at = now
+
+        # First hand-off to the system admin = the containment report going
+        # out (write-once, mirrors the tracker's วันที่ออกรายงาน).
+        if (new_status == self.STATUS_AWAITING_CONTAINMENT
+                and self.report_issued_at is None):
+            self.report_issued_at = now
+
+        # Terminal close on either path — approved_at alone misses CLOSED_EVENT.
+        if new_status in self.TERMINAL_STATUSES and self.closed_at is None:
+            self.closed_at = now
 
         # T1 verification sign-off (write-once): set when Tier 1 marks a
         # contained ticket done — whether it routes to the manager or closes.
