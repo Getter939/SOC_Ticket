@@ -1,0 +1,409 @@
+{% extends 'base.html' %}
+{% load humanize %}
+
+{% block title %}แดชบอร์ดผู้บริหาร — SOC Support System{% endblock %}
+
+{% block content %}
+
+<style>
+    /* Shared visual language with dashboard.html (page-scoped styles). */
+    .stat-card {
+        background: #fff;
+        border: 1px solid #e3e6ea;
+        border-top-width: 3px;
+        border-radius: 6px;
+        padding: 0.7rem 0.9rem;
+        height: 100%;
+    }
+    .stat-card.b-blue   { border-top-color: #0d6efd; }
+    .stat-card.b-orange { border-top-color: #fd7e14; }
+    .stat-card.b-green  { border-top-color: #198754; }
+    .stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+    .stat-card .stat-label { font-size: 13px; color: #6c757d; font-weight: 600; }
+    .stat-card .stat-sub   { font-size: 13px; margin-top: 0.15rem; }
+
+    .panel { background:#fff; border:1px solid #e3e6ea; border-radius:6px; }
+    .panel-title { font-size: 13px; font-weight: 700; text-transform: uppercase;
+                   letter-spacing: .02em; color:#495057; }
+
+    /* Closure progress bar (green = closed, red = in progress) */
+    .progress-split {
+        display: flex; height: 34px; border-radius: 6px;
+        overflow: hidden; border: 1px solid #e3e6ea;
+    }
+    .progress-split .seg-closed { background: #198754; }
+    .progress-split .seg-open   { background: #dc3545; flex: 1; }
+    .progress-legend { font-size: 12px; color: #495057; }
+    .progress-legend .dot {
+        display: inline-block; width: 10px; height: 10px;
+        border-radius: 50%; margin-right: 4px; vertical-align: baseline;
+    }
+
+    /* Executive summary verdict box */
+    .verdict-box {
+        border-radius: 8px; text-align: center;
+        padding: 1.1rem 0.5rem; height: 100%;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 0.25rem;
+    }
+    .verdict-box i { font-size: 2.6rem; line-height: 1; }
+    .verdict-box .verdict-label { font-size: 1.4rem; font-weight: 700; letter-spacing: .05em; }
+    .verdict-good    { background: rgba(25,135,84,0.10);  color: #198754; }
+    .verdict-waiting { background: rgba(255,193,7,0.15);  color: #b58800; }
+    .verdict-warning { background: rgba(220,53,69,0.10);  color: #dc3545; }
+
+    /* Criteria checklist — rows are links that filter the detail table */
+    .criteria-row {
+        display: flex; align-items: center; gap: 0.6rem;
+        padding: 0.45rem 0.6rem; border-radius: 6px;
+        font-size: 13px; color: #212529; text-decoration: none;
+    }
+    .criteria-row:hover { background: #f1f3f5; color: #212529; }
+    .criteria-row i { font-size: 1.05rem; }
+    .criteria-row .crit-count { font-weight: 700; min-width: 1.4em; text-align: right; }
+
+    /* Detail table */
+    .detail-table { font-size: 13px; }
+    .detail-table thead th { background:#212529; color:#fff; font-size: 13px; white-space: nowrap; }
+    .detail-table td { vertical-align: middle; }
+    .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
+                   border-radius:10px; color:#fff; white-space:nowrap; }
+</style>
+
+<!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">แดชบอร์ดผู้บริหาร</h4>
+    <span class="text-muted" style="font-size:13px;">
+        <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
+    </span>
+</div>
+
+<!-- ══ ROW 1: KPI cards + progress bar ═══════════════════════════════════ -->
+<div class="row g-3 mb-3">
+
+    <!-- 1. Total active High/Critical cases -->
+    <div class="col-md-4 col-lg-3">
+        <div class="stat-card b-blue">
+            <div class="stat-value">{{ active_hc|intcomma }}</div>
+            <div class="stat-label">เคสที่กำลังดำเนินการ (Critical/High)</div>
+            {% if active_hc_delta > 0 %}
+            <div class="stat-sub text-danger">↑{{ active_hc_delta|intcomma }} จากเดือนที่แล้ว</div>
+            {% elif active_hc_delta < 0 %}
+            <div class="stat-sub text-success">↓{{ active_hc_delta|intcomma|slice:"1:" }} จากเดือนที่แล้ว</div>
+            {% else %}
+            <div class="stat-sub text-muted">เท่ากับเดือนที่แล้ว</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 2. MTTR (placeholder) -->
+    <div class="col-md-4 col-lg-3">
+        <div class="stat-card b-orange">
+            {# TODO(MTTR): compute median/mean of (closed_at - created_at) over #}
+            {# terminal tickets (last 30 days) once closed_at coverage is       #}
+            {# sufficient — imported historical rows mostly lack closed_at.     #}
+            <div class="stat-value text-muted">–</div>
+            <div class="stat-label">เวลาเฉลี่ยในการแก้ไข (MTTR)</div>
+            <div class="stat-sub text-muted">อยู่ระหว่างรวบรวมข้อมูล</div>
+        </div>
+    </div>
+
+    <!-- 3. High/Critical closure progress -->
+    <div class="col-md-4 col-lg-6">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส (Critical/High)
+            </div>
+            {% if hc_total %}
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+                <div class="flex-grow-1" style="min-width:220px;">
+                    <div class="progress-split" role="img"
+                         aria-label="ปิดแล้ว {{ hc_closed }} จาก {{ hc_total }} เคส ({{ hc_progress_pct }}%)">
+                        <div class="seg-closed" style="width: {{ hc_progress_pct }}%;"></div>
+                        <div class="seg-open"></div>
+                    </div>
+                    <div class="text-center fw-bold mt-1">{{ hc_progress_pct }}%</div>
+                </div>
+                <div class="progress-legend">
+                    <div><span class="dot" style="background:#198754;"></span>ปิดแล้ว ({{ hc_closed|intcomma }})</div>
+                    <div><span class="dot" style="background:#dc3545;"></span>กำลังดำเนินการ ({{ hc_open|intcomma }})</div>
+                </div>
+            </div>
+            {% else %}
+            <div class="text-muted" style="font-size:13px;">ยังไม่มีเคส Critical/High</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ══ ROW 2: Executive summary + pipeline ═══════════════════════════════ -->
+<div class="row g-3 mb-3">
+
+    <!-- 2L — Executive summary -->
+    <div class="col-lg-5">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-clipboard-check me-1"></i>สรุปสถานการณ์
+            </div>
+            <div class="row g-3 align-items-stretch">
+                <div class="col-5">
+                    {% if overall_status == 'GOOD' %}
+                    <div class="verdict-box verdict-good">
+                        <i class="bi bi-check-lg" aria-hidden="true"></i>
+                        <div class="verdict-label">GOOD</div>
+                        <div style="font-size:12px;">สถานการณ์ปกติ</div>
+                    </div>
+                    {% elif overall_status == 'WAITING' %}
+                    <div class="verdict-box verdict-waiting">
+                        <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+                        <div class="verdict-label">WAITING</div>
+                        <div style="font-size:12px;">มีงานรอดำเนินการ</div>
+                    </div>
+                    {% else %}
+                    <div class="verdict-box verdict-warning">
+                        <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+                        <div class="verdict-label">WARNING</div>
+                        <div style="font-size:12px;">ต้องให้ความสนใจทันที</div>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="col-7 d-flex flex-column justify-content-center">
+                    {% for c in summary_criteria %}
+                    <a class="criteria-row" href="?f={{ c.filter }}#detail-table"
+                       title="คลิกเพื่อกรองตารางด้านล่าง">
+                        {% if c.level == 'good' %}
+                        <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
+                        {% elif c.level == 'waiting' %}
+                        <i class="bi bi-hourglass-split text-warning" aria-hidden="true"></i>
+                        {% else %}
+                        <i class="bi bi-exclamation-circle-fill text-danger" aria-hidden="true"></i>
+                        {% endif %}
+                        <span class="crit-count">{{ c.count|intcomma }}</span>
+                        <span>{{ c.label }}</span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2R — Ticket pipeline (click a bar to filter the detail table) -->
+    <div class="col-lg-7">
+        <div class="panel p-3 h-100">
+            <div class="panel-title mb-2">
+                <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด (Pipeline)
+            </div>
+            <div style="height:300px;">
+                <canvas id="chartPipelineExec" role="img"
+                        aria-label="จำนวน Ticket แยกตามสถานะและความรุนแรง — คลิกแท่งเพื่อกรองตารางด้านล่าง"></canvas>
+            </div>
+            <div class="text-muted mt-1" style="font-size:11px;">
+                <i class="bi bi-info-circle me-1"></i>คลิกแท่งกราฟเพื่อกรองตารางรายละเอียดด้านล่าง
+            </div>
+            <table class="visually-hidden">
+                <caption>จำนวน Ticket แยกตามสถานะและความรุนแรง</caption>
+                <thead>
+                    <tr>
+                        <th>ความรุนแรง</th>
+                        {% for slug, display in pipeline_by_severity.statuses %}
+                        <th>{{ display }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in pipeline_rows %}
+                    <tr>
+                        <td>{{ row.severity }}</td>
+                        {% for cell in row.cells %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ══ ROW 3: Ticket detail table ════════════════════════════════════════ -->
+<div class="row g-3">
+    <div class="col-12">
+        <div class="panel" id="detail-table">
+            <div class="d-flex flex-wrap align-items-center gap-2 p-3 pb-2">
+                <span class="panel-title mb-0">
+                    <i class="bi bi-list-ul me-1"></i>รายละเอียด Ticket
+                </span>
+                {% if filter_f %}
+                <span class="badge text-bg-primary">ตัวกรอง: {{ filter_label }}</span>
+                <a href="{% url 'executive_dashboard' %}#detail-table"
+                   class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
+                {% endif %}
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm detail-table mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Ticket ID</th>
+                            <th>รายละเอียด</th>
+                            <th>ผู้รับผิดชอบ</th>
+                            <th>สถานะ</th>
+                            <th>อัปเดตล่าสุด</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in table_tickets %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'ticket_detail' t.pk %}"
+                                   class="font-monospace fw-bold text-decoration-none">#{{ t.ticket_id }}</a>
+                            </td>
+                            <td>{{ t.issue_description|truncatechars:70 }}</td>
+                            <td>
+                                {# During containment the accountable person is the #}
+                                {# system admin, not the SOC analyst.               #}
+                                {% if t.status == 'AWAITING_CONTAINMENT' and t.assigned_admin %}
+                                    {{ t.assigned_admin.get_full_name|default:t.assigned_admin.username }}
+                                    <span class="text-muted" style="font-size:12px;">(ผู้ดูแลระบบ)</span>
+                                {% elif t.assigned_to %}
+                                    {{ t.assigned_to.get_full_name|default:t.assigned_to.username }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="status-pill" style="background:
+                                    {% if t.status == 'NEW' %}#0d6efd
+                                    {% elif t.status == 'ESCALATED_T2' %}#6f42c1
+                                    {% elif t.status == 'T1_REVIEW' %}#0dcaf0;color:#212529
+                                    {% elif t.status == 'AWAITING_CONTAINMENT' %}#fd7e14
+                                    {% elif t.status == 'CONTAINMENT_REPORTED' %}#20c997;color:#212529
+                                    {% elif t.status == 'PENDING_MANAGER' %}#ffc107;color:#212529
+                                    {% elif t.status == 'APPROVED' %}#198754
+                                    {% elif t.status == 'CLOSED_EVENT' %}#6c757d
+                                    {% else %}#6c757d{% endif %};">{{ t.get_status_display }}</span>
+                            </td>
+                            <td class="text-nowrap">{{ t.updated_at|date:"d M Y H:i" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quiet auto-refresh, same behavior as the management dashboard. -->
+<script>
+(function () {
+    const AUTO_REFRESH_MS = 300000;
+    const IDLE_GRACE_MS = 15000;
+    let userActiveUntil = 0;
+    ['pointerdown', 'keydown', 'input', 'change', 'focusin'].forEach(name => {
+        document.addEventListener(
+            name, () => { userActiveUntil = Date.now() + IDLE_GRACE_MS; },
+            { capture: true, passive: true });
+    });
+    setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        if (Date.now() < userActiveUntil) return;
+        if (navigator.onLine === false) return;
+        window.location.reload();
+    }, AUTO_REFRESH_MS);
+})();
+</script>
+
+<!-- ── Chart.js: pipeline (stacked bar, click-to-filter) ─────────────────── -->
+{{ pipeline_by_severity|json_script:"pipeline-by-severity-exec" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+Chart.defaults.font.size = 13;
+Chart.defaults.maintainAspectRatio = false;
+
+(function () {
+    const pbs = JSON.parse(
+        document.getElementById('pipeline-by-severity-exec').textContent);
+    const statuses   = pbs.statuses;    // [[slug, display], ...] workflow order
+    const severities = pbs.severities;  // [[slug, display], ...] highest rank first
+    const matrix     = pbs.matrix;
+
+    const SEV_COLOR = {
+        'Critical': '#dc3545', 'High': '#fd7e14', 'Medium': '#ffc107',
+        'Low': '#198754', 'Unknown': '#adb5bd',
+    };
+    const labels = statuses.map(s => s[1]);
+    const datasets = severities.map(([sevSlug, sevDisplay]) => ({
+        label: sevDisplay,
+        data: statuses.map(([stSlug]) => matrix[sevSlug][stSlug]),
+        backgroundColor: SEV_COLOR[sevSlug] || '#adb5bd',
+        borderRadius: 3,
+    }));
+    const totals = statuses.map((_, i) =>
+        datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
+    const maxTotal = Math.max(0, ...totals);
+
+    const totalLabelPlugin = {
+        id: 'pipelineTotalsExec',
+        afterDatasetsDraw(chart) {
+            const { ctx, scales: { x, y } } = chart;
+            ctx.save();
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillStyle = '#343a40';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            totals.forEach((t, i) => {
+                if (t === 0) return;
+                ctx.fillText(t, x.getPixelForValue(i), y.getPixelForValue(t) - 4);
+            });
+            ctx.restore();
+        }
+    };
+
+    new Chart(document.getElementById('chartPipelineExec'), {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            // Click a bar → filter the detail table to that status (?f=slug).
+            onClick: (evt, els) => {
+                if (els.length) {
+                    const slug = statuses[els[0].index][0];
+                    window.location = '?f=' + encodeURIComponent(slug) + '#detail-table';
+                }
+            },
+            onHover: (evt, els) => {
+                evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, minRotation: 45,
+                             font: { size: 12 }, autoSkip: false },
+                },
+                y: {
+                    stacked: true, beginAtZero: true,
+                    suggestedMax: maxTotal + 1,
+                    grid: { color: '#e9ecef' },
+                    ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
+                    title: { display: true, text: 'จำนวนเคส', font: { size: 13 } },
+                }
+            },
+            plugins: {
+                legend: { position: 'top', labels: { font: { size: 13 } } },
+                tooltip: {
+                    callbacks: {
+                        title: items => items[0].label,
+                        label: item => `${item.dataset.label}: ${item.parsed.y}`,
+                        footer: items =>
+                            'รวม: ' + totals[items[0].dataIndex] + ' — คลิกเพื่อกรองตาราง',
+                    }
+                }
+            },
+        },
+        plugins: [totalLabelPlugin],
+    });
+})();
+</script>
+{% endblock %}

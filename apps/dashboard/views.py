@@ -3,10 +3,10 @@ from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import (
-    Case, Count, F, IntegerField, OuterRef, Subquery, Value, When,
+    Case, Count, F, IntegerField, OuterRef, Q, Subquery, Value, When,
 )
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from apps.incidents import ola as ola_buckets
@@ -390,4 +390,182 @@ def dashboard(request):
             profile and not request.user.is_superuser
             and getattr(profile, 'is_soc_manager', False)
         ),
+    })
+
+
+# ====================================================================== #
+# Executive dashboard                                                     #
+# ====================================================================== #
+
+@login_required
+def executive_dashboard(request):
+    """Executive dashboard — glanceable posture summary for management.
+
+    Follows the approved wireframe: KPI cards (active High/Critical count
+    with month-over-month delta, MTTR placeholder), a High/Critical closure
+    progress bar, a four-criteria executive summary with an overall
+    GOOD / WAITING / WARNING verdict, the pipeline chart (same shape as the
+    management dashboard's), and a filterable ticket detail table.
+
+    Pipeline bars and summary criterion rows deep-link back to this page
+    with ?f=<status slug | EMERGENCY> — a single filter, last click wins.
+    """
+    profile = getattr(request.user, 'profile', None)
+    if not request.user.is_superuser and profile and profile.is_system_owner:
+        return redirect('system_owner_dashboard')
+    if not request.user.is_superuser and profile and profile.is_system_admin:
+        return redirect('ticket_list')
+
+    now = timezone.now()
+    terminal = list(Ticket.TERMINAL_STATUSES)
+    HIGH_CRIT = ('Critical', 'High')
+
+    all_tickets = Ticket.objects.all()
+    active_qs = all_tickets.exclude(status__in=terminal)
+
+    # ── KPI 1: active High/Critical cases + delta vs end of last month ──── #
+    active_hc = active_qs.filter(severity__in=HIGH_CRIT).count()
+
+    this_month_start = now.replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Close timestamp: closed_at (stamped by transition_to since migration
+    # 0031), with fallbacks for rows that predate the field — approved_at,
+    # then the first terminal TicketLog, then status_changed_at.
+    first_terminal_log = (
+        TicketLog.objects
+        .filter(ticket=OuterRef('pk'), status_at_time__in=terminal)
+        .order_by('created_at')
+        .values('created_at')[:1]
+    )
+    close_ts_expr = Coalesce(
+        F('closed_at'), F('approved_at'),
+        Subquery(first_terminal_log), F('status_changed_at'),
+    )
+    # "Active at end of last month" = created before this month AND not yet
+    # closed by then (i.e. still open now, or closed during this month).
+    prev_active_hc = (
+        all_tickets
+        .filter(severity__in=HIGH_CRIT, created_at__lt=this_month_start)
+        .annotate(close_ts=close_ts_expr)
+        .filter(
+            ~Q(status__in=terminal)
+            | Q(status__in=terminal, close_ts__gte=this_month_start)
+        )
+        .count()
+    )
+    active_hc_delta = active_hc - prev_active_hc
+
+    # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
+    hc_total = all_tickets.filter(severity__in=HIGH_CRIT).count()
+    hc_closed = all_tickets.filter(
+        severity__in=HIGH_CRIT, status__in=terminal).count()
+    hc_open = hc_total - hc_closed
+    hc_progress_pct = round(hc_closed / hc_total * 100) if hc_total else 0
+
+    # ── Executive summary — 4 criteria, priority Warning > Waiting > Good ─ #
+    crit_unassigned = active_qs.filter(
+        severity='Critical', status=Ticket.STATUS_NEW,
+        assigned_to__isnull=True,
+    ).count()
+    emergency_active = active_qs.filter(is_emergency=True).count()
+    awaiting_containment = active_qs.filter(
+        status=Ticket.STATUS_AWAITING_CONTAINMENT).count()
+    # verified_by is stamped when T1 signs the containment off, so a null
+    # here means the report is still waiting on T1's review.
+    unverified_containment = active_qs.filter(
+        status=Ticket.STATUS_CONTAINMENT_REPORTED,
+        verified_by__isnull=True,
+    ).count()
+
+    summary_criteria = [
+        {
+            'label': 'เคส Critical ที่ยังไม่มีผู้รับผิดชอบ',
+            'count': crit_unassigned,
+            'level': 'warning' if crit_unassigned else 'good',
+            'filter': Ticket.STATUS_NEW,
+        },
+        {
+            'label': 'เคสฉุกเฉิน (Emergency) ที่ยังไม่ปิด',
+            'count': emergency_active,
+            'level': 'warning' if emergency_active else 'good',
+            'filter': 'EMERGENCY',
+        },
+        {
+            'label': 'เคสที่รอการจัดการจากผู้ดูแลระบบ',
+            'count': awaiting_containment,
+            'level': 'waiting' if awaiting_containment else 'good',
+            'filter': Ticket.STATUS_AWAITING_CONTAINMENT,
+        },
+        {
+            'label': 'การควบคุมที่รอ Tier 1 ตรวจสอบ',
+            'count': unverified_containment,
+            'level': 'waiting' if unverified_containment else 'good',
+            'filter': Ticket.STATUS_CONTAINMENT_REPORTED,
+        },
+    ]
+    if any(c['level'] == 'warning' for c in summary_criteria):
+        overall_status = 'WARNING'
+    elif any(c['level'] == 'waiting' for c in summary_criteria):
+        overall_status = 'WAITING'
+    else:
+        overall_status = 'GOOD'
+
+    # ── Pipeline — same status × severity matrix as the main dashboard ──── #
+    status_map = dict(Ticket.STATUS_CHOICES)
+    status_order = [s for s, _ in Ticket.STATUS_CHOICES]
+    sev_display = dict(Ticket.SEVERITY_CHOICES)
+    severity_order = sorted(
+        sev_display, key=lambda s: Ticket.SEVERITY_RANK.get(s, 0), reverse=True)
+    pipeline_matrix = {
+        sev: {st: 0 for st in status_order} for sev in severity_order
+    }
+    for row in all_tickets.values('severity', 'status').annotate(c=Count('id')):
+        sev, st = row['severity'], row['status']
+        if sev in pipeline_matrix and st in pipeline_matrix[sev]:
+            pipeline_matrix[sev][st] = row['c']
+    pipeline_by_severity = {
+        'statuses': [(s, status_map[s]) for s in status_order],
+        'severities': [(s, sev_display[s]) for s in severity_order],
+        'matrix': pipeline_matrix,
+    }
+    pipeline_rows = [
+        {'severity': sev_display[sev],
+         'cells': [pipeline_matrix[sev][st] for st in status_order]}
+        for sev in severity_order
+    ]
+
+    # ── Detail table — single ?f= filter, last click wins ───────────────── #
+    f = request.GET.get('f', '')
+    filter_label = ''
+    if f == 'EMERGENCY':
+        table_qs = active_qs.filter(is_emergency=True)
+        filter_label = 'เคสฉุกเฉิน (Emergency)'
+    elif f in status_map:
+        # A status filter may target a terminal status (pipeline "close" bars),
+        # so it searches ALL tickets, not just the active queue.
+        table_qs = all_tickets.filter(status=f)
+        filter_label = status_map[f]
+    else:
+        f = ''
+        table_qs = active_qs
+    table_tickets = list(
+        table_qs.select_related('assigned_to', 'assigned_admin')
+        .order_by('-updated_at')
+    )
+
+    return render(request, 'dashboard/executive.html', {
+        'now': now,
+        'active_hc': active_hc,
+        'active_hc_delta': active_hc_delta,
+        'hc_total': hc_total,
+        'hc_closed': hc_closed,
+        'hc_open': hc_open,
+        'hc_progress_pct': hc_progress_pct,
+        'summary_criteria': summary_criteria,
+        'overall_status': overall_status,
+        'pipeline_by_severity': pipeline_by_severity,
+        'pipeline_rows': pipeline_rows,
+        'table_tickets': table_tickets,
+        'filter_f': f,
+        'filter_label': filter_label,
     })

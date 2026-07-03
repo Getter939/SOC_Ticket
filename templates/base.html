@@ -235,6 +235,12 @@
        class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
         <i class="bi bi-speedometer2"></i> <span class="nav-label">Dashboard</span>
     </a>
+    {% if request.user.is_superuser or profile.is_soc %}
+    <a href="{% url 'executive_dashboard' %}" data-label="แดชบอร์ดผู้บริหาร"
+       class="nav-link {% if request.resolver_match.url_name == 'executive_dashboard' %}active{% endif %}">
+        <i class="bi bi-briefcase-fill"></i> <span class="nav-label">แดชบอร์ดผู้บริหาร</span>
+    </a>
+    {% endif %}
 
     {% if request.user.is_superuser or profile.is_system_owner %}
     <div class="nav-section-label">ระบบของฉัน</div>
