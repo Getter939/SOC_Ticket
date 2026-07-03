@@ -502,13 +502,50 @@ class ExecutiveDashboardViewTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        cls.executive = _make_user('exec_user', UserProfile.ROLE_EXECUTIVE)
         cls.soc = _make_user('soc_exec', UserProfile.ROLE_SOC_STAFF)
+        cls.soc_manager = _make_user('soc_mgr_exec', UserProfile.ROLE_SOC_MANAGER)
 
     def setUp(self):
-        self.client.force_login(self.soc)
+        self.client.force_login(self.executive)
 
     def _get(self, **params):
         return self.client.get(EXECUTIVE_URL, params)
+
+    def test_executive_role_can_view_dashboard(self):
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard/executive.html')
+
+    def test_superuser_can_view_dashboard(self):
+        from django.contrib.auth.models import User
+        superuser = User.objects.create_superuser(
+            username='exec_superuser',
+            email='exec-super@example.com',
+            password='pw',
+        )
+        self.client.force_login(superuser)
+
+        response = self._get()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'dashboard/executive.html')
+
+    def test_soc_roles_cannot_view_dashboard(self):
+        self.client.force_login(self.soc)
+        self.assertEqual(self._get().status_code, 403)
+
+        self.client.force_login(self.soc_manager)
+        self.assertEqual(self._get().status_code, 403)
+
+    def test_sidebar_link_visible_only_to_executive_or_superuser(self):
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn('แดชบอร์ดผู้บริหาร', html)
+
+        self.client.force_login(self.soc)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertNotIn('แดชบอร์ดผู้บริหาร', html)
 
     def _ticket(
         self,
@@ -657,4 +694,7 @@ class ExecutiveDashboardViewTest(TestCase):
 
         html = self._get(date_range='week', f='EMERGENCY').content.decode()
 
-        self.assertIn('?date_range=week&f=EMERGENCY&page=2#detail-table', html)
+        self.assertIn(
+            '?date_range=week&date_from=&date_to=&f=EMERGENCY&page=2#detail-table',
+            html,
+        )

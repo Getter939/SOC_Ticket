@@ -7,12 +7,14 @@ class UserProfile(models.Model):
     ROLE_SOC_MANAGER  = 'SOC_MANAGER'
     ROLE_SYSTEM_ADMIN = 'SYSTEM_ADMIN'
     ROLE_SYSTEM_OWNER = 'SYSTEM_OWNER'
+    ROLE_EXECUTIVE    = 'EXECUTIVE'
 
     ROLE_CHOICES = [
         (ROLE_SOC_STAFF,    'SOC Staff'),
         (ROLE_SOC_MANAGER,  'SOC Manager'),
         (ROLE_SYSTEM_ADMIN, 'System Admin'),
         (ROLE_SYSTEM_OWNER, 'System Owner'),
+        (ROLE_EXECUTIVE,    'Executive'),
     ]
 
     TIER_T1 = 'T1'
@@ -49,6 +51,10 @@ class UserProfile(models.Model):
     @property
     def is_system_owner(self):
         return self.role == self.ROLE_SYSTEM_OWNER
+
+    @property
+    def is_executive(self):
+        return self.role == self.ROLE_EXECUTIVE
 
     @property
     def is_soc(self):

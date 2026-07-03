@@ -3,6 +3,7 @@ from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.core.exceptions import PermissionDenied
 from django.db.models import (
     Case, Count, F, IntegerField, OuterRef, Q, Subquery, Value, When,
 )
@@ -415,10 +416,10 @@ def executive_dashboard(request):
     verdict stays a live current-posture summary.
     """
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and profile and profile.is_system_owner:
-        return redirect('system_owner_dashboard')
-    if not request.user.is_superuser and profile and profile.is_system_admin:
-        return redirect('ticket_list')
+    if not request.user.is_superuser and not (
+        profile and getattr(profile, 'is_executive', False)
+    ):
+        raise PermissionDenied
 
     now = timezone.now()
     terminal = list(Ticket.TERMINAL_STATUSES)
