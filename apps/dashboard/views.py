@@ -9,6 +9,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from apps.incidents import ola as ola_buckets
 from apps.incidents.models import Ticket, TicketLog
@@ -426,26 +427,56 @@ def executive_dashboard(request):
     all_tickets = Ticket.objects.all()
     active_qs = all_tickets.exclude(status__in=terminal)
 
-    date_range = request.GET.get('date_range', 'all')
-    if date_range not in {'today', 'week', 'month', 'all'}:
-        date_range = 'all'
+    # ── Date-range scope ────────────────────────────────────────────────── #
+    # A custom from/to range (date_from / date_to, ISO yyyy-mm-dd from the
+    # date inputs) takes precedence over the preset buttons. Either bound may
+    # be given alone (open-ended); a reversed range is swapped rather than
+    # rejected. Bad input parses to None and is ignored.
+    def _safe_date(value):
+        try:
+            return parse_date(value.strip()) if value else None
+        except ValueError:
+            return None
+
+    date_from = _safe_date(request.GET.get('date_from', ''))
+    date_to = _safe_date(request.GET.get('date_to', ''))
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+
     range_tickets = all_tickets
-    if date_range == 'today':
-        range_tickets = range_tickets.filter(created_at__date=now.date())
-    elif date_range == 'week':
-        week_start = (now - timedelta(days=now.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0)
-        range_tickets = range_tickets.filter(created_at__gte=week_start)
-    elif date_range == 'month':
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        range_tickets = range_tickets.filter(created_at__gte=month_start)
+    if date_from or date_to:
+        date_range = 'custom'
+        if date_from:
+            range_tickets = range_tickets.filter(created_at__date__gte=date_from)
+        if date_to:
+            range_tickets = range_tickets.filter(created_at__date__lte=date_to)
+        if date_from and date_to:
+            range_label = f'{date_from:%d %b %Y} – {date_to:%d %b %Y}'
+        elif date_from:
+            range_label = f'ตั้งแต่ {date_from:%d %b %Y}'
+        else:
+            range_label = f'ถึง {date_to:%d %b %Y}'
+    else:
+        date_range = request.GET.get('date_range', 'all')
+        if date_range not in {'today', 'week', 'month', 'all'}:
+            date_range = 'all'
+        if date_range == 'today':
+            range_tickets = range_tickets.filter(created_at__date=now.date())
+        elif date_range == 'week':
+            week_start = (now - timedelta(days=now.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0)
+            range_tickets = range_tickets.filter(created_at__gte=week_start)
+        elif date_range == 'month':
+            month_start = now.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0)
+            range_tickets = range_tickets.filter(created_at__gte=month_start)
+        range_label = {
+            'today': 'Today',
+            'week': 'This Week',
+            'month': 'This Month',
+            'all': 'All Time',
+        }[date_range]
     range_active_qs = range_tickets.exclude(status__in=terminal)
-    range_labels = {
-        'today': 'Today',
-        'week': 'This Week',
-        'month': 'This Month',
-        'all': 'All Time',
-    }
 
     # ── KPI 1: total High/Critical cases + delta vs start of this month ─── #
     total_hc = all_tickets.filter(severity__in=HIGH_CRIT).count()
@@ -596,6 +627,8 @@ def executive_dashboard(request):
         'filter_label': filter_label,
         'filters': {
             'date_range': date_range,
-            'range_label': range_labels[date_range],
+            'range_label': range_label,
+            'date_from': date_from.isoformat() if date_from else '',
+            'date_to': date_to.isoformat() if date_to else '',
         },
     })

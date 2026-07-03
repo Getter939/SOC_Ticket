@@ -114,6 +114,26 @@
             <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
                class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">All Time</a>
         </div>
+
+        <div class="vr d-none d-md-block"></div>
+
+        <!-- Custom from–to range (overrides the presets when applied) -->
+        <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-0">
+            {% if filter_f %}<input type="hidden" name="f" value="{{ filter_f }}">{% endif %}
+            <span class="mini-label text-muted">กำหนดเอง</span>
+            <input type="date" name="date_from" value="{{ filters.date_from }}"
+                   class="form-control form-control-sm" style="width:150px;"
+                   aria-label="ตั้งแต่วันที่">
+            <span class="mini-label text-muted">–</span>
+            <input type="date" name="date_to" value="{{ filters.date_to }}"
+                   class="form-control form-control-sm" style="width:150px;"
+                   aria-label="ถึงวันที่">
+            <button type="submit" class="btn btn-sm btn-primary">ใช้ช่วงเวลา</button>
+            {% if filters.date_range == 'custom' %}
+            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+               class="btn btn-sm btn-outline-secondary">ล้าง</a>
+            {% endif %}
+        </form>
     </div>
 </div>
 
@@ -209,7 +229,7 @@
                 </div>
                 <div class="col-7 d-flex flex-column justify-content-evenly criteria-list">
                     {% for c in summary_criteria %}
-                    <a class="criteria-row" href="?date_range={{ filters.date_range }}&f={{ c.filter|urlencode }}#detail-table"
+                    <a class="criteria-row" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&f={{ c.filter|urlencode }}#detail-table"
                        title="คลิกเพื่อกรองตารางด้านล่าง">
                         {% if c.level == 'good' %}
                         <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
@@ -283,7 +303,7 @@
                 </span>
                 {% if filter_f %}
                 <span class="badge text-bg-primary">ตัวกรอง: {{ filter_label }}</span>
-                <a href="{% url 'executive_dashboard' %}?date_range={{ filters.date_range }}#detail-table"
+                <a href="{% url 'executive_dashboard' %}?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}#detail-table"
                    class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
                 {% endif %}
             </div>
@@ -357,7 +377,7 @@
                     <ul class="pagination pagination-sm mb-0">
                         {% if page_obj.has_previous %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="Previous">«</a>
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="Previous">«</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">«</span></li>
@@ -367,7 +387,7 @@
                         </li>
                         {% if page_obj.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="Next">»</a>
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="Next">»</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">»</span></li>
@@ -411,6 +431,8 @@ Chart.defaults.maintainAspectRatio = false;
     const pbs = JSON.parse(
         document.getElementById('pipeline-by-severity-exec').textContent);
     const dateRange = '{{ filters.date_range|escapejs }}';
+    const dateFrom = '{{ filters.date_from|escapejs }}';
+    const dateTo = '{{ filters.date_to|escapejs }}';
     const statuses   = pbs.statuses;    // [[slug, display], ...] workflow order
     const severities = pbs.severities;  // Critical/High only, highest rank first
     const matrix     = pbs.matrix;
@@ -460,6 +482,8 @@ Chart.defaults.maintainAspectRatio = false;
                     const slug = statuses[els[0].index][0];
                     window.location =
                         '?date_range=' + encodeURIComponent(dateRange) +
+                        '&date_from=' + encodeURIComponent(dateFrom) +
+                        '&date_to=' + encodeURIComponent(dateTo) +
                         '&f=' + encodeURIComponent(slug) + '#detail-table';
                 }
             },
