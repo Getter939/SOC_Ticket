@@ -631,6 +631,11 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertIn('date_range=month', html)
         self.assertIn("const dateRange = 'week';", html)
         self.assertIn("'?date_range=' + encodeURIComponent(dateRange)", html)
+        self.assertIn('pipelineTotalsExec', html)
+        self.assertIn('color: tick => emergencyCounts', html)
+        self.assertNotIn('roundedRect(ctx', html)
+        self.assertNotIn('pipelineLabelsExec', html)
+        self.assertNotIn('pipelineAnnotationsExec', html)
 
     def test_detail_pagination_preserves_filter(self):
         for _ in range(11):

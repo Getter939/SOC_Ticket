@@ -248,7 +248,7 @@
                         aria-label="จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency ในแต่ละสถานะ"></canvas>
             </div>
             <div class="text-muted mt-1" style="font-size:11px;">
-                <span class="badge bg-danger me-1">E</span>จำนวนเคส Emergency ในสถานะนั้น · คลิกแท่งกราฟเพื่อกรองตารางรายละเอียดด้านล่าง
+                <span class="badge bg-danger me-1">E</span>ชื่อสถานะสีแดง = มีเคส Emergency · ดูจำนวนใน tooltip
             </div>
             <table class="visually-hidden">
                 <caption>จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency</caption>
@@ -440,22 +440,8 @@ Chart.defaults.maintainAspectRatio = false;
     const emergencyCounts = statuses.map(([stSlug]) => emergencyByStatus[stSlug] || 0);
     const maxTotal = Math.max(0, ...totals);
 
-    function roundedRect(ctx, x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-    }
-
-    const pipelineLabelsPlugin = {
-        id: 'pipelineLabelsExec',
+    const totalLabelPlugin = {
+        id: 'pipelineTotalsExec',
         afterDatasetsDraw(chart) {
             const { ctx, scales: { x, y } } = chart;
             ctx.save();
@@ -468,24 +454,6 @@ Chart.defaults.maintainAspectRatio = false;
                 ctx.fillText(t, x.getPixelForValue(i), y.getPixelForValue(t) - 4);
             });
             ctx.restore();
-
-            ctx.save();
-            ctx.font = 'bold 11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            emergencyCounts.forEach((e, i) => {
-                if (e === 0) return;
-                const label = 'E ' + e;
-                const cx = x.getPixelForValue(i);
-                const cy = y.getPixelForValue(totals[i]) - 24;
-                const w = Math.max(28, ctx.measureText(label).width + 12);
-                roundedRect(ctx, cx - (w / 2), cy - 9, w, 18, 9);
-                ctx.fillStyle = '#dc3545';
-                ctx.fill();
-                ctx.fillStyle = '#fff';
-                ctx.fillText(label, cx, cy);
-            });
-            ctx.restore();
         }
     };
 
@@ -494,7 +462,7 @@ Chart.defaults.maintainAspectRatio = false;
         data: { labels, datasets },
         options: {
             responsive: true,
-            layout: { padding: { top: 28 } },
+            layout: { padding: { top: 12 } },
             // Click a bar → filter the detail table to that status within range.
             onClick: (evt, els) => {
                 if (els.length) {
@@ -512,7 +480,12 @@ Chart.defaults.maintainAspectRatio = false;
                     stacked: true,
                     grid: { display: false },
                     ticks: { maxRotation: 45, minRotation: 45,
-                             font: { size: 12 }, autoSkip: false },
+                             color: tick => emergencyCounts[tick.index] ? '#dc3545' : '#6c757d',
+                             font: tick => ({
+                                 size: 12,
+                                 weight: emergencyCounts[tick.index] ? '700' : '400',
+                             }),
+                             autoSkip: false },
                 },
                 y: {
                     stacked: true, beginAtZero: true,
@@ -540,7 +513,7 @@ Chart.defaults.maintainAspectRatio = false;
                 }
             },
         },
-        plugins: [pipelineLabelsPlugin],
+        plugins: [totalLabelPlugin],
     });
 })();
 </script>
