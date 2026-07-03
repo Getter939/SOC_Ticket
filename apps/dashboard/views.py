@@ -402,7 +402,7 @@ def dashboard(request):
 def executive_dashboard(request):
     """Executive dashboard — glanceable posture summary for management.
 
-    Follows the approved wireframe: KPI cards (active High/Critical count
+    Follows the approved wireframe: KPI cards (total High/Critical count
     with month-over-month delta, MTTR placeholder), a date-scoped
     High/Critical closure progress bar, a four-criteria executive summary
     with an overall GOOD / WAITING / WARNING verdict, the date-scoped
@@ -447,37 +447,17 @@ def executive_dashboard(request):
         'all': 'All Time',
     }
 
-    # ── KPI 1: active High/Critical cases + delta vs end of last month ──── #
-    active_hc = active_qs.filter(severity__in=HIGH_CRIT).count()
+    # ── KPI 1: total High/Critical cases + delta vs start of this month ─── #
+    total_hc = all_tickets.filter(severity__in=HIGH_CRIT).count()
 
     this_month_start = now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
-    # Close timestamp: closed_at (stamped by transition_to since migration
-    # 0031), with fallbacks for rows that predate the field — approved_at,
-    # then the first terminal TicketLog, then status_changed_at.
-    first_terminal_log = (
-        TicketLog.objects
-        .filter(ticket=OuterRef('pk'), status_at_time__in=terminal)
-        .order_by('created_at')
-        .values('created_at')[:1]
-    )
-    close_ts_expr = Coalesce(
-        F('closed_at'), F('approved_at'),
-        Subquery(first_terminal_log), F('status_changed_at'),
-    )
-    # "Active at end of last month" = created before this month AND not yet
-    # closed by then (i.e. still open now, or closed during this month).
-    prev_active_hc = (
+    prev_total_hc = (
         all_tickets
         .filter(severity__in=HIGH_CRIT, created_at__lt=this_month_start)
-        .annotate(close_ts=close_ts_expr)
-        .filter(
-            ~Q(status__in=terminal)
-            | Q(status__in=terminal, close_ts__gte=this_month_start)
-        )
         .count()
     )
-    active_hc_delta = active_hc - prev_active_hc
+    total_hc_delta = total_hc - prev_total_hc
 
     # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
     hc_total = range_tickets.filter(severity__in=HIGH_CRIT).count()
@@ -598,8 +578,8 @@ def executive_dashboard(request):
 
     return render(request, 'dashboard/executive.html', {
         'now': now,
-        'active_hc': active_hc,
-        'active_hc_delta': active_hc_delta,
+        'total_hc': total_hc,
+        'total_hc_delta': total_hc_delta,
         'emergency_active': emergency_active,
         'hc_total': hc_total,
         'hc_closed': hc_closed,

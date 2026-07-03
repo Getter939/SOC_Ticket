@@ -120,32 +120,23 @@
 <!-- ══ ROW 1: KPI cards + progress bar ═══════════════════════════════════ -->
 <div class="row g-3 mb-3">
 
-    <!-- 1. Total active High/Critical cases -->
-    <div class="col-6 col-md-4 col-lg-3">
+    <!-- 1. Total High/Critical cases -->
+    <div class="col-6 col-md-4 col-lg-4">
         <div class="stat-card b-blue">
-            <div class="stat-value">{{ active_hc|intcomma }}</div>
-            <div class="stat-label">เคสที่กำลังดำเนินการ (Critical/High)</div>
-            {% if active_hc_delta > 0 %}
-            <div class="stat-sub text-danger">↑{{ active_hc_delta|intcomma }} จากเดือนที่แล้ว</div>
-            {% elif active_hc_delta < 0 %}
-            <div class="stat-sub text-success">↓{{ active_hc_delta|intcomma|slice:"1:" }} จากเดือนที่แล้ว</div>
+            <div class="stat-value">{{ total_hc|intcomma }}</div>
+            <div class="stat-label">เคสทั้งหมด (Critical/High)</div>
+            {% if total_hc_delta > 0 %}
+            <div class="stat-sub text-danger">↑{{ total_hc_delta|intcomma }} จากเดือนที่แล้ว</div>
+            {% elif total_hc_delta < 0 %}
+            <div class="stat-sub text-success">↓{{ total_hc_delta|intcomma|slice:"1:" }} จากเดือนที่แล้ว</div>
             {% else %}
             <div class="stat-sub text-muted">เท่ากับเดือนที่แล้ว</div>
             {% endif %}
         </div>
     </div>
 
-    <!-- 2. Active emergency-flagged cases -->
-    <div class="col-6 col-md-4 col-lg-3">
-        <div class="stat-card b-red">
-            <div class="stat-value text-danger">{{ emergency_active|intcomma }}</div>
-            <div class="stat-label">เคสฉุกเฉิน (Emergency)</div>
-            <div class="stat-sub text-muted">ที่กำลังดำเนินการ</div>
-        </div>
-    </div>
-
-    <!-- 3. MTTR (placeholder) -->
-    <div class="col-6 col-md-4 col-lg-3">
+    <!-- 2. MTTR (placeholder) -->
+    <div class="col-6 col-md-4 col-lg-4">
         <div class="stat-card b-orange">
             {# TODO(MTTR): compute median/mean of (closed_at - created_at) over #}
             {# terminal tickets (last 30 days) once closed_at coverage is       #}
@@ -156,8 +147,8 @@
         </div>
     </div>
 
-    <!-- 4. High/Critical closure progress -->
-    <div class="col-12 col-lg-3">
+    <!-- 3. High/Critical closure progress -->
+    <div class="col-12 col-md-4 col-lg-4">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส (Critical/High)

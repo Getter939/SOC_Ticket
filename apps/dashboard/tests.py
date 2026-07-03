@@ -570,6 +570,19 @@ class ExecutiveDashboardViewTest(TestCase):
             1,
         )
 
+    def test_top_kpi_counts_all_high_critical_and_omits_emergency_card(self):
+        self._ticket(status=Ticket.STATUS_NEW, severity='High')
+        self._ticket(status=Ticket.STATUS_APPROVED, severity='Critical')
+        self._ticket(status=Ticket.STATUS_NEW, severity='Low', emergency=True)
+
+        resp = self._get()
+        html = resp.content.decode()
+
+        self.assertEqual(resp.context['total_hc'], 2)
+        self.assertIn('เคสทั้งหมด (Critical/High)', html)
+        self.assertNotIn('เคสที่กำลังดำเนินการ (Critical/High)', html)
+        self.assertNotIn('<div class="stat-label">เคสฉุกเฉิน (Emergency)</div>', html)
+
     def test_detail_table_paginates_ten_rows(self):
         for _ in range(12):
             self._ticket()
