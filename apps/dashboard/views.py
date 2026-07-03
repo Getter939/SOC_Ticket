@@ -557,6 +557,7 @@ def executive_dashboard(request):
         'now': now,
         'active_hc': active_hc,
         'active_hc_delta': active_hc_delta,
+        'emergency_active': emergency_active,
         'hc_total': hc_total,
         'hc_closed': hc_closed,
         'hc_open': hc_open,

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load humanize %}
 
-{% block title %}แดชบอร์ดผู้บริหาร — SOC Support System{% endblock %}
+{% block title %}Executive SOC Dashboard — SOC Support System{% endblock %}
 
 {% block content %}
 
@@ -18,6 +18,7 @@
     .stat-card.b-blue   { border-top-color: #0d6efd; }
     .stat-card.b-orange { border-top-color: #fd7e14; }
     .stat-card.b-green  { border-top-color: #198754; }
+    .stat-card.b-red    { border-top-color: #dc3545; }
     .stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
     .stat-card .stat-label { font-size: 13px; color: #6c757d; font-weight: 600; }
     .stat-card .stat-sub   { font-size: 13px; margin-top: 0.15rem; }
@@ -39,28 +40,31 @@
         border-radius: 50%; margin-right: 4px; vertical-align: baseline;
     }
 
-    /* Executive summary verdict box */
+    /* Executive summary verdict box — scales to fill the card height */
     .verdict-box {
         border-radius: 8px; text-align: center;
-        padding: 1.1rem 0.5rem; height: 100%;
+        padding: 1.25rem 0.75rem; height: 100%;
         display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 0.25rem;
+        align-items: center; justify-content: center; gap: 0.4rem;
     }
-    .verdict-box i { font-size: 2.6rem; line-height: 1; }
-    .verdict-box .verdict-label { font-size: 1.4rem; font-weight: 700; letter-spacing: .05em; }
+    .verdict-box i { font-size: 3.4rem; line-height: 1; }
+    .verdict-box .verdict-label { font-size: 1.75rem; font-weight: 700; letter-spacing: .06em; }
+    .verdict-box .verdict-sub { font-size: 0.9rem; font-weight: 600; opacity: 0.85; }
     .verdict-good    { background: rgba(25,135,84,0.10);  color: #198754; }
     .verdict-waiting { background: rgba(255,193,7,0.15);  color: #b58800; }
     .verdict-warning { background: rgba(220,53,69,0.10);  color: #dc3545; }
 
-    /* Criteria checklist — rows are links that filter the detail table */
+    /* Criteria checklist — rows are links that filter the detail table.
+       Rows spread to fill the card height (justify-content on the column). */
+    .criteria-list { gap: 0.35rem; }
     .criteria-row {
-        display: flex; align-items: center; gap: 0.6rem;
-        padding: 0.45rem 0.6rem; border-radius: 6px;
-        font-size: 13px; color: #212529; text-decoration: none;
+        display: flex; align-items: center; gap: 0.7rem;
+        padding: 0.55rem 0.65rem; border-radius: 6px;
+        font-size: 15px; line-height: 1.3; color: #212529; text-decoration: none;
     }
     .criteria-row:hover { background: #f1f3f5; color: #212529; }
-    .criteria-row i { font-size: 1.05rem; }
-    .criteria-row .crit-count { font-weight: 700; min-width: 1.4em; text-align: right; }
+    .criteria-row i { font-size: 1.4rem; flex-shrink: 0; }
+    .criteria-row .crit-count { font-size: 1.05rem; font-weight: 700; min-width: 1.5em; text-align: right; flex-shrink: 0; }
 
     /* Detail table */
     .detail-table { font-size: 13px; }
@@ -72,7 +76,7 @@
 
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h4 class="mb-0 fw-bold">แดชบอร์ดผู้บริหาร</h4>
+    <h4 class="mb-0 fw-bold">Executive SOC Dashboard</h4>
     <span class="text-muted" style="font-size:13px;">
         <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
     </span>
@@ -82,7 +86,7 @@
 <div class="row g-3 mb-3">
 
     <!-- 1. Total active High/Critical cases -->
-    <div class="col-md-4 col-lg-3">
+    <div class="col-6 col-md-4 col-lg-3">
         <div class="stat-card b-blue">
             <div class="stat-value">{{ active_hc|intcomma }}</div>
             <div class="stat-label">เคสที่กำลังดำเนินการ (Critical/High)</div>
@@ -96,8 +100,17 @@
         </div>
     </div>
 
-    <!-- 2. MTTR (placeholder) -->
-    <div class="col-md-4 col-lg-3">
+    <!-- 2. Active emergency-flagged cases -->
+    <div class="col-6 col-md-4 col-lg-3">
+        <div class="stat-card b-red">
+            <div class="stat-value text-danger">{{ emergency_active|intcomma }}</div>
+            <div class="stat-label">เคสฉุกเฉิน (Emergency)</div>
+            <div class="stat-sub text-muted">ที่กำลังดำเนินการ</div>
+        </div>
+    </div>
+
+    <!-- 3. MTTR (placeholder) -->
+    <div class="col-6 col-md-4 col-lg-3">
         <div class="stat-card b-orange">
             {# TODO(MTTR): compute median/mean of (closed_at - created_at) over #}
             {# terminal tickets (last 30 days) once closed_at coverage is       #}
@@ -108,15 +121,15 @@
         </div>
     </div>
 
-    <!-- 3. High/Critical closure progress -->
-    <div class="col-md-4 col-lg-6">
+    <!-- 4. High/Critical closure progress -->
+    <div class="col-12 col-lg-3">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส (Critical/High)
             </div>
             {% if hc_total %}
             <div class="d-flex align-items-center gap-3 flex-wrap">
-                <div class="flex-grow-1" style="min-width:220px;">
+                <div class="flex-grow-1" style="min-width:150px;">
                     <div class="progress-split" role="img"
                          aria-label="ปิดแล้ว {{ hc_closed }} จาก {{ hc_total }} เคส ({{ hc_progress_pct }}%)">
                         <div class="seg-closed" style="width: {{ hc_progress_pct }}%;"></div>
@@ -141,33 +154,33 @@
 
     <!-- 2L — Executive summary -->
     <div class="col-lg-5">
-        <div class="panel p-3 h-100">
+        <div class="panel p-3 h-100 d-flex flex-column">
             <div class="panel-title mb-2">
                 <i class="bi bi-clipboard-check me-1"></i>สรุปสถานการณ์
             </div>
-            <div class="row g-3 align-items-stretch">
+            <div class="row g-3 align-items-stretch flex-grow-1">
                 <div class="col-5">
                     {% if overall_status == 'GOOD' %}
                     <div class="verdict-box verdict-good">
                         <i class="bi bi-check-lg" aria-hidden="true"></i>
                         <div class="verdict-label">GOOD</div>
-                        <div style="font-size:12px;">สถานการณ์ปกติ</div>
+                        <div class="verdict-sub">สถานการณ์ปกติ</div>
                     </div>
                     {% elif overall_status == 'WAITING' %}
                     <div class="verdict-box verdict-waiting">
                         <i class="bi bi-hourglass-split" aria-hidden="true"></i>
                         <div class="verdict-label">WAITING</div>
-                        <div style="font-size:12px;">มีงานรอดำเนินการ</div>
+                        <div class="verdict-sub">มีงานรอดำเนินการ</div>
                     </div>
                     {% else %}
                     <div class="verdict-box verdict-warning">
                         <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
                         <div class="verdict-label">WARNING</div>
-                        <div style="font-size:12px;">ต้องให้ความสนใจทันที</div>
+                        <div class="verdict-sub">ต้องให้ความสนใจทันที</div>
                     </div>
                     {% endif %}
                 </div>
-                <div class="col-7 d-flex flex-column justify-content-center">
+                <div class="col-7 d-flex flex-column justify-content-evenly criteria-list">
                     {% for c in summary_criteria %}
                     <a class="criteria-row" href="?f={{ c.filter }}#detail-table"
                        title="คลิกเพื่อกรองตารางด้านล่าง">
