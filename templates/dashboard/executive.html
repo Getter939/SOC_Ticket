@@ -7,6 +7,18 @@
 
 <style>
     /* Shared visual language with dashboard.html (page-scoped styles). */
+    .exec-filterbar {
+        position: sticky;
+        top: var(--header-height);
+        z-index: 1020;
+        background: #f4f6f9;
+        padding: 0.5rem 0;
+        margin: -0.25rem 0 1rem;
+        border-bottom: 1px solid #e3e6ea;
+    }
+    .exec-filterbar .btn-group .btn { font-size: 13px; }
+    .mini-label { font-size: 13px; }
+
     .stat-card {
         background: #fff;
         border: 1px solid #e3e6ea;
@@ -72,6 +84,10 @@
     .detail-table td { vertical-align: middle; }
     .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
                    border-radius:10px; color:#fff; white-space:nowrap; }
+    .priority-pill { font-size:12px; font-weight:700; padding:2px 8px;
+                     border-radius:10px; white-space:nowrap; }
+    .priority-emergency { background:#dc3545; color:#fff; }
+    .priority-normal { background:#e9ecef; color:#495057; }
 </style>
 
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
@@ -80,6 +96,25 @@
     <span class="text-muted" style="font-size:13px;">
         <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
     </span>
+</div>
+
+<!-- ── Time range filter for charting/detail sections ──────────────────── -->
+<div class="exec-filterbar">
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <span class="mini-label fw-semibold text-muted">
+            <i class="bi bi-calendar3 me-1"></i>ช่วงเวลา
+        </span>
+        <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
+            <a href="?date_range=today{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">Today</a>
+            <a href="?date_range=week{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">This Week</a>
+            <a href="?date_range=month{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">This Month</a>
+            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">All Time</a>
+        </div>
+    </div>
 </div>
 
 <!-- ══ ROW 1: KPI cards + progress bar ═══════════════════════════════════ -->
@@ -126,6 +161,7 @@
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส (Critical/High)
+                <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
             </div>
             {% if hc_total %}
             <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -182,7 +218,7 @@
                 </div>
                 <div class="col-7 d-flex flex-column justify-content-evenly criteria-list">
                     {% for c in summary_criteria %}
-                    <a class="criteria-row" href="?f={{ c.filter }}#detail-table"
+                    <a class="criteria-row" href="?date_range={{ filters.date_range }}&f={{ c.filter|urlencode }}#detail-table"
                        title="คลิกเพื่อกรองตารางด้านล่าง">
                         {% if c.level == 'good' %}
                         <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
@@ -205,16 +241,17 @@
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด (Pipeline)
+                <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
             </div>
             <div style="height:300px;">
                 <canvas id="chartPipelineExec" role="img"
-                        aria-label="จำนวน Ticket แยกตามสถานะและความรุนแรง — คลิกแท่งเพื่อกรองตารางด้านล่าง"></canvas>
+                        aria-label="จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency ในแต่ละสถานะ"></canvas>
             </div>
             <div class="text-muted mt-1" style="font-size:11px;">
-                <i class="bi bi-info-circle me-1"></i>คลิกแท่งกราฟเพื่อกรองตารางรายละเอียดด้านล่าง
+                <span class="badge bg-danger me-1">E</span>จำนวนเคส Emergency ในสถานะนั้น · คลิกแท่งกราฟเพื่อกรองตารางรายละเอียดด้านล่าง
             </div>
             <table class="visually-hidden">
-                <caption>จำนวน Ticket แยกตามสถานะและความรุนแรง</caption>
+                <caption>จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency</caption>
                 <thead>
                     <tr>
                         <th>ความรุนแรง</th>
@@ -232,6 +269,12 @@
                         {% endfor %}
                     </tr>
                     {% endfor %}
+                    <tr>
+                        <td>Emergency</td>
+                        {% for cell in pipeline_emergency_row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -245,10 +288,11 @@
             <div class="d-flex flex-wrap align-items-center gap-2 p-3 pb-2">
                 <span class="panel-title mb-0">
                     <i class="bi bi-list-ul me-1"></i>รายละเอียด Ticket
+                    <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
                 </span>
                 {% if filter_f %}
                 <span class="badge text-bg-primary">ตัวกรอง: {{ filter_label }}</span>
-                <a href="{% url 'executive_dashboard' %}#detail-table"
+                <a href="{% url 'executive_dashboard' %}?date_range={{ filters.date_range }}#detail-table"
                    class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
                 {% endif %}
             </div>
@@ -259,6 +303,7 @@
                             <th>Ticket ID</th>
                             <th>รายละเอียด</th>
                             <th>ผู้รับผิดชอบ</th>
+                            <th>ความสำคัญ</th>
                             <th>สถานะ</th>
                             <th>อัปเดตล่าสุด</th>
                         </tr>
@@ -284,6 +329,15 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {% if t.is_emergency %}
+                                <span class="priority-pill priority-emergency">
+                                    <i class="bi bi-exclamation-octagon-fill me-1" aria-hidden="true"></i>EMERGENCY
+                                </span>
+                                {% else %}
+                                <span class="priority-pill priority-normal">ปกติ</span>
+                                {% endif %}
+                            </td>
+                            <td>
                                 <span class="status-pill" style="background:
                                     {% if t.status == 'NEW' %}#0d6efd
                                     {% elif t.status == 'ESCALATED_T2' %}#6f42c1
@@ -298,11 +352,39 @@
                             <td class="text-nowrap">{{ t.updated_at|date:"d M Y H:i" }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="5" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
+            {% if page_obj.paginator.num_pages > 1 %}
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-3 py-2">
+                <div class="text-muted" style="font-size:13px;">
+                    แสดง {{ page_obj.start_index }}–{{ page_obj.end_index }} จาก {{ page_obj.paginator.count|intcomma }} รายการ
+                </div>
+                <nav aria-label="Executive ticket detail pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="Previous">«</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link" aria-hidden="true">«</span></li>
+                        {% endif %}
+                        <li class="page-item disabled">
+                            <span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                        </li>
+                        {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="Next">»</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link" aria-hidden="true">»</span></li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -337,13 +419,14 @@ Chart.defaults.maintainAspectRatio = false;
 (function () {
     const pbs = JSON.parse(
         document.getElementById('pipeline-by-severity-exec').textContent);
+    const dateRange = '{{ filters.date_range|escapejs }}';
     const statuses   = pbs.statuses;    // [[slug, display], ...] workflow order
-    const severities = pbs.severities;  // [[slug, display], ...] highest rank first
+    const severities = pbs.severities;  // Critical/High only, highest rank first
     const matrix     = pbs.matrix;
+    const emergencyByStatus = pbs.emergency_by_status || {};
 
     const SEV_COLOR = {
-        'Critical': '#dc3545', 'High': '#fd7e14', 'Medium': '#ffc107',
-        'Low': '#198754', 'Unknown': '#adb5bd',
+        'Critical': '#dc3545', 'High': '#fd7e14',
     };
     const labels = statuses.map(s => s[1]);
     const datasets = severities.map(([sevSlug, sevDisplay]) => ({
@@ -354,10 +437,25 @@ Chart.defaults.maintainAspectRatio = false;
     }));
     const totals = statuses.map((_, i) =>
         datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
+    const emergencyCounts = statuses.map(([stSlug]) => emergencyByStatus[stSlug] || 0);
     const maxTotal = Math.max(0, ...totals);
 
-    const totalLabelPlugin = {
-        id: 'pipelineTotalsExec',
+    function roundedRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    const pipelineLabelsPlugin = {
+        id: 'pipelineLabelsExec',
         afterDatasetsDraw(chart) {
             const { ctx, scales: { x, y } } = chart;
             ctx.save();
@@ -370,6 +468,24 @@ Chart.defaults.maintainAspectRatio = false;
                 ctx.fillText(t, x.getPixelForValue(i), y.getPixelForValue(t) - 4);
             });
             ctx.restore();
+
+            ctx.save();
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            emergencyCounts.forEach((e, i) => {
+                if (e === 0) return;
+                const label = 'E ' + e;
+                const cx = x.getPixelForValue(i);
+                const cy = y.getPixelForValue(totals[i]) - 24;
+                const w = Math.max(28, ctx.measureText(label).width + 12);
+                roundedRect(ctx, cx - (w / 2), cy - 9, w, 18, 9);
+                ctx.fillStyle = '#dc3545';
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.fillText(label, cx, cy);
+            });
+            ctx.restore();
         }
     };
 
@@ -378,11 +494,14 @@ Chart.defaults.maintainAspectRatio = false;
         data: { labels, datasets },
         options: {
             responsive: true,
-            // Click a bar → filter the detail table to that status (?f=slug).
+            layout: { padding: { top: 28 } },
+            // Click a bar → filter the detail table to that status within range.
             onClick: (evt, els) => {
                 if (els.length) {
                     const slug = statuses[els[0].index][0];
-                    window.location = '?f=' + encodeURIComponent(slug) + '#detail-table';
+                    window.location =
+                        '?date_range=' + encodeURIComponent(dateRange) +
+                        '&f=' + encodeURIComponent(slug) + '#detail-table';
                 }
             },
             onHover: (evt, els) => {
@@ -400,7 +519,7 @@ Chart.defaults.maintainAspectRatio = false;
                     suggestedMax: maxTotal + 1,
                     grid: { color: '#e9ecef' },
                     ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
-                    title: { display: true, text: 'จำนวนเคส', font: { size: 13 } },
+                    title: { display: true, text: 'จำนวนเคส Critical/High', font: { size: 13 } },
                 }
             },
             plugins: {
@@ -409,13 +528,19 @@ Chart.defaults.maintainAspectRatio = false;
                     callbacks: {
                         title: items => items[0].label,
                         label: item => `${item.dataset.label}: ${item.parsed.y}`,
-                        footer: items =>
-                            'รวม: ' + totals[items[0].dataIndex] + ' — คลิกเพื่อกรองตาราง',
+                        footer: items => {
+                            const i = items[0].dataIndex;
+                            return [
+                                'รวม Critical/High: ' + totals[i],
+                                'Emergency: ' + emergencyCounts[i],
+                                'คลิกเพื่อกรองตาราง',
+                            ];
+                        },
                     }
                 }
             },
         },
-        plugins: [totalLabelPlugin],
+        plugins: [pipelineLabelsPlugin],
     });
 })();
 </script>

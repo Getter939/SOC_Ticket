@@ -59,6 +59,7 @@ def _make_ticket(
 
 
 DASHBOARD_URL = reverse('home')
+EXECUTIVE_URL = reverse('executive_dashboard')
 
 
 # ── Access-control tests ─────────────────────────────────────────────────── #
@@ -492,3 +493,150 @@ class DashboardManagementViewTest(TestCase):
             for i in range(1000)
         ])
         self.assertIn('1,000', self._get().content.decode())
+
+
+# ── Executive dashboard ─────────────────────────────────────────────────── #
+
+class ExecutiveDashboardViewTest(TestCase):
+    """Executive dashboard pipeline and detail-table behavior."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('soc_exec', UserProfile.ROLE_SOC_STAFF)
+
+    def setUp(self):
+        self.client.force_login(self.soc)
+
+    def _get(self, **params):
+        return self.client.get(EXECUTIVE_URL, params)
+
+    def _ticket(
+        self,
+        status=Ticket.STATUS_NEW,
+        severity='High',
+        emergency=False,
+        created_at=None,
+    ):
+        ticket = _make_ticket(status=status)
+        updates = {
+            'severity': severity,
+            'is_emergency': emergency,
+        }
+        if created_at is not None:
+            updates['created_at'] = created_at
+        Ticket.objects.filter(pk=ticket.pk).update(**updates)
+        ticket.refresh_from_db()
+        return ticket
+
+    def test_pipeline_is_high_critical_only_with_emergency_counts(self):
+        self._ticket(
+            status=Ticket.STATUS_NEW,
+            severity='Critical',
+            emergency=True,
+        )
+        self._ticket(
+            status=Ticket.STATUS_AWAITING_CONTAINMENT,
+            severity='High',
+        )
+        self._ticket(
+            status=Ticket.STATUS_NEW,
+            severity='Medium',
+            emergency=True,
+        )
+        self._ticket(
+            status=Ticket.STATUS_CLOSED_EVENT,
+            severity='Unknown',
+            emergency=True,
+        )
+
+        ctx = self._get().context
+        pbs = ctx['pipeline_by_severity']
+        status_slugs = [slug for slug, _ in pbs['statuses']]
+
+        self.assertEqual(
+            [slug for slug, _ in pbs['severities']],
+            ['Critical', 'High'],
+        )
+        self.assertEqual(set(pbs['matrix']), {'Critical', 'High'})
+        self.assertEqual(pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(
+            pbs['matrix']['High'][Ticket.STATUS_AWAITING_CONTAINMENT],
+            1,
+        )
+        self.assertEqual(pbs['emergency_by_status'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(sum(pbs['emergency_by_status'].values()), 1)
+        self.assertEqual(
+            ctx['pipeline_emergency_row'][status_slugs.index(Ticket.STATUS_NEW)],
+            1,
+        )
+
+    def test_detail_table_paginates_ten_rows(self):
+        for _ in range(12):
+            self._ticket()
+
+        first_page = self._get()
+        second_page = self._get(page=2)
+
+        self.assertEqual(first_page.context['page_obj'].paginator.per_page, 10)
+        self.assertEqual(len(first_page.context['table_tickets']), 10)
+        self.assertEqual(len(second_page.context['table_tickets']), 2)
+
+    def test_detail_table_renders_priority_column(self):
+        self._ticket(emergency=True)
+        self._ticket(emergency=False)
+
+        html = self._get().content.decode()
+
+        self.assertIn('ความสำคัญ', html)
+        self.assertIn('priority-emergency', html)
+        self.assertIn('priority-normal', html)
+
+    def test_time_range_filters_chart_progress_and_detail_data(self):
+        old_created_at = timezone.now() - timedelta(days=2)
+        self._ticket(
+            status=Ticket.STATUS_NEW,
+            severity='Critical',
+            emergency=True,
+        )
+        self._ticket(
+            status=Ticket.STATUS_APPROVED,
+            severity='High',
+            emergency=True,
+            created_at=old_created_at,
+        )
+
+        today = self._get(date_range='today')
+        today_pbs = today.context['pipeline_by_severity']
+
+        self.assertEqual(today.context['filters']['date_range'], 'today')
+        self.assertEqual(today.context['hc_total'], 1)
+        self.assertEqual(today.context['hc_open'], 1)
+        self.assertEqual(today_pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(today_pbs['matrix']['High'][Ticket.STATUS_APPROVED], 0)
+        self.assertEqual(today_pbs['emergency_by_status'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(len(today.context['table_tickets']), 1)
+
+        all_time = self._get(date_range='all')
+        all_pbs = all_time.context['pipeline_by_severity']
+
+        self.assertEqual(all_time.context['hc_total'], 2)
+        self.assertEqual(all_pbs['matrix']['High'][Ticket.STATUS_APPROVED], 1)
+
+    def test_time_range_control_and_chart_links_render(self):
+        self._ticket()
+
+        html = self._get(date_range='week').content.decode()
+
+        self.assertIn('date_range=today', html)
+        self.assertIn('date_range=month', html)
+        self.assertIn("const dateRange = 'week';", html)
+        self.assertIn("'?date_range=' + encodeURIComponent(dateRange)", html)
+
+    def test_detail_pagination_preserves_filter(self):
+        for _ in range(11):
+            self._ticket(emergency=True)
+        self._ticket(emergency=False)
+
+        html = self._get(date_range='week', f='EMERGENCY').content.decode()
+
+        self.assertIn('?date_range=week&f=EMERGENCY&page=2#detail-table', html)

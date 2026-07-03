@@ -2,6 +2,7 @@ from datetime import timedelta
 from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db.models import (
     Case, Count, F, IntegerField, OuterRef, Q, Subquery, Value, When,
 )
@@ -402,13 +403,15 @@ def executive_dashboard(request):
     """Executive dashboard — glanceable posture summary for management.
 
     Follows the approved wireframe: KPI cards (active High/Critical count
-    with month-over-month delta, MTTR placeholder), a High/Critical closure
-    progress bar, a four-criteria executive summary with an overall
-    GOOD / WAITING / WARNING verdict, the pipeline chart (same shape as the
-    management dashboard's), and a filterable ticket detail table.
+    with month-over-month delta, MTTR placeholder), a date-scoped
+    High/Critical closure progress bar, a four-criteria executive summary
+    with an overall GOOD / WAITING / WARNING verdict, the date-scoped
+    pipeline chart, and a date-scoped filterable ticket detail table.
 
     Pipeline bars and summary criterion rows deep-link back to this page
     with ?f=<status slug | EMERGENCY> — a single filter, last click wins.
+    date_range scopes the charting/detail sections, while the executive
+    verdict stays a live current-posture summary.
     """
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and profile and profile.is_system_owner:
@@ -422,6 +425,27 @@ def executive_dashboard(request):
 
     all_tickets = Ticket.objects.all()
     active_qs = all_tickets.exclude(status__in=terminal)
+
+    date_range = request.GET.get('date_range', 'all')
+    if date_range not in {'today', 'week', 'month', 'all'}:
+        date_range = 'all'
+    range_tickets = all_tickets
+    if date_range == 'today':
+        range_tickets = range_tickets.filter(created_at__date=now.date())
+    elif date_range == 'week':
+        week_start = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        range_tickets = range_tickets.filter(created_at__gte=week_start)
+    elif date_range == 'month':
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        range_tickets = range_tickets.filter(created_at__gte=month_start)
+    range_active_qs = range_tickets.exclude(status__in=terminal)
+    range_labels = {
+        'today': 'Today',
+        'week': 'This Week',
+        'month': 'This Month',
+        'all': 'All Time',
+    }
 
     # ── KPI 1: active High/Critical cases + delta vs end of last month ──── #
     active_hc = active_qs.filter(severity__in=HIGH_CRIT).count()
@@ -456,8 +480,8 @@ def executive_dashboard(request):
     active_hc_delta = active_hc - prev_active_hc
 
     # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
-    hc_total = all_tickets.filter(severity__in=HIGH_CRIT).count()
-    hc_closed = all_tickets.filter(
+    hc_total = range_tickets.filter(severity__in=HIGH_CRIT).count()
+    hc_closed = range_tickets.filter(
         severity__in=HIGH_CRIT, status__in=terminal).count()
     hc_open = hc_total - hc_closed
     hc_progress_pct = round(hc_closed / hc_total * 100) if hc_total else 0
@@ -510,48 +534,67 @@ def executive_dashboard(request):
     else:
         overall_status = 'GOOD'
 
-    # ── Pipeline — same status × severity matrix as the main dashboard ──── #
+    # ── Pipeline — executive view tracks only High/Critical cases. Emergency
+    # counts are a subset overlay per status, not an extra severity segment.
     status_map = dict(Ticket.STATUS_CHOICES)
     status_order = [s for s, _ in Ticket.STATUS_CHOICES]
     sev_display = dict(Ticket.SEVERITY_CHOICES)
     severity_order = sorted(
-        sev_display, key=lambda s: Ticket.SEVERITY_RANK.get(s, 0), reverse=True)
+        (s for s in sev_display if s in HIGH_CRIT),
+        key=lambda s: Ticket.SEVERITY_RANK.get(s, 0),
+        reverse=True,
+    )
     pipeline_matrix = {
         sev: {st: 0 for st in status_order} for sev in severity_order
     }
-    for row in all_tickets.values('severity', 'status').annotate(c=Count('id')):
+    pipeline_qs = range_tickets.filter(severity__in=HIGH_CRIT)
+    for row in pipeline_qs.values('severity', 'status').annotate(c=Count('id')):
         sev, st = row['severity'], row['status']
         if sev in pipeline_matrix and st in pipeline_matrix[sev]:
             pipeline_matrix[sev][st] = row['c']
+    emergency_by_status = {st: 0 for st in status_order}
+    for row in (
+        pipeline_qs
+        .filter(is_emergency=True)
+        .values('status')
+        .annotate(c=Count('id'))
+    ):
+        if row['status'] in emergency_by_status:
+            emergency_by_status[row['status']] = row['c']
     pipeline_by_severity = {
         'statuses': [(s, status_map[s]) for s in status_order],
         'severities': [(s, sev_display[s]) for s in severity_order],
         'matrix': pipeline_matrix,
+        'emergency_by_status': emergency_by_status,
     }
     pipeline_rows = [
         {'severity': sev_display[sev],
          'cells': [pipeline_matrix[sev][st] for st in status_order]}
         for sev in severity_order
     ]
+    pipeline_emergency_row = [emergency_by_status[st] for st in status_order]
 
     # ── Detail table — single ?f= filter, last click wins ───────────────── #
     f = request.GET.get('f', '')
     filter_label = ''
     if f == 'EMERGENCY':
-        table_qs = active_qs.filter(is_emergency=True)
+        table_qs = range_active_qs.filter(is_emergency=True)
         filter_label = 'เคสฉุกเฉิน (Emergency)'
     elif f in status_map:
         # A status filter may target a terminal status (pipeline "close" bars),
-        # so it searches ALL tickets, not just the active queue.
-        table_qs = all_tickets.filter(status=f)
+        # so it searches the date-scoped tickets, not just the active queue.
+        table_qs = range_tickets.filter(status=f)
         filter_label = status_map[f]
     else:
         f = ''
-        table_qs = active_qs
-    table_tickets = list(
+        table_qs = range_active_qs
+    table_qs = (
         table_qs.select_related('assigned_to', 'assigned_admin')
         .order_by('-updated_at')
     )
+    paginator = Paginator(table_qs, 10)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    table_tickets = page_obj
 
     return render(request, 'dashboard/executive.html', {
         'now': now,
@@ -566,7 +609,13 @@ def executive_dashboard(request):
         'overall_status': overall_status,
         'pipeline_by_severity': pipeline_by_severity,
         'pipeline_rows': pipeline_rows,
+        'pipeline_emergency_row': pipeline_emergency_row,
         'table_tickets': table_tickets,
+        'page_obj': page_obj,
         'filter_f': f,
         'filter_label': filter_label,
+        'filters': {
+            'date_range': date_range,
+            'range_label': range_labels[date_range],
+        },
     })
