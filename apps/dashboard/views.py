@@ -515,7 +515,7 @@ def executive_dashboard(request):
 
     summary_criteria = [
         {
-            'label': 'เคส Critical ที่ยังไม่มีผู้รับผิดชอบ',
+            'label': 'เคสอันตราย (Critical) ที่ยังไม่มีผู้รับผิดชอบ',
             'count': crit_unassigned,
             'level': 'warning' if crit_unassigned else 'good',
             'filter': Ticket.STATUS_NEW,
@@ -533,7 +533,7 @@ def executive_dashboard(request):
             'filter': Ticket.STATUS_AWAITING_CONTAINMENT,
         },
         {
-            'label': 'การควบคุมที่รอ Tier 1 ตรวจสอบ',
+            'label': 'การควบคุมที่รอการตรวจสอบ',
             'count': unverified_containment,
             'level': 'waiting' if unverified_containment else 'good',
             'filter': Ticket.STATUS_CONTAINMENT_REPORTED,
