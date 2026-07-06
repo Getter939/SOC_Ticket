@@ -155,19 +155,19 @@
                     <div class="verdict-box verdict-good">
                         <i class="bi bi-check-lg" aria-hidden="true"></i>
                         <div class="verdict-label">GOOD</div>
-                        <div class="verdict-sub">สถานการณ์ปกติ</div>
+                        <div class="verdict-sub">ไม่มี Incident ค้าง</div>
                     </div>
                     {% elif overall_status == 'WAITING' %}
                     <div class="verdict-box verdict-waiting">
                         <i class="bi bi-hourglass-split" aria-hidden="true"></i>
                         <div class="verdict-label">WAITING</div>
-                        <div class="verdict-sub">มีงานรอดำเนินการ</div>
+                        <div class="verdict-sub">มี Incident รอดำเนินการ</div>
                     </div>
                     {% else %}
                     <div class="verdict-box verdict-warning">
                         <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
                         <div class="verdict-label">WARNING</div>
-                        <div class="verdict-sub">ต้องให้ความสนใจทันที</div>
+                        <div class="verdict-sub">มี Incident ต้องจัดการทันที</div>
                     </div>
                     {% endif %}
                 </div>
@@ -196,7 +196,7 @@
                 <div class="col-6">
                     <div class="stat-card b-blue">
                         <div class="stat-value">{{ total_hc|intcomma }}</div>
-                        <div class="stat-label">เคสทั้งหมด (Critical/High)</div>
+                        <div class="stat-label">เคสทั้งหมด (High/Critical)</div>
                         {% if total_hc_delta > 0 %}
                         <div class="stat-sub text-danger">↑{{ total_hc_delta|intcomma }} จากเดือนที่แล้ว</div>
                         {% elif total_hc_delta < 0 %}
@@ -221,7 +221,7 @@
             <!-- High/Critical closure progress -->
             <div class="panel p-3">
                 <div class="panel-title mb-2">
-                    <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส (Critical/High)
+                    <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส / Close Case (High/Critical)
                     <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
                 </div>
                 {% if hc_total %}
@@ -235,12 +235,12 @@
                         <div class="text-center fw-bold mt-1">{{ hc_progress_pct }}%</div>
                     </div>
                     <div class="progress-legend">
-                        <div><span class="dot" style="background:#198754;"></span>ปิดแล้ว ({{ hc_closed|intcomma }})</div>
+                        <div><span class="dot" style="background:#198754;"></span>ปิดเคสแล้ว (Close Case) ({{ hc_closed|intcomma }})</div>
                         <div><span class="dot" style="background:#dc3545;"></span>กำลังดำเนินการ ({{ hc_open|intcomma }})</div>
                     </div>
                 </div>
                 {% else %}
-                <div class="text-muted" style="font-size:13px;">ยังไม่มีเคส Critical/High</div>
+                <div class="text-muted" style="font-size:13px;">ยังไม่มีเคส High/Critical</div>
                 {% endif %}
             </div>
 
@@ -314,7 +314,7 @@
                             <th>Ticket ID</th>
                             <th>รายละเอียด</th>
                             <th>ผู้รับผิดชอบ</th>
-                            <th>ความสำคัญ</th>
+                            <th>สถานะ Emergency</th>
                             <th>สถานะ</th>
                             <th>อัปเดตล่าสุด</th>
                         </tr>
@@ -510,7 +510,7 @@ Chart.defaults.maintainAspectRatio = false;
                     suggestedMax: maxTotal + 1,
                     grid: { color: '#e9ecef' },
                     ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
-                    title: { display: true, text: 'จำนวนเคส Critical/High', font: { size: 13 } },
+                    title: { display: true, text: 'จำนวนเคส High/Critical', font: { size: 13 } },
                 }
             },
             plugins: {
@@ -522,7 +522,7 @@ Chart.defaults.maintainAspectRatio = false;
                         footer: items => {
                             const i = items[0].dataIndex;
                             return [
-                                'รวม Critical/High: ' + totals[i],
+                                'รวม High/Critical: ' + totals[i],
                                 'Emergency: ' + emergencyCounts[i],
                                 'คลิกเพื่อกรองตาราง',
                             ];
