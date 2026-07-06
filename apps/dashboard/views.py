@@ -546,10 +546,25 @@ def executive_dashboard(request):
     else:
         overall_status = 'GOOD'
 
-    # ── Pipeline — executive view tracks only High/Critical cases. Emergency
-    # counts are a subset overlay per status, not an extra severity segment.
+    # ── Pipeline — executive view tracks only High/Critical cases, grouped by
+    # SANS-IR phase: several workflow statuses collapse into one phase column.
+    # Emergency counts are a subset overlay per phase, not an extra segment.
     status_map = dict(Ticket.STATUS_CHOICES)
-    status_order = [s for s, _ in Ticket.STATUS_CHOICES]
+    IR_PHASES = [
+        ('PREPARATION',    'Preparation',             [Ticket.STATUS_NEW]),
+        ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
+                                                       Ticket.STATUS_T1_REVIEW]),
+        ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
+                                                       Ticket.STATUS_CONTAINMENT_REPORTED]),
+        ('RECOVERY',       'Recovery',                [Ticket.STATUS_PENDING_MANAGER,
+                                                       Ticket.STATUS_APPROVED]),
+        ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_CLOSED_EVENT]),
+    ]
+    phase_order = [key for key, _, _ in IR_PHASES]
+    phase_display = {key: label for key, label, _ in IR_PHASES}
+    phase_statuses = {key: sts for key, _, sts in IR_PHASES}
+    status_to_phase = {st: key for key, _, sts in IR_PHASES for st in sts}
+
     sev_display = dict(Ticket.SEVERITY_CHOICES)
     severity_order = sorted(
         (s for s in sev_display if s in HIGH_CRIT),
@@ -557,34 +572,35 @@ def executive_dashboard(request):
         reverse=True,
     )
     pipeline_matrix = {
-        sev: {st: 0 for st in status_order} for sev in severity_order
+        sev: {ph: 0 for ph in phase_order} for sev in severity_order
     }
     pipeline_qs = range_tickets.filter(severity__in=HIGH_CRIT)
     for row in pipeline_qs.values('severity', 'status').annotate(c=Count('id')):
-        sev, st = row['severity'], row['status']
-        if sev in pipeline_matrix and st in pipeline_matrix[sev]:
-            pipeline_matrix[sev][st] = row['c']
-    emergency_by_status = {st: 0 for st in status_order}
+        sev, ph = row['severity'], status_to_phase.get(row['status'])
+        if ph and sev in pipeline_matrix:
+            pipeline_matrix[sev][ph] += row['c']
+    emergency_by_status = {ph: 0 for ph in phase_order}
     for row in (
         pipeline_qs
         .filter(is_emergency=True)
         .values('status')
         .annotate(c=Count('id'))
     ):
-        if row['status'] in emergency_by_status:
-            emergency_by_status[row['status']] = row['c']
+        ph = status_to_phase.get(row['status'])
+        if ph:
+            emergency_by_status[ph] += row['c']
     pipeline_by_severity = {
-        'statuses': [(s, status_map[s]) for s in status_order],
+        'statuses': [(ph, phase_display[ph]) for ph in phase_order],
         'severities': [(s, sev_display[s]) for s in severity_order],
         'matrix': pipeline_matrix,
         'emergency_by_status': emergency_by_status,
     }
     pipeline_rows = [
         {'severity': sev_display[sev],
-         'cells': [pipeline_matrix[sev][st] for st in status_order]}
+         'cells': [pipeline_matrix[sev][ph] for ph in phase_order]}
         for sev in severity_order
     ]
-    pipeline_emergency_row = [emergency_by_status[st] for st in status_order]
+    pipeline_emergency_row = [emergency_by_status[ph] for ph in phase_order]
 
     # ── Detail table — single ?f= filter, last click wins ───────────────── #
     f = request.GET.get('f', '')
@@ -592,6 +608,10 @@ def executive_dashboard(request):
     if f == 'EMERGENCY':
         table_qs = range_active_qs.filter(is_emergency=True)
         filter_label = 'เคสฉุกเฉิน (Emergency)'
+    elif f in phase_statuses:
+        # Pipeline bars are SANS-IR phases, each covering one or more statuses.
+        table_qs = range_tickets.filter(status__in=phase_statuses[f])
+        filter_label = phase_display[f]
     elif f in status_map:
         # A status filter may target a terminal status (pipeline "close" bars),
         # so it searches the date-scoped tickets, not just the active queue.

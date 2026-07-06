@@ -595,15 +595,16 @@ class ExecutiveDashboardViewTest(TestCase):
             ['Critical', 'High'],
         )
         self.assertEqual(set(pbs['matrix']), {'Critical', 'High'})
-        self.assertEqual(pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
+        # Pipeline bars are SANS-IR phases: NEW→Preparation, AWAITING→Containment.
+        self.assertEqual(pbs['matrix']['Critical']['PREPARATION'], 1)
         self.assertEqual(
-            pbs['matrix']['High'][Ticket.STATUS_AWAITING_CONTAINMENT],
+            pbs['matrix']['High']['CONTAINMENT'],
             1,
         )
-        self.assertEqual(pbs['emergency_by_status'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(pbs['emergency_by_status']['PREPARATION'], 1)
         self.assertEqual(sum(pbs['emergency_by_status'].values()), 1)
         self.assertEqual(
-            ctx['pipeline_emergency_row'][status_slugs.index(Ticket.STATUS_NEW)],
+            ctx['pipeline_emergency_row'][status_slugs.index('PREPARATION')],
             1,
         )
 
@@ -616,8 +617,8 @@ class ExecutiveDashboardViewTest(TestCase):
         html = resp.content.decode()
 
         self.assertEqual(resp.context['total_hc'], 2)
-        self.assertIn('เคสทั้งหมด (Critical/High)', html)
-        self.assertNotIn('เคสที่กำลังดำเนินการ (Critical/High)', html)
+        self.assertIn('เคสทั้งหมด (High/Critical)', html)
+        self.assertNotIn('เคสที่กำลังดำเนินการ (High/Critical)', html)
         self.assertNotIn('<div class="stat-label">เคสฉุกเฉิน (Emergency)</div>', html)
 
     def test_detail_table_paginates_ten_rows(self):
@@ -637,7 +638,7 @@ class ExecutiveDashboardViewTest(TestCase):
 
         html = self._get().content.decode()
 
-        self.assertIn('ความสำคัญ', html)
+        self.assertIn('สถานะ Emergency', html)
         self.assertIn('priority-emergency', html)
         self.assertIn('priority-normal', html)
 
@@ -661,16 +662,16 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertEqual(today.context['filters']['date_range'], 'today')
         self.assertEqual(today.context['hc_total'], 1)
         self.assertEqual(today.context['hc_open'], 1)
-        self.assertEqual(today_pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
-        self.assertEqual(today_pbs['matrix']['High'][Ticket.STATUS_APPROVED], 0)
-        self.assertEqual(today_pbs['emergency_by_status'][Ticket.STATUS_NEW], 1)
+        self.assertEqual(today_pbs['matrix']['Critical']['PREPARATION'], 1)
+        self.assertEqual(today_pbs['matrix']['High']['RECOVERY'], 0)
+        self.assertEqual(today_pbs['emergency_by_status']['PREPARATION'], 1)
         self.assertEqual(len(today.context['table_tickets']), 1)
 
         all_time = self._get(date_range='all')
         all_pbs = all_time.context['pipeline_by_severity']
 
         self.assertEqual(all_time.context['hc_total'], 2)
-        self.assertEqual(all_pbs['matrix']['High'][Ticket.STATUS_APPROVED], 1)
+        self.assertEqual(all_pbs['matrix']['High']['RECOVERY'], 1)
 
     def test_time_range_control_and_chart_links_render(self):
         self._ticket()
