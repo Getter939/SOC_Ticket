@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -19,12 +19,13 @@ from django.utils import timezone
 from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
-    AdminAssignmentForm, AttachmentForm, SubtaskForm, SubtaskUpdateForm,
+    AdminAssignmentForm, AttachmentForm, ProjectIncidentForm,
+    ProjectIncidentTargetFormSet, SubtaskForm, SubtaskUpdateForm,
     TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
-    Ticket, TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
-    validate_attachment_size,
+    ProjectIncident, Ticket, TicketAttachment, TicketLog, TicketSubtask,
+    TriageRecord, bundle_suffix_for_index, validate_attachment_size,
 )
 from .notifications import (
     notify_containment_alert,
@@ -154,7 +155,7 @@ def _notify_owner_closed(ticket, request):
 # ── Ticket views ─────────────────────────────────────────────────────── #
 
 def _can_create_ticket_from_triage(triage, user):
-    if triage.ticket_id:
+    if triage.ticket_id or triage.project_incident_id:
         return False
     if not triage.decision:
         return (
@@ -438,6 +439,227 @@ def create_ticket(request):
         'form': form,
         'triage_id': triage_id or '',
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
+    })
+
+
+# ── Project Incident (Case Bundling) ─────────────────────────────────── #
+# Incident-level fields copied from the shared form onto every member ticket.
+_BUNDLE_SHARED_FIELDS = [
+    'severity', 'incident_datetime', 'reference_id',
+    'issue_type', 'detailed_issue', 'detailed_issue2', 'issue_description',
+    'destination_ip', 'ioc_details', 'mitre_phase', 'spread_to_others',
+    'action_required', 'action_precautions',
+]
+
+
+@login_required
+def create_project_incident(request):
+    """Fan out one multi-system incident into linked member tickets.
+
+    Tier 1 fills the shared incident facts once and lists the affected systems;
+    each system becomes a Ticket routed to its own admin (AWAITING_CONTAINMENT),
+    all pointing at one ProjectIncident so they stay grouped and trackable.
+    """
+    profile = getattr(request.user, 'profile', None)
+    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเปิด Project Incident ได้')
+        return redirect('ticket_list')
+
+    # Optional originating Wazuh alert — the analyst arrived here from the
+    # triage queue ("Create Project Incident" on a claimed alert). It pre-fills
+    # the shared fields and, on success, is linked to the whole bundle.
+    source_alert = None
+    alert_pk = request.POST.get('wazuh_alert') or request.GET.get('wazuh_alert')
+    if alert_pk:
+        source_alert = WazuhAlert.objects.filter(pk=alert_pk).first()
+        if (source_alert and request.method == 'GET'
+                and not _can_create_ticket_from_wazuh(source_alert, request.user)):
+            messages.error(request, 'Wazuh Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ หรือถูกดำเนินการไปแล้ว')
+            return redirect('triage_queue')
+
+    # Or an originating manual-triage record (analyst came from Manual Triage,
+    # "Create Project Incident" on a claimed record). Same idea, different queue.
+    source_triage = None
+    triage_pk = request.POST.get('triage_id') or request.GET.get('triage_id')
+    if triage_pk:
+        source_triage = TriageRecord.objects.filter(pk=triage_pk).first()
+        if (source_triage and request.method == 'GET'
+                and not _can_create_ticket_from_triage(source_triage, request.user)):
+            messages.error(request, 'รายการ Manual Triage นี้ไม่พร้อมสำหรับการสร้าง Project Incident')
+            return redirect('triage_list')
+
+    if request.method == 'POST':
+        shared_form = ProjectIncidentForm(request.POST, request.FILES, user=request.user)
+        target_formset = ProjectIncidentTargetFormSet(request.POST, prefix='target')
+        project = None
+        if shared_form.is_valid() and target_formset.is_valid():
+            shared = shared_form.cleaned_data
+            created = []
+            try:
+                with transaction.atomic():
+                    project = ProjectIncident.objects.create(
+                        title=shared['title'],
+                        summary=shared.get('issue_description', ''),
+                        created_by=request.user,
+                    )
+                    for tform in target_formset:
+                        cd = getattr(tform, 'cleaned_data', None)
+                        if not cd or cd.get('DELETE'):
+                            continue
+                        ticket = tform.save(commit=False)
+                        for field in _BUNDLE_SHARED_FIELDS:
+                            setattr(ticket, field, shared[field])
+                        ticket.classification = Ticket.CLASSIFICATION_INCIDENT
+                        ticket.created_by = request.user
+                        ticket.assigned_to = request.user
+                        ticket.project_incident = project
+                        ticket.bundle_suffix = bundle_suffix_for_index(len(created))
+                        ticket.save()
+                        ticket.transition_to(
+                            Ticket.STATUS_AWAITING_CONTAINMENT, request.user,
+                            f'Project Incident {project.project_code} — '
+                            f'มอบหมายให้ผู้ดูแลระบบ ({ticket.device_name})',
+                        )
+                        created.append(ticket)
+
+                    if len(created) < 2:
+                        raise ValidationError(
+                            'ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident'
+                        )
+
+                    # Evidence attaches to the first member — it is the shared
+                    # incident evidence; per-target files can be added later.
+                    for evidence_file in request.FILES.getlist('evidence_files'):
+                        validate_attachment_size(evidence_file)
+                        TicketAttachment.objects.create(
+                            ticket=created[0], file=evidence_file,
+                            original_name=evidence_file.name, uploaded_by=request.user,
+                        )
+
+                    # Consume the originating alert: link it to the bundle and
+                    # mark it handled so it leaves the triage queue (mirrors the
+                    # single-ticket flow, but pointing at the ProjectIncident).
+                    if source_alert is not None:
+                        locked_alert = WazuhAlert.objects.select_for_update().get(
+                            pk=source_alert.pk
+                        )
+                        if not _can_create_ticket_from_wazuh(locked_alert, request.user):
+                            raise ValidationError(
+                                'Wazuh Alert นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
+                                '(อาจถูกดำเนินการไปแล้ว)'
+                            )
+                        now = timezone.now()
+                        locked_alert.project_incident = project
+                        locked_alert.triage_status = WazuhAlert.TRIAGE_TRUE_POSITIVE
+                        locked_alert.triaged_by = request.user
+                        locked_alert.triaged_at = now
+                        locked_alert.escalated_to_tier = None
+                        locked_alert.claimed_by = None
+                        locked_alert.claimed_at = None
+                        locked_alert.save(update_fields=[
+                            'project_incident', 'triage_status', 'triaged_by',
+                            'triaged_at', 'escalated_to_tier', 'claimed_by', 'claimed_at',
+                        ])
+                        # Analyst response time (alert actionable → bundle raised),
+                        # stamped once on the first member. Guard clock skew.
+                        delta = now - locked_alert.ingested_at
+                        if delta.total_seconds() >= 0:
+                            created[0].alert_conversion_duration = delta
+                            created[0].save(update_fields=['alert_conversion_duration'])
+
+                    # Consume the originating manual-triage record: link it to
+                    # the bundle and mark it TP so it leaves the manual queue.
+                    if source_triage is not None:
+                        locked_triage = TriageRecord.objects.select_for_update().get(
+                            pk=source_triage.pk
+                        )
+                        if not _can_create_ticket_from_triage(locked_triage, request.user):
+                            raise ValidationError(
+                                'รายการ Manual Triage นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
+                                '(อาจถูกดำเนินการไปแล้ว)'
+                            )
+                        locked_triage.project_incident = project
+                        locked_triage.decision = TriageRecord.DECISION_TP
+                        locked_triage.claimed_by = None
+                        locked_triage.claimed_at = None
+                        locked_triage.save(update_fields=[
+                            'project_incident', 'decision', 'claimed_by', 'claimed_at',
+                        ])
+            except ValidationError as exc:
+                shared_form.add_error(None, exc.message)
+                project = None
+                created = []
+
+            if project:
+                for ticket in created:
+                    if ticket.system_owner and ticket.system_owner.email:
+                        if not notify_system_owner_created(ticket):
+                            messages.warning(
+                                request,
+                                f'{ticket.bundle_ref}: ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ',
+                            )
+                    _notify_containment(ticket, None, request)
+                messages.success(
+                    request,
+                    f'สร้าง Project Incident {project.project_code} เรียบร้อย — '
+                    f'{len(created)} Ticket ตามระบบที่ได้รับผลกระทบ',
+                )
+                return redirect('project_incident_detail', pk=project.pk)
+    else:
+        initial = {}
+        if source_alert is not None:
+            initial['title'] = (source_alert.rule_description or '')[:255]
+            initial['issue_description'] = (
+                request.GET.get('issue_description') or source_alert.rule_description
+            )
+            if source_alert.timestamp:
+                initial['incident_datetime'] = timezone.localtime(
+                    source_alert.timestamp
+                ).strftime('%Y-%m-%dT%H:%M')
+            if source_alert.alert_id:
+                initial['reference_id'] = source_alert.alert_id
+        elif source_triage is not None:
+            initial['title'] = (source_triage.alert_description or '')[:255]
+            initial['issue_description'] = source_triage.alert_description
+            if source_triage.source:
+                initial['issue_type'] = source_triage.source
+            if source_triage.source_reference:
+                initial['reference_id'] = source_triage.source_reference
+        if request.GET.get('severity'):
+            initial['severity'] = request.GET['severity']
+        di2 = request.GET.get('detailed_issue2')
+        if di2 in dict(Ticket.DETAILED_ISSUE_CHOICES2):
+            initial['detailed_issue2'] = di2
+            parent = Ticket.parent_of_detailed_issue2(di2)
+            if parent:
+                initial['detailed_issue'] = parent
+        shared_form = ProjectIncidentForm(initial=initial, user=request.user)
+        target_formset = ProjectIncidentTargetFormSet(prefix='target')
+
+    return render(request, 'incidents/project_incident_form.html', {
+        'form': shared_form,
+        'target_formset': target_formset,
+        'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
+        'source_alert': source_alert,
+        'source_triage': source_triage,
+    })
+
+
+@login_required
+def project_incident_detail(request, pk):
+    """Overview of a case bundle: the shared incident and its member tickets."""
+    project = get_object_or_404(ProjectIncident, pk=pk)
+    members = (
+        project.member_tickets.visible_to(request.user)
+        .select_related('assigned_admin', 'system_owner', 'project_incident')
+        .order_by('bundle_suffix', 'created_at')
+    )
+    # A user who can see none of the members has no business on the bundle page.
+    if not members and not request.user.is_superuser:
+        raise Http404('ไม่พบ Project Incident')
+    return render(request, 'incidents/project_incident_detail.html', {
+        'project': project,
+        'members': members,
     })
 
 

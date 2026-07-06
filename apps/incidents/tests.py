@@ -39,7 +39,10 @@ from django.utils import timezone
 
 from apps.accounts.models import UserProfile
 from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
-from apps.incidents.models import Ticket, TicketAttachment, TicketLog, TriageRecord
+from apps.incidents.models import (
+    ProjectIncident, Ticket, TicketAttachment, TicketLog, TriageRecord,
+    bundle_suffix_for_index,
+)
 from apps.incidents.notifications import notify_containment_required
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -1457,3 +1460,259 @@ class OlaPolicyTest(TestCase):
         low = _make_ticket(severity='Low', incident_datetime=base,
                            status=Ticket.STATUS_NEW)
         self.assertFalse(low.is_ola_contain_breached)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# Project Incident (Case Bundling) — one incident fanned out to many tickets    #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+def _pi_post_data(admin_a, admin_b, **overrides):
+    """A valid create_project_incident POST payload with 2 target systems."""
+    data = {
+        # shared incident facts
+        'title': 'Multi-system intrusion via public-facing app',
+        'severity': 'High',
+        'issue_type': 'SIEM',
+        'detailed_issue': 'Malicious Logic',
+        'detailed_issue2': 'C2 Server',
+        'issue_description': 'Attacker pivoted across several core systems.',
+        'action_required': 'Isolate host and rotate credentials.',
+        'action_precautions': 'Preserve volatile evidence before reimaging.',
+        'spread_to_others': 'true',
+        # target formset management form
+        'target-TOTAL_FORMS': '2',
+        'target-INITIAL_FORMS': '0',
+        'target-MIN_NUM_FORMS': '2',
+        'target-MAX_NUM_FORMS': '25',
+        # target A
+        'target-0-device_name': 'HR Portal',
+        'target-0-ip_address': '192.0.2.11',
+        'target-0-assigned_admin': str(admin_a.pk),
+        # target B
+        'target-1-device_name': 'AD Server',
+        'target-1-ip_address': '192.0.2.12',
+        'target-1-assigned_admin': str(admin_b.pk),
+    }
+    data.update(overrides)
+    return data
+
+
+class BundleSuffixHelperTest(TestCase):
+    def test_excel_style_labels(self):
+        self.assertEqual(bundle_suffix_for_index(0), 'A')
+        self.assertEqual(bundle_suffix_for_index(1), 'B')
+        self.assertEqual(bundle_suffix_for_index(25), 'Z')
+        self.assertEqual(bundle_suffix_for_index(26), 'AA')
+
+
+class ProjectIncidentFanOutTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1      = _make_t1('pi_t1')
+        cls.t2      = _make_t2('pi_t2')
+        cls.admin_a = _make_user('pi_admin_a', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.admin_b = _make_user('pi_admin_b', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def test_fanout_creates_linked_member_tickets(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        project = ProjectIncident.objects.get()
+        members = list(project.members)
+        self.assertEqual(len(members), 2)
+
+        # Trackable, ordered ids: PI-YYMMDD-NN-A / -B
+        self.assertTrue(project.project_code.startswith('PI-'))
+        self.assertEqual([m.bundle_suffix for m in members], ['A', 'B'])
+        self.assertEqual(members[0].bundle_ref, f'{project.project_code}-A')
+        self.assertEqual(members[1].display_id, f'{project.project_code}-B')
+
+        # Each member routed to its own admin, awaiting containment, as Incident.
+        self.assertEqual({m.assigned_admin for m in members}, {self.admin_a, self.admin_b})
+        for m in members:
+            self.assertEqual(m.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+            self.assertEqual(m.classification, Ticket.CLASSIFICATION_INCIDENT)
+            self.assertEqual(m.created_by, self.t1)
+            # Shared incident facts copied onto every member.
+            self.assertEqual(m.action_required, 'Isolate host and rotate credentials.')
+            self.assertEqual(m.issue_description, 'Attacker pivoted across several core systems.')
+            self.assertEqual(m.detailed_issue2, 'C2 Server')
+        # Per-target facts differ.
+        self.assertEqual({m.device_name for m in members}, {'HR Portal', 'AD Server'})
+
+    def test_members_keep_independent_lifecycle(self):
+        """Closing one member must not move the others (grouping only)."""
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        first, second = list(project.members)
+        _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a)
+        second.refresh_from_db()
+        self.assertEqual(second.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertEqual(project.open_member_count, 1)
+        self.assertFalse(project.all_closed)
+
+    def test_fewer_than_two_targets_is_rejected(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        data = _pi_post_data(self.admin_a, self.admin_b)
+        # Blank out the second target row → only one valid target remains.
+        data['target-1-device_name'] = ''
+        data['target-1-ip_address'] = ''
+        data['target-1-assigned_admin'] = ''
+        resp = self.client.post(reverse('create_project_incident'), data)
+        self.assertEqual(resp.status_code, 200)  # re-rendered with errors
+        self.assertFalse(ProjectIncident.objects.exists())
+        self.assertFalse(Ticket.objects.exists())
+
+    def test_non_tier1_cannot_open_fanout_page(self):
+        self.client.login(username='pi_t2', password='testpass123')
+        resp = self.client.get(reverse('create_project_incident'))
+        self.assertEqual(resp.status_code, 302)  # Tier 1 only
+
+    def test_detail_page_lists_members_for_soc(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        resp = self.client.get(reverse('project_incident_detail', args=[project.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, project.project_code)
+        self.assertContains(resp, 'HR Portal')
+        self.assertContains(resp, 'AD Server')
+
+    def test_detail_page_scopes_members_to_system_admin(self):
+        """A system admin only sees the member ticket assigned to them."""
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        self.client.logout()
+        self.client.login(username='pi_admin_a', password='testpass123')
+        resp = self.client.get(reverse('project_incident_detail', args=[project.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'HR Portal')      # assigned to admin_a
+        self.assertNotContains(resp, 'AD Server')   # assigned to admin_b
+
+    # ── Origin from a Wazuh alert (analyst-initiated, pre-filled) ──────── #
+
+    def _claimed_alert(self, claimer):
+        return WazuhAlert.objects.create(
+            opensearch_id=f'os-pi-{claimer.username}-{timezone.now().timestamp()}',
+            timestamp=timezone.now(), rule_level=13,
+            rule_description='Coordinated intrusion across core systems',
+            agent_name='DC-01',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=claimer, claimed_at=timezone.now(),
+        )
+
+    def test_triage_action_routes_to_project_incident_keeping_claim(self):
+        alert = self._claimed_alert(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.post(reverse('triage_action'), {
+            'alert_id': alert.pk, 'action': 'create_project_incident',
+            'note': 'multi-system', 'category': WazuhAlert.CATEGORY_MALWARE,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(reverse('create_project_incident'), resp.url)
+        self.assertIn(f'wazuh_alert={alert.pk}', resp.url)
+        # Alert stays claimed + triaging until the fan-out form is saved.
+        alert.refresh_from_db()
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+        self.assertEqual(alert.claimed_by, self.t1)
+
+    def test_get_prefills_from_alert(self):
+        alert = self._claimed_alert(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.get(
+            reverse('create_project_incident'), {'wazuh_alert': alert.pk},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Coordinated intrusion across core systems')
+        self.assertContains(resp, f'name="wazuh_alert" value="{alert.pk}"')
+
+    def test_get_rejects_alert_not_claimed_by_user(self):
+        alert = self._claimed_alert(self.t2)  # claimed by someone else
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.get(
+            reverse('create_project_incident'), {'wazuh_alert': alert.pk},
+        )
+        self.assertEqual(resp.status_code, 302)  # bounced back to the queue
+
+    def test_fanout_from_alert_links_bundle_and_consumes_alert(self):
+        alert = self._claimed_alert(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        data = _pi_post_data(self.admin_a, self.admin_b, wazuh_alert=str(alert.pk))
+        resp = self.client.post(reverse('create_project_incident'), data)
+        self.assertEqual(resp.status_code, 302)
+
+        project = ProjectIncident.objects.get()
+        alert.refresh_from_db()
+        # Alert points at the whole bundle (option B), not a single ticket.
+        self.assertEqual(alert.project_incident, project)
+        self.assertFalse(hasattr(alert, 'ticket'))
+        # Alert consumed → leaves the triage queue.
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
+        self.assertEqual(alert.triaged_by, self.t1)
+        self.assertIsNone(alert.claimed_by)
+        # Response time stamped on the first member.
+        first = project.members.first()
+        self.assertIsNotNone(first.alert_conversion_duration)
+        # The bundle exposes its origin alert via the reverse relation.
+        self.assertEqual(project.source_alerts.first(), alert)
+
+    # ── Origin from a Manual Triage record ────────────────────────────── #
+
+    def _claimed_triage(self, claimer):
+        return TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL,
+            source_reference='REP-2026-777',
+            analyst=claimer,
+            alert_description='User reported ransomware note across two shared drives',
+            claimed_by=claimer, claimed_at=timezone.now(),
+        )
+
+    def test_manual_triage_get_prefills(self):
+        triage = self._claimed_triage(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.get(
+            reverse('create_project_incident'), {'triage_id': triage.pk},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'ransomware note across two shared drives')
+        self.assertContains(resp, f'name="triage_id" value="{triage.pk}"')
+
+    def test_manual_triage_get_rejects_record_of_other_user(self):
+        triage = self._claimed_triage(self.t2)  # claimed by someone else
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.get(
+            reverse('create_project_incident'), {'triage_id': triage.pk},
+        )
+        self.assertEqual(resp.status_code, 302)  # bounced to manual triage list
+
+    def test_manual_triage_fanout_links_bundle_and_consumes_record(self):
+        triage = self._claimed_triage(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        data = _pi_post_data(self.admin_a, self.admin_b, triage_id=str(triage.pk))
+        resp = self.client.post(reverse('create_project_incident'), data)
+        self.assertEqual(resp.status_code, 302)
+
+        project = ProjectIncident.objects.get()
+        triage.refresh_from_db()
+        # Record points at the whole bundle, not a single ticket (option B).
+        self.assertEqual(triage.project_incident, project)
+        self.assertIsNone(triage.ticket_id)
+        # Marked TP + unclaimed → leaves the manual triage queue.
+        self.assertEqual(triage.decision, TriageRecord.DECISION_TP)
+        self.assertIsNone(triage.claimed_by)
+        self.assertEqual(project.source_triages.first(), triage)

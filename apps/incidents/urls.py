@@ -5,6 +5,9 @@ urlpatterns = [
     # Tickets
     path('', views.ticket_list, name='ticket_list'),
     path('new/', views.create_ticket, name='create_ticket'),
+    # Project Incident (Case Bundling) — one incident → many linked tickets
+    path('project-incident/new/', views.create_project_incident, name='create_project_incident'),
+    path('project-incident/<int:pk>/', views.project_incident_detail, name='project_incident_detail'),
     path('lookup/ip/', views.ip_lookup, name='ip_lookup'),
     path('search/', views.global_search, name='global_search'),
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'),

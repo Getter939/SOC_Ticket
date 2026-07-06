@@ -64,16 +64,21 @@
 {% for alert in alerts %}{% if alert.triage_status == 'TRIAGING' and alert.claimed_by_id == request.user.id %}
 <div class="modal fade" id="createTicket{{ alert.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
   <form method="post" action="{% url 'triage_action' %}">{% csrf_token %}
-    <input type="hidden" name="alert_id" value="{{ alert.pk }}"><input type="hidden" name="action" value="create_ticket">
-    <div class="modal-header"><h5 class="modal-title">สร้าง Ticket</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+    <input type="hidden" name="alert_id" value="{{ alert.pk }}">
+    <div class="modal-header"><h5 class="modal-title">สร้าง Ticket / Project Incident</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
       <p class="small text-muted">{{ alert.rule_description }}</p>
       <label class="form-label fw-semibold">ประเภทเหตุการณ์ <span class="text-danger">*</span></label>
       <select name="category" class="form-select mb-3" required><option value="">-- เลือก --</option>{% for value, label in category_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
       <label class="form-label fw-semibold">บันทึกการ Triage <span class="text-danger">*</span></label>
       <textarea name="note" class="form-control" rows="3" required></textarea>
+      <div class="form-text mt-2"><i class="bi bi-info-circle me-1"></i>เลือก <strong>Project Incident</strong> เมื่อเหตุการณ์เดียวกระทบหลายระบบ (สร้าง Ticket แยกตามระบบ)</div>
     </div>
-    <div class="modal-footer"><button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-success" type="submit">ไปหน้าสร้าง Ticket</button></div>
+    <div class="modal-footer">
+      <button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button>
+      <button class="btn btn-success" type="submit" name="action" value="create_ticket">ไปหน้าสร้าง Ticket</button>
+      <button class="btn btn-primary" type="submit" name="action" value="create_project_incident"><i class="bi bi-diagram-3 me-1"></i>Project Incident (หลายระบบ)</button>
+    </div>
   </form>
 </div></div></div>
 <div class="modal fade" id="releaseAlert{{ alert.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">

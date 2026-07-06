@@ -283,6 +283,10 @@
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
         <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
     </a>
+    <a href="{% url 'create_project_incident' %}" data-label="Project Incident"
+       class="nav-link {% if request.resolver_match.url_name == 'create_project_incident' or request.resolver_match.url_name == 'project_incident_detail' %}active{% endif %}">
+        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident</span>
+    </a>
     {% endif %}
     <a href="{% url 'ticket_history' %}" data-label="ประวัติ Ticket"
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">

@@ -13,6 +13,7 @@ class WazuhAlertAdmin(admin.ModelAdmin):
     list_filter = ['rule_level', 'agent_name', 'triage_status', 'incident_category']
     search_fields = ['opensearch_id', 'alert_id', 'rule_id', 'rule_description', 'agent_name']
     readonly_fields = ['ingested_at', 'claimed_by', 'claimed_at', 'triaged_by', 'triaged_at']
+    raw_id_fields = ['project_incident']
 
 
 @admin.register(IngestWatermark)

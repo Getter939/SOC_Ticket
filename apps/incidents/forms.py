@@ -223,6 +223,133 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
         return cleaned
 
 
+class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
+    """Shared, incident-level fields for a multi-system case bundle.
+
+    Classification is implicitly Incident and every member is routed to its
+    system admin, so this form carries neither the classification radio nor the
+    route selector — only the facts common to every affected system. Per-target
+    fields live on ``ProjectIncidentTargetForm``. This form is never saved
+    directly; ``create_project_incident`` reads ``cleaned_data`` and copies the
+    shared values onto each generated member ticket.
+    """
+
+    title = forms.CharField(
+        max_length=255, required=True,
+        label='หัวข้อเหตุการณ์ (Project Incident)',
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'เช่น การบุกรุกผ่าน Public-Facing Application กระทบหลายระบบ',
+        }),
+    )
+
+    class Meta:
+        model = Ticket
+        fields = [
+            'severity', 'incident_datetime', 'reference_id',
+            'issue_type', 'detailed_issue', 'detailed_issue2',
+            'issue_description',
+            'destination_ip', 'ioc_details', 'mitre_phase',
+            'spread_to_others',
+            'action_required', 'action_precautions',
+        ]
+        widgets = {
+            'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
+            'incident_datetime':  forms.DateTimeInput(
+                attrs={'class': 'form-control', 'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M',
+            ),
+            'reference_id':       forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น INC-2026-0001'}),
+            'issue_type':         forms.Select(attrs={'class': 'form-select'}),
+            'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
+            'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
+            'issue_description':  forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 5,
+                'placeholder': 'สรุปเหตุการณ์โดยรวมที่กระทบหลายระบบ — เนื้อหานี้จะถูกใช้ร่วมกันในทุก Ticket ของกลุ่ม',
+            }),
+            'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
+            'ioc_details':        forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ'}),
+            'mitre_phase':        forms.Select(attrs={'class': 'form-select'}),
+            'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
+            'action_required':    forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'ขั้นตอน/มาตรการที่ผู้ดูแลระบบต้องดำเนินการ — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
+            }),
+            'action_precautions': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'ข้อควรระวัง — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        # ``user`` accepted for call-site symmetry with TicketForm; unused here.
+        kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        # A bundle exists precisely because the incident spread across systems.
+        if not self.is_bound:
+            self.fields['spread_to_others'].initial = True
+        self._restrict_detailed_issue_fields()
+
+    def clean(self):
+        cleaned = super().clean()
+        self._validate_detailed_issue_pair(cleaned)
+        return cleaned
+
+
+class ProjectIncidentTargetForm(forms.ModelForm):
+    """One affected system within a bundle — only the per-target fields.
+
+    Each valid row becomes a member Ticket; the shared incident facts are
+    copied in by the view. ``ip_address`` is optional here (a service/system
+    target may have no single IP) even though single-ticket creation requires
+    one.
+    """
+
+    assigned_admin = forms.ModelChoiceField(
+        queryset=User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_ADMIN, is_active=True,
+        ).order_by('first_name', 'username'),
+        required=True, label='ผู้ดูแลระบบ', empty_label='-- เลือกผู้ดูแลระบบ --',
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+    system_owner = forms.ModelChoiceField(
+        queryset=User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_OWNER, is_active=True,
+        ).order_by('profile__department', 'first_name', 'username'),
+        required=False, label='เจ้าของระบบ', empty_label='-- ไม่ระบุ --',
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+
+    class Meta:
+        model = Ticket
+        fields = [
+            'device_name', 'ip_address', 'mac_address', 'asset_type',
+            'assigned_admin', 'system_owner',
+        ]
+        widgets = {
+            'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
+            'ip_address':  forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': '0.0.0.0'}),
+            'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
+            'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A single-ticket create requires an IP; a bundle target may be a
+        # service with none, so relax it here (model already allows null).
+        self.fields['ip_address'].required = False
+        self.fields['system_owner'].label_from_instance = lambda u: (
+            f"{u.profile.department} — {u.get_full_name() or u.username}"
+            if hasattr(u, 'profile') else u.username
+        )
+
+
+ProjectIncidentTargetFormSet = forms.formset_factory(
+    ProjectIncidentTargetForm,
+    extra=2, min_num=2, max_num=25, validate_min=True, can_delete=True,
+)
+
+
 class TicketReviewForm(_DetailedIssueCascade, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
 

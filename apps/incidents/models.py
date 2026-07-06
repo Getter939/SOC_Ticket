@@ -57,6 +57,101 @@ class TicketQuerySet(models.QuerySet):
         return self.none()
 
 
+def bundle_suffix_for_index(index):
+    """Excel-style column label for a member's position in a bundle.
+
+    0→A, 1→B, … 25→Z, 26→AA. Used to build the trackable child id
+    ``<project_code>-<suffix>`` (e.g. PI-260706-01-C).
+    """
+    label = ''
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        label = chr(65 + rem) + label
+    return label
+
+
+class ProjectIncident(models.Model):
+    """
+    One real-world security incident that hit MULTIPLE systems and is therefore
+    worked as several linked tickets — one per affected system, each routed to
+    that system's own admin. The member tickets share the containment guidance
+    and classification; only the target (device / IP / owner / admin) differs.
+
+    This is the "Case Bundling" grouping: the bundle counts as a single
+    incident/report, while its member tickets are contained and closed
+    independently on their own OLA clocks. Members are reached via the
+    ``member_tickets`` reverse relation and carry a stable, trackable id of the
+    form ``<project_code>-<bundle_suffix>`` (see ``Ticket.bundle_ref``).
+    """
+    project_code = models.CharField(
+        max_length=20, unique=True, editable=False, blank=True,
+        verbose_name='รหัส Project Incident',
+    )
+    title = models.CharField(max_length=255, verbose_name='หัวข้อเหตุการณ์')
+    summary = models.TextField(
+        blank=True, default='', verbose_name='รายละเอียดโดยรวม',
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_project_incidents', verbose_name='ผู้เปิดเหตุการณ์',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Project Incident (Case Bundle)'
+        verbose_name_plural = 'Project Incidents (Case Bundles)'
+
+    def __str__(self):
+        return f'{self.project_code} — {self.title}'
+
+    def save(self, *args, **kwargs):
+        # Generate a human-trackable code PI-YYMMDD-NN (NN = per-day sequence),
+        # mirroring the Ticket.ticket_id scheme so the two id spaces are
+        # visually distinct.
+        if not self.project_code or not self.project_code.strip():
+            now = timezone.now()
+            prefix = f'PI-{now.year % 100:02d}{now.month:02d}{now.day:02d}-'
+            last = (
+                ProjectIncident.objects.filter(project_code__startswith=prefix)
+                .order_by('-project_code')
+                .first()
+            )
+            if last:
+                try:
+                    seq = int(last.project_code.rsplit('-', 1)[1]) + 1
+                except (ValueError, IndexError):
+                    seq = 1
+            else:
+                seq = 1
+            self.project_code = f'{prefix}{seq:02d}'
+            while ProjectIncident.objects.filter(project_code=self.project_code).exists():
+                seq += 1
+                self.project_code = f'{prefix}{seq:02d}'
+        super().save(*args, **kwargs)
+
+    # ── Rollup helpers (grouping only — members keep their own lifecycle) ─ #
+    @property
+    def members(self):
+        """Member tickets ordered by bundle suffix (A, B, C …)."""
+        return self.member_tickets.order_by('bundle_suffix', 'created_at')
+
+    @property
+    def member_count(self):
+        return self.member_tickets.count()
+
+    @property
+    def open_member_count(self):
+        return self.member_tickets.exclude(status__in=Ticket.TERMINAL_STATUSES).count()
+
+    @property
+    def all_closed(self):
+        total = self.member_count
+        return total > 0 and self.open_member_count == 0
+
+
 class Ticket(models.Model):
     objects = TicketQuerySet.as_manager()
 
@@ -364,6 +459,19 @@ class Ticket(models.Model):
         verbose_name='Reference',
     )
 
+    # ── Case Bundling (Project Incident) ─────────────────────────────── #
+    # When one incident affects several systems it is fanned out into one
+    # ticket per system, all pointing at the same ProjectIncident. Members
+    # keep their own status/OLA; the bundle is the grouping + rollup unit.
+    project_incident = models.ForeignKey(
+        ProjectIncident, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='member_tickets', verbose_name='Project Incident (Case Bundle)',
+    )
+    bundle_suffix = models.CharField(
+        max_length=4, blank=True, default='',
+        verbose_name='ลำดับในกลุ่ม (A, B, C …)',
+    )
+
     # ── Section 3: Description ───────────────────────────────────────── #
     device_name = models.CharField(max_length=100, verbose_name='ระบบ / บริการ (System/Service)')
     issue_description = models.TextField(verbose_name='รายละเอียดเหตุการณ์')
@@ -598,6 +706,23 @@ class Ticket(models.Model):
     def was_escalated_to_t2(self):
         """True if this ticket was escalated to Tier 2 at any point in its life."""
         return self.escalated_to_t2_at is not None
+
+    @property
+    def is_bundled(self):
+        """Part of a multi-system Project Incident (case bundle)."""
+        return self.project_incident_id is not None
+
+    @property
+    def bundle_ref(self):
+        """Trackable id within a bundle, e.g. 'PI-260706-01-C'. '' if unbundled."""
+        if self.project_incident_id and self.bundle_suffix:
+            return f'{self.project_incident.project_code}-{self.bundle_suffix}'
+        return ''
+
+    @property
+    def display_id(self):
+        """Bundle ref when part of a Project Incident, else the plain ticket id."""
+        return self.bundle_ref or self.ticket_id
 
     @property
     def requires_manager_verification(self):
@@ -1027,6 +1152,16 @@ class TriageRecord(models.Model):
     ticket = models.OneToOneField(
         Ticket, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='triage', verbose_name='Ticket ที่สร้าง',
+    )
+
+    # Set when this record is turned into a multi-system Project Incident (case
+    # bundle) instead of a single ticket. Mirrors WazuhAlert.project_incident:
+    # the record points at the whole bundle, and the ``ticket`` OneToOne stays
+    # null. Either link marks the record consumed (see
+    # _can_create_ticket_from_triage).
+    project_incident = models.ForeignKey(
+        'ProjectIncident', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='source_triages', verbose_name='Project Incident (Case Bundle)',
     )
 
     class Meta:

@@ -68,6 +68,19 @@
   </div>
 </section>
 
+{% if ticket.is_bundled %}
+<div class="alert alert-primary d-flex flex-wrap align-items-center gap-2 mb-3">
+  <i class="bi bi-diagram-3-fill"></i>
+  <span>Ticket นี้เป็นส่วนหนึ่งของ Project Incident
+    <strong>{{ ticket.project_incident.project_code }}</strong>
+    (<strong>{{ ticket.bundle_ref }}</strong>) — เหตุการณ์เดียวที่กระทบ
+    {{ ticket.project_incident.member_count }} ระบบ</span>
+  <a class="btn btn-sm btn-primary ms-auto" href="{% url 'project_incident_detail' ticket.project_incident.id %}">
+    <i class="bi bi-collection me-1"></i>ดูภาพรวมกลุ่ม
+  </a>
+</div>
+{% endif %}
+
 <div class="snapshot-grid mb-3">
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-clock me-1"></i>ตรวจพบเหตุการณ์</div><div class="snapshot-value">{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</div></div>
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-person-badge me-1"></i>Tier 1 ผู้รับผิดชอบ</div><div class="snapshot-value">{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}-{% endif %}</div></div>

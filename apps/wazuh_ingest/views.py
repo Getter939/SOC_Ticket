@@ -259,7 +259,7 @@ def triage_action(request):
     note = request.POST.get('note', '').strip()
     category = request.POST.get('category', '').strip()
 
-    if action != 'create_ticket':
+    if action not in ('create_ticket', 'create_project_incident'):
         messages.error(
             request,
             'การดำเนินการไม่ถูกต้อง — Tier 1 สามารถสร้าง Ticket หรือคืน Alert เท่านั้น',
@@ -306,4 +306,12 @@ def triage_action(request):
     if detailed_issue2:
         params['detailed_issue2'] = detailed_issue2
 
-    return redirect(f"{reverse('create_ticket')}?{urlencode(params)}")
+    # Same claimed-alert intake, two destinations: a single ticket or a
+    # multi-system Project Incident (case bundle). Both pre-fill from the alert;
+    # the alert stays claimed until the target form is saved.
+    target = (
+        'create_project_incident'
+        if action == 'create_project_incident'
+        else 'create_ticket'
+    )
+    return redirect(f"{reverse(target)}?{urlencode(params)}")

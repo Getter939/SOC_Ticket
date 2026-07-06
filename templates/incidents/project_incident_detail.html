@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ project.project_code }} — Project Incident{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-xl-11">
+
+  <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3-fill text-primary me-2"></i>{{ project.project_code }}</h4>
+    <span class="badge bg-primary-subtle text-primary border border-primary">Project Incident (Case Bundle)</span>
+    {% if project.all_closed %}
+      <span class="badge bg-success">ปิดครบทุกระบบแล้ว</span>
+    {% else %}
+      <span class="badge bg-warning text-dark">{{ project.open_member_count }} / {{ project.member_count }} ระบบยังดำเนินการอยู่</span>
+    {% endif %}
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <h5 class="fw-semibold mb-2">{{ project.title }}</h5>
+      {% if project.summary %}<p class="text-muted mb-3" style="white-space:pre-line;">{{ project.summary }}</p>{% endif %}
+      <div class="row small text-muted g-2">
+        <div class="col-md-4"><i class="bi bi-person me-1"></i>เปิดโดย: {{ project.created_by.get_full_name|default:project.created_by.username|default:"—" }}</div>
+        <div class="col-md-4"><i class="bi bi-clock me-1"></i>เมื่อ: {{ project.created_at|date:"Y-m-d H:i" }}</div>
+        <div class="col-md-4"><i class="bi bi-collection me-1"></i>จำนวนระบบ: {{ project.member_count }}</div>
+      </div>
+      {% with alert=project.source_alerts.first %}
+      {% if alert %}
+      <div class="mt-3 pt-2 border-top small">
+        <i class="bi bi-shield-fill-exclamation text-info me-1"></i>ต้นทาง: Wazuh Alert
+        <strong>#{{ alert.pk }}</strong> [Rule {{ alert.rule_level }}]
+        {{ alert.rule_description|truncatechars:100 }}
+        {% if alert.agent_name %}<span class="text-muted">— {{ alert.agent_name }}</span>{% endif %}
+      </div>
+      {% endif %}
+      {% endwith %}
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center mb-2">
+    <h6 class="fw-bold mb-0"><i class="bi bi-list-check me-1"></i>Ticket ตามระบบที่ได้รับผลกระทบ</h6>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle bg-white border">
+      <thead class="table-light">
+        <tr>
+          <th style="width:8rem;">รหัส</th>
+          <th>ระบบ / บริการ</th>
+          <th>ผู้ดูแลระบบ</th>
+          <th>ความรุนแรง</th>
+          <th>สถานะ</th>
+          <th class="text-end">การดำเนินการ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ticket in members %}
+        <tr>
+          <td><span class="fw-semibold">{{ ticket.bundle_ref }}</span><div class="text-muted small">{{ ticket.ticket_id }}</div></td>
+          <td>{{ ticket.device_name }}{% if ticket.ip_address %}<div class="text-muted small">{{ ticket.ip_address }}</div>{% endif %}</td>
+          <td>{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}</td>
+          <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+          <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
+          <td class="text-end"><a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3">ดูรายละเอียด</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">ไม่มี Ticket ที่คุณมีสิทธิ์เข้าถึงในกลุ่มนี้</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4 mt-2"><i class="bi bi-arrow-left me-1"></i>กลับไปที่รายการ Ticket</a>
+</div>
+</div>
+{% endblock %}

@@ -94,6 +94,17 @@ class WazuhAlert(models.Model):
         max_length=32, choices=CATEGORY_CHOICES, null=True, blank=True,
     )
 
+    # ── Case Bundling origin ─────────────────────────────────────────── #
+    # Set when this alert is triaged into a multi-system Project Incident
+    # (case bundle) rather than a single ticket. The alert is the origin of the
+    # whole bundle, so it points at the ProjectIncident, not one member ticket
+    # (the single-ticket path still uses the Ticket.wazuh_alert OneToOne).
+    project_incident = models.ForeignKey(
+        'incidents.ProjectIncident', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='source_alerts',
+        verbose_name='Project Incident (Case Bundle)',
+    )
+
     # ── Claim (in-progress work tracking) ───────────────────────────── #
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,

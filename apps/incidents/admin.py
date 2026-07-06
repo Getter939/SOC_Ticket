@@ -1,5 +1,16 @@
 from django.contrib import admin
-from .models import NotificationTemplate, Ticket, TicketLog, TicketSubtask, TriageRecord
+from .models import (
+    NotificationTemplate, ProjectIncident, Ticket, TicketLog, TicketSubtask,
+    TriageRecord,
+)
+
+
+@admin.register(ProjectIncident)
+class ProjectIncidentAdmin(admin.ModelAdmin):
+    list_display = ('project_code', 'title', 'member_count', 'created_by', 'created_at')
+    search_fields = ('project_code', 'title', 'summary')
+    readonly_fields = ('project_code', 'created_at', 'updated_at')
+    raw_id_fields = ('created_by',)
 
 
 @admin.register(Ticket)
@@ -21,7 +32,10 @@ class TicketAdmin(admin.ModelAdmin):
         'verified_by', 'verified_at',
         'approved_by', 'approved_at',
     )
-    raw_id_fields = ('assigned_to', 'assigned_admin', 'created_by', 'system_owner')
+    raw_id_fields = (
+        'assigned_to', 'assigned_admin', 'created_by', 'system_owner',
+        'project_incident',
+    )
 
     fieldsets = (
         ('ข้อมูลทั่วไป', {
@@ -40,6 +54,9 @@ class TicketAdmin(admin.ModelAdmin):
         }),
         ('การมอบหมาย', {
             'fields': ('assigned_to', 'assigned_admin', 'created_by'),
+        }),
+        ('Project Incident (Case Bundle)', {
+            'fields': ('project_incident', 'bundle_suffix'),
         }),
         ('การรับรอง / อนุมัติ (อ่านอย่างเดียว)', {
             'fields': ('verified_by', 'verified_at', 'approved_by', 'approved_at'),
@@ -94,4 +111,4 @@ class TriageRecordAdmin(admin.ModelAdmin):
         'source_reference', 'alert_description', 'source_ip', 'analyst__username',
     )
     readonly_fields = ('created_at', 't2_decided_at')
-    raw_id_fields = ('analyst', 'escalated_to', 'ticket')
+    raw_id_fields = ('analyst', 'escalated_to', 'ticket', 'project_incident')
