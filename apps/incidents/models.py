@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from datetime import timedelta
 
@@ -107,30 +107,56 @@ class ProjectIncident(models.Model):
     def __str__(self):
         return f'{self.project_code} — {self.title}'
 
-    def save(self, *args, **kwargs):
-        # Generate a human-trackable code PI-YYMMDD-NN (NN = per-day sequence),
-        # mirroring the Ticket.ticket_id scheme so the two id spaces are
-        # visually distinct.
-        if not self.project_code or not self.project_code.strip():
-            now = timezone.now()
-            prefix = f'PI-{now.year % 100:02d}{now.month:02d}{now.day:02d}-'
-            last = (
-                ProjectIncident.objects.filter(project_code__startswith=prefix)
-                .order_by('-project_code')
-                .first()
-            )
-            if last:
-                try:
-                    seq = int(last.project_code.rsplit('-', 1)[1]) + 1
-                except (ValueError, IndexError):
-                    seq = 1
-            else:
+    # How many times to regenerate project_code when a concurrent insert wins
+    # the unique-constraint race before giving up.
+    _CODE_MAX_RETRIES = 5
+
+    def _assign_project_code(self):
+        """Compute the next human-trackable code PI-YYMMDD-NN (NN = per-day
+        sequence), mirroring the Ticket.ticket_id scheme so the two id spaces
+        are visually distinct. The read-then-write here is racy on its own — see
+        save() for the retry that closes the window against committed rows.
+        """
+        now = timezone.now()
+        prefix = f'PI-{now.year % 100:02d}{now.month:02d}{now.day:02d}-'
+        last = (
+            ProjectIncident.objects.filter(project_code__startswith=prefix)
+            .order_by('-project_code')
+            .first()
+        )
+        if last:
+            try:
+                seq = int(last.project_code.rsplit('-', 1)[1]) + 1
+            except (ValueError, IndexError):
                 seq = 1
+        else:
+            seq = 1
+        self.project_code = f'{prefix}{seq:02d}'
+        while ProjectIncident.objects.filter(project_code=self.project_code).exists():
+            seq += 1
             self.project_code = f'{prefix}{seq:02d}'
-            while ProjectIncident.objects.filter(project_code=self.project_code).exists():
-                seq += 1
-                self.project_code = f'{prefix}{seq:02d}'
-        super().save(*args, **kwargs)
+
+    def save(self, *args, **kwargs):
+        # Already-coded rows (updates, or an explicit code) save straight through.
+        if self.pk or (self.project_code and self.project_code.strip()):
+            super().save(*args, **kwargs)
+            return
+
+        # New row needing a generated code: the per-day sequence is a
+        # read-then-write, so two concurrent inserts on the same day can compute
+        # the same NN and one INSERT then violates the unique constraint. Retry
+        # with a freshly recomputed code; each attempt runs in a savepoint so the
+        # failed INSERT doesn't poison the caller's surrounding transaction, and
+        # the recompute sees the committed winner (READ COMMITTED).
+        for attempt in range(self._CODE_MAX_RETRIES):
+            self._assign_project_code()
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                if attempt == self._CODE_MAX_RETRIES - 1:
+                    raise
 
     # ── Rollup helpers (grouping only — members keep their own lifecycle) ─ #
     @property

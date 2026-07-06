@@ -190,6 +190,72 @@ def _can_create_ticket_from_wazuh(alert, user):
     return alert.escalated_to_tier == user_tier
 
 
+def _consume_source_alert(alert, user, *, classification, link_ticket,
+                          project_incident=None):
+    """Mark a claimed Wazuh alert handled once it has become a ticket (or a
+    case bundle) and stamp the analyst response time on ``link_ticket``.
+
+    Shared by the single-ticket (create_ticket) and fan-out
+    (create_project_incident) flows — the only differences are the disposition
+    (a bundle is always an Incident) and whether the alert links to a
+    ProjectIncident. ``alert`` must already be locked (select_for_update) and
+    re-validated by the caller.
+    """
+    now = timezone.now()
+    alert.triage_status = (
+        WazuhAlert.TRIAGE_FALSE_POSITIVE
+        if classification == Ticket.CLASSIFICATION_EVENT
+        else WazuhAlert.TRIAGE_TRUE_POSITIVE
+    )
+    alert.triaged_by = user
+    alert.triaged_at = now
+    alert.escalated_to_tier = None
+    alert.claimed_by = None
+    alert.claimed_at = None
+    update_fields = [
+        'triage_status', 'triaged_by', 'triaged_at',
+        'escalated_to_tier', 'claimed_by', 'claimed_at',
+    ]
+    if project_incident is not None:
+        alert.project_incident = project_incident
+        update_fields.insert(0, 'project_incident')
+    alert.save(update_fields=update_fields)
+
+    # Stamp analyst response time once (alert actionable → ticket raised).
+    # now() is within sub-second of the ticket's auto_now_add created_at; guard
+    # against clock skew that would otherwise yield a negative duration.
+    delta = now - alert.ingested_at
+    if delta.total_seconds() >= 0:
+        link_ticket.alert_conversion_duration = delta
+        link_ticket.save(update_fields=['alert_conversion_duration'])
+
+
+def _consume_source_triage(triage, *, classification, ticket=None,
+                           project_incident=None):
+    """Mark a claimed manual-triage record handled once it has become a ticket
+    (or a case bundle): record the Event/Incident decision, link it to whatever
+    it spawned, and release the claim so it leaves the manual queue.
+
+    Shared by both create flows. ``triage`` must already be locked
+    (select_for_update) and re-validated by the caller.
+    """
+    triage.decision = (
+        TriageRecord.DECISION_FP
+        if classification == Ticket.CLASSIFICATION_EVENT
+        else TriageRecord.DECISION_TP
+    )
+    triage.claimed_by = None
+    triage.claimed_at = None
+    update_fields = ['decision', 'claimed_by', 'claimed_at']
+    if ticket is not None:
+        triage.ticket = ticket
+        update_fields.insert(0, 'ticket')
+    if project_incident is not None:
+        triage.project_incident = project_incident
+        update_fields.insert(0, 'project_incident')
+    triage.save(update_fields=update_fields)
+
+
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
@@ -350,43 +416,18 @@ def create_ticket(request):
                         )
 
                     if locked_triage:
-                        locked_triage.ticket = ticket
-                        locked_triage.decision = (
-                            TriageRecord.DECISION_FP
-                            if ticket.classification == Ticket.CLASSIFICATION_EVENT
-                            else TriageRecord.DECISION_TP
+                        _consume_source_triage(
+                            locked_triage,
+                            classification=ticket.classification,
+                            ticket=ticket,
                         )
-                        locked_triage.claimed_by = None
-                        locked_triage.claimed_at = None
-                        locked_triage.save(update_fields=[
-                            'ticket', 'decision', 'claimed_by', 'claimed_at',
-                        ])
 
                     if locked_alert:
-                        now = timezone.now()
-                        locked_alert.triage_status = (
-                            WazuhAlert.TRIAGE_FALSE_POSITIVE
-                            if ticket.classification == Ticket.CLASSIFICATION_EVENT
-                            else WazuhAlert.TRIAGE_TRUE_POSITIVE
+                        _consume_source_alert(
+                            locked_alert, request.user,
+                            classification=ticket.classification,
+                            link_ticket=ticket,
                         )
-                        locked_alert.triaged_by = request.user
-                        locked_alert.triaged_at = now
-                        locked_alert.escalated_to_tier = None
-                        locked_alert.claimed_by = None
-                        locked_alert.claimed_at = None
-                        locked_alert.save(update_fields=[
-                            'triage_status', 'triaged_by', 'triaged_at',
-                            'escalated_to_tier', 'claimed_by', 'claimed_at',
-                        ])
-
-                        # Stamp analyst response time once (alert actionable →
-                        # ticket raised). now() is within sub-second of the
-                        # ticket's auto_now_add created_at. Guard against clock
-                        # skew that would otherwise yield a negative duration.
-                        delta = now - locked_alert.ingested_at
-                        if delta.total_seconds() >= 0:
-                            ticket.alert_conversion_duration = delta
-                            ticket.save(update_fields=['alert_conversion_duration'])
 
                     for evidence_file in request.FILES.getlist('evidence_files'):
                         validate_attachment_size(evidence_file)
@@ -548,24 +589,14 @@ def create_project_incident(request):
                                 'Wazuh Alert นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
                                 '(อาจถูกดำเนินการไปแล้ว)'
                             )
-                        now = timezone.now()
-                        locked_alert.project_incident = project
-                        locked_alert.triage_status = WazuhAlert.TRIAGE_TRUE_POSITIVE
-                        locked_alert.triaged_by = request.user
-                        locked_alert.triaged_at = now
-                        locked_alert.escalated_to_tier = None
-                        locked_alert.claimed_by = None
-                        locked_alert.claimed_at = None
-                        locked_alert.save(update_fields=[
-                            'project_incident', 'triage_status', 'triaged_by',
-                            'triaged_at', 'escalated_to_tier', 'claimed_by', 'claimed_at',
-                        ])
-                        # Analyst response time (alert actionable → bundle raised),
-                        # stamped once on the first member. Guard clock skew.
-                        delta = now - locked_alert.ingested_at
-                        if delta.total_seconds() >= 0:
-                            created[0].alert_conversion_duration = delta
-                            created[0].save(update_fields=['alert_conversion_duration'])
+                        # A bundle is always an Incident; the response time is
+                        # stamped once on the first member.
+                        _consume_source_alert(
+                            locked_alert, request.user,
+                            classification=Ticket.CLASSIFICATION_INCIDENT,
+                            link_ticket=created[0],
+                            project_incident=project,
+                        )
 
                     # Consume the originating manual-triage record: link it to
                     # the bundle and mark it TP so it leaves the manual queue.
@@ -578,13 +609,11 @@ def create_project_incident(request):
                                 'รายการ Manual Triage นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
                                 '(อาจถูกดำเนินการไปแล้ว)'
                             )
-                        locked_triage.project_incident = project
-                        locked_triage.decision = TriageRecord.DECISION_TP
-                        locked_triage.claimed_by = None
-                        locked_triage.claimed_at = None
-                        locked_triage.save(update_fields=[
-                            'project_incident', 'decision', 'claimed_by', 'claimed_at',
-                        ])
+                        _consume_source_triage(
+                            locked_triage,
+                            classification=Ticket.CLASSIFICATION_INCIDENT,
+                            project_incident=project,
+                        )
             except ValidationError as exc:
                 shared_form.add_error(None, exc.message)
                 project = None
