@@ -486,7 +486,7 @@ def create_ticket(request):
 # ── Project Incident (Case Bundling) ─────────────────────────────────── #
 # Incident-level fields copied from the shared form onto every member ticket.
 _BUNDLE_SHARED_FIELDS = [
-    'severity', 'incident_datetime', 'reference_id',
+    'severity', 'ncsa_severity', 'incident_datetime', 'reference_id',
     'issue_type', 'detailed_issue', 'detailed_issue2', 'issue_description',
     'destination_ip', 'ioc_details', 'mitre_phase', 'spread_to_others',
     'action_required', 'action_precautions',
@@ -550,6 +550,8 @@ def create_project_incident(request):
                         ticket = tform.save(commit=False)
                         for field in _BUNDLE_SHARED_FIELDS:
                             setattr(ticket, field, shared[field])
+                        # The bundle title doubles as each member's incident name.
+                        ticket.incident_name = shared['title']
                         ticket.classification = Ticket.CLASSIFICATION_INCIDENT
                         ticket.created_by = request.user
                         ticket.assigned_to = request.user

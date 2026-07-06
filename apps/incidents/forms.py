@@ -112,7 +112,9 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'classification',
             # Section 1
             'wazuh_alert',
+            'incident_name',
             'severity',
+            'ncsa_severity',
             'incident_datetime',
             'reference_id',
             # Section 2
@@ -126,6 +128,7 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'ip_address',
             'mac_address',
             'asset_type',
+            'operating_system',
             'spread_to_others',
             # Section 5
             'destination_ip',
@@ -140,7 +143,9 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'system_owner',
         ]
         widgets = {
+            'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Suspicious SoftEther Signed File'}),
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
+            'ncsa_severity':      forms.Select(attrs={'class': 'form-select'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
@@ -150,6 +155,7 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
             'device_name':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น NTHQ-WS-047 / ระบบ HR Portal'}),
+            'operating_system':   forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Windows Server 2019 / Ubuntu 22.04'}),
             'issue_description':  forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 5,
                 'placeholder': 'สรุปรายละเอียดเหตุการณ์ที่ตรวจพบ เช่น ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบเหตุการณ์ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น',
@@ -246,7 +252,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
     class Meta:
         model = Ticket
         fields = [
-            'severity', 'incident_datetime', 'reference_id',
+            'severity', 'ncsa_severity', 'incident_datetime', 'reference_id',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
             'destination_ip', 'ioc_details', 'mitre_phase',
@@ -255,6 +261,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
         ]
         widgets = {
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
+            'ncsa_severity':      forms.Select(attrs={'class': 'form-select'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
@@ -324,13 +331,14 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         model = Ticket
         fields = [
             'device_name', 'ip_address', 'mac_address', 'asset_type',
-            'assigned_admin', 'system_owner',
+            'operating_system', 'assigned_admin', 'system_owner',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
             'ip_address':  forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': '0.0.0.0'}),
             'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
+            'operating_system': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น Windows Server 2019'}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -356,11 +364,13 @@ class TicketReviewForm(_DetailedIssueCascade, forms.ModelForm):
     class Meta:
         model = Ticket
         fields = [
-            'classification', 'severity', 'incident_datetime', 'reference_id',
+            'classification', 'incident_name', 'severity', 'ncsa_severity',
+            'incident_datetime', 'reference_id',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address', 'mac_address',
-            'asset_type', 'spread_to_others', 'destination_ip', 'ioc_details',
-            'mitre_phase', 'action_required', 'action_precautions', 'system_owner',
+            'asset_type', 'operating_system', 'spread_to_others', 'destination_ip',
+            'ioc_details', 'mitre_phase', 'action_required', 'action_precautions',
+            'system_owner',
         ]
         widgets = {
             'classification': forms.RadioSelect(),

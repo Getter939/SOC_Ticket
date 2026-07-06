@@ -86,6 +86,12 @@
           </div>
           {% if form.severity.errors %}<div class="text-danger small mt-1">{{ form.severity.errors }}</div>{% endif %}
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small></label>
+          {{ form.ncsa_severity }}
+          <div class="field-hint">วิกฤต / ร้ายแรง / ไม่ร้ายแรง — ใช้ร่วมกันทุก Ticket ในกลุ่ม (ไม่บังคับ)</div>
+          {% if form.ncsa_severity.errors %}<div class="text-danger small">{{ form.ncsa_severity.errors }}</div>{% endif %}
+        </div>
       </div>
     </div>
 
@@ -186,6 +192,11 @@
               <label class="form-label small fw-semibold mb-1">ประเภททรัพย์สิน</label>
               {{ tform.asset_type }}
             </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold mb-1">ระบบปฏิบัติการ (OS)</label>
+              {{ tform.operating_system }}
+              {% if tform.operating_system.errors %}<div class="text-danger small">{{ tform.operating_system.errors }}</div>{% endif %}
+            </div>
             <div class="col-md-6">
               <label class="form-label small fw-semibold mb-1">เจ้าของระบบ / หน่วยงาน</label>
               {{ tform.system_owner }}
@@ -244,6 +255,10 @@
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">ประเภททรัพย์สิน</label>
         {{ target_formset.empty_form.asset_type }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold mb-1">ระบบปฏิบัติการ (OS)</label>
+        {{ target_formset.empty_form.operating_system }}
       </div>
       <div class="col-md-6">
         <label class="form-label small fw-semibold mb-1">เจ้าของระบบ / หน่วยงาน</label>

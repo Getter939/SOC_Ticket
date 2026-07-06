@@ -319,6 +319,19 @@ class Ticket(models.Model):
     # reach the manager only via the emergency flag. Override in settings.
     SEVERITY_FLOOR = 'Critical'
 
+    # NCSA (สกมช.) statutory threat-severity level — the 3-tier classification
+    # required on the official incident report, distinct from the SIEM-derived
+    # ``severity`` above. Optional: the analyst may not be able to assign it at
+    # intake. See the NCSA Act B.E. 2562 threat-level definitions.
+    NCSA_SEVERITY_CRITICAL   = 'CRITICAL'
+    NCSA_SEVERITY_SEVERE     = 'SEVERE'
+    NCSA_SEVERITY_NON_SEVERE = 'NON_SEVERE'
+    NCSA_SEVERITY_CHOICES = [
+        (NCSA_SEVERITY_CRITICAL,   'วิกฤต (Critical)'),
+        (NCSA_SEVERITY_SEVERE,     'ร้ายแรง (Severe)'),
+        (NCSA_SEVERITY_NON_SEVERE, 'ไม่ร้ายแรง (Non-Severe)'),
+    ]
+
     ASSET_TYPE_CHOICES = [
         ('Computer',       'Computer'),
         ('Server',         'Server'),
@@ -472,9 +485,22 @@ class Ticket(models.Model):
     ticket_id = models.CharField(max_length=20, unique=True, editable=False, blank=True)
 
     # ── Section 1: General Information ──────────────────────────────── #
+    # Short human-readable name for the case (ชื่อ incident/event on the NCSA
+    # report). Optional — the structured fields below carry the real detail;
+    # this is a one-line handle for lists, exports and the report header.
+    incident_name = models.CharField(
+        max_length=255, blank=True, default='',
+        verbose_name='ชื่อเหตุการณ์ (Incident/Event Name)',
+    )
     severity = models.CharField(
         max_length=10, choices=SEVERITY_CHOICES, default='High',
         verbose_name='ระดับความรุนแรง',
+    )
+    # NCSA (สกมช.) statutory severity level — reported alongside the SIEM
+    # ``severity``. Blank until an analyst assigns it.
+    ncsa_severity = models.CharField(
+        max_length=20, choices=NCSA_SEVERITY_CHOICES, blank=True, default='',
+        verbose_name='ระดับความรุนแรงตาม สกมช.',
     )
     incident_datetime = models.DateTimeField(
         null=True, blank=True,
@@ -515,6 +541,10 @@ class Ticket(models.Model):
     asset_type = models.CharField(
         max_length=20, choices=ASSET_TYPE_CHOICES, blank=True, default='',
         verbose_name='ประเภทของทรัพย์สิน',
+    )
+    operating_system = models.CharField(
+        max_length=100, blank=True, default='',
+        verbose_name='ระบบปฏิบัติการ (Operating System)',
     )
     spread_to_others = models.BooleanField(
         null=True, blank=True,

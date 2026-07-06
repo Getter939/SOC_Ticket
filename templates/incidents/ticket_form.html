@@ -83,6 +83,13 @@
           {% if form.wazuh_alert.errors %}<div class="text-danger small">{{ form.wazuh_alert.errors }}</div>{% endif %}
         </div>
 
+        <div class="col-12">
+          <label class="form-label fw-semibold">ชื่อเหตุการณ์ <small class="text-muted">(Incident/Event Name)</small></label>
+          {{ form.incident_name }}
+          <div class="field-hint">ชื่อสั้น ๆ ของเหตุการณ์สำหรับใช้ในรายงานและรายการ (ไม่บังคับ)</div>
+          {% if form.incident_name.errors %}<div class="text-danger small">{{ form.incident_name.errors }}</div>{% endif %}
+        </div>
+
         <div class="col-md-6">
           <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
           {{ form.incident_datetime }}
@@ -108,6 +115,13 @@
             {% endfor %}
           </div>
           {% if form.severity.errors %}<div class="text-danger small mt-1">{{ form.severity.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small></label>
+          {{ form.ncsa_severity }}
+          <div class="field-hint">ระดับตามประกาศ สกมช. — วิกฤต / ร้ายแรง / ไม่ร้ายแรง (ไม่บังคับ)</div>
+          {% if form.ncsa_severity.errors %}<div class="text-danger small">{{ form.ncsa_severity.errors }}</div>{% endif %}
         </div>
 
       </div>
@@ -187,6 +201,12 @@
             {% endfor %}
           </div>
           {% if form.asset_type.errors %}<div class="text-danger small mt-1">{{ form.asset_type.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">ระบบปฏิบัติการ <small class="text-muted">(OS)</small></label>
+          {{ form.operating_system }}
+          {% if form.operating_system.errors %}<div class="text-danger small">{{ form.operating_system.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-3">

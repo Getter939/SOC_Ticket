@@ -56,6 +56,7 @@
     <div>
       <div class="ticket-kicker mb-1">Incident workspace · Ticket #{{ ticket.ticket_id }}</div>
       <h1 class="ticket-title fw-bold mb-2">{{ ticket.device_name }}</h1>
+      {% if ticket.incident_name %}<div class="text-muted mb-2"><i class="bi bi-tag me-1"></i>{{ ticket.incident_name }}</div>{% endif %}
       <div class="d-flex flex-wrap gap-2 mb-2">
         {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
         {% include 'incidents/_status_badge.html' with ticket=ticket %}
@@ -83,7 +84,7 @@
 
 <div class="snapshot-grid mb-3">
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-clock me-1"></i>ตรวจพบเหตุการณ์</div><div class="snapshot-value">{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</div></div>
-  <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-person-badge me-1"></i>Tier 1 ผู้รับผิดชอบ</div><div class="snapshot-value">{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}-{% endif %}</div></div>
+  <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-person-badge me-1"></i>ผู้รายงาน (Tier 1)</div><div class="snapshot-value">{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% if ticket.created_by.profile.phone %}<div class="small text-muted fw-normal"><i class="bi bi-telephone me-1"></i>{{ ticket.created_by.profile.phone }}</div>{% endif %}{% else %}-{% endif %}</div></div>
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-tools me-1"></i>System Admin</div><div class="snapshot-value">{% if ticket.assigned_admin %}{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% else %}ยังไม่มอบหมาย{% endif %}</div></div>
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-building me-1"></i>เจ้าของระบบ</div><div class="snapshot-value">{% if ticket.system_owner %}{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% else %}ไม่ระบุ{% endif %}</div></div>
 </div>
@@ -110,10 +111,12 @@
           <div class="col-md-6">
             <dl class="detail-grid mb-0">
               <dt>Reference ID</dt><dd>{{ ticket.reference_id|default:"-" }}</dd>
+              <dt>ความรุนแรง (สกมช.)</dt><dd>{{ ticket.get_ncsa_severity_display|default:"-" }}</dd>
               <dt>Source</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>เหตุการณ์ที่พบ</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
               <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
               <dt>ประเภททรัพย์สิน</dt><dd>{{ ticket.get_asset_type_display|default:"-" }}</dd>
+              <dt>ระบบปฏิบัติการ</dt><dd>{{ ticket.operating_system|default:"-" }}</dd>
               <dt>การกระจาย</dt><dd>{% if ticket.spread_to_others == True %}<span class="text-danger fw-bold">พบการกระจาย</span>{% elif ticket.spread_to_others == False %}ไม่พบการกระจาย{% else %}รอตรวจสอบ{% endif %}</dd>
               <dt>MITRE ATT&CK</dt><dd>{{ ticket.mitre_phase|default:"-" }}</dd>
             </dl>
