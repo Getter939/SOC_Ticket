@@ -220,8 +220,6 @@ apps/
   accounts/             UserProfile (role, tier), admin actions for credentials
   dashboard/            KPI views + tests
   wazuh_ingest/         WazuhAlert model, OpenSearch ingest, triage views
-  customers/, projects/ ⚠ DEAD CODE — not in INSTALLED_APPS, no URLs (leftovers
-                        from the old soc-crm version). Ignore or delete.
 templates/              Django templates (base.html + per-app dirs)
 ```
 
@@ -282,26 +280,23 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 
 ## 7. Known issues, gotchas, stale docs
 
-1. **`apps/customers` and `apps/projects` are dead code** — present on disk
-   with models/views/urls but not installed or routed. Safe to delete, but do
-   it as a deliberate cleanup commit.
-2. **DEPLOY.md's role table is stale**: it says tier is "a seniority label
+1. **DEPLOY.md's role table is stale**: it says tier is "a seniority label
    with no permission effect" and references `VERIFIED → APPROVED`. Both
    predate the 2026-06-19 redesign — tier **does** gate permissions and
    `VERIFIED` no longer exists. Trust WORKFLOW_REDESIGN.md and the code.
-3. **CSP still allows `'unsafe-inline'`** for script/style
+2. **CSP still allows `'unsafe-inline'`** for script/style
    (`config/middleware.py`, policy string in settings). Two inline handlers
    block going nonce-based: `ticket_detail.html` (confirm) and
    `ticket_history.html` (onchange). Planned next hardening step.
-4. **No file-type/magic-byte validation on uploads** (low priority — mitigated
+3. **No file-type/magic-byte validation on uploads** (low priority — mitigated
    by forced-download serving, §8).
-5. **Alert-level `escalation_queue` is vestigial** after the redesign;
+4. **Alert-level `escalation_queue` is vestigial** after the redesign;
    escalation is ticket-level now.
-6. **`runserver-8099.*.log` files in the repo root** are stray dev logs —
+5. **`runserver-8099.*.log` files in the repo root** are stray dev logs —
    deletable.
-7. **OLA breach semantics are asymmetric** (fixed triage fact vs live contain
+6. **OLA breach semantics are asymmetric** (fixed triage fact vs live contain
    countdown, §3.4) — easy to "fix" incorrectly if you assume both are live.
-8. **The 0030 data migration recomputed all OLA deadlines** under the new
+7. **The 0030 data migration recomputed all OLA deadlines** under the new
    per-severity policy. Historical breach stats from before 2026-07-01 reflect
    the recomputation, not what dashboards showed at the time.
 

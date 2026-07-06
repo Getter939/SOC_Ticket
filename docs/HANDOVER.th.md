@@ -219,8 +219,6 @@ apps/
   accounts/             UserProfile (role, tier), admin action เรื่อง credential
   dashboard/            view ของ KPI + เทสต์
   wazuh_ingest/         model WazuhAlert, การ ingest จาก OpenSearch, view การ triage
-  customers/, projects/ ⚠ โค้ดตาย (DEAD CODE) — ไม่อยู่ใน INSTALLED_APPS ไม่มี URL
-                        (ของเหลือจากเวอร์ชัน soc-crm เดิม) ข้ามไปหรือลบทิ้งได้
 templates/              Django template (base.html + โฟลเดอร์แยกตาม app)
 ```
 
@@ -281,27 +279,24 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 
 ## 7. ปัญหาที่ทราบแล้ว จุดที่ต้องระวัง และเอกสารที่ล้าสมัย
 
-1. **`apps/customers` และ `apps/projects` เป็นโค้ดตาย** — มีไฟล์
-   models/views/urls อยู่บนดิสก์ แต่ไม่ได้ติดตั้งและไม่มี URL เชื่อมต่อ
-   ลบได้อย่างปลอดภัย แต่ควรทำเป็น commit เก็บกวาดแยกต่างหากโดยตั้งใจ
-2. **ตาราง role ใน DEPLOY.md ล้าสมัย**: ระบุว่า tier เป็น "ป้ายบอกอาวุโส
+1. **ตาราง role ใน DEPLOY.md ล้าสมัย**: ระบุว่า tier เป็น "ป้ายบอกอาวุโส
    ที่ไม่มีผลต่อสิทธิ์" และอ้างถึง `VERIFIED → APPROVED` ทั้งสองอย่าง
    เป็นข้อมูลก่อนการออกแบบใหม่ 2026-06-19 — ปัจจุบัน tier **มีผล**ต่อสิทธิ์
    และ state `VERIFIED` ไม่มีอยู่แล้ว ให้ยึด WORKFLOW_REDESIGN.md และโค้ดเป็นหลัก
-3. **CSP ยังอนุญาต `'unsafe-inline'`** สำหรับ script/style
+2. **CSP ยังอนุญาต `'unsafe-inline'`** สำหรับ script/style
    (`config/middleware.py`, policy string อยู่ใน settings) inline handler
    สองจุดที่ขวางการเปลี่ยนไปใช้ nonce: `ticket_detail.html` (confirm) และ
    `ticket_history.html` (onchange) — เป็นขั้นตอน hardening ถัดไปที่วางแผนไว้
-4. **ยังไม่มีการตรวจชนิดไฟล์/magic byte ของไฟล์อัปโหลด** (ความสำคัญต่ำ —
+3. **ยังไม่มีการตรวจชนิดไฟล์/magic byte ของไฟล์อัปโหลด** (ความสำคัญต่ำ —
    ลดความเสี่ยงแล้วด้วยการบังคับดาวน์โหลด ดู §8)
-5. **`escalation_queue` ระดับ alert เป็นของตกค้าง**หลังการออกแบบใหม่
+4. **`escalation_queue` ระดับ alert เป็นของตกค้าง**หลังการออกแบบใหม่
    ปัจจุบันการ escalate ทำที่ระดับตั๋ว
-6. **ไฟล์ `runserver-8099.*.log` ใน root ของ repo** เป็น log dev ที่หลงเหลือ —
+5. **ไฟล์ `runserver-8099.*.log` ใน root ของ repo** เป็น log dev ที่หลงเหลือ —
    ลบทิ้งได้
-7. **ความหมายของการ breach OLA ไม่สมมาตรกัน** (triage เป็นข้อเท็จจริงตายตัว
+6. **ความหมายของการ breach OLA ไม่สมมาตรกัน** (triage เป็นข้อเท็จจริงตายตัว
    ส่วน contain เป็นการนับถอยหลังแบบ real-time ดู §3.4) — เสี่ยงต่อการ "แก้บั๊ก"
    ผิด ๆ ถ้าเข้าใจว่าทั้งคู่เป็นแบบ real-time
-8. **Data migration 0030 คำนวณ OLA deadline ทั้งหมดใหม่**ตามนโยบาย
+7. **Data migration 0030 คำนวณ OLA deadline ทั้งหมดใหม่**ตามนโยบาย
    รายเซเวียริตี้ใหม่ สถิติการ breach ย้อนหลังก่อน 2026-07-01 จึงสะท้อน
    การคำนวณใหม่ ไม่ใช่สิ่งที่ dashboard เคยแสดง ณ เวลานั้น
 

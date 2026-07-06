@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1950" height="1450" viewBox="0 0 1950 1450" role="img" aria-labelledby="title desc">
+  <title id="title">SOC Ticket Live Database ER Diagram</title>
+  <desc id="desc">Entity relationship diagram for the running PostgreSQL database ticketdata after legacy customer/project tables were removed.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px Arial, Helvetica, sans-serif; fill: #0f172a; }
+      .subtitle { font: 14px Arial, Helvetica, sans-serif; fill: #475569; }
+      .note { font: 13px Arial, Helvetica, sans-serif; fill: #64748b; }
+      .table { stroke-width: 1.4; filter: url(#shadow); }
+      .header-text { font: 700 15px Arial, Helvetica, sans-serif; fill: white; }
+      .col-text { font: 12px Consolas, 'Courier New', monospace; fill: #111827; }
+      .edge { fill: none; stroke: #334155; stroke-width: 1.45; marker-end: url(#arrow); }
+      .edge.dashed { stroke-dasharray: 6 5; stroke: #64748b; }
+      .edge-label-bg { fill: #ffffff; stroke: #cbd5e1; stroke-width: 0.8; rx: 4; }
+      .edge-label { font: 11px Arial, Helvetica, sans-serif; fill: #334155; }
+      .legend-title { font: 700 13px Arial, Helvetica, sans-serif; fill: #1e293b; }
+      .legend-text { font: 12px Arial, Helvetica, sans-serif; fill: #475569; }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.13"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1950" height="1450"/>
+  <text class="title" x="60" y="54">SOC Ticket Live Database ER Diagram</text>
+  <text class="subtitle" x="60" y="82">Source: running PostgreSQL database <tspan font-family="Consolas, Courier New, monospace">ticketdata</tspan> in Docker. Checked 2026-07-06.</text>
+  <text class="note" x="60" y="104">Legacy customer/project tables were removed from the live DB and repo; this diagram reflects the remaining active schema.</text>
+  <g id="legend">
+    <rect x="1325" y="36" width="560" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+    <text class="legend-title" x="1343" y="60">Legend</text>
+    <text class="legend-text" x="1343" y="84">PK = primary key, UQ = unique, FK = foreign key, JSONB/INET are PostgreSQL column types.</text>
+    <path class="edge" d="M1345,100 L1417,100"/>
+    <text class="legend-text" x="1429" y="104">relationship</text>
+    <path class="edge dashed" d="M1545,100 L1617,100"/>
+    <text class="legend-text" x="1629" y="104">shared auth_user reference</text>
+  </g>
+  <g id="relationships">
+    <path id="edge-0" class="edge" d="M460,220.6 L425.0,220.6 L425.0,238.39999999999998 L390,238.39999999999998"/>
+    <rect class="edge-label-bg" x="382.8" y="220.5" width="84.4" height="18"/>
+    <text class="edge-label" x="425.0" y="233.5" text-anchor="middle">user_id 1:1</text>
+    <path id="edge-1" class="edge" d="M1161.5,905 L1045.75,905 L1045.75,925 L930.0,925"/>
+    <rect class="edge-label-bg" x="974.8" y="906.0" width="142.0" height="18"/>
+    <text class="edge-label" x="1045.8" y="919.0" text-anchor="middle">wazuh_alert_id 0/1:1</text>
+    <path id="edge-2" class="edge" d="M1495,209.8 L1457.5,209.8 L1457.5,257.2 L1420,257.2"/>
+    <rect class="edge-label-bg" x="1408.9" y="224.5" width="97.2" height="18"/>
+    <text class="edge-label" x="1457.5" y="237.5" text-anchor="middle">ticket_id N:1</text>
+    <path id="edge-3" class="edge" d="M1495,409.8 L1457.5,409.8 L1457.5,383.6 L1420,383.6"/>
+    <rect class="edge-label-bg" x="1408.9" y="387.7" width="97.2" height="18"/>
+    <text class="edge-label" x="1457.5" y="400.7" text-anchor="middle">ticket_id N:1</text>
+    <path id="edge-4" class="edge" d="M1495,621.8 L1495,573.8 L1420,573.8 L1420,525.8"/>
+    <rect class="edge-label-bg" x="1408.9" y="564.8" width="97.2" height="18"/>
+    <text class="edge-label" x="1457.5" y="577.8" text-anchor="middle">ticket_id N:1</text>
+    <path id="edge-5" class="edge" d="M1495,917.2 L1495,824.2 L1420,824.2 L1420,731.2"/>
+    <rect class="edge-label-bg" x="1402.5" y="815.2" width="110.0" height="18"/>
+    <text class="edge-label" x="1457.5" y="828.2" text-anchor="middle">ticket_id 0/1:1</text>
+    <path id="edge-6" class="edge dashed" d="M980.0,115 L685.0,115 L685.0,346.4 L390,346.4"/>
+    <rect class="edge-label-bg" x="537.2" y="221.7" width="295.6" height="18"/>
+    <text class="edge-label" x="685.0" y="234.7" text-anchor="middle">created/assigned/owner/verified/approved N:1</text>
+    <path id="edge-7" class="edge dashed" d="M620,1321.0 L620,858.0 L317.40000000000003,858.0 L317.40000000000003,395"/>
+    <rect class="edge-label-bg" x="381.7" y="849.0" width="174.0" height="18"/>
+    <text class="edge-label" x="468.7" y="862.0" text-anchor="middle">triaged_by/claimed_by N:1</text>
+    <path id="edge-8" class="edge dashed" d="M1771.5,130 L1080.75,130 L1080.75,297.8 L390,297.8"/>
+    <rect class="edge-label-bg" x="1032.2" y="204.9" width="97.2" height="18"/>
+    <text class="edge-label" x="1080.8" y="217.9" text-anchor="middle">author_id N:1</text>
+    <path id="edge-9" class="edge dashed" d="M1803.1,330 L1096.55,330 L1096.55,308.6 L390,308.6"/>
+    <rect class="edge-label-bg" x="1032.0" y="310.3" width="129.2" height="18"/>
+    <text class="edge-label" x="1096.5" y="323.3" text-anchor="middle">uploaded_by_id N:1</text>
+    <path id="edge-10" class="edge dashed" d="M1803.1,530 L1096.55,530 L1096.55,319.4 L390,319.4"/>
+    <rect class="edge-label-bg" x="1025.5" y="415.7" width="142.0" height="18"/>
+    <text class="edge-label" x="1096.5" y="428.7" text-anchor="middle">assigned/created N:1</text>
+    <path id="edge-11" class="edge dashed" d="M1822.6,805 L1106.3,805 L1106.3,330.2 L390,330.2"/>
+    <rect class="edge-label-bg" x="1022.5" y="558.6" width="167.6" height="18"/>
+    <text class="edge-label" x="1106.3" y="571.6" text-anchor="middle">analyst/escalated_to N:1</text>
+  </g>
+  <g id="tables">
+    <g id="table-auth_user">
+      <rect class="table" x="60" y="125" width="330" height="270" rx="8" fill="#f8fafc" stroke="#4b5563"/>
+      <path d="M68,125 H382 Q390,125 390,133 V159 H60 V133 Q60,125 68,125 Z" fill="#4b5563"/>
+      <text class="header-text" x="72" y="147">auth_user</text>
+      <text class="col-text" x="72" y="177" font-weight="700">id PK</text>
+      <text class="col-text" x="72" y="197" font-weight="700">username UQ</text>
+      <text class="col-text" x="72" y="217" font-weight="400">password</text>
+      <text class="col-text" x="72" y="237" font-weight="400">email</text>
+      <text class="col-text" x="72" y="257" font-weight="400">first_name</text>
+      <text class="col-text" x="72" y="277" font-weight="400">last_name</text>
+      <text class="col-text" x="72" y="297" font-weight="400">is_superuser</text>
+      <text class="col-text" x="72" y="317" font-weight="400">is_staff</text>
+      <text class="col-text" x="72" y="337" font-weight="400">is_active</text>
+      <text class="col-text" x="72" y="357" font-weight="400">last_login</text>
+      <text class="col-text" x="72" y="377" font-weight="400">date_joined</text>
+    </g>
+    <g id="table-accounts_userprofile">
+      <rect class="table" x="460" y="145" width="360" height="210" rx="8" fill="#eff6ff" stroke="#2563eb"/>
+      <path d="M468,145 H812 Q820,145 820,153 V179 H460 V153 Q460,145 468,145 Z" fill="#2563eb"/>
+      <text class="header-text" x="472" y="167">accounts_userprofile</text>
+      <text class="col-text" x="472" y="197" font-weight="700">id PK</text>
+      <text class="col-text" x="472" y="217" font-weight="700">user_id UQ FK</text>
+      <text class="col-text" x="472" y="237" font-weight="400">department</text>
+      <text class="col-text" x="472" y="257" font-weight="400">phone</text>
+      <text class="col-text" x="472" y="277" font-weight="400">request_date</text>
+      <text class="col-text" x="472" y="297" font-weight="400">note</text>
+      <text class="col-text" x="472" y="317" font-weight="400">role</text>
+      <text class="col-text" x="472" y="337" font-weight="400">tier</text>
+    </g>
+    <g id="table-incidents_ticket">
+      <rect class="table" x="870" y="115" width="550" height="790" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M878,115 H1412 Q1420,115 1420,123 V149 H870 V123 Q870,115 878,115 Z" fill="#dc2626"/>
+      <text class="header-text" x="882" y="137">incidents_ticket</text>
+      <text class="col-text" x="882" y="167" font-weight="700">id PK</text>
+      <text class="col-text" x="882" y="187" font-weight="700">ticket_id UQ</text>
+      <text class="col-text" x="882" y="207" font-weight="700">created_by_id FK</text>
+      <text class="col-text" x="882" y="227" font-weight="700">assigned_to_id FK</text>
+      <text class="col-text" x="882" y="247" font-weight="700">assigned_admin_id FK</text>
+      <text class="col-text" x="882" y="267" font-weight="700">system_owner_id FK</text>
+      <text class="col-text" x="882" y="287" font-weight="700">verified_by_id FK</text>
+      <text class="col-text" x="882" y="307" font-weight="700">approved_by_id FK</text>
+      <text class="col-text" x="882" y="327" font-weight="700">wazuh_alert_id UQ FK</text>
+      <text class="col-text" x="882" y="347" font-weight="400">device_name</text>
+      <text class="col-text" x="882" y="367" font-weight="400">ip_address INET</text>
+      <text class="col-text" x="882" y="387" font-weight="400">mac_address</text>
+      <text class="col-text" x="882" y="407" font-weight="400">asset_type</text>
+      <text class="col-text" x="882" y="427" font-weight="400">severity</text>
+      <text class="col-text" x="882" y="447" font-weight="400">status</text>
+      <text class="col-text" x="882" y="467" font-weight="400">disposition</text>
+      <text class="col-text" x="882" y="487" font-weight="400">category</text>
+      <text class="col-text" x="882" y="507" font-weight="400">issue_type</text>
+      <text class="col-text" x="882" y="527" font-weight="400">detailed_issue</text>
+      <text class="col-text" x="882" y="547" font-weight="400">detailed_issue2</text>
+      <text class="col-text" x="882" y="567" font-weight="400">issue_description</text>
+      <text class="col-text" x="882" y="587" font-weight="400">incident_datetime</text>
+      <text class="col-text" x="882" y="607" font-weight="400">sla_deadline</text>
+      <text class="col-text" x="882" y="627" font-weight="400">created_at</text>
+      <text class="col-text" x="882" y="647" font-weight="400">updated_at</text>
+      <text class="col-text" x="882" y="667" font-weight="400">verified_at</text>
+      <text class="col-text" x="882" y="687" font-weight="400">approved_at</text>
+      <text class="col-text" x="882" y="707" font-weight="400">reference_id</text>
+      <text class="col-text" x="882" y="727" font-weight="400">destination_ip</text>
+      <text class="col-text" x="882" y="747" font-weight="400">ioc_details</text>
+      <text class="col-text" x="882" y="767" font-weight="400">mitre_phase</text>
+      <text class="col-text" x="882" y="787" font-weight="400">spread_to_others</text>
+      <text class="col-text" x="882" y="807" font-weight="400">containment_report</text>
+      <text class="col-text" x="882" y="827" font-weight="400">remediation_summary</text>
+      <text class="col-text" x="882" y="847" font-weight="400">action_required</text>
+      <text class="col-text" x="882" y="867" font-weight="400">action_precautions</text>
+      <text class="col-text" x="882" y="887" font-weight="400">update_notes</text>
+    </g>
+    <g id="table-incidents_ticketlog">
+      <rect class="table" x="1495" y="130" width="395" height="190" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M1503,130 H1882 Q1890,130 1890,138 V164 H1495 V138 Q1495,130 1503,130 Z" fill="#dc2626"/>
+      <text class="header-text" x="1507" y="152">incidents_ticketlog</text>
+      <text class="col-text" x="1507" y="182" font-weight="700">id PK</text>
+      <text class="col-text" x="1507" y="202" font-weight="700">ticket_id FK</text>
+      <text class="col-text" x="1507" y="222" font-weight="700">author_id FK</text>
+      <text class="col-text" x="1507" y="242" font-weight="400">note</text>
+      <text class="col-text" x="1507" y="262" font-weight="400">status_at_time</text>
+      <text class="col-text" x="1507" y="282" font-weight="400">created_at</text>
+      <text class="col-text" x="1507" y="302" font-weight="400">updated_at</text>
+    </g>
+    <g id="table-incidents_ticketattachment">
+      <rect class="table" x="1495" y="330" width="395" height="190" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M1503,330 H1882 Q1890,330 1890,338 V364 H1495 V338 Q1495,330 1503,330 Z" fill="#dc2626"/>
+      <text class="header-text" x="1507" y="352">incidents_ticketattachment</text>
+      <text class="col-text" x="1507" y="382" font-weight="700">id PK</text>
+      <text class="col-text" x="1507" y="402" font-weight="700">ticket_id FK</text>
+      <text class="col-text" x="1507" y="422" font-weight="700">uploaded_by_id FK</text>
+      <text class="col-text" x="1507" y="442" font-weight="400">file</text>
+      <text class="col-text" x="1507" y="462" font-weight="400">original_name</text>
+      <text class="col-text" x="1507" y="482" font-weight="400">description</text>
+      <text class="col-text" x="1507" y="502" font-weight="400">uploaded_at</text>
+    </g>
+    <g id="table-incidents_ticketsubtask">
+      <rect class="table" x="1495" y="530" width="395" height="270" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M1503,530 H1882 Q1890,530 1890,538 V564 H1495 V538 Q1495,530 1503,530 Z" fill="#dc2626"/>
+      <text class="header-text" x="1507" y="552">incidents_ticketsubtask</text>
+      <text class="col-text" x="1507" y="582" font-weight="700">id PK</text>
+      <text class="col-text" x="1507" y="602" font-weight="700">ticket_id FK</text>
+      <text class="col-text" x="1507" y="622" font-weight="700">assigned_to_id FK</text>
+      <text class="col-text" x="1507" y="642" font-weight="700">created_by_id FK</text>
+      <text class="col-text" x="1507" y="662" font-weight="400">subtask_type</text>
+      <text class="col-text" x="1507" y="682" font-weight="400">title</text>
+      <text class="col-text" x="1507" y="702" font-weight="400">description</text>
+      <text class="col-text" x="1507" y="722" font-weight="400">status</text>
+      <text class="col-text" x="1507" y="742" font-weight="400">result_notes</text>
+      <text class="col-text" x="1507" y="762" font-weight="400">created_at</text>
+      <text class="col-text" x="1507" y="782" font-weight="400">updated_at</text>
+    </g>
+    <g id="table-incidents_triagerecord">
+      <rect class="table" x="1495" y="805" width="420" height="330" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M1503,805 H1907 Q1915,805 1915,813 V839 H1495 V813 Q1495,805 1503,805 Z" fill="#dc2626"/>
+      <text class="header-text" x="1507" y="827">incidents_triagerecord</text>
+      <text class="col-text" x="1507" y="857" font-weight="700">id PK</text>
+      <text class="col-text" x="1507" y="877" font-weight="700">ticket_id UQ FK</text>
+      <text class="col-text" x="1507" y="897" font-weight="700">analyst_id FK</text>
+      <text class="col-text" x="1507" y="917" font-weight="700">escalated_to_id FK</text>
+      <text class="col-text" x="1507" y="937" font-weight="400">source</text>
+      <text class="col-text" x="1507" y="957" font-weight="400">source_reference</text>
+      <text class="col-text" x="1507" y="977" font-weight="400">alert_description</text>
+      <text class="col-text" x="1507" y="997" font-weight="400">source_ip</text>
+      <text class="col-text" x="1507" y="1017" font-weight="400">decision</text>
+      <text class="col-text" x="1507" y="1037" font-weight="400">notes</text>
+      <text class="col-text" x="1507" y="1057" font-weight="400">created_at</text>
+      <text class="col-text" x="1507" y="1077" font-weight="400">t2_decision</text>
+      <text class="col-text" x="1507" y="1097" font-weight="400">t2_notes</text>
+      <text class="col-text" x="1507" y="1117" font-weight="400">t2_decided_at</text>
+    </g>
+    <g id="table-incidents_notificationtemplate">
+      <rect class="table" x="1495" y="1170" width="395" height="150" rx="8" fill="#fff5f5" stroke="#dc2626"/>
+      <path d="M1503,1170 H1882 Q1890,1170 1890,1178 V1204 H1495 V1178 Q1495,1170 1503,1170 Z" fill="#dc2626"/>
+      <text class="header-text" x="1507" y="1192">incidents_notificationtemplate</text>
+      <text class="col-text" x="1507" y="1222" font-weight="700">id PK</text>
+      <text class="col-text" x="1507" y="1242" font-weight="700">key UQ</text>
+      <text class="col-text" x="1507" y="1262" font-weight="400">subject</text>
+      <text class="col-text" x="1507" y="1282" font-weight="400">body</text>
+      <text class="col-text" x="1507" y="1302" font-weight="400">updated_at</text>
+    </g>
+    <g id="table-wazuh_ingest_wazuhalert">
+      <rect class="table" x="620" y="925" width="620" height="550" rx="8" fill="#ecfeff" stroke="#0891b2"/>
+      <path d="M628,925 H1232 Q1240,925 1240,933 V959 H620 V933 Q620,925 628,925 Z" fill="#0891b2"/>
+      <text class="header-text" x="632" y="947">wazuh_ingest_wazuhalert</text>
+      <text class="col-text" x="632" y="977" font-weight="700">id PK</text>
+      <text class="col-text" x="632" y="997" font-weight="700">opensearch_id UQ</text>
+      <text class="col-text" x="632" y="1017" font-weight="400">alert_id</text>
+      <text class="col-text" x="632" y="1037" font-weight="400">timestamp</text>
+      <text class="col-text" x="632" y="1057" font-weight="400">agent_id</text>
+      <text class="col-text" x="632" y="1077" font-weight="400">agent_name</text>
+      <text class="col-text" x="632" y="1097" font-weight="400">agent_ip</text>
+      <text class="col-text" x="632" y="1117" font-weight="400">rule_id</text>
+      <text class="col-text" x="632" y="1137" font-weight="400">rule_level</text>
+      <text class="col-text" x="632" y="1157" font-weight="400">rule_description</text>
+      <text class="col-text" x="632" y="1177" font-weight="400">rule_groups JSONB</text>
+      <text class="col-text" x="632" y="1197" font-weight="400">mitre_techniques JSONB</text>
+      <text class="col-text" x="632" y="1217" font-weight="400">mitre_tactics JSONB</text>
+      <text class="col-text" x="632" y="1237" font-weight="400">mitre_ids JSONB</text>
+      <text class="col-text" x="632" y="1257" font-weight="400">raw_data JSONB</text>
+      <text class="col-text" x="632" y="1277" font-weight="400">decoder_name</text>
+      <text class="col-text" x="632" y="1297" font-weight="400">ingested_at</text>
+      <text class="col-text" x="632" y="1317" font-weight="400">triage_status</text>
+      <text class="col-text" x="632" y="1337" font-weight="700">triaged_by_id FK</text>
+      <text class="col-text" x="632" y="1357" font-weight="400">triaged_at</text>
+      <text class="col-text" x="632" y="1377" font-weight="400">triage_note</text>
+      <text class="col-text" x="632" y="1397" font-weight="700">claimed_by_id FK</text>
+      <text class="col-text" x="632" y="1417" font-weight="400">claimed_at</text>
+      <text class="col-text" x="632" y="1437" font-weight="400">escalated_to_tier</text>
+      <text class="col-text" x="632" y="1457" font-weight="400">incident_category</text>
+    </g>
+    <g id="table-wazuh_ingest_ingestwatermark">
+      <rect class="table" x="60" y="1040" width="410" height="110" rx="8" fill="#ecfeff" stroke="#0891b2"/>
+      <path d="M68,1040 H462 Q470,1040 470,1048 V1074 H60 V1048 Q60,1040 68,1040 Z" fill="#0891b2"/>
+      <text class="header-text" x="72" y="1062">wazuh_ingest_ingestwatermark</text>
+      <text class="col-text" x="72" y="1092" font-weight="700">id PK</text>
+      <text class="col-text" x="72" y="1112" font-weight="400">last_timestamp</text>
+      <text class="col-text" x="72" y="1132" font-weight="400">updated_at</text>
+    </g>
+  </g>
+  <g id="omitted-note">
+    <rect x="60" y="1348" width="850" height="62" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+    <text class="legend-title" x="78" y="1373">Standard Django tables omitted from diagram body</text>
+    <text class="legend-text" x="78" y="1397">auth_group, auth_permission, auth_user_groups, auth_user_user_permissions, auth_group_permissions, django_admin_log, django_content_type, django_migrations, django_session.</text>
+  </g>
+</svg>
