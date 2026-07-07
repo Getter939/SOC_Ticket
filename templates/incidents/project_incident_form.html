@@ -32,6 +32,8 @@
   .mitre-option label { font-size:.82rem; margin:0; cursor:pointer; }
   .field-hint { font-size:.75rem; color:#6c757d; margin-top:.25rem; }
   .required-star { color:#dc3545; }
+  .field-has-error > .form-label, .field-has-error > label { color:#dc3545; }
+  #error-summary a.error-jump { font-weight:600; }
   .target-card { border:1px solid #dee2e6; border-radius:10px; padding:1rem 1rem .75rem; margin-bottom:.85rem; background:#fbfcfe; position:relative; }
   .target-badge { position:absolute; top:-.7rem; left:1rem; background:#0d6efd; color:#fff; font-size:.72rem; font-weight:700; padding:.15rem .55rem; border-radius:12px; }
   .target-remove { position:absolute; top:.5rem; right:.6rem; }
@@ -65,7 +67,21 @@
     {% csrf_token %}
     {% if source_alert %}<input type="hidden" name="wazuh_alert" value="{{ source_alert.pk }}">{% endif %}
     {% if source_triage %}<input type="hidden" name="triage_id" value="{{ source_triage.pk }}">{% endif %}
-    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    {% if form.errors or target_formset.total_error_count %}
+    <div class="alert alert-danger" id="error-summary">
+      <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วนก่อนสร้าง Project Incident</div>
+      {% if form.non_field_errors %}<div class="mb-1">{{ form.non_field_errors }}</div>{% endif %}
+      {% if target_formset.non_form_errors %}<div class="mb-1">{{ target_formset.non_form_errors }}</div>{% endif %}
+      <ul class="mb-0 ps-3">
+        {% for field in form %}{% if field.errors %}
+        <li><a href="#" class="error-jump" data-target="{{ field.html_name }}">{{ field.label }}</a> — {% for e in field.errors %}{{ e }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>
+        {% endif %}{% endfor %}
+        {% for tform in target_formset %}{% for field in tform %}{% if field.errors %}
+        <li><a href="#" class="error-jump" data-target="{{ field.html_name }}">ระบบที่ {{ forloop.parentloop.counter }} — {{ field.label }}</a> — {% for e in field.errors %}{{ e }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>
+        {% endif %}{% endfor %}{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
 
     <!-- ── Shared incident facts ── -->
     <div class="form-section">
@@ -335,6 +351,32 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
       e.target.closest('.target-card').classList.toggle('to-delete', e.target.checked);
     }
   });
+})();
+
+// ── Error summary: click-to-jump + auto-scroll/focus the first error ──
+// Covers both the shared form and the per-system target rows.
+(function () {
+  const summary = document.getElementById('error-summary');
+  if (!summary) return;
+  const COLS = '.col-12, .col-md-3, .col-md-4, .col-md-5, .col-md-6';
+  function fieldEl(name) { return document.querySelector('[name="' + name + '"]'); }
+  function container(name) {
+    const el = fieldEl(name);
+    return el ? (el.closest(COLS) || el.closest('.target-card') || el) : null;
+  }
+  function jump(name) {
+    const box = container(name);
+    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = fieldEl(name);
+    if (el && el.focus) setTimeout(() => { try { el.focus({ preventScroll: true }); } catch (e) {} }, 300);
+  }
+  summary.querySelectorAll('.error-jump').forEach(a => {
+    const box = container(a.dataset.target);
+    if (box) box.classList.add('field-has-error');
+    a.addEventListener('click', e => { e.preventDefault(); jump(a.dataset.target); });
+  });
+  const first = summary.querySelector('.error-jump');
+  if (first) setTimeout(() => jump(first.dataset.target), 200);
 })();
 </script>
 {% include 'incidents/_detailed_issue_cascade.html' %}

@@ -63,6 +63,10 @@
 
   .field-hint { font-size: .75rem; color: #6c757d; margin-top: .25rem; }
   .required-star { color: #dc3545; }
+  .field-has-error > .form-label, .field-has-error > label { color: #dc3545; }
+  #error-summary a.error-jump { font-weight: 600; }
+  .assist-badge { font-size: .68rem; font-weight: 400; color: #0d6efd; background: #e7f1ff; border: 1px solid #b6d4fe; border-radius: 10px; padding: .05rem .45rem; margin-left: .4rem; white-space: nowrap; }
+  .assist-badge i { font-size: .62rem; }
   .decision-option { border: 1px solid #dee2e6; border-radius: 10px; padding: 1rem; height: 100%; }
   .decision-option:has(input:checked) { border-color: #dc3545; background: #fff8f8; box-shadow: 0 0 0 2px rgba(220,53,69,.08); }
   .conditional-panel { display: none; }
@@ -81,9 +85,15 @@
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
-    {% if form.non_field_errors %}
-    <div class="alert alert-danger">
-      {{ form.non_field_errors }}
+    {% if form.errors %}
+    <div class="alert alert-danger" id="error-summary">
+      <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วนก่อนบันทึก</div>
+      {% if form.non_field_errors %}<div class="mb-1">{{ form.non_field_errors }}</div>{% endif %}
+      <ul class="mb-0 ps-3">
+        {% for field in form %}{% if field.errors %}
+        <li><a href="#" class="error-jump" data-target="{{ field.html_name }}">{{ field.label }}</a> — {% for e in field.errors %}{{ e }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>
+        {% endif %}{% endfor %}
+      </ul>
     </div>
     {% endif %}
 
@@ -100,6 +110,8 @@
               <option value="{{ alert.pk }}"
                       data-rule-description="{{ alert.rule_description }}"
                       data-rule-level="{{ alert.rule_level }}"
+                      data-agent-name="{{ alert.agent_name }}"
+                      data-agent-ip="{{ alert.agent_ip|default:'' }}"
                       {% if form.wazuh_alert.value|stringformat:"s" == alert.pk|stringformat:"s" %}selected{% endif %}>
                 [{{ alert.rule_level }}] {{ alert.rule_description }} — {{ alert.agent_name }} ({{ alert.timestamp|date:"Y-m-d H:i" }})
               </option>
@@ -118,7 +130,10 @@
 
         <div class="col-md-4">
           <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
-          {{ form.incident_datetime }}
+          <div class="input-group">
+            {{ form.incident_datetime }}
+            <button type="button" class="btn btn-outline-secondary" id="dt-now" title="ตั้งเป็นเวลาปัจจุบัน">ตอนนี้</button>
+          </div>
           {% if form.incident_datetime.errors %}<div class="text-danger small">{{ form.incident_datetime.errors }}</div>{% endif %}
         </div>
 
@@ -441,37 +456,121 @@ updateDecisionPanels();
   });
 })();
 
-// Wazuh alert — auto-fill description and severity from the selected alert
-// (only fills fields that are still empty / untouched)
-document.getElementById('id_wazuh_alert')?.addEventListener('change', function () {
-  const opt = this.options[this.selectedIndex];
-  const ruleDescription = opt.dataset.ruleDescription || '';
-  const ruleLevel = parseInt(opt.dataset.ruleLevel || '', 10);
-  if (!ruleDescription && !ruleLevel) return;
-
-  // Auto-fill incident description if empty
-  const issueDescField = document.getElementById('id_issue_description');
-  if (issueDescField && !issueDescField.value.trim() && ruleDescription) {
-    issueDescField.value = ruleDescription;
+// ── Smart assist: prefill + suggestions (only touches empty/untouched fields) ──
+(function () {
+  const COLS = '.col-12, .col-md-3, .col-md-4, .col-md-5, .col-md-6';
+  function wrapOf(el) { return el ? el.closest(COLS) : null; }
+  function addBadge(wrap, text) {
+    if (!wrap) return;
+    const label = wrap.querySelector('.form-label');
+    if (!label || label.querySelector('.assist-badge')) return;
+    const b = document.createElement('span');
+    b.className = 'assist-badge';
+    b.innerHTML = '<i class="bi bi-magic"></i> ' + text;
+    label.appendChild(b);
+  }
+  function removeBadge(wrap) {
+    const b = wrap && wrap.querySelector('.assist-badge');
+    if (b) b.remove();
+  }
+  function fillText(el, val, note) {
+    if (!el || !val || el.value.trim()) return;
+    el.value = val;
+    const w = wrapOf(el);
+    addBadge(w, note);
+    el.addEventListener('input', () => removeBadge(w), { once: true });
   }
 
-  // Auto-fill severity if nothing has been selected yet
-  // Mapping: rule.level 10–12 → High, 13–15 (and above) → Critical
-  const severityChecked = document.querySelector('#severity-group input[type=radio]:checked');
-  if (!severityChecked && !isNaN(ruleLevel)) {
-    let targetSeverity = null;
-    if (ruleLevel >= 13) targetSeverity = 'Critical';
-    else if (ruleLevel >= 10) targetSeverity = 'High';
+  // Default 'วันและเวลาที่ตรวจพบ' to now (if empty) + a "ตอนนี้" quick-set button.
+  const dt = document.getElementById('id_incident_datetime');
+  function localNow() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }
+  if (dt && !dt.value) dt.value = localNow();
+  document.getElementById('dt-now')?.addEventListener('click', () => {
+    if (dt) { dt.value = localNow(); dt.dispatchEvent(new Event('change')); }
+  });
 
-    if (targetSeverity) {
-      const radio = document.querySelector(`#severity-group input[value="${targetSeverity}"]`);
-      if (radio) {
-        radio.checked = true;
-        radio.dispatchEvent(new Event('change'));
+  // Suggest NCSA severity from the SIEM severity, until the analyst overrides it.
+  const NCSA_MAP = { Critical: 'CRITICAL', High: 'SEVERE', Medium: 'NON_SEVERE', Low: 'NON_SEVERE' };
+  let ncsaLocked = false, ncsaAuto = false;
+  const ncsaWrap = wrapOf(document.querySelector('#ncsa-severity-group input'));
+  function suggestNcsa(sev) {
+    if (ncsaLocked) return;
+    const target = NCSA_MAP[sev];
+    if (!target) return;
+    const radio = document.querySelector(`#ncsa-severity-group input[value="${target}"]`);
+    if (!radio) return;
+    ncsaAuto = true;
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+    ncsaAuto = false;
+    addBadge(ncsaWrap, 'แนะนำจากความรุนแรง (แก้ไขได้)');
+  }
+  document.querySelectorAll('#ncsa-severity-group input[type=radio]').forEach(r => {
+    r.addEventListener('change', () => { if (!ncsaAuto) { ncsaLocked = true; removeBadge(ncsaWrap); } });
+  });
+  document.querySelectorAll('#severity-group input[type=radio]').forEach(r => {
+    r.addEventListener('change', () => suggestNcsa(r.value));
+  });
+
+  // Wazuh alert — prefill empty fields from the selected alert, with badges.
+  document.getElementById('id_wazuh_alert')?.addEventListener('change', function () {
+    const opt = this.options[this.selectedIndex];
+    if (!opt || !opt.value) return;
+    const ruleDescription = opt.dataset.ruleDescription || '';
+    const ruleLevel = parseInt(opt.dataset.ruleLevel || '', 10);
+    const agentName = opt.dataset.agentName || '';
+    const agentIp = opt.dataset.agentIp || '';
+
+    fillText(document.getElementById('id_issue_description'), ruleDescription, 'เติมจาก Wazuh');
+    fillText(document.getElementById('id_device_name'), agentName, 'เติมจาก Wazuh');
+    fillText(document.getElementById('id_ip_address'), agentIp, 'เติมจาก Wazuh');
+    fillText(document.getElementById('id_log_source'), 'Wazuh', 'เติมจาก Wazuh');
+
+    // Severity from rule level (only if nothing chosen yet); the severity
+    // 'change' listener above then cascades an NCSA suggestion.
+    const severityChecked = document.querySelector('#severity-group input[type=radio]:checked');
+    if (!severityChecked && !isNaN(ruleLevel)) {
+      let targetSeverity = null;
+      if (ruleLevel >= 13) targetSeverity = 'Critical';
+      else if (ruleLevel >= 10) targetSeverity = 'High';
+      if (targetSeverity) {
+        const radio = document.querySelector(`#severity-group input[value="${targetSeverity}"]`);
+        if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
       }
     }
+  });
+})();
+
+// ── Error summary: click-to-jump + auto-scroll/focus the first error ──
+// Turns a failed submit on this tall form into one glance + one jump instead
+// of hunting for red text across four blocks.
+(function () {
+  const summary = document.getElementById('error-summary');
+  if (!summary) return;
+  const COLS = '.col-12, .col-md-3, .col-md-4, .col-md-5, .col-md-6';
+  function fieldEl(name) { return document.querySelector('[name="' + name + '"]'); }
+  function container(name) {
+    const el = fieldEl(name);
+    return el ? (el.closest(COLS) || el) : null;
   }
-});
+  function jump(name) {
+    const box = container(name);
+    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = fieldEl(name);
+    if (el && el.focus) setTimeout(() => { try { el.focus({ preventScroll: true }); } catch (e) {} }, 300);
+  }
+  summary.querySelectorAll('.error-jump').forEach(a => {
+    const box = container(a.dataset.target);
+    if (box) box.classList.add('field-has-error');
+    a.addEventListener('click', e => { e.preventDefault(); jump(a.dataset.target); });
+  });
+  const first = summary.querySelector('.error-jump');
+  if (first) setTimeout(() => jump(first.dataset.target), 200);
+})();
 </script>
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% endblock %}
