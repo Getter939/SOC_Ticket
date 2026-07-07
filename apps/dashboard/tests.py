@@ -92,6 +92,13 @@ class DashboardAccessTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('ticket_list'), fetch_redirect_response=False)
 
+    def test_system_admin_sidebar_hides_dashboard_link(self):
+        """System admins work tickets, but must not see the SOC dashboard entry point."""
+        self.client.force_login(self.sys_admin)
+        response = self.client.get(reverse('ticket_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'data-label="Dashboard"')
+
     def test_unauthenticated_user_redirected_to_login(self):
         response = self.client.get(DASHBOARD_URL)
         self.assertEqual(response.status_code, 302)

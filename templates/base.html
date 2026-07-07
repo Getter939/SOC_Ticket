@@ -230,11 +230,13 @@
 <nav id="sidebar">
     {% with profile=request.user.profile %}
 
+    {% if request.user.is_superuser or profile.is_soc %}
     <div class="nav-section-label">หลัก</div>
     <a href="{% url 'home' %}" data-label="Dashboard"
        class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
         <i class="bi bi-speedometer2"></i> <span class="nav-label">Dashboard</span>
     </a>
+    {% endif %}
     {% if request.user.is_superuser or profile.is_executive %}
     <a href="{% url 'executive_dashboard' %}" data-label="แดชบอร์ดผู้บริหาร"
        class="nav-link {% if request.resolver_match.url_name == 'executive_dashboard' %}active{% endif %}">

@@ -23,9 +23,12 @@ db.sqlite3
 
 # Django collected static (rebuild inside container)
 staticfiles/
+media/
 
 # Logs
 *.log
+logs/
+backups/
 
 # OS files
 .DS_Store

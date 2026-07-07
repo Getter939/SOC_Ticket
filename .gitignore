@@ -31,6 +31,12 @@ config/settings_local.py
 *.log
 logs/
 
+# Backup output
+backups/
+*.dump
+*.tar.gz.enc
+*.tar.gz.gpg
+
 # ── IDE ───────────────────────────────────────────────────────────────────
 .vscode/
 .idea/

@@ -31,6 +31,7 @@ services:
       DB_HOST: db
     volumes:
       - staticfiles:/app/staticfiles
+      - media:/app/media
     depends_on:
       db:
         condition: service_healthy
@@ -46,6 +47,60 @@ services:
     depends_on:
       - web
 
+  backup:
+    image: postgres:16
+    profiles: ["backup"]
+    env_file:
+      - .env
+    environment:
+      PGHOST: "db"
+      PGPORT: "${DB_PORT:-5432}"
+      BACKUP_DIR: "/backups"
+      MEDIA_ROOT: "/app/media"
+      BACKUP_PREFIX: "${BACKUP_PREFIX:-soc_ticket}"
+      BACKUP_TIER: "${BACKUP_TIER:-manual}"
+      BACKUP_RETENTION_ENABLED: "${BACKUP_RETENTION_ENABLED:-true}"
+      BACKUP_RETENTION_HOURLY_DAYS: "${BACKUP_RETENTION_HOURLY_DAYS:-2}"
+      BACKUP_RETENTION_DAILY_DAYS: "${BACKUP_RETENTION_DAILY_DAYS:-30}"
+      BACKUP_RETENTION_WEEKLY_DAYS: "${BACKUP_RETENTION_WEEKLY_DAYS:-84}"
+      BACKUP_RETENTION_MONTHLY_DAYS: "${BACKUP_RETENTION_MONTHLY_DAYS:-365}"
+      BACKUP_ENCRYPTION: "${BACKUP_ENCRYPTION:-none}"
+      BACKUP_ENCRYPTION_PASSWORD: "${BACKUP_ENCRYPTION_PASSWORD:-}"
+      BACKUP_ENCRYPTION_PASSWORD_FILE: "${BACKUP_ENCRYPTION_PASSWORD_FILE:-}"
+      BACKUP_GPG_RECIPIENT: "${BACKUP_GPG_RECIPIENT:-}"
+      APP_VERSION: "${APP_VERSION:-unknown}"
+    volumes:
+      - ./scripts/backup:/scripts:ro
+      - ${BACKUP_HOST_PATH:-./backups}:/backups
+      - media:/app/media:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/backup.sh"]
+
+  restore_verify:
+    image: postgres:16
+    profiles: ["backup"]
+    env_file:
+      - .env
+    environment:
+      PGHOST: "db"
+      PGPORT: "${DB_PORT:-5432}"
+      PGMAINTENANCE_DB: "${PGMAINTENANCE_DB:-postgres}"
+      RESTORE_DB: "${RESTORE_DB:-ticketdata_restoretest}"
+      RESTORE_DROP_AFTER_TEST: "${RESTORE_DROP_AFTER_TEST:-false}"
+      BACKUP_FILE: "${BACKUP_FILE:-}"
+      BACKUP_ENCRYPTION_PASSWORD: "${BACKUP_ENCRYPTION_PASSWORD:-}"
+      BACKUP_ENCRYPTION_PASSWORD_FILE: "${BACKUP_ENCRYPTION_PASSWORD_FILE:-}"
+    volumes:
+      - ./scripts/backup:/scripts:ro
+      - ${BACKUP_HOST_PATH:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/restore_verify.sh"]
+
 volumes:
   postgres_data:
   staticfiles:
+  media:
