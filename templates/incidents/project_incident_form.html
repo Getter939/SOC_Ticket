@@ -20,6 +20,16 @@
   input[value="Low"]:checked + label, label.selected[for*="Low"] { background:#198754; color:#fff; }
   input[value="Unknown"] + label { border-color:#6f42c1; color:#6f42c1; }
   input[value="Unknown"]:checked + label, label.selected[for*="Unknown"] { background:#6f42c1; color:#fff; }
+  .ncsa-severity-radio { display:none; }
+  input[value="CRITICAL"] + label { border-color:#dc3545; color:#dc3545; }
+  input[value="CRITICAL"]:checked + label { background:#dc3545; color:#fff; }
+  input[value="SEVERE"] + label { border-color:#fd7e14; color:#fd7e14; }
+  input[value="SEVERE"]:checked + label { background:#fd7e14; color:#fff; }
+  input[value="NON_SEVERE"] + label { border-color:#198754; color:#198754; }
+  input[value="NON_SEVERE"]:checked + label { background:#198754; color:#fff; }
+  .mitre-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:.3rem .75rem; }
+  .mitre-option { display:flex; align-items:center; gap:.4rem; }
+  .mitre-option label { font-size:.82rem; margin:0; cursor:pointer; }
   .field-hint { font-size:.75rem; color:#6c757d; margin-top:.25rem; }
   .required-star { color:#dc3545; }
   .target-card { border:1px solid #dee2e6; border-radius:10px; padding:1rem 1rem .75rem; margin-bottom:.85rem; background:#fbfcfe; position:relative; }
@@ -87,10 +97,21 @@
           {% if form.severity.errors %}<div class="text-danger small mt-1">{{ form.severity.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small></label>
-          {{ form.ncsa_severity }}
-          <div class="field-hint">วิกฤต / ร้ายแรง / ไม่ร้ายแรง — ใช้ร่วมกันทุก Ticket ในกลุ่ม (ไม่บังคับ)</div>
-          {% if form.ncsa_severity.errors %}<div class="text-danger small">{{ form.ncsa_severity.errors }}</div>{% endif %}
+          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small> <span class="required-star">*</span></label>
+          <div class="severity-group" id="ncsa-severity-group">
+            {% for radio in form.ncsa_severity %}
+              {{ radio.tag }}
+              <label for="{{ radio.id_for_label }}" class="{% if radio.data.selected %}selected{% endif %}">{{ radio.choice_label }}</label>
+            {% endfor %}
+          </div>
+          <div class="field-hint">วิกฤต / ร้ายแรง / ไม่ร้ายแรง — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          {% if form.ncsa_severity.errors %}<div class="text-danger small mt-1">{{ form.ncsa_severity.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
+          {{ form.log_source }}
+          <div class="field-hint">ชื่อแหล่ง Log เช่น Palo Alto Firewall, Windows Security Event Log — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
         </div>
       </div>
     </div>
@@ -129,9 +150,14 @@
           {{ form.destination_ip }}
           {% if form.destination_ip.errors %}<div class="text-danger small">{{ form.destination_ip.errors }}</div>{% endif %}
         </div>
-        <div class="col-md-6">
+        <div class="col-12">
           <label class="form-label fw-semibold">Phase การโจมตี (MITRE ATT&amp;CK)</label>
-          {{ form.mitre_phase }}
+          <div class="mitre-grid">
+            {% for cb in form.mitre_phase %}
+              <div class="mitre-option">{{ cb.tag }}<label for="{{ cb.id_for_label }}">{{ cb.choice_label }}</label></div>
+            {% endfor %}
+          </div>
+          <div class="field-hint">เลือกได้หลาย Tactic — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
           {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
         </div>
         <div class="col-12">
@@ -197,8 +223,13 @@
               {{ tform.operating_system }}
               {% if tform.operating_system.errors %}<div class="text-danger small">{{ tform.operating_system.errors }}</div>{% endif %}
             </div>
-            <div class="col-md-6">
-              <label class="form-label small fw-semibold mb-1">เจ้าของระบบ / หน่วยงาน</label>
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold mb-1">หน่วยงานเจ้าของทรัพย์สิน</label>
+              {{ tform.asset_owner }}
+              {% if tform.asset_owner.errors %}<div class="text-danger small">{{ tform.asset_owner.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (แจ้งเตือน)</label>
               {{ tform.system_owner }}
             </div>
           </div>
@@ -260,8 +291,12 @@
         <label class="form-label small fw-semibold mb-1">ระบบปฏิบัติการ (OS)</label>
         {{ target_formset.empty_form.operating_system }}
       </div>
-      <div class="col-md-6">
-        <label class="form-label small fw-semibold mb-1">เจ้าของระบบ / หน่วยงาน</label>
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold mb-1">หน่วยงานเจ้าของทรัพย์สิน</label>
+        {{ target_formset.empty_form.asset_owner }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (แจ้งเตือน)</label>
         {{ target_formset.empty_form.system_owner }}
       </div>
     </div>

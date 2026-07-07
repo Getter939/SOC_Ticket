@@ -51,7 +51,54 @@ class _DetailedIssueCascade:
             )
 
 
-class TicketForm(_DetailedIssueCascade, forms.ModelForm):
+def _ncsa_severity_field():
+    """Mandatory single-choice NCSA severity, rendered as coloured pills like
+    ``severity`` (the template iterates the radio group). A fresh instance per
+    form — Field objects are mutable and must not be shared across forms."""
+    return forms.ChoiceField(
+        choices=Ticket.NCSA_SEVERITY_CHOICES,
+        required=True,
+        label='ระดับความรุนแรงตาม สกมช.',
+        widget=forms.RadioSelect(attrs={'class': 'ncsa-severity-radio'}),
+    )
+
+
+def _mitre_phase_field():
+    """Multi-select MITRE ATT&CK phases — an incident can span several phases.
+    Stored on the model as a comma-separated string (see ``clean_mitre_phase``
+    and ``_init_report_fields``). Fresh instance per form."""
+    return forms.MultipleChoiceField(
+        choices=Ticket.MITRE_PHASE_CHOICES,
+        required=False,
+        label='Phase การโจมตีตาม MITRE ATT&CK',
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'mitre-phase-checks'}),
+    )
+
+
+class _ReportFields:
+    """Shared helper *methods* for the NCSA-report inputs (``ncsa_severity`` +
+    ``mitre_phase``).
+
+    The two fields themselves are declared inline on each form via the factory
+    helpers above — a plain mixin's ``Field`` class attributes are NOT collected
+    by the form metaclass (only bases that are themselves forms contribute
+    declared fields), so declaring them here would silently drop them. Methods,
+    however, are inherited normally.
+    """
+
+    def _init_report_fields(self):
+        """Seed the multi-select MITRE initial from the stored CSV (edit forms)."""
+        inst = getattr(self, 'instance', None)
+        if inst is not None and not self.is_bound and inst.mitre_phase:
+            self.initial['mitre_phase'] = [
+                p for p in inst.mitre_phase.split(',') if p
+            ]
+
+    def clean_mitre_phase(self):
+        return ','.join(self.cleaned_data.get('mitre_phase') or [])
+
+
+class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     # ── Tier 1 disposition (set at creation) ─────────────────────────────── #
     # The Event/Incident decision IS the disposition. Required — every ticket
     # carries an explicit value; it is never derived.
@@ -68,6 +115,8 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
         label='การจัดประเภท (Event/Incident)',
         widget=forms.RadioSelect(attrs={'class': 'classification-radio'}),
     )
+    ncsa_severity = _ncsa_severity_field()
+    mitre_phase = _mitre_phase_field()
     t1_route = forms.ChoiceField(
         choices=ROUTE_CHOICES,
         required=False,
@@ -117,6 +166,7 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'ncsa_severity',
             'incident_datetime',
             'reference_id',
+            'log_source',
             # Section 2
             'issue_type',
             'detailed_issue',
@@ -129,6 +179,7 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'mac_address',
             'asset_type',
             'operating_system',
+            'asset_owner',
             'spread_to_others',
             # Section 5
             'destination_ip',
@@ -145,12 +196,12 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
         widgets = {
             'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Suspicious SoftEther Signed File'}),
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
-            'ncsa_severity':      forms.Select(attrs={'class': 'form-select'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
             ),
             'reference_id':       forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น INC-2026-0001'}),
+            'log_source':         forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Palo Alto Firewall, Windows Security Event Log'}),
             'issue_type':         forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
@@ -163,13 +214,13 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             'ip_address':         forms.TextInput(attrs={'class': 'form-control', 'placeholder': '0.0.0.0'}),
             'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
+            'asset_owner':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น ฝ่ายเทคโนโลยีสารสนเทศ / กองระบบงาน HR'}),
             'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
             }),
-            'mitre_phase':        forms.Select(attrs={'class': 'form-select'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ขั้นตอน/มาตรการที่ผู้เกี่ยวข้องต้องดำเนินการเพื่อจัดการเหตุการณ์นี้',
@@ -208,7 +259,9 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
             f"{u.profile.department} — {u.get_full_name() or u.username}"
             if hasattr(u, 'profile') else u.username
         )
+        self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
+        self._init_report_fields()
 
     def clean(self):
         cleaned = super().clean()
@@ -229,7 +282,7 @@ class TicketForm(_DetailedIssueCascade, forms.ModelForm):
         return cleaned
 
 
-class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
+class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """Shared, incident-level fields for a multi-system case bundle.
 
     Classification is implicitly Incident and every member is routed to its
@@ -248,11 +301,14 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
             'placeholder': 'เช่น การบุกรุกผ่าน Public-Facing Application กระทบหลายระบบ',
         }),
     )
+    ncsa_severity = _ncsa_severity_field()
+    mitre_phase = _mitre_phase_field()
 
     class Meta:
         model = Ticket
         fields = [
             'severity', 'ncsa_severity', 'incident_datetime', 'reference_id',
+            'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
             'destination_ip', 'ioc_details', 'mitre_phase',
@@ -261,12 +317,12 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
         ]
         widgets = {
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
-            'ncsa_severity':      forms.Select(attrs={'class': 'form-select'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
             ),
             'reference_id':       forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น INC-2026-0001'}),
+            'log_source':         forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Palo Alto Firewall, Windows Security Event Log'}),
             'issue_type':         forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue':     forms.Select(attrs={'class': 'form-select'}),
             'detailed_issue2':    forms.Select(attrs={'class': 'form-select'}),
@@ -276,7 +332,6 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
             }),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ'}),
-            'mitre_phase':        forms.Select(attrs={'class': 'form-select'}),
             'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -295,7 +350,9 @@ class ProjectIncidentForm(_DetailedIssueCascade, forms.ModelForm):
         # A bundle exists precisely because the incident spread across systems.
         if not self.is_bound:
             self.fields['spread_to_others'].initial = True
+        self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
+        self._init_report_fields()
 
     def clean(self):
         cleaned = super().clean()
@@ -331,13 +388,14 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         model = Ticket
         fields = [
             'device_name', 'ip_address', 'mac_address', 'asset_type',
-            'operating_system', 'assigned_admin', 'system_owner',
+            'operating_system', 'asset_owner', 'assigned_admin', 'system_owner',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
             'ip_address':  forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': '0.0.0.0'}),
             'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
+            'asset_owner': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ฝ่ายไอที'}),
             'operating_system': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น Windows Server 2019'}),
         }
 
@@ -358,19 +416,22 @@ ProjectIncidentTargetFormSet = forms.formset_factory(
 )
 
 
-class TicketReviewForm(_DetailedIssueCascade, forms.ModelForm):
+class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
+
+    ncsa_severity = _ncsa_severity_field()
+    mitre_phase = _mitre_phase_field()
 
     class Meta:
         model = Ticket
         fields = [
             'classification', 'incident_name', 'severity', 'ncsa_severity',
-            'incident_datetime', 'reference_id',
+            'incident_datetime', 'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address', 'mac_address',
-            'asset_type', 'operating_system', 'spread_to_others', 'destination_ip',
-            'ioc_details', 'mitre_phase', 'action_required', 'action_precautions',
-            'system_owner',
+            'asset_type', 'operating_system', 'asset_owner', 'spread_to_others',
+            'destination_ip', 'ioc_details', 'mitre_phase', 'action_required',
+            'action_precautions', 'system_owner',
         ]
         widgets = {
             'classification': forms.RadioSelect(),
@@ -396,7 +457,9 @@ class TicketReviewForm(_DetailedIssueCascade, forms.ModelForm):
                 )
         if self.instance and self.instance.incident_datetime:
             self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+        self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
+        self._init_report_fields()
 
     def clean(self):
         cleaned = super().clean()

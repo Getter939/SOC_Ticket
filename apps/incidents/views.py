@@ -485,12 +485,10 @@ def create_ticket(request):
 
 # ── Project Incident (Case Bundling) ─────────────────────────────────── #
 # Incident-level fields copied from the shared form onto every member ticket.
-_BUNDLE_SHARED_FIELDS = [
-    'severity', 'ncsa_severity', 'incident_datetime', 'reference_id',
-    'issue_type', 'detailed_issue', 'detailed_issue2', 'issue_description',
-    'destination_ip', 'ioc_details', 'mitre_phase', 'spread_to_others',
-    'action_required', 'action_precautions',
-]
+# Derived from the form itself so a field added to ProjectIncidentForm can't be
+# silently dropped from members by a stale hand-maintained copy. (title is a
+# form-only field, not in Meta.fields, so it is correctly excluded.)
+_BUNDLE_SHARED_FIELDS = list(ProjectIncidentForm.Meta.fields)
 
 
 @login_required

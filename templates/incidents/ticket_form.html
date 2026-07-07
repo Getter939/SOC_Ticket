@@ -28,6 +28,21 @@
   input[value="Unknown"] + label, label[for*="Unknown"] { border-color: #6f42c1; color: #6f42c1; }
   input[value="Unknown"]:checked + label, label[for*="Unknown"].selected { background: #6f42c1; color: #fff; }
 
+  /* NCSA severity pills (วิกฤต / ร้ายแรง / ไม่ร้ายแรง) */
+  .ncsa-severity-radio { display: none; }
+  input[value="CRITICAL"] + label   { border-color: #dc3545; color: #dc3545; }
+  input[value="CRITICAL"]:checked + label   { background: #dc3545; color: #fff; }
+  input[value="SEVERE"] + label     { border-color: #fd7e14; color: #fd7e14; }
+  input[value="SEVERE"]:checked + label     { background: #fd7e14; color: #fff; }
+  input[value="NON_SEVERE"] + label { border-color: #198754; color: #198754; }
+  input[value="NON_SEVERE"]:checked + label { background: #198754; color: #fff; }
+
+  /* MITRE ATT&CK multi-select checkboxes */
+  .mitre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .3rem .75rem; }
+  .mitre-option { display: flex; align-items: center; gap: .4rem; }
+  .mitre-option label { font-size: .82rem; margin: 0; cursor: pointer; }
+  .mitre-option input { cursor: pointer; }
+
   /* Asset type radio */
   .asset-type-radio { display: none; }
   .asset-type-group { display: flex; gap: .5rem; flex-wrap: wrap; }
@@ -118,10 +133,24 @@
         </div>
 
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small></label>
-          {{ form.ncsa_severity }}
-          <div class="field-hint">ระดับตามประกาศ สกมช. — วิกฤต / ร้ายแรง / ไม่ร้ายแรง (ไม่บังคับ)</div>
-          {% if form.ncsa_severity.errors %}<div class="text-danger small">{{ form.ncsa_severity.errors }}</div>{% endif %}
+          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small> <span class="required-star">*</span></label>
+          <div class="severity-group" id="ncsa-severity-group">
+            {% for radio in form.ncsa_severity %}
+              {{ radio.tag }}
+              <label for="{{ radio.id_for_label }}"
+                     class="ncsa-pill {% if radio.data.selected %}selected{% endif %}">
+                {{ radio.choice_label }}
+              </label>
+            {% endfor %}
+          </div>
+          {% if form.ncsa_severity.errors %}<div class="text-danger small mt-1">{{ form.ncsa_severity.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
+          {{ form.log_source }}
+          <div class="field-hint">ชื่อแหล่ง Log ที่ตรวจพบเหตุการณ์ เช่น Palo Alto Firewall, Windows Security Event Log</div>
+          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
         </div>
 
       </div>
@@ -186,7 +215,15 @@
 
         <div class="col-md-4">
           <label class="form-label fw-semibold">หน่วยงานเจ้าของทรัพย์สิน</label>
+          {{ form.asset_owner }}
+          <div class="field-hint">หน่วยงาน/แผนกเจ้าของทรัพย์สิน (พิมพ์ได้อิสระ)</div>
+          {% if form.asset_owner.errors %}<div class="text-danger small">{{ form.asset_owner.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">เจ้าของระบบ (ผู้รับการแจ้งเตือน)</label>
           {{ form.system_owner }}
+          <div class="field-hint">บัญชีเจ้าของระบบที่ลงทะเบียนไว้ — ใช้ส่งอีเมลแจ้งเตือน (ไม่บังคับ)</div>
           {% if form.system_owner.errors %}<div class="text-danger small">{{ form.system_owner.errors }}</div>{% endif %}
         </div>
 
@@ -242,8 +279,12 @@
       <div class="row g-3">
         <div class="col-12">
           <label class="form-label fw-semibold">Phase การโจมตีตาม MITRE ATT&CK</label>
-          {{ form.mitre_phase }}
-          <div class="field-hint">เลือก Tactic ตามขั้นตอนการโจมตีของ MITRE ATT&CK</div>
+          <div class="mitre-grid">
+            {% for cb in form.mitre_phase %}
+              <div class="mitre-option">{{ cb.tag }}<label for="{{ cb.id_for_label }}">{{ cb.choice_label }}</label></div>
+            {% endfor %}
+          </div>
+          <div class="field-hint">เลือกได้หลาย Tactic — เหตุการณ์หนึ่งอาจครอบคลุมหลายขั้นตอนของ MITRE ATT&CK</div>
           {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
         </div>
         <div class="col-12">

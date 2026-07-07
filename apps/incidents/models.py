@@ -510,6 +510,15 @@ class Ticket(models.Model):
         max_length=50, blank=True, default='',
         verbose_name='Reference',
     )
+    # Free-text name of the log source the alert came from (แหล่งข้อมูล on the
+    # NCSA report) — e.g. "Palo Alto Firewall", "Windows Security Event Log".
+    # Distinct from issue_type (the coarse reporting channel). Required at the
+    # form level, not the DB, so non-form creation paths (Wazuh ingest, seeders)
+    # are unaffected.
+    log_source = models.CharField(
+        max_length=150, blank=True, default='',
+        verbose_name='แหล่งข้อมูล (Log Source)',
+    )
 
     # ── Case Bundling (Project Incident) ─────────────────────────────── #
     # When one incident affects several systems it is fanned out into one
@@ -546,6 +555,14 @@ class Ticket(models.Model):
         max_length=100, blank=True, default='',
         verbose_name='ระบบปฏิบัติการ (Operating System)',
     )
+    # Free-text owning unit/department of the affected asset (หน่วยงานเจ้าของ
+    # ทรัพย์สิน on the report). Deliberately NOT the system_owner FK — this is a
+    # descriptive label typed by the analyst, independent of whether that unit
+    # has a registered System Owner account in the system.
+    asset_owner = models.CharField(
+        max_length=150, blank=True, default='',
+        verbose_name='หน่วยงานเจ้าของทรัพย์สิน',
+    )
     spread_to_others = models.BooleanField(
         null=True, blank=True,
         verbose_name='มีการกระจายไปยังจุดอื่น',
@@ -578,9 +595,12 @@ class Ticket(models.Model):
         ('Exfiltration',         'Exfiltration'),
         ('Impact',               'Impact'),
     ]
+    # An incident can span several ATT&CK phases, so this stores a
+    # comma-separated list of MITRE_PHASE_CHOICES codes (set via the multi-select
+    # form field). Read it through ``mitre_phase_list`` / ``mitre_phase_labels``
+    # rather than parsing the raw string.
     mitre_phase = models.CharField(
-        max_length=200, blank=True, default='',
-        choices=MITRE_PHASE_CHOICES,
+        max_length=500, blank=True, default='',
         verbose_name='Phase การโจมตีตาม MITRE ATT&CK',
     )
 
@@ -759,6 +779,17 @@ class Ticket(models.Model):
         return self.classification == self.CLASSIFICATION_INCIDENT
 
     @property
+    def mitre_phase_list(self):
+        """MITRE ATT&CK phase codes recorded on this ticket (multi-select)."""
+        return [p for p in self.mitre_phase.split(',') if p]
+
+    @property
+    def mitre_phase_labels(self):
+        """Human labels for the recorded MITRE ATT&CK phases."""
+        labels = dict(self.MITRE_PHASE_CHOICES)
+        return [labels.get(p, p) for p in self.mitre_phase_list]
+
+    @property
     def was_escalated_to_t2(self):
         """True if this ticket was escalated to Tier 2 at any point in its life."""
         return self.escalated_to_t2_at is not None
@@ -848,6 +879,34 @@ class Ticket(models.Model):
     # Save                                                                #
     # ------------------------------------------------------------------ #
 
+    # How many times to regenerate ticket_id when a concurrent insert wins the
+    # unique-constraint race before giving up.
+    _ID_MAX_RETRIES = 5
+
+    def _assign_ticket_id(self):
+        """Compute the next per-month sequential id YYMMNN. Racy on its own —
+        save() wraps it in a retry that closes the window against committed rows.
+        """
+        now = timezone.now()
+        prefix = f'{now.year % 100:02d}{now.month:02d}'  # e.g. '2606' for June 2026
+        last = (
+            Ticket.objects.filter(ticket_id__startswith=prefix)
+            .order_by('-ticket_id')
+            .first()
+        )
+        if last:
+            try:
+                seq = int(last.ticket_id[4:]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        else:
+            seq = 1
+
+        self.ticket_id = f'{prefix}{seq:02d}'
+        while Ticket.objects.filter(ticket_id=self.ticket_id).exists():
+            seq += 1
+            self.ticket_id = f'{prefix}{seq:02d}'
+
     def save(self, *args, **kwargs):
         if not self.pk:
             # OLA clocks start when the alert/incident occurred, not when the
@@ -866,28 +925,25 @@ class Ticket(models.Model):
             # status-change clock so the field is never null going forward.
             self.status_changed_at = timezone.now()
 
-        if not self.ticket_id or self.ticket_id.strip() == '':
-            now = timezone.now()
-            prefix = f'{now.year % 100:02d}{now.month:02d}'  # e.g. '2606' for June 2026
-            last = (
-                Ticket.objects.filter(ticket_id__startswith=prefix)
-                .order_by('-ticket_id')
-                .first()
-            )
-            if last:
-                try:
-                    seq = int(last.ticket_id[4:]) + 1
-                except (ValueError, IndexError):
-                    seq = 1
-            else:
-                seq = 1
+        # Already-id'd rows (updates, or an explicit id) save straight through.
+        if self.ticket_id and self.ticket_id.strip():
+            super().save(*args, **kwargs)
+            return
 
-            self.ticket_id = f'{prefix}{seq:02d}'
-            while Ticket.objects.filter(ticket_id=self.ticket_id).exists():
-                seq += 1
-                self.ticket_id = f'{prefix}{seq:02d}'
-
-        super().save(*args, **kwargs)
+        # New ticket needing a generated id: the per-month sequence is a
+        # read-then-write, so two concurrent inserts can compute the same NN and
+        # one then violates the unique id. Retry with a freshly recomputed id;
+        # each attempt runs in a savepoint so the failed INSERT doesn't poison
+        # the caller's surrounding transaction (see ProjectIncident.save).
+        for attempt in range(self._ID_MAX_RETRIES):
+            self._assign_ticket_id()
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                if attempt == self._ID_MAX_RETRIES - 1:
+                    raise
 
     # ------------------------------------------------------------------ #
     # State machine                                                       #
