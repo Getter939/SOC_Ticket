@@ -555,8 +555,11 @@ def executive_dashboard(request):
         ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
                                                        Ticket.STATUS_T1_REVIEW]),
         ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
-                                                       Ticket.STATUS_CONTAINMENT_REPORTED]),
+                                                       Ticket.STATUS_CONTAINMENT_REPORTED,
+                                                       Ticket.STATUS_AWAITING_OWNER,
+                                                       Ticket.STATUS_OWNER_REMEDIATED]),
         ('RECOVERY',       'Recovery',                [Ticket.STATUS_PENDING_MANAGER,
+                                                       Ticket.STATUS_PENDING_T2_REVIEW,
                                                        Ticket.STATUS_APPROVED]),
         ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_CLOSED_EVENT]),
     ]

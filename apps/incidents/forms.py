@@ -133,10 +133,17 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     # carries an explicit value; it is never derived.
     ROUTE_ASSIGN_ADMIN = 'assign_admin'
     ROUTE_ESCALATE_T2  = 'escalate_t2'
+    ROUTE_DIRECT_OWNER = 'direct_owner'
     ROUTE_CHOICES = [
         (ROUTE_ASSIGN_ADMIN, 'มอบหมายให้ผู้ดูแลระบบ (System Admin)'),
+        (ROUTE_DIRECT_OWNER, 'ให้เจ้าของระบบแก้ไขเอง (ไม่ออก Ticket ถึงผู้ดูแลระบบ)'),
         (ROUTE_ESCALATE_T2,  'ส่งต่อให้ Tier 2'),
     ]
+
+    # Direct-to-Owner is a lightweight fast path — only offered for Low/Medium
+    # severity. Higher-severity incidents must go through the System Admin
+    # containment process (or be escalated to Tier 2).
+    DIRECT_OWNER_SEVERITIES = frozenset({'Low', 'Medium'})
 
     classification = forms.ChoiceField(
         choices=Ticket.CLASSIFICATION_CHOICES,
@@ -284,10 +291,20 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 
         if classification == Ticket.CLASSIFICATION_INCIDENT:
             # An Incident must choose a forward route at creation.
-            if route not in (self.ROUTE_ASSIGN_ADMIN, self.ROUTE_ESCALATE_T2):
+            if route not in (
+                self.ROUTE_ASSIGN_ADMIN, self.ROUTE_DIRECT_OWNER, self.ROUTE_ESCALATE_T2,
+            ):
                 self.add_error('t1_route', 'กรุณาเลือกการดำเนินการสำหรับ Incident')
             elif route == self.ROUTE_ASSIGN_ADMIN and not cleaned.get('assigned_admin'):
                 self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+            elif (route == self.ROUTE_DIRECT_OWNER
+                    and cleaned.get('severity') not in self.DIRECT_OWNER_SEVERITIES):
+                # Guard the fast path server-side — the client also hides it for
+                # High/Critical, but never trust that alone.
+                self.add_error(
+                    't1_route',
+                    'การให้เจ้าของระบบแก้ไขเอง ใช้ได้เฉพาะเหตุการณ์ระดับ Low/Medium เท่านั้น',
+                )
         elif classification == Ticket.CLASSIFICATION_EVENT:
             # A benign Event is closed immediately — no route, no admin.
             cleaned['t1_route'] = ''

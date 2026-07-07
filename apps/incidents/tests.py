@@ -610,6 +610,118 @@ class ManagerRoutingTest(TestCase):
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 7b. Direct-to-Owner fast path (Low/Medium)                                    #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+def _owner_payload(severity='Low', **overrides):
+    """A valid create_ticket POST payload for the direct-to-owner route.
+
+    Extends _ticket_post_data with the two fields the create form requires that
+    the base helper omits (ncsa_severity, log_source), so the form validates.
+    """
+    data = _ticket_post_data(
+        classification=Ticket.CLASSIFICATION_INCIDENT,
+        t1_route=TicketForm.ROUTE_DIRECT_OWNER,
+        severity=severity,
+        ncsa_severity=Ticket.NCSA_SEVERITY_NON_SEVERE,
+        log_source='Windows Security Event Log',
+    )
+    data.update(overrides)
+    return data
+
+
+class DirectToOwnerPathTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1    = _make_t1('do_t1')
+        cls.other = _make_t1('do_other')   # a different Tier 1 (not the creator)
+        cls.t2    = _make_t2('do_t2')
+        cls.mgr   = _make_user('do_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+    def _owner_case(self, severity='Low', is_emergency=False,
+                    status=Ticket.STATUS_AWAITING_OWNER):
+        return _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            severity=severity, is_emergency=is_emergency, status=status,
+        )
+
+    # ── Model FSM: happy path (Low, non-emergency → Tier 2 review) ──────── #
+    def test_full_owner_path_low_severity_closes_via_tier2(self):
+        t = self._owner_case(status=Ticket.STATUS_NEW)
+        t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t1, 'phoned owner')
+        self.assertTrue(t.direct_owner_remediation)
+        self.assertIsNotNone(t.owner_contacted_at)
+
+        t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.t1, 'owner fixed')
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        self.assertEqual(t.verified_by, self.t1)   # T1 sign-off stamped
+
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'reviewed & closed')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(t.approved_by, self.t2)
+        self.assertIsNotNone(t.closed_at)
+
+    # ── Review split: non-emergency → Tier 2 only (never the manager) ───── #
+    def test_non_emergency_routes_to_tier2_not_manager(self):
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no')
+
+    # ── Review split: emergency forces the SOC Manager ─────────────────── #
+    def test_emergency_routes_to_manager_not_tier2(self):
+        t = self._owner_case(is_emergency=True,
+                             status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
+        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'no')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+
+    # ── Tier 2 reject loops back to the owner ──────────────────────────── #
+    def test_tier2_can_reject_back_to_owner(self):
+        t = self._owner_case(status=Ticket.STATUS_PENDING_T2_REVIEW)
+        t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t2, 'not actually fixed')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
+
+    # ── Permissions: T1 side is creator-gated; review close is Tier 2 ───── #
+    def test_non_creator_t1_cannot_confirm(self):
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.other, 'nope')
+
+    def test_tier2_review_close_requires_tier2(self):
+        t = self._owner_case(status=Ticket.STATUS_PENDING_T2_REVIEW)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'T1 cannot close a T2 review')
+
+    # ── Form gating: route valid only for Low/Medium ───────────────────── #
+    def test_form_rejects_direct_owner_for_high_severity(self):
+        form = TicketForm(data=_owner_payload(severity='High'), user=self.t1)
+        self.assertFalse(form.is_valid())
+        self.assertIn('t1_route', form.errors)
+
+    def test_form_accepts_direct_owner_for_low_severity(self):
+        form = TicketForm(data=_owner_payload(severity='Low'), user=self.t1)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    # ── Create-flow view: routes to AWAITING_OWNER, sends no admin email ── #
+    def test_create_view_routes_to_awaiting_owner_without_email(self):
+        self.client.login(username='do_t1', password='testpass123')
+        mail.outbox = []
+        resp = self.client.post(reverse('create_ticket'), _owner_payload(severity='Low'))
+        self.assertEqual(resp.status_code, 302)
+        t = Ticket.objects.latest('id')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
+        self.assertTrue(t.direct_owner_remediation)
+        self.assertIsNone(t.assigned_admin)
+        self.assertEqual(len(mail.outbox), 0)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 8. Emergency flag permissions + audit                                        #
 # ──────────────────────────────────────────────────────────────────────────── #
 

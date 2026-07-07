@@ -13,6 +13,12 @@ Colors match the dashboard pipeline chart (PIPELINE_COLORS).
     <span class="badge rounded-pill bg-warning text-dark">{{ ticket.get_status_display }}</span>
 {% elif ticket.status == 'CONTAINMENT_REPORTED' %}
     <span class="badge rounded-pill bg-info text-dark">{{ ticket.get_status_display }}</span>
+{% elif ticket.status == 'AWAITING_OWNER' %}
+    <span class="badge rounded-pill" style="background:#fd7e14;">{{ ticket.get_status_display }}</span>
+{% elif ticket.status == 'OWNER_REMEDIATED' %}
+    <span class="badge rounded-pill bg-info text-dark">{{ ticket.get_status_display }}</span>
+{% elif ticket.status == 'PENDING_T2_REVIEW' %}
+    <span class="badge rounded-pill" style="background:#0d9488;">{{ ticket.get_status_display }}</span>
 {% elif ticket.status == 'PENDING_MANAGER' %}
     <span class="badge rounded-pill" style="background:#6f42c1;">{{ ticket.get_status_display }}</span>
 {% elif ticket.status == 'APPROVED' %}

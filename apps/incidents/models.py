@@ -189,6 +189,16 @@ class Ticket(models.Model):
     STATUS_T1_REVIEW            = 'T1_REVIEW'
     STATUS_AWAITING_CONTAINMENT = 'AWAITING_CONTAINMENT'
     STATUS_CONTAINMENT_REPORTED = 'CONTAINMENT_REPORTED'
+    # ── Direct-to-Owner fast path (Low/Medium only) ──────────────────── #
+    # A T1 handling route that skips the System Admin entirely: the analyst
+    # contacts the asset owner directly (e.g. by phone) and the owner remediates
+    # it themselves — no admin ticket, no containment email. The case is still
+    # tracked (AWAITING_OWNER) and still passes a mandatory review before it can
+    # close (OWNER_REMEDIATED → PENDING_T2_REVIEW / PENDING_MANAGER). See the
+    # deterministic review split in can_transition_to / transition_to.
+    STATUS_AWAITING_OWNER       = 'AWAITING_OWNER'
+    STATUS_OWNER_REMEDIATED     = 'OWNER_REMEDIATED'
+    STATUS_PENDING_T2_REVIEW    = 'PENDING_T2_REVIEW'
     STATUS_PENDING_MANAGER      = 'PENDING_MANAGER'
     STATUS_APPROVED             = 'APPROVED'
     STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
@@ -199,6 +209,9 @@ class Ticket(models.Model):
         (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
         (STATUS_AWAITING_CONTAINMENT, 'รอการจัดการจากผู้ดูแลระบบ'),
         (STATUS_CONTAINMENT_REPORTED, 'รายงานการควบคุมแล้ว'),
+        (STATUS_AWAITING_OWNER,       'รอเจ้าของระบบดำเนินการเอง'),
+        (STATUS_OWNER_REMEDIATED,     'เจ้าของแจ้งแก้ไขแล้ว — รอ SOC ตรวจ'),
+        (STATUS_PENDING_T2_REVIEW,    'รอ Tier 2 ตรวจสอบ (ปิดเคสทางลัด)'),
         (STATUS_PENDING_MANAGER,      'รอผู้จัดการตรวจสอบ'),
         (STATUS_APPROVED,             'อนุมัติแล้ว'),
         (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
@@ -228,6 +241,7 @@ class Ticket(models.Model):
     ALLOWED_TRANSITIONS = {
         STATUS_NEW: [
             STATUS_AWAITING_CONTAINMENT,   # Incident → assign admin directly
+            STATUS_AWAITING_OWNER,         # Incident (Low/Med) → direct-to-owner
             STATUS_ESCALATED_T2,           # Incident → escalate to Tier 2
             STATUS_CLOSED_EVENT,           # Event    → T1 closes
         ],
@@ -237,6 +251,7 @@ class Ticket(models.Model):
         ],
         STATUS_T1_REVIEW: [
             STATUS_AWAITING_CONTAINMENT,   # T1 reviews → assign admin
+            STATUS_AWAITING_OWNER,         # T1 reviews → direct-to-owner
         ],
         STATUS_AWAITING_CONTAINMENT: [
             STATUS_CONTAINMENT_REPORTED,   # admin returns to T1
@@ -245,6 +260,19 @@ class Ticket(models.Model):
             STATUS_AWAITING_CONTAINMENT,   # not contained → back to admin (loop)
             STATUS_PENDING_MANAGER,        # contained + needs manager verification
             STATUS_APPROVED,               # contained + no manager needed → T1 closes
+        ],
+        # ── Direct-to-Owner path ─────────────────────────────────────── #
+        STATUS_AWAITING_OWNER: [
+            STATUS_OWNER_REMEDIATED,       # T1 records owner-confirmed fix
+        ],
+        STATUS_OWNER_REMEDIATED: [
+            STATUS_AWAITING_OWNER,         # not actually fixed → keep tracking (loop)
+            STATUS_PENDING_T2_REVIEW,      # normal → Tier 2 reviews (mandatory)
+            STATUS_PENDING_MANAGER,        # emergency → SOC Manager reviews
+        ],
+        STATUS_PENDING_T2_REVIEW: [
+            STATUS_APPROVED,               # Tier 2 verifies → close
+            STATUS_AWAITING_OWNER,         # Tier 2 rejects → back to owner
         ],
         STATUS_PENDING_MANAGER: [
             STATUS_APPROVED,               # manager verifies → close
@@ -262,15 +290,24 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
     TRANSITION_PERMISSIONS = {
         (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
+        (STATUS_NEW,                  STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
         (STATUS_NEW,                  STATUS_ESCALATED_T2):         'TIER1_CREATOR',
         (STATUS_NEW,                  STATUS_CLOSED_EVENT):         'TIER1_CREATOR',
         (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
         (STATUS_T1_REVIEW,            STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
+        (STATUS_T1_REVIEW,            STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
         (STATUS_AWAITING_CONTAINMENT, STATUS_CONTAINMENT_REPORTED): 'ASSIGNED_ADMIN',
         (STATUS_CONTAINMENT_REPORTED, STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
         (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER1_CREATOR',
         (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER1_CREATOR',
+        # Direct-to-Owner path
+        (STATUS_AWAITING_OWNER,       STATUS_OWNER_REMEDIATED):     'TIER1_CREATOR',
+        (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
+        (STATUS_OWNER_REMEDIATED,     STATUS_PENDING_T2_REVIEW):    'TIER1_CREATOR',
+        (STATUS_OWNER_REMEDIATED,     STATUS_PENDING_MANAGER):      'TIER1_CREATOR',
+        (STATUS_PENDING_T2_REVIEW,    STATUS_APPROVED):             'TIER2',
+        (STATUS_PENDING_T2_REVIEW,    STATUS_AWAITING_OWNER):       'TIER2',
         (STATUS_PENDING_MANAGER,      STATUS_APPROVED):             'MANAGER',
     }
 
@@ -279,6 +316,10 @@ class Ticket(models.Model):
     # transition_to and the same-status note guard.
     CREATOR_REVIEW_STATUSES = frozenset({
         STATUS_T1_REVIEW, STATUS_CONTAINMENT_REPORTED,
+        # Direct-to-Owner tracking sits with the opening analyst too. (The
+        # PENDING_T2_REVIEW queue is deliberately NOT here — it is the reviewer's
+        # queue, so a non-creator Tier 2 must be able to annotate it.)
+        STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
     })
 
     # Edges that close a benign Event — require classification == EVENT.
@@ -290,6 +331,7 @@ class Ticket(models.Model):
     # Edges that commit to handling an Incident — require classification == INCIDENT.
     INCIDENT_TRANSITIONS = frozenset({
         (STATUS_NEW,          STATUS_AWAITING_CONTAINMENT),
+        (STATUS_NEW,          STATUS_AWAITING_OWNER),
         (STATUS_NEW,          STATUS_ESCALATED_T2),
         (STATUS_ESCALATED_T2, STATUS_T1_REVIEW),
     })
@@ -689,6 +731,19 @@ class Ticket(models.Model):
     report_issued_at = models.DateTimeField(
         null=True, blank=True, verbose_name='วันที่ออกรายงาน',
     )
+    # ── Direct-to-Owner path bookkeeping ─────────────────────────────── #
+    # owner_contacted_at — first entry to AWAITING_OWNER (analogous to
+    #   report_issued_at on the admin path); the point the owner was told to fix
+    #   it themselves. Write-once, set by transition_to.
+    # direct_owner_remediation — permanent marker that this ticket was handled by
+    #   the asset owner directly (no System Admin ticket / email), for dashboard
+    #   segmentation and reporting. Set by transition_to on AWAITING_OWNER.
+    owner_contacted_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่ติดต่อเจ้าของระบบ',
+    )
+    direct_owner_remediation = models.BooleanField(
+        default=False, verbose_name='ให้เจ้าของระบบแก้ไขเอง (ไม่ผ่านผู้ดูแลระบบ)',
+    )
     closed_at = models.DateTimeField(
         null=True, blank=True, verbose_name='วันที่ปิดเคส',
     )
@@ -977,6 +1032,15 @@ class Ticket(models.Model):
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             return False
+        # Direct-to-Owner review split: emergency (requires_manager_verification)
+        # → SOC Manager; otherwise → Tier 2. Since this path is Low/Medium only,
+        # the manager branch is reached solely via the emergency flag.
+        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_T2_REVIEW)
+                and self.requires_manager_verification):
+            return False
+        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_MANAGER)
+                and not self.requires_manager_verification):
+            return False
         return True
 
     def transition_to(self, new_status, user, note=''):
@@ -1039,6 +1103,17 @@ class Ticket(models.Model):
             raise ValidationError(
                 'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 1 ปิดได้ทันที'
             )
+        # Direct-to-Owner review split (emergency → Manager, else → Tier 2).
+        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_T2_REVIEW)
+                and self.requires_manager_verification):
+            raise ValidationError(
+                'Ticket ฉุกเฉินต้องส่งให้ผู้จัดการ SOC ตรวจสอบ ไม่ใช่ Tier 2'
+            )
+        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_MANAGER)
+                and not self.requires_manager_verification):
+            raise ValidationError(
+                'Ticket นี้ให้ Tier 2 ตรวจสอบ — ไม่ต้องส่งผู้จัดการ SOC'
+            )
 
         # ── 6. Check permission ───────────────────────────────────────── #
         required_perm = self.TRANSITION_PERMISSIONS.get(edge)
@@ -1092,15 +1167,27 @@ class Ticket(models.Model):
                 and self.report_issued_at is None):
             self.report_issued_at = now
 
+        # Direct-to-Owner: mark the case as owner-handled and stamp the first
+        # owner contact (write-once). The flag is a permanent record of "this
+        # ticket took the owner path", used for dashboard segmentation.
+        if new_status == self.STATUS_AWAITING_OWNER:
+            self.direct_owner_remediation = True
+            if self.owner_contacted_at is None:
+                self.owner_contacted_at = now
+
         # Terminal close on either path — approved_at alone misses CLOSED_EVENT.
         if new_status in self.TERMINAL_STATUSES and self.closed_at is None:
             self.closed_at = now
 
-        # T1 verification sign-off (write-once): set when Tier 1 marks a
-        # contained ticket done — whether it routes to the manager or closes.
+        # T1 verification sign-off (write-once): set when Tier 1 marks a case
+        # done — the admin-containment review OR the direct-to-owner review —
+        # whether it routes to a reviewer or closes.
         if (
-            prev_status == self.STATUS_CONTAINMENT_REPORTED
-            and new_status in (self.STATUS_PENDING_MANAGER, self.STATUS_APPROVED)
+            prev_status in (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_OWNER_REMEDIATED)
+            and new_status in (
+                self.STATUS_PENDING_MANAGER, self.STATUS_PENDING_T2_REVIEW,
+                self.STATUS_APPROVED,
+            )
             and self.verified_by_id is None
         ):
             self.verified_by = user

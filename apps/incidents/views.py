@@ -96,10 +96,14 @@ def _transition_actions(ticket, user):
     labels = {
         Ticket.STATUS_CLOSED_EVENT: 'Mark as Event -> Close',
         Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
+        Ticket.STATUS_OWNER_REMEDIATED: 'Owner fixed it -> Confirm',
+        Ticket.STATUS_PENDING_T2_REVIEW: 'Send to Tier 2 review',
         Ticket.STATUS_PENDING_MANAGER: 'Send to SOC Manager',
         Ticket.STATUS_APPROVED: (
             'Verify -> Close'
-            if ticket.status == Ticket.STATUS_PENDING_MANAGER else 'Close case'
+            if ticket.status in (
+                Ticket.STATUS_PENDING_MANAGER, Ticket.STATUS_PENDING_T2_REVIEW,
+            ) else 'Close case'
         ),
     }
     actions = []
@@ -129,6 +133,13 @@ def _transition_actions(ticket, user):
                 if ticket.status == Ticket.STATUS_CONTAINMENT_REPORTED
                 else 'Send to System Admin'
             )
+        if next_status == Ticket.STATUS_AWAITING_OWNER:
+            if ticket.status == Ticket.STATUS_OWNER_REMEDIATED:
+                label = 'Return to owner (not fixed)'
+            elif ticket.status == Ticket.STATUS_PENDING_T2_REVIEW:
+                label = 'Reject -> back to owner'
+            else:
+                label = 'Send to owner (direct)'
         actions.append({'status': next_status, 'label': label})
     return actions
 
@@ -413,6 +424,13 @@ def create_ticket(request):
                         ticket.transition_to(
                             Ticket.STATUS_AWAITING_CONTAINMENT, request.user,
                             'จัดประเภทเป็น Incident — มอบหมายให้ผู้ดูแลระบบ',
+                        )
+                    elif route == TicketForm.ROUTE_DIRECT_OWNER:
+                        # Fast path: no System Admin ticket / email. The analyst
+                        # contacts the owner directly and tracks the fix here.
+                        ticket.transition_to(
+                            Ticket.STATUS_AWAITING_OWNER, request.user,
+                            'จัดประเภทเป็น Incident — ให้เจ้าของระบบแก้ไขเอง (ไม่ผ่านผู้ดูแลระบบ)',
                         )
 
                     if locked_triage:
