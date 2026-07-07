@@ -648,6 +648,16 @@ class Ticket(models.Model):
     # ── System Owner ─────────────────────────────────────────────────── #
     # FK to the registered System Owner user account.  Their email and
     # department are read from their User / UserProfile at notification time.
+    #
+    # DORMANT (2026-07-07): the NCSA-report form redesign dropped the System
+    # Owner picker from every user-facing form in favour of the free-text
+    # ``asset_owner`` unit label. New tickets created via the forms therefore
+    # leave this null, so the owner-notification emails
+    # (notify_system_owner_created / notify_system_owner_closed) and the System
+    # Owner dashboard visibility (TicketQuerySet.visible_to → system_owner) no
+    # longer fire for them. The field/wiring are kept intact for legacy tickets
+    # and admin use; re-introduce a picker (or map asset_owner → a recipient)
+    # to reactivate owner notifications.
     system_owner = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='owned_tickets',

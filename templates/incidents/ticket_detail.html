@@ -86,7 +86,7 @@
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-clock me-1"></i>ตรวจพบเหตุการณ์</div><div class="snapshot-value">{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</div></div>
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-person-badge me-1"></i>ผู้รายงาน (Tier 1)</div><div class="snapshot-value">{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% if ticket.created_by.profile.phone %}<div class="small text-muted fw-normal"><i class="bi bi-telephone me-1"></i>{{ ticket.created_by.profile.phone }}</div>{% endif %}{% else %}-{% endif %}</div></div>
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-tools me-1"></i>System Admin</div><div class="snapshot-value">{% if ticket.assigned_admin %}{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% else %}ยังไม่มอบหมาย{% endif %}</div></div>
-  <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-building me-1"></i>เจ้าของระบบ</div><div class="snapshot-value">{% if ticket.system_owner %}{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% else %}ไม่ระบุ{% endif %}</div></div>
+  <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-building me-1"></i>หน่วยงานเจ้าของ</div><div class="snapshot-value">{% if ticket.asset_owner %}{{ ticket.asset_owner }}{% elif ticket.system_owner %}{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% else %}ไม่ระบุ{% endif %}</div></div>
 </div>
 
 <nav class="quick-nav mb-3" aria-label="Ticket sections">

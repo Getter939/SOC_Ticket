@@ -75,6 +75,35 @@ def _mitre_phase_field():
     )
 
 
+class NullBooleanRadioSelect(forms.RadioSelect):
+    """RadioSelect rendering for a nullable boolean (tri-state ใช่ / ไม่ใช่ /
+    รอตรวจสอบ). Borrows ``NullBooleanSelect``'s value<->string mapping so that
+    True / False / None round-trip correctly through the radio group (a plain
+    RadioSelect can't map a Python ``True`` back to the ``'true'`` option)."""
+    _nb = forms.NullBooleanSelect()
+
+    def format_value(self, value):
+        return self._nb.format_value(value)
+
+    def value_from_datadict(self, data, files, name):
+        return self._nb.value_from_datadict(data, files, name)
+
+
+def _spread_field():
+    """Tri-state 'มีการกระจายไปยังจุดอื่น' rendered as pills (ใช่ / ไม่ใช่ /
+    รอตรวจสอบ) instead of a dropdown — a checkbox can't express the null
+    'not yet determined' state. Fresh instance per form."""
+    return forms.NullBooleanField(
+        required=False,
+        label='มีการกระจายไปยังจุดอื่น',
+        widget=NullBooleanRadioSelect(choices=[
+            ('true',    'ใช่'),
+            ('false',   'ไม่ใช่'),
+            ('unknown', 'รอตรวจสอบ'),
+        ]),
+    )
+
+
 class _ReportFields:
     """Shared helper *methods* for the NCSA-report inputs (``ncsa_severity`` +
     ``mitre_phase``).
@@ -117,6 +146,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     )
     ncsa_severity = _ncsa_severity_field()
     mitre_phase = _mitre_phase_field()
+    spread_to_others = _spread_field()
     t1_route = forms.ChoiceField(
         choices=ROUTE_CHOICES,
         required=False,
@@ -139,17 +169,6 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         ).order_by('first_name', 'username'),
         required=False,
         label='ผู้ดูแลระบบที่รับผิดชอบ',
-        empty_label='-- ยังไม่ระบุ --',
-        widget=forms.Select(attrs={'class': 'form-control'}),
-    )
-
-    system_owner = forms.ModelChoiceField(
-        queryset=User.objects.filter(
-            profile__role=UserProfile.ROLE_SYSTEM_OWNER,
-            is_active=True,
-        ).order_by('profile__department', 'first_name', 'username'),
-        required=False,
-        label='เจ้าของระบบ / หน่วยงาน',
         empty_label='-- ยังไม่ระบุ --',
         widget=forms.Select(attrs={'class': 'form-control'}),
     )
@@ -191,7 +210,6 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'action_precautions',
             # Assignment
             'assigned_admin',
-            'system_owner',
         ]
         widgets = {
             'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Suspicious SoftEther Signed File'}),
@@ -215,7 +233,6 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
             'asset_owner':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น ฝ่ายเทคโนโลยีสารสนเทศ / กองระบบงาน HR'}),
-            'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -255,10 +272,6 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         self.fields['wazuh_alert'].queryset = alert_qs
         if self.instance and self.instance.pk and self.instance.incident_datetime:
             self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
-        self.fields['system_owner'].label_from_instance = lambda u: (
-            f"{u.profile.department} — {u.get_full_name() or u.username}"
-            if hasattr(u, 'profile') else u.username
-        )
         self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
@@ -303,6 +316,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
     )
     ncsa_severity = _ncsa_severity_field()
     mitre_phase = _mitre_phase_field()
+    spread_to_others = _spread_field()
 
     class Meta:
         model = Ticket
@@ -332,7 +346,6 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             }),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ'}),
-            'spread_to_others':   forms.NullBooleanSelect(attrs={'class': 'form-select'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ขั้นตอน/มาตรการที่ผู้ดูแลระบบต้องดำเนินการ — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
@@ -376,19 +389,12 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         required=True, label='ผู้ดูแลระบบ', empty_label='-- เลือกผู้ดูแลระบบ --',
         widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
     )
-    system_owner = forms.ModelChoiceField(
-        queryset=User.objects.filter(
-            profile__role=UserProfile.ROLE_SYSTEM_OWNER, is_active=True,
-        ).order_by('profile__department', 'first_name', 'username'),
-        required=False, label='เจ้าของระบบ', empty_label='-- ไม่ระบุ --',
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
-    )
 
     class Meta:
         model = Ticket
         fields = [
             'device_name', 'ip_address', 'mac_address', 'asset_type',
-            'operating_system', 'asset_owner', 'assigned_admin', 'system_owner',
+            'operating_system', 'asset_owner', 'assigned_admin',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
@@ -404,10 +410,6 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         # A single-ticket create requires an IP; a bundle target may be a
         # service with none, so relax it here (model already allows null).
         self.fields['ip_address'].required = False
-        self.fields['system_owner'].label_from_instance = lambda u: (
-            f"{u.profile.department} — {u.get_full_name() or u.username}"
-            if hasattr(u, 'profile') else u.username
-        )
 
 
 ProjectIncidentTargetFormSet = forms.formset_factory(
@@ -421,6 +423,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 
     ncsa_severity = _ncsa_severity_field()
     mitre_phase = _mitre_phase_field()
+    spread_to_others = _spread_field()
 
     class Meta:
         model = Ticket
@@ -431,7 +434,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'spread_to_others',
             'destination_ip', 'ioc_details', 'mitre_phase', 'action_required',
-            'action_precautions', 'system_owner',
+            'action_precautions',
         ]
         widgets = {
             'classification': forms.RadioSelect(),
@@ -446,10 +449,6 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['system_owner'].queryset = User.objects.filter(
-            profile__role=UserProfile.ROLE_SYSTEM_OWNER,
-            is_active=True,
-        ).order_by('profile__department', 'first_name', 'username')
         for field in self.fields.values():
             if not isinstance(field.widget, forms.RadioSelect):
                 field.widget.attrs.setdefault(
