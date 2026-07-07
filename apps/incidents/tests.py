@@ -698,14 +698,23 @@ class DirectToOwnerPathTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'T1 cannot close a T2 review')
 
-    # ── Form gating: route valid only for Low/Medium ───────────────────── #
-    def test_form_rejects_direct_owner_for_high_severity(self):
-        form = TicketForm(data=_owner_payload(severity='High'), user=self.t1)
-        self.assertFalse(form.is_valid())
-        self.assertIn('t1_route', form.errors)
+    # ── Critical (severity floor) routes the review to the SOC Manager ──── #
+    def test_critical_severity_routes_to_manager_not_tier2(self):
+        t = self._owner_case(severity='Critical',
+                             status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
+        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
+    # ── Form gating: route valid at any severity ───────────────────────── #
     def test_form_accepts_direct_owner_for_low_severity(self):
         form = TicketForm(data=_owner_payload(severity='Low'), user=self.t1)
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_accepts_direct_owner_for_high_severity(self):
+        form = TicketForm(data=_owner_payload(severity='High'), user=self.t1)
         self.assertTrue(form.is_valid(), form.errors)
 
     # ── Create-flow view: routes to AWAITING_OWNER, sends no admin email ── #

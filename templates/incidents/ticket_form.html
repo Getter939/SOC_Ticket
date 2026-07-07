@@ -344,7 +344,7 @@
         </div>
         <div id="owner-panel" class="conditional-panel mt-3 alert alert-warning mb-0">
           <strong><i class="bi bi-telephone me-1"></i>ให้เจ้าของระบบแก้ไขเอง (ทางลัด)</strong>
-          <div class="small">ติดต่อเจ้าของระบบโดยตรง (เช่น โทรศัพท์) แล้วติดตามผลในหน้า Ticket — ระบบจะ<strong>ไม่ออก Ticket ถึงผู้ดูแลระบบ</strong> และยังต้องผ่านการตรวจสอบก่อนปิดเคส (ใช้ได้เฉพาะระดับ Low/Medium)</div>
+          <div class="small">ติดต่อเจ้าของระบบโดยตรง (เช่น โทรศัพท์) แล้วติดตามผลในหน้า Ticket — ระบบจะ<strong>ไม่ออก Ticket ถึงผู้ดูแลระบบ</strong> และยังต้องผ่านการตรวจสอบก่อนปิดเคส (Tier 2 ปกติ / SOC Manager เมื่อเป็น Critical หรือ Emergency)</div>
         </div>
       </div>
     </div>
@@ -366,27 +366,9 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
   radio.addEventListener('change', () => {
     document.querySelectorAll('#severity-group label').forEach(l => l.classList.remove('selected'));
     radio.nextElementSibling.classList.add('selected');
-    updateDirectOwnerAvailability();
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
 });
-
-// Direct-to-Owner is a Low/Medium-only fast path. Show/enable its route option
-// only for those severities; hide + uncheck it otherwise so a stale selection
-// never survives a severity bump (the server enforces this too).
-function updateDirectOwnerAvailability() {
-  const sev = document.querySelector('#severity-group input[type=radio]:checked')?.value;
-  const allowed = (sev === 'Low' || sev === 'Medium');
-  const col = document.querySelector('#incident-panel [data-route="direct_owner"]');
-  if (!col) return;
-  const input = col.querySelector('input[type=radio]');
-  col.style.display = allowed ? '' : 'none';
-  input.disabled = !allowed;
-  if (!allowed && input.checked) {
-    input.checked = false;
-    updateDecisionPanels();
-  }
-}
 
 // Asset type pills — highlight selected on click
 document.querySelectorAll('#asset-type-group input[type=radio]').forEach(radio => {
@@ -412,7 +394,6 @@ function updateDecisionPanels() {
   document.querySelector('#create-submit span').textContent = label;
 }
 document.querySelectorAll('input[name="classification"], input[name="t1_route"]').forEach(input => input.addEventListener('change', updateDecisionPanels));
-updateDirectOwnerAvailability();
 updateDecisionPanels();
 
 // ── Draft autosave (localStorage) ──

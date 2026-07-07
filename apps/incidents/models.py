@@ -189,7 +189,7 @@ class Ticket(models.Model):
     STATUS_T1_REVIEW            = 'T1_REVIEW'
     STATUS_AWAITING_CONTAINMENT = 'AWAITING_CONTAINMENT'
     STATUS_CONTAINMENT_REPORTED = 'CONTAINMENT_REPORTED'
-    # ── Direct-to-Owner fast path (Low/Medium only) ──────────────────── #
+    # ── Direct-to-Owner fast path (any severity) ─────────────────────── #
     # A T1 handling route that skips the System Admin entirely: the analyst
     # contacts the asset owner directly (e.g. by phone) and the owner remediates
     # it themselves — no admin ticket, no containment email. The case is still
@@ -241,7 +241,7 @@ class Ticket(models.Model):
     ALLOWED_TRANSITIONS = {
         STATUS_NEW: [
             STATUS_AWAITING_CONTAINMENT,   # Incident → assign admin directly
-            STATUS_AWAITING_OWNER,         # Incident (Low/Med) → direct-to-owner
+            STATUS_AWAITING_OWNER,         # Incident → direct-to-owner (any severity)
             STATUS_ESCALATED_T2,           # Incident → escalate to Tier 2
             STATUS_CLOSED_EVENT,           # Event    → T1 closes
         ],
@@ -1032,9 +1032,9 @@ class Ticket(models.Model):
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             return False
-        # Direct-to-Owner review split: emergency (requires_manager_verification)
-        # → SOC Manager; otherwise → Tier 2. Since this path is Low/Medium only,
-        # the manager branch is reached solely via the emergency flag.
+        # Direct-to-Owner review split (any severity): the manager branch fires
+        # when requires_manager_verification — i.e. Critical (severity floor) or
+        # the emergency flag; every other case reviews via Tier 2.
         if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_T2_REVIEW)
                 and self.requires_manager_verification):
             return False
