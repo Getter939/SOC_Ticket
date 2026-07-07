@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block title %}บัญชีถูกล็อกชั่วคราว — SOC Support System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
+        <div class="col-md-5 col-lg-4">
+            <div class="text-center mb-4">
+                <div class="display-1 text-danger"><i class="bi bi-shield-exclamation"></i></div>
+                <h2 class="fw-bold text-dark">เข้าสู่ระบบล้มเหลวหลายครั้ง</h2>
+            </div>
+
+            <div class="card border-0 shadow-lg">
+                <div class="card-body p-5 text-center">
+                    <p class="mb-3">
+                        ตรวจพบการพยายามเข้าสู่ระบบที่ไม่สำเร็จหลายครั้งเกินกำหนด
+                        บัญชีนี้จึงถูกล็อกชั่วคราวเพื่อความปลอดภัย
+                    </p>
+                    <p class="text-muted small mb-0">
+                        กรุณารอสักครู่แล้วลองใหม่อีกครั้ง
+                        หากยังเข้าใช้งานไม่ได้ โปรดติดต่อ Admin แผนก IT
+                    </p>
+                </div>
+            </div>
+
+            <div class="text-center mt-4">
+                <a href="{% url 'login' %}" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-left me-1"></i> กลับไปหน้าเข้าสู่ระบบ
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

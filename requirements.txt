@@ -22,3 +22,8 @@ et_xmlfile==2.0.0    # required by openpyxl
 
 # HTTP client (apps/wazuh_ingest/ingest.py → OpenSearch alert ingestion)
 requests==2.34.2
+
+# Login brute-force protection / account lockout (DB-backed, so it holds
+# across gunicorn workers). Wired in config/settings.py: INSTALLED_APPS, the
+# AxesStandaloneBackend auth backend, and AxesMiddleware.
+django-axes==7.1.0

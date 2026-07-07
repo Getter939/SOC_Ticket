@@ -5,7 +5,7 @@ from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
 from .models import (
     Ticket, TicketAttachment, TicketSubtask, TriageRecord,
-    validate_attachment_size,
+    validate_attachment,
 )
 
 
@@ -568,5 +568,5 @@ class AttachmentForm(forms.ModelForm):
 
     def clean_file(self):
         uploaded = self.cleaned_data.get('file')
-        validate_attachment_size(uploaded)
+        validate_attachment(uploaded)
         return uploaded

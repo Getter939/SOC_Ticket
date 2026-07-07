@@ -74,7 +74,7 @@
                 </div>
                 <div class="col-12">
                     <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="all_time" value="1" id="allTimeCheck" {% if all_time %}checked{% endif %} onchange="this.form.start_date.value='';this.form.end_date.value='';this.form.submit();">
+                        <input class="form-check-input" type="checkbox" name="all_time" value="1" id="allTimeCheck" {% if all_time %}checked{% endif %}>
                         <label class="form-check-label small" for="allTimeCheck">แสดงทุกช่วงเวลา (ไม่จำกัดเฉพาะเดือนนี้)</label>
                     </div>
                 </div>
@@ -147,4 +147,17 @@
     </nav>
     {% endif %}
 </div>
+
+{# "Show all time" clears the date range and resubmits. Wired here rather than #}
+{# via an inline onchange= so it satisfies the nonce-based CSP (no             #}
+{# 'unsafe-inline' in script-src).                                             #}
+<script nonce="{{ request.csp_nonce }}">
+    document.getElementById('allTimeCheck')?.addEventListener('change', function () {
+        const form = this.form;
+        if (!form) return;
+        form.start_date.value = '';
+        form.end_date.value = '';
+        form.submit();
+    });
+</script>
 {% endblock %}

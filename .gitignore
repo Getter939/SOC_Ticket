@@ -3,6 +3,8 @@
 .env
 .env.*
 !.env.example
+# Demo/staging account credentials — never track (kept locally for testers).
+test_accounts.txt
 
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/

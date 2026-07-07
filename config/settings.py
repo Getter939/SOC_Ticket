@@ -1,3 +1,5 @@
+import sys
+from datetime import timedelta
 from pathlib import Path
 from decouple import config
 
@@ -20,6 +22,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    # Third-party
+    'axes',   # login brute-force protection / account lockout
     # Project apps
     'apps.incidents',
     'apps.accounts',
@@ -37,6 +41,18 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Must be LAST — wraps authentication to record failed logins and enforce
+    # lockouts (django-axes).
+    'axes.middleware.AxesMiddleware',
+]
+
+# ── Authentication backends ────────────────────────────────────────────────
+# AxesStandaloneBackend MUST be first: it short-circuits authentication for a
+# locked-out client before credentials are ever checked. The default
+# ModelBackend follows for normal password verification.
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -123,16 +139,43 @@ SECURE_HSTS_PRELOAD            = config('SECURE_HSTS_PRELOAD',            defaul
 # proxy→app HTTP leg, never redirects (or loops). Only enable when the proxy
 # strips any client-supplied X-Forwarded-Proto, otherwise the header is
 # spoofable. The bundled nginx.conf sets X-Forwarded-Proto $scheme.
-if config('USE_PROXY_SSL_HEADER', default=False, cast=bool):
+_BEHIND_PROXY = config('USE_PROXY_SSL_HEADER', default=False, cast=bool)
+if _BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+# ── Login brute-force protection (django-axes) ─────────────────────────────
+# Locks out a client after AXES_FAILURE_LIMIT failed logins for a cooloff
+# window, then auto-clears. Lockout is keyed on the (username, IP) pair so an
+# attacker hammering one account from one host is stopped, without one shared
+# NAT IP locking every account in the building.
+# Disabled under the test runner: lockout state would otherwise leak between
+# tests that exercise the login view, and client.login() authenticates without
+# a request object.
+AXES_ENABLED = 'test' not in sys.argv
+AXES_FAILURE_LIMIT   = config('AXES_FAILURE_LIMIT', default=5, cast=int)
+AXES_COOLOFF_TIME    = timedelta(
+    minutes=config('AXES_COOLOFF_MINUTES', default=15, cast=int)
+)
+AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]
+AXES_RESET_ON_SUCCESS = True          # a good login clears that client's tally
+AXES_LOCKOUT_TEMPLATE = 'registration/lockout.html'
+# Behind the bundled nginx reverse proxy, trust exactly one X-Forwarded-For hop
+# so lockouts key on the real client IP, not the proxy's. Without a proxy Axes
+# uses REMOTE_ADDR directly.
+if _BEHIND_PROXY:
+    AXES_IPWARE_PROXY_COUNT = config('AXES_PROXY_COUNT', default=1, cast=int)
+
 # ── Content-Security-Policy (applied by config.middleware) ─────────────────
-# Defense-in-depth against XSS / clickjacking / data exfiltration. Scripts and
-# styles still allow 'unsafe-inline' (templates use inline <script>/<style>);
-# everything else is locked to 'self' plus the one CDN the UI loads
-# (Bootstrap + Chart.js from jsdelivr). Tightening script-src to a nonce is the
-# recommended next step. Flip *_REPORT_ONLY on to trial changes without
-# enforcing.
+# Defense-in-depth against XSS / clickjacking / data exfiltration.
+#   • script-src is NONCE-based: the middleware swaps {NONCE} for a fresh
+#     per-request value and drops 'unsafe-inline', so an injected inline
+#     <script> without the nonce is blocked. Inline event handlers are gone
+#     from the templates for the same reason (nonces don't cover on*= attrs).
+#   • style-src keeps 'unsafe-inline' — inline style= attributes are pervasive
+#     in the Bootstrap templates and can't carry a nonce.
+#   • Everything else is locked to 'self' plus the one CDN the UI loads
+#     (Bootstrap + Chart.js from jsdelivr).
+# Flip *_REPORT_ONLY on to trial changes without enforcing.
 _CSP_CDN = 'https://cdn.jsdelivr.net'
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
@@ -143,7 +186,7 @@ CONTENT_SECURITY_POLICY = (
     "img-src 'self' data:; "
     f"font-src 'self' {_CSP_CDN}; "
     f"style-src 'self' 'unsafe-inline' {_CSP_CDN}; "
-    f"script-src 'self' 'unsafe-inline' {_CSP_CDN}; "
+    f"script-src 'self' 'nonce-{{NONCE}}' {_CSP_CDN}; "
     "connect-src 'self'"
 )
 CONTENT_SECURITY_POLICY_REPORT_ONLY = config(

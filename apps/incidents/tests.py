@@ -1206,6 +1206,58 @@ class AttachmentUploadLimitTest(TestCase):
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 16b. Attachment upload type / content validation                              #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class AttachmentUploadTypeTest(TestCase):
+    def test_disallowed_extension_rejected(self):
+        """Active-web content (.html) is not on the evidence allowlist."""
+        form = AttachmentForm(
+            data={'description': ''},
+            files={'file': SimpleUploadedFile(
+                'evidence.html', b'<script>alert(1)</script>',
+                content_type='text/html',
+            )},
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('file', form.errors)
+
+    def test_extensionless_file_rejected(self):
+        form = AttachmentForm(
+            data={'description': ''},
+            files={'file': SimpleUploadedFile('noext', b'data')},
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('file', form.errors)
+
+    def test_spoofed_image_content_rejected(self):
+        """An allowed extension whose bytes don't match its type is refused."""
+        form = AttachmentForm(
+            data={'description': ''},
+            files={'file': SimpleUploadedFile(
+                'shot.png', b'<svg onload=alert(1)>', content_type='image/png',
+            )},
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('file', form.errors)
+
+    def test_valid_png_accepted(self):
+        png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 32
+        form = AttachmentForm(
+            data={'description': 'ok'},
+            files={'file': SimpleUploadedFile('shot.png', png, content_type='image/png')},
+        )
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+    def test_log_evidence_accepted(self):
+        form = AttachmentForm(
+            data={'description': 'ok'},
+            files={'file': SimpleUploadedFile('firewall.log', b'deny 1.2.3.4')},
+        )
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 17. 'Unknown' severity (additive, human-assigned)                            #
 # ──────────────────────────────────────────────────────────────────────────── #
 

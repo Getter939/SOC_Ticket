@@ -3,7 +3,7 @@
 {# and the two selects rendered with the default ids id_detailed_issue / #}
 {# id_detailed_issue2. Server-side validation still enforces the pairing.#}
 {{ detailed_issue_cascade|json_script:"detailed-issue-cascade" }}
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (function () {
   var el = document.getElementById('detailed-issue-cascade');
   if (!el) return;

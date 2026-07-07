@@ -1439,6 +1439,47 @@ class NotificationTemplate(models.Model):
 # legitimately needs more headroom.
 MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024  # 25 MB
 
+# Extension allowlist for uploaded evidence. This is a SOC evidence store, so
+# the default is deliberately broad — logs, captures, documents, images and
+# archives are all legitimate evidence — but it still blocks active-web content
+# (.html/.svg/.xhtml/.js …) that could be socially engineered into a stored-XSS
+# vector. It is only a second line of defence: download_attachment already
+# forces `Content-Disposition: attachment` + `nosniff` so nothing is rendered
+# as same-origin script. Override with ATTACHMENT_ALLOWED_EXTENSIONS in .env/
+# settings if a deployment needs a different set (e.g. malware-sample intake).
+DEFAULT_ALLOWED_ATTACHMENT_EXTENSIONS = frozenset({
+    # documents
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'rtf',
+    # text / structured logs
+    'txt', 'log', 'csv', 'tsv', 'json', 'yaml', 'yml', 'md',
+    # images (screenshots) — content is magic-byte verified below
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp',
+    # archives / captures
+    'zip', 'gz', 'tgz', '7z', 'rar', 'tar', 'pcap', 'pcapng', 'cap',
+    # mail evidence
+    'eml', 'msg',
+})
+
+# Leading magic bytes for the renderable types we accept, so a spoofed
+# `evil.svg` renamed to `.png` (still active content) is rejected on content,
+# not just on its extension.
+_ATTACHMENT_MAGIC_BYTES = {
+    'png':  (b'\x89PNG\r\n\x1a\n',),
+    'gif':  (b'GIF87a', b'GIF89a'),
+    'jpg':  (b'\xff\xd8\xff',),
+    'jpeg': (b'\xff\xd8\xff',),
+    'bmp':  (b'BM',),
+    'pdf':  (b'%PDF',),
+    # WEBP is a RIFF container: bytes 0-3 'RIFF', bytes 8-11 'WEBP'.
+    'webp': (b'RIFF',),
+}
+
+
+def _attachment_extension(name):
+    """Lower-cased final extension of ``name`` (no dot), or '' if none."""
+    _, _, ext = (name or '').rpartition('.')
+    return ext.lower() if ext and '.' in (name or '') else ''
+
 
 def validate_attachment_size(uploaded_file):
     """Raise ValidationError if an uploaded file exceeds MAX_ATTACHMENT_SIZE."""
@@ -1446,6 +1487,53 @@ def validate_attachment_size(uploaded_file):
         raise ValidationError(
             f'ไฟล์มีขนาดใหญ่เกินไป — สูงสุด {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB'
         )
+
+
+def validate_attachment_type(uploaded_file):
+    """Reject disallowed file types by extension, and verify content magic bytes
+    for the renderable types (images / PDF) to catch spoofed content.
+
+    Defence-in-depth: uploads are always served as forced downloads with
+    ``nosniff`` (see download_attachment), so this guards against social
+    engineering and accidental active-content uploads rather than direct code
+    execution.
+    """
+    if uploaded_file is None:
+        return
+
+    allowed = getattr(
+        settings, 'ATTACHMENT_ALLOWED_EXTENSIONS',
+        DEFAULT_ALLOWED_ATTACHMENT_EXTENSIONS,
+    )
+    ext = _attachment_extension(uploaded_file.name)
+    if not ext:
+        raise ValidationError('ไฟล์ต้องมีนามสกุล (extension) ที่ชัดเจน')
+    if ext not in allowed:
+        raise ValidationError(
+            f'ชนิดไฟล์ ".{ext}" ไม่ได้รับอนุญาต — '
+            f'รองรับเฉพาะเอกสาร รูปภาพ log และไฟล์หลักฐานทั่วไป'
+        )
+
+    signatures = _ATTACHMENT_MAGIC_BYTES.get(ext)
+    if signatures:
+        pos = uploaded_file.tell() if hasattr(uploaded_file, 'tell') else 0
+        try:
+            uploaded_file.seek(0)
+            header = uploaded_file.read(16)
+        finally:
+            uploaded_file.seek(pos)
+        if not any(header.startswith(sig) for sig in signatures):
+            raise ValidationError(
+                f'เนื้อหาของไฟล์ไม่ตรงกับชนิด ".{ext}" ที่ระบุ — '
+                f'ไฟล์อาจถูกปลอมนามสกุล'
+            )
+
+
+def validate_attachment(uploaded_file):
+    """Run every attachment guard (size + type/content). Single entry point for
+    both upload paths so they can never drift apart."""
+    validate_attachment_size(uploaded_file)
+    validate_attachment_type(uploaded_file)
 
 
 def attachment_upload_path(instance, filename):

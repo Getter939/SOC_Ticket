@@ -401,7 +401,7 @@
 </div>
 
 <!-- Quiet auto-refresh, same behavior as the management dashboard. -->
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (function () {
     const AUTO_REFRESH_MS = 300000;
     const IDLE_GRACE_MS = 15000;
@@ -423,7 +423,7 @@
 <!-- ── Chart.js: pipeline (stacked bar, click-to-filter) ─────────────────── -->
 {{ pipeline_by_severity|json_script:"pipeline-by-severity-exec" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script>
+<script nonce="{{ request.csp_nonce }}">
 Chart.defaults.font.size = 13;
 Chart.defaults.maintainAspectRatio = false;
 

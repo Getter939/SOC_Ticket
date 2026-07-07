@@ -356,7 +356,7 @@
 </div>
 </div>
 
-<script>
+<script nonce="{{ request.csp_nonce }}">
 // Severity pills — highlight selected on click
 document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => {
   radio.addEventListener('change', () => {

@@ -25,7 +25,7 @@ from .forms import (
 )
 from .models import (
     ProjectIncident, Ticket, TicketAttachment, TicketLog, TicketSubtask,
-    TriageRecord, bundle_suffix_for_index, validate_attachment_size,
+    TriageRecord, bundle_suffix_for_index, validate_attachment,
 )
 from .notifications import (
     notify_containment_alert,
@@ -430,7 +430,7 @@ def create_ticket(request):
                         )
 
                     for evidence_file in request.FILES.getlist('evidence_files'):
-                        validate_attachment_size(evidence_file)
+                        validate_attachment(evidence_file)
                         TicketAttachment.objects.create(
                             ticket=ticket,
                             file=evidence_file,
@@ -571,7 +571,7 @@ def create_project_incident(request):
                     # Evidence attaches to the first member — it is the shared
                     # incident evidence; per-target files can be added later.
                     for evidence_file in request.FILES.getlist('evidence_files'):
-                        validate_attachment_size(evidence_file)
+                        validate_attachment(evidence_file)
                         TicketAttachment.objects.create(
                             ticket=created[0], file=evidence_file,
                             original_name=evidence_file.name, uploaded_by=request.user,
