@@ -55,3 +55,5 @@ desktop.ini
 
 .codex_work/
 .claude/skills/03-exploit-development/scripts/payload_generator.py
+.claude/settings.json
+/.claude
