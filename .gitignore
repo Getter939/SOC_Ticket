@@ -54,3 +54,4 @@ desktop.ini
 *.js
 
 .codex_work/
+.claude/skills/03-exploit-development/scripts/payload_generator.py
