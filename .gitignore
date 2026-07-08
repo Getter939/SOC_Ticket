@@ -58,3 +58,5 @@ desktop.ini
 .claude/settings.json
 /.claude
 *.md
+.claude/skills/03-exploit-development/scripts/payload_generator.py
+.claude/skills/03-exploit-development/SKILL.md
