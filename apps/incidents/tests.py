@@ -9,7 +9,7 @@ Test classes
 4.  WorkflowPermissionTest        — Per-transition role/tier permissions (positive + negative)
 5.  T1ClassificationCreateTest    — Tier 1 Event/Incident disposition at creation
 6.  Tier2EscalationTest           — Tier 2 return-only constraint (never assign / never create)
-7.  ManagerRoutingTest            — requires_manager_verification (Critical floor + emergency)
+7.  ManagerRoutingTest            — requires_manager_verification (emergency flag only)
 8.  EmergencyFlagTest             — emergency-flag permissions + audit
 9.  AdminFieldAccessTest          — System Admin write access to containment/remediation fields
 10. SignOffFieldsTest             — verified_by/at and approved_by/at are write-once
@@ -96,11 +96,11 @@ def _ticket_post_data(**overrides):
     return data
 
 
-def _advance_to(ticket, target_status, t1, admin=None, mgr=None):
+def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
     """
     Drive a ticket from its current status to target_status along the
-    Incident → assign-admin happy path. Chooses the manager step automatically
-    based on requires_manager_verification (severity / emergency).
+    Incident → assign-admin happy path. Tier 2 verifies the containment report;
+    the manager step fires automatically when the emergency flag requires it.
     """
     if ticket.created_by_id is None:
         ticket.created_by = t1
@@ -125,9 +125,9 @@ def _advance_to(ticket, target_status, t1, admin=None, mgr=None):
             ticket.containment_report = 'Contained.'
             ticket.transition_to(step, admin, 'containment note')
         elif step == Ticket.STATUS_PENDING_MANAGER:
-            ticket.transition_to(step, t1, 'verified — route to manager')
+            ticket.transition_to(step, t2, 'T2 verified — route to manager')
         elif step == Ticket.STATUS_APPROVED:
-            actor = mgr if ticket.requires_manager_verification else t1
+            actor = mgr if ticket.requires_manager_verification else t2
             ticket.transition_to(step, actor, 'close')
         else:  # AWAITING_CONTAINMENT
             ticket.transition_to(step, t1, 'assign admin')
@@ -265,22 +265,26 @@ class WorkflowTransitionTest(TestCase):
         t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign admin')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
 
-    def test_full_happy_path_high_severity_no_manager(self):
+    def test_full_happy_path_t2_closes_without_manager(self):
         t = self._incident(severity='High')
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_full_happy_path_critical_via_manager(self):
+    def test_full_happy_path_emergency_via_manager(self):
         t = self._incident(severity='Critical')
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, mgr=self.mgr)
+        t.is_emergency = True
+        t.save(update_fields=['is_emergency'])
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     def test_containment_rejection_loop(self):
         t = self._incident()
         _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'not contained')
+        # Tier 2 (not Tier 1) judges the containment report and sends it back.
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'not contained')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
 
     # ── Illegal transitions ─────────────────────────────────────────────── #
@@ -292,7 +296,7 @@ class WorkflowTransitionTest(TestCase):
 
     def test_approved_is_terminal(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'reopen')
 
@@ -400,17 +404,37 @@ class WorkflowPermissionTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, 'denied')
 
-    # CONTAINMENT_REPORTED close  requires TIER1_CREATOR ──────────────────
+    # CONTAINMENT_REPORTED close  requires TIER2 ──────────────────────────
 
-    def test_creator_t1_can_close_when_no_manager(self):
+    def test_t2_can_verify_and_close_when_no_manager(self):
         t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'close')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — close')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_non_creator_t1_cannot_close(self):
+    def test_creator_t1_cannot_close_containment(self):
+        """Containment verification moved to Tier 2 — even the creator may not close."""
         t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.other_t1, 'denied')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'denied')
+
+    def test_t2_must_route_emergency_to_manager(self):
+        t = self._ticket_at(
+            Ticket.STATUS_CONTAINMENT_REPORTED, severity='High', is_emergency=True,
+        )
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'denied — emergency')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'to manager')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MANAGER)
+
+    def test_t2_can_reject_containment_back_to_admin(self):
+        t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'not contained')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_t1_cannot_reject_containment(self):
+        t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'denied')
 
     # PENDING_MANAGER → APPROVED  requires MANAGER ────────────────────────
 
@@ -553,6 +577,7 @@ class ManagerRoutingTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('mr_t1')
+        cls.t2    = _make_t2('mr_t2')
         cls.mgr   = _make_user('mr_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('mr_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -563,9 +588,10 @@ class ManagerRoutingTest(TestCase):
             severity=severity, is_emergency=is_emergency, containment_report='done',
         )
 
-    def test_critical_requires_manager(self):
+    def test_critical_does_not_require_manager(self):
+        """Severity alone never routes to the manager — only the emergency flag."""
         t = self._contained(severity='Critical')
-        self.assertTrue(t.requires_manager_verification)
+        self.assertFalse(t.requires_manager_verification)
 
     def test_high_does_not_require_manager(self):
         t = self._contained(severity='High')
@@ -575,38 +601,31 @@ class ManagerRoutingTest(TestCase):
         t = self._contained(severity='High', is_emergency=True)
         self.assertTrue(t.requires_manager_verification)
 
-    def test_high_ticket_t1_closes_directly(self):
+    def test_non_emergency_ticket_t2_closes_directly(self):
         t = self._contained(severity='High')
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'closed')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_high_ticket_cannot_route_to_manager(self):
-        t = self._contained(severity='High')
-        with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no need')
-
-    def test_critical_ticket_t1_cannot_close_directly(self):
+    def test_critical_non_emergency_t2_closes_directly(self):
         t = self._contained(severity='Critical')
-        with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'must go to manager')
-
-    def test_critical_ticket_routes_to_manager_then_closes(self):
-        t = self._contained(severity='Critical')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'verified')
-        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_emergency_high_must_route_to_manager(self):
+    def test_non_emergency_ticket_cannot_route_to_manager(self):
+        t = self._contained(severity='High')
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'no need')
+
+    def test_emergency_ticket_t2_cannot_close_directly(self):
         t = self._contained(severity='High', is_emergency=True)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'blocked by emergency')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'route')
-        self.assertEqual(t.status, Ticket.STATUS_PENDING_MANAGER)
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'must go to manager')
 
-    @override_settings(SOC_SEVERITY_FLOOR='High')
-    def test_severity_floor_is_tunable(self):
-        t = self._contained(severity='High')
-        self.assertTrue(t.requires_manager_verification)
+    def test_emergency_ticket_routes_to_manager_then_closes(self):
+        t = self._contained(severity='High', is_emergency=True)
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'T2 verified')
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -654,10 +673,11 @@ class DirectToOwnerPathTest(TestCase):
 
         t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.t1, 'owner fixed')
         t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
-        self.assertEqual(t.verified_by, self.t1)   # T1 sign-off stamped
+        self.assertIsNone(t.verified_by)           # verification is T2's act now
 
         t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'reviewed & closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(t.verified_by, self.t2)   # T2 sign-off stamped at close
         self.assertEqual(t.approved_by, self.t2)
         self.assertIsNotNone(t.closed_at)
 
@@ -669,15 +689,17 @@ class DirectToOwnerPathTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no')
 
-    # ── Review split: emergency forces the SOC Manager ─────────────────── #
-    def test_emergency_routes_to_manager_not_tier2(self):
+    # ── Review split: emergency passes Tier 2 first, then the Manager ───── #
+    def test_emergency_owner_path_passes_t2_then_manager(self):
         t = self._owner_case(is_emergency=True,
                              status=Ticket.STATUS_OWNER_REMEDIATED)
-        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
-        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
+        # Every owner case goes to Tier 2 review — including emergencies.
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        # Tier 2 may not close an emergency directly; it must go to the manager.
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_APPROVED))
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'no')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'no')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'to manager')
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
@@ -698,14 +720,13 @@ class DirectToOwnerPathTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'T1 cannot close a T2 review')
 
-    # ── Critical (severity floor) routes the review to the SOC Manager ──── #
-    def test_critical_severity_routes_to_manager_not_tier2(self):
+    # ── Critical severity alone no longer routes to the SOC Manager ─────── #
+    def test_critical_severity_still_closes_via_tier2(self):
         t = self._owner_case(severity='Critical',
                              status=Ticket.STATUS_OWNER_REMEDIATED)
-        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
-        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
-        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     # ── Form gating: route valid at any severity ───────────────────────── #
@@ -880,47 +901,55 @@ class SignOffFieldsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('sf_t1')
+        cls.t2    = _make_t2('sf_t2')
+        cls.t2b   = _make_t2('sf_t2b')
         cls.mgr   = _make_user('sf_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('sf_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
-    def _incident(self, severity='Critical'):
+    def _incident(self, severity='Critical', is_emergency=True):
+        # Manager routing now keys off the emergency flag, not severity.
         return _make_ticket(
             assigned_admin=self.admin, created_by=self.t1,
             classification=Ticket.CLASSIFICATION_INCIDENT, severity=severity,
+            is_emergency=is_emergency,
         )
 
-    def test_verified_by_set_when_t1_marks_contained(self):
+    def test_verified_by_set_when_t2_marks_contained(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
         self.assertIsNotNone(t.verified_at)
 
     def test_approved_by_set_to_manager(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.approved_by, self.mgr)
 
-    def test_direct_close_sets_both_signoffs_to_t1(self):
-        t = self._incident(severity='High')  # no manager needed
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+    def test_direct_close_sets_both_signoffs_to_t2(self):
+        t = self._incident(severity='High', is_emergency=False)  # no manager needed
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
-        self.assertEqual(t.approved_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
+        self.assertEqual(t.approved_by, self.t2)
 
     def test_verified_by_write_once(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
-        # Force back to CONTAINMENT_REPORTED with a different creator; verified_by must hold.
+        # Force back to CONTAINMENT_REPORTED; a different Tier 2 re-verifies —
+        # the original verified_by must hold (write-once).
         Ticket.objects.filter(pk=t.pk).update(
-            status=Ticket.STATUS_CONTAINMENT_REPORTED, created_by=self.t1.pk,
+            status=Ticket.STATUS_CONTAINMENT_REPORTED,
         )
         t.refresh_from_db()
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'again')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2b, 'again')
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -1227,9 +1256,11 @@ class SuperuserAccessTest(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_superuser_can_perform_every_ticket_role_transition(self):
+        # Emergency flag set so the ticket legally routes through PENDING_MANAGER
+        # (severity alone no longer triggers the manager gate).
         ticket = _make_ticket(
             assigned_admin=self.system_admin, severity='Critical',
-            classification=Ticket.CLASSIFICATION_INCIDENT,
+            classification=Ticket.CLASSIFICATION_INCIDENT, is_emergency=True,
         )
         ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.superuser, 'as t1')
         ticket.containment_report = 'Contained by superuser.'
@@ -1386,13 +1417,15 @@ class UnknownSeverityTest(TestCase):
     """
     'Unknown' is a human-assigned severity for cases the analyst cannot yet
     classify. It is selectable in the manual create + manual triage forms,
-    absent from the automated Wazuh mapping, ranks lowest (never meets the
-    manager floor on its own), and renders a distinct badge.
+    absent from the automated Wazuh mapping, ranks lowest for queue ordering
+    (severity never routes to the manager — only the emergency flag), and
+    renders a distinct badge.
     """
 
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('uk_t1')
+        cls.t2    = _make_t2('uk_t2')
         cls.mgr   = _make_user('uk_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('uk_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -1455,15 +1488,15 @@ class UnknownSeverityTest(TestCase):
     def test_unknown_without_emergency_does_not_require_manager(self):
         self.assertFalse(self._contained().requires_manager_verification)
 
-    def test_unknown_without_emergency_t1_closes_directly(self):
+    def test_unknown_without_emergency_t2_closes_directly(self):
         t = self._contained()
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'closed — no manager needed')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'closed — no manager needed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     def test_unknown_without_emergency_cannot_route_to_manager(self):
         t = self._contained()
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no need')
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'no need')
 
     def test_unknown_with_emergency_requires_manager(self):
         self.assertTrue(self._contained(is_emergency=True).requires_manager_verification)
@@ -1471,8 +1504,8 @@ class UnknownSeverityTest(TestCase):
     def test_unknown_with_emergency_routes_to_manager(self):
         t = self._contained(is_emergency=True)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'blocked by emergency')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'route to manager')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'blocked by emergency')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'route to manager')
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
@@ -1726,7 +1759,7 @@ class ProjectIncidentFanOutTest(TestCase):
         )
         project = ProjectIncident.objects.get()
         first, second = list(project.members)
-        _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a)
+        _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a, t2=self.t2)
         second.refresh_from_db()
         self.assertEqual(second.status, Ticket.STATUS_AWAITING_CONTAINMENT)
         self.assertEqual(project.open_member_count, 1)

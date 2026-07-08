@@ -103,6 +103,7 @@ def _transition_actions(ticket, user):
             'Verify -> Close'
             if ticket.status in (
                 Ticket.STATUS_PENDING_MANAGER, Ticket.STATUS_PENDING_T2_REVIEW,
+                Ticket.STATUS_CONTAINMENT_REPORTED,
             ) else 'Close case'
         ),
     }
@@ -803,8 +804,8 @@ def ticket_detail(request, pk):
             else:
                 # The System Admin writes the countermeasure (containment_report)
                 # and investigation-findings (remediation_summary) fields, then
-                # returns the ticket to Tier 1. Classification is NOT set here —
-                # it is Tier 1's (or Tier 2's) decision.
+                # submits the ticket for Tier 2 verification. Classification is
+                # NOT set here — it is Tier 1's (or Tier 2's) decision.
                 report = request.POST.get('containment_report', '').strip()
                 remediation = request.POST.get('remediation_summary', '').strip()
                 note = request.POST.get('note', '').strip()

@@ -94,15 +94,16 @@ NEW ─(classify EVENT)───────────────────
 
 กติกาที่พลาดกันง่าย:
 
-- **T2 ทำได้เพียงส่งตั๋วกลับให้ T1 (`T1_REVIEW`) หรือปิดเป็น event เท่านั้น**
-  T2 ไม่มีสิทธิ์มอบหมาย admin และไม่มีสิทธิ์สร้างตั๋ว
-- **วงจรการตีกลับ (rejection loop)**: ถ้า T1 พิจารณาว่าการ containment ยังไม่เพียงพอ
+- **สำหรับตั๋ว escalation T2 ทำได้เพียงส่งกลับให้ T1 (`T1_REVIEW`) หรือปิดเป็น event**
+  T2 ไม่มีสิทธิ์มอบหมาย admin และไม่มีสิทธิ์สร้างตั๋ว แต่ T2 เป็นผู้ตรวจสอบ
+  การควบคุม/การแก้ไข: `CONTAINMENT_REPORTED` และ `PENDING_T2_REVIEW` เป็นคิวของ Tier 2
+- **วงจรการตีกลับ (rejection loop)**: ถ้า Tier 2 พิจารณาว่าการ containment ยังไม่เพียงพอ
   จะเปลี่ยน `CONTAINMENT_REPORTED → AWAITING_CONTAINMENT` และ admin
   ที่ได้รับมอบหมายจะได้รับอีเมลแจ้งอีกครั้ง
-- **เส้นทางผ่าน manager**: `requires_manager_verification` เป็นจริงเมื่อ severity ≥
-  เกณฑ์ขั้นต่ำ (ค่าเริ่มต้น `Critical` เปลี่ยนได้ผ่าน `settings.SOC_SEVERITY_FLOOR`)
-  **หรือ**ตั๋วถูกตั้งธง emergency เฉพาะตั๋วแบบนี้เท่านั้นที่จะผ่าน `PENDING_MANAGER`
-  ตั๋วอื่นไป `APPROVED` ทันทีเมื่อ T1 ยืนยันว่า contain แล้ว
+- **เส้นทางผ่าน manager** (ปรับใหม่ 8 ก.ค. 2026): `requires_manager_verification`
+  เป็นจริง**เฉพาะเมื่อตั๋วถูกตั้งธง emergency เท่านั้น** — severity อย่างเดียวไม่ส่งถึง
+  manager อีกต่อไป (ค่า `SOC_SEVERITY_FLOOR` ถูกถอดออกแล้ว) ตั๋วฉุกเฉินต้องผ่าน
+  การตรวจของ Tier 2 ก่อนแล้วจึงเข้า `PENDING_MANAGER` ส่วนตั๋วอื่น Tier 2 ปิด (`APPROVED`) ได้เอง
 - Permission token (`TIER1_CREATOR`, `TIER2`, `ASSIGNED_ADMIN`, `MANAGER`)
   ประกาศไว้รายทรานซิชันใน `TRANSITION_PERMISSIONS` และ `transition_to`
   ยังบังคับใช้เงื่อนไข classification และเงื่อนไขเส้นทาง manager ด้วย

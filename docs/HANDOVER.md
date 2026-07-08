@@ -95,16 +95,18 @@ NEW ─(classify EVENT)───────────────────
 
 Rules that are easy to get wrong:
 
-- **T2 can only return tickets to T1 (`T1_REVIEW`) or close events.** T2 never
-  assigns admins and never creates tickets.
-- The **rejection loop**: if T1 judges containment insufficient,
+- **On escalations T2 can only return tickets to T1 (`T1_REVIEW`) or close
+  events** — T2 never assigns admins and never creates tickets. T2 *does*
+  verify containment/remediation: `CONTAINMENT_REPORTED` and
+  `PENDING_T2_REVIEW` are Tier 2 queues.
+- The **rejection loop**: if Tier 2 judges containment insufficient,
   `CONTAINMENT_REPORTED → AWAITING_CONTAINMENT` and the assigned admin is
   re-notified.
-- **Manager routing**: `requires_manager_verification` is true when severity ≥
-  the floor (default `Critical`, overridable via `settings.SOC_SEVERITY_FLOOR`)
-  **or** the ticket is flagged emergency. Only such tickets pass through
-  `PENDING_MANAGER`; others go straight to `APPROVED` when T1 confirms
-  containment.
+- **Manager routing** (redesigned 2026-07-08): `requires_manager_verification`
+  is true **only when the ticket is flagged emergency** — severity alone never
+  routes to the manager (the old `SOC_SEVERITY_FLOOR` setting is gone). An
+  emergency ticket passes Tier 2 verification first, then `PENDING_MANAGER`;
+  all other tickets are closed (`APPROVED`) by Tier 2 directly.
 - Permission tokens (`TIER1_CREATOR`, `TIER2`, `ASSIGNED_ADMIN`, `MANAGER`) are
   declared per-transition in `TRANSITION_PERMISSIONS`; `transition_to` also
   enforces the classification gate and the manager-routing gate.

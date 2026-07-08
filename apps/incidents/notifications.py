@@ -11,6 +11,7 @@ Rules
 import logging
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.core.mail import EmailMessage, send_mail
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -61,13 +62,21 @@ def _render(key, context, default_subject, default_body):
 
 
 def _send(subject, body, recipient_email, ticket_id, attachments=None):
-    """Shared send wrapper with optional file attachments."""
+    """Shared send wrapper with optional file attachments.
+
+    ``recipient_email`` may be a single address or a list of addresses.
+    """
+    recipients = (
+        list(recipient_email)
+        if isinstance(recipient_email, (list, tuple, set))
+        else [recipient_email]
+    )
     try:
         email = EmailMessage(
             subject=subject,
             body=body,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[recipient_email],
+            to=recipients,
         )
         for att in (attachments or []):
             try:
@@ -76,7 +85,7 @@ def _send(subject, body, recipient_email, ticket_id, attachments=None):
             except Exception as att_exc:
                 logger.warning('Could not attach %s: %s', att.original_name, att_exc)
         email.send(fail_silently=False)
-        logger.info('Email sent to %s for ticket %s.', recipient_email, ticket_id)
+        logger.info('Email sent to %s for ticket %s.', ', '.join(recipients), ticket_id)
         return True
     except Exception as exc:
         logger.error('SMTP failure for ticket %s — %s', ticket_id, exc)
@@ -148,16 +157,31 @@ def notify_containment_required(ticket, reason=None):
 
 def notify_containment_submitted(ticket):
     """
-    Email the SOC analyst (assigned_to) that the assigned admin has
-    submitted a containment report and the ticket is ready for review.
+    Email Tier 2 staff that the assigned admin has submitted a containment
+    report and the ticket is awaiting Tier 2 verification. Falls back to the
+    assigned analyst if no Tier 2 staff with an email address exists.
     """
-    analyst = ticket.assigned_to
-    if not analyst or not analyst.email:
-        logger.warning(
-            'notify_containment_submitted: ticket %s — no assigned analyst or no email.',
-            ticket.ticket_id,
+    from apps.accounts.models import UserProfile
+
+    recipients = list(
+        User.objects.filter(
+            is_active=True,
+            profile__role=UserProfile.ROLE_SOC_STAFF,
+            profile__tier=UserProfile.TIER_T2,
         )
-        return False
+        .exclude(email='')
+        .values_list('email', flat=True)
+    )
+    if not recipients:
+        analyst = ticket.assigned_to
+        if not analyst or not analyst.email:
+            logger.warning(
+                'notify_containment_submitted: ticket %s — no Tier 2 staff with '
+                'email and no assigned analyst to fall back to.',
+                ticket.ticket_id,
+            )
+            return False
+        recipients = [analyst.email]
 
     ticket_url = _ticket_url(ticket)
     summary = ticket.issue_description[:100]
@@ -168,7 +192,7 @@ def notify_containment_submitted(ticket):
     admin_name = (admin.get_full_name() or admin.username) if admin else '-'
     classification = ticket.get_classification_display() if ticket.classification else '-'
 
-    default_subject = '[{ticket_id}] Containment report submitted — review required'
+    default_subject = '[{ticket_id}] Containment report submitted — Tier 2 review required'
     default_body = (
         'The assigned admin has submitted a containment report for ticket {ticket_id}.\n'
         '\n'
@@ -202,7 +226,7 @@ def notify_containment_submitted(ticket):
     subject, body = _render(
         NotificationTemplate.KEY_CONTAINMENT_SUBMITTED, context, default_subject, default_body,
     )
-    return _send(subject, body, analyst.email, ticket.ticket_id)
+    return _send(subject, body, recipients, ticket.ticket_id)
 
 
 # ──────────────────────────────────────────────────────────────────────── #

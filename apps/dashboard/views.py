@@ -506,8 +506,8 @@ def executive_dashboard(request):
     emergency_active = active_qs.filter(is_emergency=True).count()
     awaiting_containment = active_qs.filter(
         status=Ticket.STATUS_AWAITING_CONTAINMENT).count()
-    # verified_by is stamped when T1 signs the containment off, so a null
-    # here means the report is still waiting on T1's review.
+    # verified_by is stamped when Tier 2 signs the containment off, so a null
+    # here means the report is still waiting on Tier 2's verification.
     unverified_containment = active_qs.filter(
         status=Ticket.STATUS_CONTAINMENT_REPORTED,
         verified_by__isnull=True,
@@ -533,7 +533,7 @@ def executive_dashboard(request):
             'filter': Ticket.STATUS_AWAITING_CONTAINMENT,
         },
         {
-            'label': 'การควบคุมที่รอการตรวจสอบ',
+            'label': 'การควบคุมที่รอ Tier 2 ตรวจสอบ',
             'count': unverified_containment,
             'level': 'waiting' if unverified_containment else 'good',
             'filter': Ticket.STATUS_CONTAINMENT_REPORTED,

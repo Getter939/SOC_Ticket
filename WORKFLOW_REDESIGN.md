@@ -146,16 +146,18 @@ cannot be bypassed from a view.
   `escalated_to_t2_at` is stamped the first time a ticket enters `ESCALATED_T2` and is never
   cleared, so a ticket T2 returned to T1 still counts.
 
-### 2e. `requires_manager_verification` — single tunable property
+### 2e. `requires_manager_verification` — emergency flag only
+
+> **Updated 2026-07-08:** the severity floor was removed. Tier 2 now verifies every
+> containment/remediation (`CONTAINMENT_REPORTED` and `PENDING_T2_REVIEW` are Tier 2
+> queues); the SOC manager reviews emergency tickets only, *after* Tier 2 verification.
 
 ```
-requires_manager_verification == (SEVERITY_RANK[severity] >= SEVERITY_RANK[SEVERITY_FLOOR])
-                                  or is_emergency
+requires_manager_verification == is_emergency
 ```
-- `SEVERITY_FLOOR` config constant, default `Critical` (override via
-  `settings.SOC_SEVERITY_FLOOR`). With the default, only Critical reaches the manager via the
-  floor; High/Medium/Low (and unknown severities) reach the manager only through the emergency
-  flag. No other auto-triggers.
+- Severity (even Critical) never routes to the manager on its own; the old
+  `SEVERITY_FLOOR` constant and `settings.SOC_SEVERITY_FLOOR` override are gone.
+  No other auto-triggers.
 
 ### 2f. Tier 1 triage — exactly 2 actions after claim (`apps/wazuh_ingest`)
 
