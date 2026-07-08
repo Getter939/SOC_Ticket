@@ -210,6 +210,8 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             # Section 7
             'action_required',
             'action_precautions',
+            'actions_taken_summary',
+            'next_steps_summary',
             # Assignment
             'assigned_admin',
         ]
@@ -247,6 +249,14 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'action_precautions': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ข้อควรระวังหรือผลกระทบที่อาจเกิดขึ้นระหว่างการดำเนินการ',
+            }),
+            'actions_taken_summary': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'สรุปสิ่งที่ SOC หรือผู้ดูแลระบบดำเนินการแล้ว เพื่อใช้ในรายงาน',
+            }),
+            'next_steps_summary': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'สรุปขั้นตอนถัดไปหรือการติดตามผล เพื่อใช้ในรายงาน',
             }),
         }
 
@@ -440,7 +450,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'spread_to_others',
             'destination_ip', 'ioc_details', 'mitre_phase', 'action_required',
-            'action_precautions',
+            'action_precautions', 'actions_taken_summary', 'next_steps_summary',
         ]
         widgets = {
             'classification': forms.RadioSelect(),
@@ -451,6 +461,8 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'ioc_details': forms.Textarea(attrs={'rows': 3}),
             'action_required': forms.Textarea(attrs={'rows': 3}),
             'action_precautions': forms.Textarea(attrs={'rows': 3}),
+            'actions_taken_summary': forms.Textarea(attrs={'rows': 3}),
+            'next_steps_summary': forms.Textarea(attrs={'rows': 3}),
         }
 
     def __init__(self, *args, **kwargs):

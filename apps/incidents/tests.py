@@ -18,12 +18,15 @@ Test classes
 13. TriageWorkflowIntegrityTest   — manual-triage + wazuh-alert ticket creation
 14. SuperuserAccessTest           — superuser bypass across the redesigned flow
 15. AttachmentDownloadSecurityTest / AttachmentUploadLimitTest
+16. TicketReportExportTest       — preview, DOCX/PDF generation + metadata
 
 Run with:  py manage.py test apps.incidents --settings=config.settings_local
 """
 
+import hashlib
 import shutil
 import tempfile
+from io import BytesIO
 from unittest.mock import patch
 
 from datetime import timedelta
@@ -36,6 +39,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from docx import Document
+from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
 from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
@@ -44,6 +49,7 @@ from apps.incidents.models import (
     bundle_suffix_for_index,
 )
 from apps.incidents.notifications import notify_containment_required
+from apps.incidents.reports import REPORT_TEMPLATE_VERSION, generate_ticket_report
 from apps.wazuh_ingest.models import WazuhAlert
 
 
@@ -85,6 +91,8 @@ def _ticket_post_data(**overrides):
         'classification': Ticket.CLASSIFICATION_INCIDENT,
         't1_route': TicketForm.ROUTE_ESCALATE_T2,
         'severity': 'High',
+        'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Investigating',
         'detailed_issue2': 'Investigating Other',
@@ -131,6 +139,19 @@ def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
             ticket.transition_to(step, actor, 'close')
         else:  # AWAITING_CONTAINMENT
             ticket.transition_to(step, t1, 'assign admin')
+
+
+def _docx_text(content):
+    doc = Document(BytesIO(content))
+    parts = [p.text for p in doc.paragraphs]
+    parts.extend(
+        p.text
+        for table in doc.tables
+        for row in table.rows
+        for cell in row.cells
+        for p in cell.paragraphs
+    )
+    return '\n'.join(parts)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -201,6 +222,134 @@ class TicketVisibilityViewTest(TestCase):
 # ──────────────────────────────────────────────────────────────────────────── #
 # 3. Workflow transition tests                                                  #
 # ──────────────────────────────────────────────────────────────────────────── #
+
+class TicketReportExportTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('report_t1', phone='02-574-8209')
+        cls.admin = _make_user('report_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.other_admin = _make_user('report_other_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.ticket = _make_ticket(
+            created_by=cls.t1,
+            assigned_admin=cls.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            incident_name='Suspicious SoftEther Signed File',
+            incident_datetime=timezone.now(),
+            reference_id='INC-2026-0001',
+            log_source='Wazuh',
+            severity='High',
+            ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            issue_type='SIEM',
+            detailed_issue='Malicious Logic',
+            detailed_issue2='Malware EDR',
+            device_name='SRV-SQL-01',
+            ip_address='192.0.2.10',
+            mac_address='AA:BB:CC:DD:EE:FF',
+            asset_type='Server',
+            operating_system='Windows Server 2019',
+            asset_owner='IT Operations',
+            spread_to_others=False,
+            destination_ip='203.0.113.50',
+            ioc_details='203.0.113.50\nsoftether.example',
+            mitre_phase='Initial Access,Execution',
+            action_required='Block IoC and inspect persistence.',
+            action_precautions='Preserve memory and logs before reboot.',
+            actions_taken_summary='SOC contacted the owner and blocked the IP.',
+            next_steps_summary='Monitor endpoint telemetry for 24 hours.',
+            remediation_summary='Unauthorized service removed.',
+            containment_report='Host isolated and C2 destination blocked.',
+        )
+        TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file='ticket_attachments/report/evidence.log',
+            original_name='evidence.log',
+            uploaded_by=cls.t1,
+        )
+
+    def test_generate_ticket_report_renders_docx_and_updates_metadata(self):
+        snapshot_updated_at = self.ticket.updated_at
+
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        content = report.content
+        text = _docx_text(content)
+
+        self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
+        self.assertIn('Suspicious SoftEther Signed File', text)
+        self.assertIn('SOC contacted the owner and blocked the IP.', text)
+        self.assertIn('Host isolated and C2 destination blocked.', text)
+        self.assertIn('Initial Access, Execution', text)
+        self.assertIn('evidence.log', text)
+        self.assertNotIn('{{ticket_id}}', text)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_ticket_updated_at, snapshot_updated_at)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+        self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_ticket_report_docx_endpoint_streams_authorized_download(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('ticket_report_docx', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx', response['Content-Disposition'])
+        content = b''.join(response.streaming_content)
+        self.assertIn('Suspicious SoftEther Signed File', _docx_text(content))
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+
+    def test_ticket_report_preview_returns_read_only_html(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'General Info')
+        self.assertContains(response, 'Incident Description')
+        self.assertContains(response, 'Scope / Affected Asset')
+        self.assertContains(response, 'IoCs / Evidence / MITRE Phases')
+        self.assertContains(response, 'Containment / Precautions')
+        self.assertContains(response, 'Remediation / Results')
+        self.assertContains(response, 'Sign-off')
+        self.assertContains(response, 'Appendix')
+        self.assertContains(response, 'Suspicious SoftEther Signed File')
+        self.assertContains(response, 'SOC contacted the owner and blocked the IP.')
+        self.assertContains(response, 'Host isolated and C2 destination blocked.')
+        self.assertContains(response, 'Back to ticket edit workspace')
+
+    def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.pdf', response['Content-Disposition'])
+
+        content = b''.join(response.streaming_content)
+        self.assertTrue(content.startswith(b'%PDF'))
+        pdf = PdfReader(BytesIO(content))
+        self.assertGreaterEqual(len(pdf.pages), 1)
+        text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+        normalized_text = ' '.join(text.split())
+        self.assertIn('Suspicious SoftEther Signed File', normalized_text)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+        self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_ticket_report_docx_endpoint_respects_ticket_visibility(self):
+        self.client.force_login(self.other_admin)
+        response = self.client.get(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        self.assertEqual(response.status_code, 404)
+
 
 class WorkflowTransitionTest(TestCase):
     @classmethod
@@ -635,8 +784,8 @@ class ManagerRoutingTest(TestCase):
 def _owner_payload(severity='Low', **overrides):
     """A valid create_ticket POST payload for the direct-to-owner route.
 
-    Extends _ticket_post_data with the two fields the create form requires that
-    the base helper omits (ncsa_severity, log_source), so the form validates.
+    Extends _ticket_post_data with the direct-owner route and a lower default
+    statutory severity suitable for the owner-remediation fast path.
     """
     data = _ticket_post_data(
         classification=Ticket.CLASSIFICATION_INCIDENT,
@@ -1678,6 +1827,8 @@ def _pi_post_data(admin_a, admin_b, **overrides):
         # shared incident facts
         'title': 'Multi-system intrusion via public-facing app',
         'severity': 'High',
+        'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Malicious Logic',
         'detailed_issue2': 'C2 Server',

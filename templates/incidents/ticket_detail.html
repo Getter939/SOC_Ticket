@@ -65,7 +65,12 @@
       </div>
       <div class="hero-summary">{{ ticket.issue_description|truncatechars:180 }}</div>
     </div>
-    <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_preview' ticket.pk %}"><i class="bi bi-eye me-1"></i>Report Preview</a>
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_docx' ticket.pk %}"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</a>
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_pdf' ticket.pk %}"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</a>
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+    </div>
   </div>
 </section>
 
@@ -135,12 +140,14 @@
       </div>
     </section>
 
-    {% if ticket.action_required or ticket.action_precautions %}
+    {% if ticket.action_required or ticket.action_precautions or ticket.actions_taken_summary or ticket.next_steps_summary %}
     <section id="response" class="card section-card mb-4">
       <div class="card-header"><h2 class="section-title"><i class="bi bi-shield-check me-2"></i>แนวทางตอบสนอง</h2><div class="section-hint">สิ่งที่ต้องทำและข้อควรระวังก่อนเปลี่ยนแปลงระบบ</div></div>
       <div class="card-body"><div class="row g-3">
         {% if ticket.action_required %}<div class="col-md-7"><div class="response-panel info"><div class="panel-title text-primary">สิ่งที่ต้องดำเนินการ</div><div class="panel-copy">{{ ticket.action_required|linebreaks }}</div></div></div>{% endif %}
         {% if ticket.action_precautions %}<div class="col-md-5"><div class="response-panel warning"><div class="panel-title text-warning-emphasis">ข้อควรระวัง</div><div class="panel-copy">{{ ticket.action_precautions|linebreaks }}</div></div></div>{% endif %}
+        {% if ticket.actions_taken_summary %}<div class="col-md-6"><div class="response-panel success"><div class="panel-title text-success">เรื่องที่ดำเนินการแล้ว</div><div class="panel-copy">{{ ticket.actions_taken_summary|linebreaks }}</div></div></div>{% endif %}
+        {% if ticket.next_steps_summary %}<div class="col-md-6"><div class="response-panel info"><div class="panel-title text-primary">การดำเนินการลำดับถัดไป</div><div class="panel-copy">{{ ticket.next_steps_summary|linebreaks }}</div></div></div>{% endif %}
       </div></div>
     </section>
     {% endif %}

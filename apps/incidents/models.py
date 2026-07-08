@@ -659,6 +659,17 @@ class Ticket(models.Model):
         verbose_name='ข้อควรระวังในการดำเนินการ',
     )
 
+    # Report-only prose: lets analysts polish the official document wording
+    # without overloading lifecycle logs or containment fields.
+    actions_taken_summary = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปเรื่องที่ดำเนินการแล้ว',
+    )
+    next_steps_summary = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปการดำเนินการลำดับถัดไป',
+    )
+
     # ── Section 9: Remediation ──────────────────────────────────────── #
     remediation_summary = models.TextField(
         blank=True, default='',
@@ -776,6 +787,17 @@ class Ticket(models.Model):
         verbose_name='ผู้อนุมัติ',
     )
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name='วันที่อนุมัติ')
+
+    # DOCX report export metadata. These are audit fields for the latest
+    # generated report artifact, not the canonical ticket content itself.
+    report_template_version = models.CharField(max_length=20, blank=True, default='')
+    report_generated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='generated_ticket_reports',
+    )
+    report_generated_at = models.DateTimeField(null=True, blank=True)
+    report_ticket_updated_at = models.DateTimeField(null=True, blank=True)
+    report_sha256 = models.CharField(max_length=64, blank=True, default='')
 
     update_notes = models.TextField(blank=True, null=True, verbose_name='บันทึกการติดตามงาน')
     ola_triage_deadline = models.DateTimeField(

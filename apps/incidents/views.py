@@ -33,6 +33,11 @@ from .notifications import (
     notify_system_owner_created,
     notify_system_owner_closed,
 )
+from .reports import (
+    build_ticket_report_render_context,
+    generate_ticket_report,
+    generate_ticket_report_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -896,6 +901,44 @@ def ticket_detail(request, pk):
         'subtask_update_form': subtask_update_form,
         'can_create_subtask': can_create_subtask,
     })
+
+
+@login_required
+def ticket_report_docx(request, pk):
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    report = generate_ticket_report(pk, generated_by=request.user)
+    return FileResponse(
+        report.as_file(),
+        as_attachment=True,
+        filename=report.filename,
+        content_type=report.content_type,
+    )
+
+
+@login_required
+def ticket_report_pdf(request, pk):
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    report = generate_ticket_report_pdf(
+        pk,
+        generated_by=request.user,
+        base_url=request.build_absolute_uri('/'),
+    )
+    return FileResponse(
+        report.as_file(),
+        as_attachment=True,
+        filename=report.filename,
+        content_type=report.content_type,
+    )
+
+
+@login_required
+def ticket_report_preview(request, pk):
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    return render(
+        request,
+        'incidents/report_preview.html',
+        build_ticket_report_render_context(ticket),
+    )
 
 
 @login_required

@@ -31,10 +31,12 @@ class TicketAdmin(admin.ModelAdmin):
         'ticket_id', 'created_at', 'updated_at', 'escalated_to_t2_at',
         'verified_by', 'verified_at',
         'approved_by', 'approved_at',
+        'report_template_version', 'report_generated_by', 'report_generated_at',
+        'report_ticket_updated_at', 'report_sha256',
     )
     raw_id_fields = (
         'assigned_to', 'assigned_admin', 'created_by', 'system_owner',
-        'project_incident',
+        'project_incident', 'report_generated_by',
     )
 
     fieldsets = (
@@ -42,7 +44,8 @@ class TicketAdmin(admin.ModelAdmin):
             'fields': (
                 'ticket_id', 'device_name', 'ip_address',
                 'issue_type', 'detailed_issue', 'detailed_issue2',
-                'issue_description', 'update_notes',
+                'issue_description', 'actions_taken_summary',
+                'next_steps_summary', 'update_notes',
             ),
         }),
         ('เจ้าของระบบ', {
@@ -60,6 +63,12 @@ class TicketAdmin(admin.ModelAdmin):
         }),
         ('การรับรอง / อนุมัติ (อ่านอย่างเดียว)', {
             'fields': ('verified_by', 'verified_at', 'approved_by', 'approved_at'),
+        }),
+        ('Report export metadata (read-only)', {
+            'fields': (
+                'report_template_version', 'report_generated_by',
+                'report_generated_at', 'report_ticket_updated_at', 'report_sha256',
+            ),
         }),
         ('OLA และวันที่', {
             'fields': ('ola_triage_deadline', 'ola_contain_deadline',
