@@ -3,6 +3,9 @@
 {% block title %}เปิดเคสใหม่ — SOC Support System{% endblock %}
 
 {% block content %}
+
+<!-- {{ issue_detail|json_script:"issue_data_description" }}
+{{ issue_precaution|json_script:"issue_data_precautions" }} -->
 <style>
   .section-header {
     background: #1a1a2e; color: #fff;
@@ -84,6 +87,8 @@
 
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
+    {{ issue_detail|json_script:"issue_data_description" }}
+    {{ issue_precaution|json_script:"issue_data_precautions" }}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
     {% if form.errors %}
     <div class="alert alert-danger" id="error-summary">
@@ -552,6 +557,35 @@ updateDecisionPanels();
       }
     }
   });
+
+
+  // Test alert
+document.getElementById('id_detailed_issue')?.addEventListener('change', function () {
+  const opt = this.value;
+  const issue_data_description = JSON.parse(document.getElementById('issue_data_description').textContent);
+  const issue_data_precautions = JSON.parse(document.getElementById('issue_data_precautions').textContent);
+  
+  const issue_Textarea = document.getElementById('id_action_required');
+  const issue_precautions = document.getElementById('id_action_precautions');
+  
+  
+  if (opt && issue_data_description[opt] && issue_data_precautions[opt] ) {
+      issue_Textarea.value = issue_data_description[opt];
+      issue_precautions.value = issue_data_precautions[opt];
+  } else {
+    //alert('none');
+    issue_Textarea.value = '';
+    issue_precautions.value = '';
+  }
+    
+    //fillText(document.getElementById('id_issue_description'), opt.val, 'test');
+});
+
+
+
+
+
+
 })();
 
 // ── Error summary: click-to-jump + auto-scroll/focus the first error ──
@@ -580,6 +614,17 @@ updateDecisionPanels();
   const first = summary.querySelector('.error-jump');
   if (first) setTimeout(() => jump(first.dataset.target), 200);
 })();
+
+// Test alert
+/*document.getElementById('id_detailed_issue')?.addEventListener('change', function () {
+  const opt = this.options[this.selectedIndex];
+    //if (opt.value) return;
+    //alert(opt.value);
+    //document.getElementById('id_issue_description').innerText = opt.value; 
+    fillText(document.getElementById('id_issue_description'), opt, 'test');
+});*/
+
+
 </script>
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% endblock %}

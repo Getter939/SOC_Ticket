@@ -1,6 +1,7 @@
 import calendar
 import ipaddress
 import logging
+import json
 
 import requests
 from django.contrib import messages
@@ -359,6 +360,14 @@ def ticket_list(request):
 
 @login_required
 def create_ticket(request):
+    issue_description_detail ={
+            "Unsuccessful Attempt": "1. xxxxxxxxx\n2. xxxxxxxxx\n3. xxxxxxxxxx\n",
+            "Reconnaissance": "1. xxxxxxxxx\n2. xxxxxxxxx\n",
+    }
+    issue_precautions_detail ={
+            "Unsuccessful Attempt": "1. xxxxxxxxx\n",
+            "Reconnaissance": "1. xxxxxxxxx\n2. xxxxxxxxx\n",
+    }
     profile = getattr(request.user, 'profile', None)
     # Tickets are always created by Tier 1 — no other role may open a case.
     if not request.user.is_superuser and (profile is None or not profile.is_tier1):
@@ -493,11 +502,24 @@ def create_ticket(request):
             if parent:
                 initial['detailed_issue'] = parent
         form = TicketForm(initial=initial, user=request.user)
+        # issue_description_detail ={
+        #     "Unsuccessful Attempt": "1. xxxxxxxxx\n2. xxxxxxxxx\n3. xxxxxxxxxx\n",
+        #     "Reconnaissance": "1. xxxxxxxxx\n2. xxxxxxxxx\n",
+        # }
+        # issue_precautions_detail ={
+        #     "Unsuccessful Attempt": "1. xxxxxxxxx\n",
+        #     "Reconnaissance": "1. xxxxxxxxx\n2. xxxxxxxxx\n",
+        # }
 
-    return render(request, 'incidents/ticket_form.html', {
+        #issue_description_detail = json.loads(data_dict)
+
+    return render(request, 'incidents/ticket_form.html',
+    {
         'form': form,
         'triage_id': triage_id or '',
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
+        'issue_detail': issue_description_detail,
+        'issue_precaution': issue_precautions_detail,
     })
 
 
