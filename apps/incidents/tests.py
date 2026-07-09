@@ -370,6 +370,23 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
         self.assertIsNotNone(self.ticket.report_generated_at)
 
+    def test_pdf_export_embeds_bundled_thai_font(self):
+        from reportlab.pdfbase import pdfmetrics
+        from apps.incidents.reports import REPORT_FONT_NAME, _register_pdf_font
+
+        _register_pdf_font()
+        registered = pdfmetrics.getRegisteredFontNames()
+        self.assertIn(REPORT_FONT_NAME, registered)
+        self.assertIn(f'{REPORT_FONT_NAME}-Bold', registered)
+
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+        content = b''.join(response.streaming_content)
+        # The bundled TH Sarabun New faces must be embedded so Thai headings and
+        # values render as real glyphs instead of blank boxes on any host.
+        self.assertIn(b'THSarabunNew', content)
+        self.assertIn(b'THSarabunNew-Bold', content)
+
     def test_ticket_report_docx_endpoint_respects_ticket_visibility(self):
         self.client.force_login(self.other_admin)
         response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))

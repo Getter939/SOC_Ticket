@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from io import BytesIO
@@ -17,6 +18,8 @@ from xhtml2pdf import pisa
 from .models import Ticket
 
 
+logger = logging.getLogger(__name__)
+
 REPORT_TEMPLATE_VERSION = 'v1'
 REPORT_TEMPLATE_NAME = f'report_template_{REPORT_TEMPLATE_VERSION}.docx'
 REPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -24,11 +27,21 @@ PDF_CONTENT_TYPE = 'application/pdf'
 REPORT_TEMPLATE_PATH = Path(__file__).resolve().parent / 'report_templates' / REPORT_TEMPLATE_NAME
 REPORT_PREVIEW_TEMPLATE = 'incidents/report_preview.html'
 REPORT_FONT_NAME = 'ReportUnicode'
-REPORT_FONT_CANDIDATES = (
+REPORT_FONT_DIR = Path(__file__).resolve().parent / 'report_templates' / 'fonts'
+# TH Sarabun New is bundled under report_templates/fonts/ (see NOTICE.md) so the
+# PDF renders Thai on any host. Each entry: (bold, italic, filename, reportlab
+# font name) — real weights instead of faux-mapping everything to the regular.
+REPORT_FONT_VARIANTS = (
+    (0, 0, 'THSarabunNew.ttf', REPORT_FONT_NAME),
+    (1, 0, 'THSarabunNew-Bold.ttf', f'{REPORT_FONT_NAME}-Bold'),
+    (0, 1, 'THSarabunNew-Italic.ttf', f'{REPORT_FONT_NAME}-Italic'),
+    (1, 1, 'THSarabunNew-BoldItalic.ttf', f'{REPORT_FONT_NAME}-BoldItalic'),
+)
+# Last-resort system paths, only consulted if the bundled regular face is
+# missing — keeps Thai rendering alive on a host where the bundle was stripped.
+REPORT_FONT_FALLBACKS = (
     Path('C:/Windows/Fonts/THSarabunNew.ttf'),
-    Path('C:/Windows/Fonts/THSarabun.ttf'),
-    Path('C:/Windows/Fonts/leelawad.ttf'),
-    Path('C:/Windows/Fonts/tahoma.ttf'),
+    Path('/usr/share/fonts/truetype/thai/THSarabunNew.ttf'),
     Path('/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf'),
     Path('/usr/share/fonts/truetype/thai/Garuda.ttf'),
 )
@@ -283,16 +296,46 @@ def _register_pdf_font():
     if REPORT_FONT_NAME in pdfmetrics.getRegisteredFontNames():
         return
 
-    for font_path in REPORT_FONT_CANDIDATES:
-        if font_path.exists():
+    registered = {}  # (bold, italic) -> reportlab font name
+    for bold, italic, filename, font_name in REPORT_FONT_VARIANTS:
+        font_path = REPORT_FONT_DIR / filename
+        if not font_path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+        except (OSError, TTFError):
+            logger.warning('Could not register bundled report font %s', font_path)
+            continue
+        registered[(bold, italic)] = font_name
+
+    if (0, 0) not in registered:
+        # Bundled regular face missing/unreadable — fall back to a system font
+        # so Thai text still renders instead of blank boxes.
+        for font_path in REPORT_FONT_FALLBACKS:
+            if not font_path.exists():
+                continue
             try:
                 pdfmetrics.registerFont(TTFont(REPORT_FONT_NAME, str(font_path)))
             except (OSError, TTFError):
                 continue
-            for bold in (0, 1):
-                for italic in (0, 1):
-                    addMapping(REPORT_FONT_NAME, bold, italic, REPORT_FONT_NAME)
-            return
+            registered[(0, 0)] = REPORT_FONT_NAME
+            logger.warning(
+                'Bundled report font missing; using system fallback %s', font_path,
+            )
+            break
+
+    if (0, 0) not in registered:
+        logger.error(
+            'No Thai-capable report font found (looked in %s and system paths); '
+            'PDF Thai text will render as blank boxes',
+            REPORT_FONT_DIR,
+        )
+        return
+
+    regular = registered[(0, 0)]
+    for bold in (0, 1):
+        for italic in (0, 1):
+            addMapping(REPORT_FONT_NAME, bold, italic, registered.get((bold, italic), regular))
 
 
 def _resolve_pdf_resource(uri, rel):
