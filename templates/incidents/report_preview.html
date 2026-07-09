@@ -35,7 +35,8 @@
       border-bottom: 1px solid #d9e1ea;
     }
 
-    .report-actions a {
+    .report-actions a,
+    .report-actions button {
       display: inline-block;
       padding: 7px 12px;
       border: 1px solid #b9c6d3;
@@ -44,6 +45,14 @@
       text-decoration: none;
       font-weight: 700;
       font-size: 10pt;
+      background: #ffffff;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .report-actions form {
+      display: inline;
+      margin: 0;
     }
 
     .report-actions .muted {
@@ -195,8 +204,8 @@
     <div class="report-actions">
       <div>
         <a href="{% url 'ticket_detail' ticket.pk %}">Back to ticket edit workspace</a>
-        <a href="{% url 'ticket_report_docx' ticket.pk %}">Download DOCX</a>
-        <a href="{% url 'ticket_report_pdf' ticket.pk %}">Download PDF</a>
+        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<button type="submit">Download DOCX</button></form>
+        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<button type="submit">Download PDF</button></form>
       </div>
       <div class="muted">Read-only preview. Edit ticket fields in the ticket workspace.</div>
     </div>

@@ -788,9 +788,11 @@ class Ticket(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name='วันที่อนุมัติ')
 
-    # DOCX report export metadata. These are audit fields for the latest
-    # generated report artifact, not the canonical ticket content itself.
+    # Report export metadata. These are audit fields for the latest generated
+    # report artifact (report_format says whether that artifact was DOCX or
+    # PDF), not the canonical ticket content itself.
     report_template_version = models.CharField(max_length=20, blank=True, default='')
+    report_format = models.CharField(max_length=8, blank=True, default='')
     report_generated_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='generated_ticket_reports',

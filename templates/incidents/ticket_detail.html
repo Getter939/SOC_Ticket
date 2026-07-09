@@ -67,8 +67,8 @@
     </div>
     <div class="d-flex gap-2 flex-wrap">
       <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_preview' ticket.pk %}"><i class="bi bi-eye me-1"></i>Report Preview</a>
-      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_docx' ticket.pk %}"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</a>
-      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_pdf' ticket.pk %}"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</a>
+      <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</button></form>
+      <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</button></form>
       <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
     </div>
   </div>

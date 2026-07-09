@@ -15,6 +15,7 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
@@ -904,9 +905,15 @@ def ticket_detail(request, pk):
 
 
 @login_required
+@require_POST
 def ticket_report_docx(request, pk):
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
-    report = generate_ticket_report(pk, generated_by=request.user)
+    try:
+        report = generate_ticket_report(pk, generated_by=request.user)
+    except Exception:
+        logger.exception('DOCX report generation failed for ticket %s', pk)
+        messages.error(request, 'ไม่สามารถสร้างรายงาน DOCX ได้ — โปรดแจ้งผู้ดูแลระบบ')
+        return redirect('ticket_detail', pk=pk)
     return FileResponse(
         report.as_file(),
         as_attachment=True,
@@ -916,13 +923,19 @@ def ticket_report_docx(request, pk):
 
 
 @login_required
+@require_POST
 def ticket_report_pdf(request, pk):
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
-    report = generate_ticket_report_pdf(
-        pk,
-        generated_by=request.user,
-        base_url=request.build_absolute_uri('/'),
-    )
+    try:
+        report = generate_ticket_report_pdf(
+            pk,
+            generated_by=request.user,
+            base_url=request.build_absolute_uri('/'),
+        )
+    except Exception:
+        logger.exception('PDF report generation failed for ticket %s', pk)
+        messages.error(request, 'ไม่สามารถสร้างรายงาน PDF ได้ — โปรดแจ้งผู้ดูแลระบบ')
+        return redirect('ticket_detail', pk=pk)
     return FileResponse(
         report.as_file(),
         as_attachment=True,

@@ -283,6 +283,7 @@ class TicketReportExportTest(TestCase):
 
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_format, 'docx')
         self.assertEqual(self.ticket.report_generated_by, self.t1)
         self.assertEqual(self.ticket.report_ticket_updated_at, snapshot_updated_at)
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
@@ -290,7 +291,7 @@ class TicketReportExportTest(TestCase):
 
     def test_ticket_report_docx_endpoint_streams_authorized_download(self):
         self.client.force_login(self.t1)
-        response = self.client.get(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -302,8 +303,31 @@ class TicketReportExportTest(TestCase):
         self.assertIn('Suspicious SoftEther Signed File', _docx_text(content))
 
         self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_format, 'docx')
         self.assertEqual(self.ticket.report_generated_by, self.t1)
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+
+    def test_ticket_report_export_rejects_get(self):
+        self.client.force_login(self.t1)
+        snapshot = self.ticket.report_generated_at
+        for url_name in ('ticket_report_docx', 'ticket_report_pdf'):
+            response = self.client.get(reverse(url_name, args=[self.ticket.pk]))
+            self.assertEqual(response.status_code, 405)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_generated_at, snapshot)
+
+    def test_ticket_report_export_failure_redirects_with_message(self):
+        self.client.force_login(self.t1)
+        with patch(
+            'apps.incidents.views.generate_ticket_report',
+            side_effect=ValueError('Unresolved report template placeholders: {{bogus}}'),
+        ):
+            response = self.client.post(
+                reverse('ticket_report_docx', args=[self.ticket.pk]), follow=True,
+            )
+        self.assertRedirects(response, reverse('ticket_detail', args=[self.ticket.pk]))
+        message_texts = [str(m) for m in response.context['messages']]
+        self.assertTrue(any('ไม่สามารถสร้างรายงาน DOCX ได้' in m for m in message_texts))
 
     def test_ticket_report_preview_returns_read_only_html(self):
         self.client.force_login(self.t1)
@@ -325,7 +349,7 @@ class TicketReportExportTest(TestCase):
 
     def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
         self.client.force_login(self.t1)
-        response = self.client.get(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
@@ -341,13 +365,14 @@ class TicketReportExportTest(TestCase):
 
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_format, 'pdf')
         self.assertEqual(self.ticket.report_generated_by, self.t1)
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
         self.assertIsNotNone(self.ticket.report_generated_at)
 
     def test_ticket_report_docx_endpoint_respects_ticket_visibility(self):
         self.client.force_login(self.other_admin)
-        response = self.client.get(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
         self.assertEqual(response.status_code, 404)
 
 

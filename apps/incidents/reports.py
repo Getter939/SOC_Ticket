@@ -69,7 +69,7 @@ def generate_ticket_report(ticket_id, generated_by=None):
     content = output.getvalue()
     digest = hashlib.sha256(content).hexdigest()
 
-    _record_export_metadata(ticket, generated_by, generated_at, digest)
+    _record_export_metadata(ticket, generated_by, generated_at, digest, report_format='docx')
 
     filename = f'report_{ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx'
     return GeneratedTicketReport(filename=filename, content=content)
@@ -87,7 +87,7 @@ def generate_ticket_report_pdf(ticket_id, generated_by=None, base_url=None):
     content = _render_pdf_from_html(html, base_url=base_url)
     digest = hashlib.sha256(content).hexdigest()
 
-    _record_export_metadata(ticket, generated_by, generated_at, digest)
+    _record_export_metadata(ticket, generated_by, generated_at, digest, report_format='pdf')
 
     filename = f'report_{ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.pdf'
     return GeneratedTicketReport(
@@ -251,10 +251,11 @@ def build_ticket_report_sections(report):
     ]
 
 
-def _record_export_metadata(ticket, generated_by, generated_at, digest):
+def _record_export_metadata(ticket, generated_by, generated_at, digest, report_format):
     generated_by_id = getattr(generated_by, 'pk', None)
     Ticket.objects.filter(pk=ticket.pk).update(
         report_template_version=REPORT_TEMPLATE_VERSION,
+        report_format=report_format,
         report_generated_by_id=generated_by_id,
         report_generated_at=generated_at,
         report_ticket_updated_at=ticket.updated_at,
