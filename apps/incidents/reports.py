@@ -131,7 +131,6 @@ def build_ticket_report_context(ticket, generated_at=None):
     generated_at = generated_at or timezone.now()
     return {
         'ticket_id': _value(ticket.display_id or ticket.ticket_id),
-        'ticket_pk': _value(ticket.pk),
         'incident_datetime': _format_dt(ticket.incident_datetime),
         'incident_name': _value(ticket.incident_name),
         'classification': _value(ticket.get_classification_display()),

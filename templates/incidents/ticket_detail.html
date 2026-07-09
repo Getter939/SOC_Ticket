@@ -70,6 +70,9 @@
       <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</button></form>
       <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</button></form>
       <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+      {% if ticket.report_generated_at and ticket.report_ticket_updated_at and ticket.updated_at > ticket.report_ticket_updated_at %}
+      <span class="badge bg-warning text-dark w-100"><i class="bi bi-exclamation-triangle-fill me-1"></i>Ticket ถูกแก้ไขหลังสร้างรายงานล่าสุด ({{ ticket.report_format|upper }} {{ ticket.report_generated_at|date:"d/m/Y H:i" }}) — ควรสร้างรายงานใหม่</span>
+      {% endif %}
     </div>
   </div>
 </section>

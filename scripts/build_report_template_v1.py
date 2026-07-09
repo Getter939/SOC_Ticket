@@ -250,7 +250,7 @@ def add_appendix(doc):
     add_single_table(doc, categories, header_fill=LIGHT_GRAY)
 
 
-def build():
+def build(output_path=OUTPUT_PATH):
     doc = Document()
     style_doc(doc)
     add_title(doc)
@@ -302,9 +302,10 @@ def build():
     add_signature_table(doc)
     add_appendix(doc)
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(OUTPUT_PATH)
-    print(OUTPUT_PATH)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(output_path))
+    print(output_path)
 
 
 if __name__ == '__main__':

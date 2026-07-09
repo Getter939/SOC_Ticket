@@ -24,9 +24,12 @@ Run with:  py manage.py test apps.incidents --settings=config.settings_local
 """
 
 import hashlib
+import importlib.util
+import re
 import shutil
 import tempfile
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 from datetime import timedelta
@@ -49,7 +52,10 @@ from apps.incidents.models import (
     bundle_suffix_for_index,
 )
 from apps.incidents.notifications import notify_containment_required
-from apps.incidents.reports import REPORT_TEMPLATE_VERSION, generate_ticket_report
+from apps.incidents.reports import (
+    REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
+    build_ticket_report_context, generate_ticket_report, _iter_paragraphs,
+)
 from apps.wazuh_ingest.models import WazuhAlert
 
 
@@ -391,6 +397,70 @@ class TicketReportExportTest(TestCase):
         self.client.force_login(self.other_admin)
         response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
         self.assertEqual(response.status_code, 404)
+
+    @staticmethod
+    def _docx_placeholders(path):
+        doc = Document(str(path))
+        found = set()
+        for paragraph in _iter_paragraphs(doc):
+            found.update(re.findall(r'\{\{([^}]+)\}\}', paragraph.text))
+        return found
+
+    def test_template_placeholders_match_context_keys(self):
+        # Both directions: an orphan placeholder in the .docx would raise at
+        # export time, and an unused context key is silent drift.
+        context_keys = set(build_ticket_report_context(self.ticket))
+        self.assertEqual(self._docx_placeholders(REPORT_TEMPLATE_PATH), context_keys)
+
+    def test_build_script_matches_committed_template(self):
+        script_path = Path(settings.BASE_DIR) / 'scripts' / 'build_report_template_v1.py'
+        spec = importlib.util.spec_from_file_location('build_report_template_v1', script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rebuilt_path = Path(tmp) / 'rebuilt_template.docx'
+            module.build(rebuilt_path)
+            rebuilt = self._docx_placeholders(rebuilt_path)
+
+        self.assertEqual(rebuilt, self._docx_placeholders(REPORT_TEMPLATE_PATH))
+
+    def test_docx_renders_multiline_values_as_line_breaks(self):
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        doc = Document(BytesIO(report.content))
+
+        target = next(
+            (p for p in _iter_paragraphs(doc)
+             if '203.0.113.50' in p.text and 'softether.example' in p.text),
+            None,
+        )
+        self.assertIsNotNone(target, 'ioc_details paragraph not found in DOCX')
+        # python-docx turns \n into <w:br/> (older versions used <w:cr/>);
+        # either way the two IoC lines must not collapse into one.
+        breaks = target._p.findall(f'.//{{{target._p.nsmap["w"]}}}br')
+        carriage = target._p.findall(f'.//{{{target._p.nsmap["w"]}}}cr')
+        self.assertTrue(breaks or carriage, 'multiline value lost its line break')
+
+    def test_ticket_detail_shows_stale_report_badge(self):
+        stale_marker = 'หลังสร้างรายงานล่าสุด'
+        self.client.force_login(self.t1)
+
+        # No report generated yet — no badge.
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertNotContains(response, stale_marker)
+
+        # Fresh report — still no badge.
+        self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertNotContains(response, stale_marker)
+
+        # Ticket modified after the export — badge appears.
+        Ticket.objects.filter(pk=self.ticket.pk).update(
+            updated_at=timezone.now() + timedelta(seconds=5),
+        )
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertContains(response, stale_marker)
+        self.assertContains(response, 'ล่าสุด (DOCX')
 
 
 class WorkflowTransitionTest(TestCase):
