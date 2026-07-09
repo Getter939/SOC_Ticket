@@ -54,7 +54,8 @@ from apps.incidents.models import (
 from apps.incidents.notifications import notify_containment_required
 from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
-    build_ticket_report_context, generate_ticket_report, _iter_paragraphs,
+    build_ticket_report_context, build_ticket_report_sections,
+    generate_ticket_report, _iter_paragraphs,
 )
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -286,6 +287,12 @@ class TicketReportExportTest(TestCase):
         self.assertIn('Initial Access, Execution', text)
         self.assertIn('evidence.log', text)
         self.assertNotIn('{{ticket_id}}', text)
+        # Checkbox states reflect the ticket: INCIDENT / High / SEVERE / Server.
+        self.assertIn('☑ Incident', text)
+        self.assertIn('☐ Event', text)
+        self.assertIn('☑ High', text)
+        self.assertIn('☑ ร้ายแรง', text)   # NCSA severe
+        self.assertIn('☑ Server', text)
 
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
@@ -340,18 +347,24 @@ class TicketReportExportTest(TestCase):
         response = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'General Info')
-        self.assertContains(response, 'Incident Description')
-        self.assertContains(response, 'Scope / Affected Asset')
-        self.assertContains(response, 'IoCs / Evidence / MITRE Phases')
-        self.assertContains(response, 'Containment / Precautions')
-        self.assertContains(response, 'Remediation / Results')
-        self.assertContains(response, 'Sign-off')
-        self.assertContains(response, 'Appendix')
+        # NT-form section titles.
+        self.assertContains(response, 'ข้อมูลทั่วไป (General Information)')
+        self.assertContains(response, 'รายละเอียดเหตุการณ์ (Incident Description)')
+        self.assertContains(response, 'Scope ทรัพย์สินที่ได้รับผลกระทบ')
+        self.assertContains(response, 'Indicators of Compromise หรือหลักฐานที่พบ')
+        self.assertContains(response, 'สิ่งที่ต้องดำเนินการ (Containment)')
+        self.assertContains(response, 'สรุปผลการดำเนินการแก้ไข')
+        self.assertContains(response, 'หมวดหมู่ของภัยคุกคามทางไซเบอร์')
+        # Ticket data filled in.
         self.assertContains(response, 'Suspicious SoftEther Signed File')
         self.assertContains(response, 'SOC contacted the owner and blocked the IP.')
         self.assertContains(response, 'Host isolated and C2 destination blocked.')
-        self.assertContains(response, 'Back to ticket edit workspace')
+        self.assertContains(response, 'กลับไปแก้ไข Ticket')
+        # Data-driven checkbox: INCIDENT is checked, Event is not (☑=&#9745;, ☐=&#9744;).
+        self.assertContains(response, '&#9745;</span>&#160;Incident')
+        self.assertContains(response, '&#9744;</span>&#160;Event')
+        # NT logo embedded as a data URI.
+        self.assertContains(response, 'data:image/png;base64,')
 
     def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
         self.client.force_login(self.t1)
@@ -413,8 +426,8 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(self._docx_placeholders(REPORT_TEMPLATE_PATH), context_keys)
 
     def test_build_script_matches_committed_template(self):
-        script_path = Path(settings.BASE_DIR) / 'scripts' / 'build_report_template_v1.py'
-        spec = importlib.util.spec_from_file_location('build_report_template_v1', script_path)
+        script_path = Path(settings.BASE_DIR) / 'scripts' / 'build_report_template_v2.py'
+        spec = importlib.util.spec_from_file_location('build_report_template_v2', script_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
@@ -424,6 +437,45 @@ class TicketReportExportTest(TestCase):
             rebuilt = self._docx_placeholders(rebuilt_path)
 
         self.assertEqual(rebuilt, self._docx_placeholders(REPORT_TEMPLATE_PATH))
+
+    def _checkbox_options(self, ticket, label):
+        """Return the {label: checked} options for a named checkbox row."""
+        report = build_ticket_report_context(ticket)
+        for section in build_ticket_report_sections(report, ticket):
+            for row in section['rows']:
+                if row.get('type') == 'checks' and row['label'] == label:
+                    return {opt['label']: opt['checked'] for opt in row['options']}
+        raise AssertionError(f'checkbox row {label!r} not found')
+
+    def test_report_sections_reflect_ticket_checkbox_state(self):
+        opts = self._checkbox_options(self.ticket, 'ประเภท: event หรือ incident')
+        self.assertTrue(opts['Incident'])
+        self.assertFalse(opts['Event'])
+
+        sev = self._checkbox_options(self.ticket, 'ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)')
+        self.assertEqual([k for k, v in sev.items() if v], ['High'])
+
+        ncsa = self._checkbox_options(self.ticket, 'ระดับความรุนแรง (อ้างอิงตาม สกมช.)')
+        self.assertEqual([k for k, v in ncsa.items() if v], ['ร้ายแรง'])
+
+        # is_emergency drives ระดับความสำคัญ (สำคัญ vs สำคัญมาก).
+        imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+        self.assertEqual([k for k, v in imp.items() if v], ['สำคัญ'])
+
+    def test_emergency_flag_flips_importance_checkbox(self):
+        self.ticket.is_emergency = True
+        imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+        self.assertEqual([k for k, v in imp.items() if v], ['สำคัญมาก'])
+
+    def test_pdf_repeats_footer_on_every_page(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+        pdf = PdfReader(BytesIO(b''.join(response.streaming_content)))
+        pages_with_footer = sum(
+            1 for page in pdf.pages
+            if 'INCIDENT REPORT CONTAINMENT' in (page.extract_text() or '')
+        )
+        self.assertEqual(pages_with_footer, len(pdf.pages))
 
     def test_docx_renders_multiline_values_as_line_breaks(self):
         report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)

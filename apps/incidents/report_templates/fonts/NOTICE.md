@@ -1,4 +1,21 @@
-# Bundled font: TH Sarabun New
+# Bundled fonts
+
+These `.ttf` files are bundled so that incident reports render Thai text and
+checkbox glyphs on any deployment host, without depending on system-installed
+fonts.
+
+## DejaVu Sans (checkbox glyphs)
+
+- **Font**: DejaVu Sans (regular, bold)
+- **Purpose**: TH Sarabun New has no ballot-box glyphs (☐ U+2610 / ☑ U+2611);
+  DejaVu Sans supplies them for the report's checkbox form fields.
+- **License**: Bitstream Vera Fonts license + DejaVu changes in the public
+  domain — freely redistributable. Copyright (c) 2003 Bitstream, Inc.;
+  (c) 2006 Tavmjong Bah. Full text: <https://dejavu-fonts.github.io/License.html>
+
+---
+
+# TH Sarabun New
 
 These `.ttf` files are bundled so that PDF incident reports render Thai text on
 any deployment host, without depending on system-installed fonts.

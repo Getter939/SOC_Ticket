@@ -4,11 +4,13 @@
   <meta charset="utf-8">
   <title>Incident Report {{ report.ticket_id }}</title>
   <style>
-    {{ pdf_font_face_css|safe }}
-
+    /* Screen ignores @frame; xhtml2pdf uses these frames to repeat the NT logo
+       header and the footer on every page. Letter = 612x792pt, ~0.6in margins. */
     @page {
-      size: Letter;
-      margin: 0.75in;
+      size: letter;
+      @frame header_frame { -pdf-frame-content: 'reportHeader'; left: 43pt; width: 526pt; top: 16pt; height: 66pt; }
+      @frame content_frame { left: 43pt; width: 526pt; top: 92pt; height: 662pt; }
+      @frame footer_frame { -pdf-frame-content: 'reportFooter'; left: 43pt; width: 526pt; top: 760pt; height: 26pt; }
     }
 
     * { box-sizing: border-box; }
@@ -16,186 +18,105 @@
     body {
       margin: 0;
       background: #edf1f5;
-      color: #1f2933;
-      font-family: "ReportUnicode", Calibri, Arial, sans-serif;
-      font-size: 11pt;
-      line-height: 1.45;
+      color: #404040;
+      font-family: "ReportUnicode", "TH Sarabun New", Tahoma, "Segoe UI", sans-serif;
+      font-size: 12pt;
+      line-height: 1.35;
     }
 
+    .cb {
+      font-family: "ReportSymbol", "DejaVu Sans", sans-serif;
+      margin-right: 4px;
+    }
+
+    /* screen-only action bar */
     .report-actions {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 18px;
-      background: #ffffff;
-      border-bottom: 1px solid #d9e1ea;
+      position: sticky; top: 0; z-index: 2;
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; padding: 12px 18px;
+      background: #ffffff; border-bottom: 1px solid #d9e1ea;
     }
-
-    .report-actions a,
-    .report-actions button {
-      display: inline-block;
-      padding: 7px 12px;
-      border: 1px solid #b9c6d3;
-      border-radius: 6px;
-      color: #1f4d78;
-      text-decoration: none;
-      font-weight: 700;
-      font-size: 10pt;
-      background: #ffffff;
-      font-family: inherit;
-      cursor: pointer;
+    .report-actions a, .report-actions button {
+      display: inline-block; padding: 7px 12px;
+      border: 1px solid #b9c6d3; border-radius: 6px;
+      color: #1f4d78; text-decoration: none; font-weight: 700; font-size: 11pt;
+      background: #ffffff; font-family: inherit; cursor: pointer;
     }
-
-    .report-actions form {
-      display: inline;
-      margin: 0;
-    }
-
-    .report-actions .muted {
-      color: #65758b;
-      font-size: 10pt;
-    }
+    .report-actions form { display: inline; margin: 0; }
+    .report-actions .muted { color: #65758b; font-size: 11pt; }
 
     .report-page {
-      max-width: 8.5in;
-      margin: 24px auto;
-      padding: 0.75in;
-      background: #ffffff;
-      box-shadow: 0 16px 42px rgba(31, 41, 51, 0.14);
+      max-width: 8.5in; margin: 24px auto;
+      background: #ffffff; box-shadow: 0 16px 42px rgba(31, 41, 51, 0.14);
     }
+    /* Screen padding only; in the PDF the @frame insets provide the margins. */
+    @media screen { .report-page { padding: 0.6in; } }
 
-    header {
-      margin-bottom: 18px;
-      text-align: center;
-      border-bottom: 2px solid #1f4d78;
-      padding-bottom: 10px;
+    #reportHeader { text-align: right; }
+    #reportHeader img { height: 42px; }
+    #reportFooter {
+      width: 100%; border-collapse: collapse; color: #5B6775; font-size: 9pt;
+      margin-top: 20px; border-top: 1px solid #d9e1ea;
     }
+    #reportFooter td { border: none; padding: 6px 0 0; vertical-align: top; }
+    #reportFooter .right { text-align: right; }
 
-    h1 {
-      margin: 0;
-      color: #1f4d78;
-      font-size: 20pt;
-      letter-spacing: 0;
+    .banner {
+      background: #FFD100; text-align: center;
+      padding: 14px 10px; margin-bottom: 4px;
     }
+    .banner h1 { margin: 0; color: #1f2933; font-size: 20pt; letter-spacing: .5px; }
+    .banner .subtitle { margin-top: 2px; color: #1f2933; font-size: 15pt; font-weight: 700; }
 
-    .subtitle {
-      margin-top: 3px;
-      color: #1f4d78;
-      font-size: 14pt;
-      font-weight: 700;
+    .meta { text-align: right; color: #5B6775; font-size: 9pt; margin: 4px 0 12px; }
+
+    .section-band {
+      background: #FFF9C4; padding: 6px 10px; margin: 14px 0 0;
+      font-size: 13pt; font-weight: 700; color: #1f2933;
+      break-after: avoid;
     }
+    .section-band .secnum { margin-right: 4px; }
 
-    .generated {
-      margin-top: 7px;
-      color: #65758b;
-      font-size: 9pt;
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 0 0 4px; }
+    th, td {
+      border: 1px solid #BFBFBF; padding: 5px 8px;
+      vertical-align: top; word-break: break-word;
     }
-
-    section {
-      margin-top: 18px;
-      break-inside: avoid;
-    }
-
-    h2 {
-      margin: 0 0 7px;
-      color: #1f4d78;
-      font-size: 14pt;
-    }
-
-    h2 span {
-      color: #65758b;
-      font-size: 10pt;
-      font-weight: 400;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      margin-bottom: 8px;
-    }
-
-    th,
-    td {
-      border: 1px solid #b8c2cc;
-      padding: 6px 8px;
-      vertical-align: top;
-      word-break: break-word;
-    }
-
     th {
-      width: 23%;
-      background: #e8eef5;
-      color: #243b53;
-      text-align: left;
-      font-weight: 700;
+      width: 34%; background: #F2F2F2; color: #404040;
+      text-align: left; font-weight: 700;
+    }
+    td { background: #ffffff; }
+    td.checks .cb { margin-left: 12px; }
+    td.checks .cb:first-child { margin-left: 0; }
+
+    .textbox {
+      border: 1px solid #BFBFBF; padding: 10px 12px; min-height: 44px;
+      white-space: pre-wrap; margin-bottom: 4px;
     }
 
-    td {
-      background: #ffffff;
-    }
+    .checklist { border: 1px solid #BFBFBF; padding: 10px 12px; margin-bottom: 4px; }
+    .checklist .check-item { margin-bottom: 3px; }
+    .checklist .findings { margin-top: 10px; }
+    .checklist .findings .lbl { font-weight: 700; }
+    .checklist .findings .val { white-space: pre-wrap; margin: 2px 0 8px; }
 
-    .two-up th {
-      width: 22%;
-    }
+    .signoff { border: none; margin-top: 18px; }
+    .signoff td { border: none; text-align: center; width: 50%; }
+    .signoff .line { margin-bottom: 2px; }
 
-    .two-up td {
-      width: 28%;
-    }
-
-    .signoff th,
-    .signoff td {
-      text-align: center;
-      width: 33.333%;
-    }
-
-    .signature-line {
-      margin-top: 18px;
-      color: #65758b;
-    }
-
-    .appendix {
-      break-before: page;
-    }
-
-    .appendix-intro {
-      margin: 0 0 8px;
-      color: #364152;
-    }
+    .appendix { break-before: page; }
+    .appendix-intro { margin: 4px 0 8px; color: #364152; }
+    table.appendix th { text-align: center; }
 
     @media screen and (max-width: 820px) {
-      .report-page {
-        margin: 0;
-        padding: 20px;
-        box-shadow: none;
-      }
-
-      .report-actions {
-        position: static;
-        flex-direction: column;
-        align-items: flex-start;
-      }
+      .report-page { margin: 0; padding: 20px; box-shadow: none; }
+      .report-actions { position: static; flex-direction: column; align-items: flex-start; }
     }
-
     @media print {
-      body {
-        background: #ffffff;
-      }
-
-      .report-actions {
-        display: none;
-      }
-
-      .report-page {
-        max-width: none;
-        margin: 0;
-        padding: 0;
-        box-shadow: none;
-      }
+      body { background: #ffffff; }
+      .report-actions { display: none; }
+      .report-page { max-width: none; margin: 0; padding: 0; box-shadow: none; }
     }
   </style>
 </head>
@@ -203,98 +124,96 @@
   {% if show_report_actions %}
     <div class="report-actions">
       <div>
-        <a href="{% url 'ticket_detail' ticket.pk %}">Back to ticket edit workspace</a>
-        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<button type="submit">Download DOCX</button></form>
-        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<button type="submit">Download PDF</button></form>
+        <a href="{% url 'ticket_detail' ticket.pk %}">กลับไปแก้ไข Ticket</a>
+        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<button type="submit">ดาวน์โหลด DOCX</button></form>
+        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<button type="submit">ดาวน์โหลด PDF</button></form>
       </div>
-      <div class="muted">Read-only preview. Edit ticket fields in the ticket workspace.</div>
+      <div class="muted">ตัวอย่างแบบอ่านอย่างเดียว — แก้ไขข้อมูลได้ที่หน้า Ticket</div>
     </div>
   {% endif %}
 
   <main class="report-page">
-    <header>
+    <div id="reportHeader">{% if nt_logo %}<img src="{{ nt_logo }}" alt="NT">{% endif %}</div>
+
+    <div class="banner">
       <h1>INCIDENT REPORT</h1>
       <div class="subtitle">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</div>
-      <div class="generated">Template {{ report.template_version }} | Generated {{ report.generated_at }}</div>
-    </header>
+    </div>
+    <div class="meta">Template {{ report.template_version }} | จัดทำเมื่อ {{ report.generated_at }}</div>
 
     {% for section in sections %}
-      <section id="{{ section.id }}">
-        <h2>{{ section.number }}. {{ section.title }} <span>{{ section.subtitle }}</span></h2>
-
-        {% if section.layout == 'grid' %}
-          <table class="two-up">
-            <tbody>
-              {% for label_left, value_left, label_right, value_right in section.rows %}
-                <tr>
-                  <th>{{ label_left }}</th>
-                  <td>{{ value_left|linebreaksbr }}</td>
-                  <th>{{ label_right }}</th>
-                  <td>{{ value_right|linebreaksbr }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% elif section.layout == 'signoff' %}
-          <table class="signoff">
-            <thead>
+      <div class="section-band"><span class="secnum">{{ section.number }}.</span> {{ section.title }}</div>
+      {% if section.rows.0.type == 'text' %}
+        <div class="textbox">{{ section.rows.0.value }}</div>
+      {% elif section.rows.0.type == 'checklist' %}
+        <div class="checklist">
+          {% for item in section.rows.0.items %}
+            <div class="check-item"><span class="cb">&#9744;</span>&#160;{{ item }}</div>
+          {% endfor %}
+          <div class="findings">
+            {% for row in section.rows %}{% if row.type == 'kv' %}
+              <div class="lbl">{{ row.label }}:</div>
+              <div class="val">{{ row.value }}</div>
+            {% endif %}{% endfor %}
+          </div>
+        </div>
+      {% else %}
+        <table>
+          <tbody>
+            {% for row in section.rows %}
               <tr>
-                {% for label, person, signed_at in section.rows %}
-                  <th>{{ label }}</th>
-                {% endfor %}
+                <th>{{ row.label }}</th>
+                {% if row.type == 'checks' %}
+                  <td class="checks">{% for opt in row.options %}<span class="cb">{% if opt.checked %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ opt.label }}&#160;&#160;{% endfor %}</td>
+                {% else %}
+                  <td>{{ row.value|linebreaksbr }}</td>
+                {% endif %}
               </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {% for label, person, signed_at in section.rows %}
-                  <td>{{ person }}</td>
-                {% endfor %}
-              </tr>
-              <tr>
-                {% for label, person, signed_at in section.rows %}
-                  <td>{{ signed_at }}</td>
-                {% endfor %}
-              </tr>
-              <tr>
-                {% for label, person, signed_at in section.rows %}
-                  <td><div class="signature-line">..........................................</div></td>
-                {% endfor %}
-              </tr>
-            </tbody>
-          </table>
-        {% else %}
-          <table>
-            <tbody>
-              {% for label, value in section.rows %}
-                <tr>
-                  <th>{{ label }}</th>
-                  <td>{{ value|linebreaksbr }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% endif %}
-      </section>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
     {% endfor %}
 
-    <section id="appendix" class="appendix">
-      <h2>8. Appendix <span>หมวดหมู่ของภัยคุกคามทางไซเบอร์</span></h2>
-      <p class="appendix-intro">
-        อ้างอิงตามภาคผนวกท้ายประกาศคณะกรรมการการรักษาความมั่นคงปลอดภัยไซเบอร์แห่งชาติ
-        เรื่อง ลักษณะภัยคุกคามทางไซเบอร์ มาตรการป้องกัน รับมือ ประเมิน ปราบปราม
-        และระงับภัยคุกคามทางไซเบอร์แต่ละระดับ พ.ศ. 2564
-      </p>
-      <table>
-        <tbody>
-          {% for category, description in appendix_categories %}
-            <tr>
-              <th>{{ category }}</th>
-              <td>{{ description }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
+    <table class="signoff">
+      <tbody>
+        <tr>
+          <td>
+            <div class="line">..........................................</div>
+            <div class="line">{{ report.signoff_admin }}</div>
+            <div class="line">( ผู้ดำเนินการแก้ไข )</div>
+            <div class="line">วันที่ .......... / .......... / ..........</div>
+          </td>
+          <td>
+            <div class="line">..........................................</div>
+            <div class="line">{{ report.signoff_approver }}</div>
+            <div class="line">( ผู้อนุมัติ )</div>
+            <div class="line">วันที่ .......... / .......... / ..........</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-band appendix">&#8206;*หมวดหมู่ของภัยคุกคามทางไซเบอร์</div>
+    <p class="appendix-intro">{{ appendix_intro }}</p>
+    <table class="appendix">
+      <colgroup><col style="width:14%"><col style="width:86%"></colgroup>
+      <thead>
+        <tr><th>หมวดหมู่</th><th>คำอธิบาย</th></tr>
+      </thead>
+      <tbody>
+        {% for category, description in appendix_categories %}
+          <tr><th>{{ category }}</th><td>{{ description }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <table id="reportFooter">
+      <tr>
+        <td class="left">{{ footer_left }}</td>
+        <td class="right">{{ footer_right }}</td>
+      </tr>
+    </table>
   </main>
 </body>
 </html>

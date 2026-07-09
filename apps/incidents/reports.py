@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import logging
 import re
@@ -16,11 +17,18 @@ from xhtml2pdf import default as xhtml2pdf_default
 from xhtml2pdf import pisa
 
 from .models import Ticket
+from .report_content import (
+    APPENDIX_CATEGORIES,
+    APPENDIX_INTRO,
+    FOOTER_LEFT,
+    FOOTER_RIGHT,
+    REMEDIATION_CHECKLIST,
+)
 
 
 logger = logging.getLogger(__name__)
 
-REPORT_TEMPLATE_VERSION = 'v1'
+REPORT_TEMPLATE_VERSION = 'v2'
 REPORT_TEMPLATE_NAME = f'report_template_{REPORT_TEMPLATE_VERSION}.docx'
 REPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 PDF_CONTENT_TYPE = 'application/pdf'
@@ -45,19 +53,22 @@ REPORT_FONT_FALLBACKS = (
     Path('/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf'),
     Path('/usr/share/fonts/truetype/thai/Garuda.ttf'),
 )
+# DejaVu Sans supplies the ballot-box glyphs (☐/☑) that TH Sarabun New lacks;
+# used only for the checkbox marks in the PDF path.
+SYMBOL_FONT_NAME = 'ReportSymbol'
+SYMBOL_FONT_VARIANTS = (
+    (0, 'DejaVuSans.ttf', SYMBOL_FONT_NAME),
+    (1, 'DejaVuSans-Bold.ttf', f'{SYMBOL_FONT_NAME}-Bold'),
+)
 
-APPENDIX_CATEGORIES = [
-    ('Training and Exercises', 'เหตุการณ์จำลอง และ การฝึกจู่โจม ของหน่วยงาน'),
-    ('Unsuccessful Activity Attempt', 'การพยายามเข้าถึงระบบที่ไม่สำเร็จ'),
-    ('Reconnaissance', 'การพยายามบุกรุกเพื่อสำรวจข้อมูลองค์กรเพื่อโจมตี'),
-    ('Non-Compliance Activity', 'การดำเนินการที่ไม่เป็นไปตามมาตรฐานความปลอดภัยที่หน่วยงานกำหนด'),
-    ('Malicious Logic', 'การบุกรุกโดยการใช้มัลแวร์'),
-    ('User Level Intrusion', 'การบุกรุกในระดับผู้ใช้งาน'),
-    ('Root Level Intrusion', 'การบุกรุกในระดับผู้ควบคุมระบบ'),
-    ('Denial of Service', 'การบุกรุกที่ทำให้ไม่สามารถเข้าใช้บริการได้'),
-    ('Investigating', 'เหตุการณ์ที่อยู่ระหว่างการวิเคราะห์สอบสวน'),
-    ('Explained Anomaly', 'เหตุการณ์ผิดปกติที่ได้รับการวิเคราะห์แล้วไม่ใช่เหตุการณ์ที่เป็นภัยคุกคาม'),
-]
+CHECKED = '☑'
+UNCHECKED = '☐'
+
+
+def _chk(flag):
+    return CHECKED if flag else UNCHECKED
+
+REPORT_LOGO_PATH = Path(__file__).resolve().parent / 'report_templates' / 'assets' / 'nt_logo.png'
 
 
 @dataclass(frozen=True)
@@ -110,156 +121,168 @@ def generate_ticket_report_pdf(ticket_id, generated_by=None, base_url=None):
     )
 
 
-def build_ticket_report_render_context(
-    ticket,
-    generated_at=None,
-    show_report_actions=True,
-    pdf_font_face_css='',
-):
+def build_ticket_report_render_context(ticket, generated_at=None, show_report_actions=True):
     report = build_ticket_report_context(ticket, generated_at=generated_at)
     return {
         'ticket': ticket,
         'report': report,
-        'sections': build_ticket_report_sections(report),
+        'sections': build_ticket_report_sections(report, ticket),
         'appendix_categories': APPENDIX_CATEGORIES,
+        'appendix_intro': APPENDIX_INTRO,
+        'footer_left': FOOTER_LEFT,
+        'footer_right': FOOTER_RIGHT,
+        'nt_logo': _logo_data_uri(),
         'show_report_actions': show_report_actions,
-        'pdf_font_face_css': pdf_font_face_css,
     }
 
 
 def build_ticket_report_context(ticket, generated_at=None):
     generated_at = generated_at or timezone.now()
+    asset = ticket.asset_type
+    asset_known = asset in {'Computer', 'Server', 'Network Device'}
     return {
         'ticket_id': _value(ticket.display_id or ticket.ticket_id),
         'incident_datetime': _format_dt(ticket.incident_datetime),
         'incident_name': _value(ticket.incident_name),
-        'classification': _value(ticket.get_classification_display()),
-        'siem_severity': _value(ticket.severity),
-        'ncsa_severity': _value(ticket.get_ncsa_severity_display()),
         'category': _value(ticket.get_detailed_issue_display()),
-        'category_detail': _value(ticket.get_detailed_issue2_display()),
         'reporter': _user_label(ticket.created_by, include_phone=True),
         'log_source': _value(ticket.log_source),
-        'source_channel': _value(ticket.get_issue_type_display()),
-        'reference_id': _value(ticket.reference_id),
         'status': _value(ticket.get_status_display()),
         'actions_taken_summary': _value(ticket.actions_taken_summary),
         'next_steps_summary': _value(ticket.next_steps_summary),
         'incident_description': _value(ticket.issue_description),
+        'host_ip': _host_ip(ticket),
         'system_name': _value(ticket.device_name),
         'asset_owner': _value(ticket.asset_owner),
         'host_name': _value(ticket.device_name),
         'ip_address': _value(ticket.ip_address),
-        'mac_address': _value(ticket.mac_address),
         'operating_system': _value(ticket.operating_system),
-        'asset_type': _value(ticket.get_asset_type_display()),
-        'spread_to_others': _spread_label(ticket.spread_to_others),
-        'destination_ip': _value(ticket.destination_ip),
-        'ioc_details': _value(ticket.ioc_details),
-        'evidence_files': _attachment_summary(ticket),
-        'mitre_phases': _value(', '.join(ticket.mitre_phase_labels)),
+        'ioc_process': _value(ticket.ioc_details),
+        'ioc_command': '-',
+        'ioc_hash': '-',
+        'ioc_ip': _value(ticket.destination_ip),
+        'evidence_log': _evidence_log(ticket),
         'action_required': _value(ticket.action_required),
         'action_precautions': _value(ticket.action_precautions),
         'remediation_summary': _value(ticket.remediation_summary),
         'containment_report': _value(ticket.containment_report),
-        'created_by': _user_label(ticket.created_by),
-        'created_at': _format_dt(ticket.created_at),
-        'verified_by': _user_label(ticket.verified_by),
-        'verified_at': _format_dt(ticket.verified_at),
-        'approved_by': _user_label(ticket.approved_by),
-        'approved_at': _format_dt(ticket.approved_at),
+        'signoff_admin': _signoff_name(ticket.assigned_admin),
+        'signoff_approver': _signoff_name(ticket.approved_by),
         'template_version': REPORT_TEMPLATE_VERSION,
         'generated_at': _format_dt(generated_at),
+        # Checkbox states (☑/☐) driven by the ticket's actual values.
+        'chk_class_event': _chk(ticket.classification == Ticket.CLASSIFICATION_EVENT),
+        'chk_class_incident': _chk(ticket.classification == Ticket.CLASSIFICATION_INCIDENT),
+        'chk_sev_critical': _chk(ticket.severity == 'Critical'),
+        'chk_sev_high': _chk(ticket.severity == 'High'),
+        'chk_sev_medium': _chk(ticket.severity == 'Medium'),
+        'chk_sev_low': _chk(ticket.severity == 'Low'),
+        'chk_imp_high': _chk(ticket.is_emergency),
+        'chk_imp_normal': _chk(not ticket.is_emergency),
+        'chk_spread_yes': _chk(ticket.spread_to_others is True),
+        'chk_spread_no': _chk(ticket.spread_to_others is False),
+        'chk_ncsa_critical': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),
+        'chk_ncsa_severe': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_SEVERE),
+        'chk_ncsa_nonsevere': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE),
+        'chk_asset_computer': _chk(asset == 'Computer'),
+        'chk_asset_server': _chk(asset == 'Server'),
+        'chk_asset_network': _chk(asset == 'Network Device'),
+        'chk_asset_unknown': _chk(not asset_known),
     }
 
 
-def build_ticket_report_sections(report):
+def build_ticket_report_sections(report, ticket):
+    """Structured sections for the HTML/PDF preview, mirroring the v2 DOCX form.
+
+    Row shapes consumed by report_preview.html:
+      {'type': 'kv', 'label', 'value'}
+      {'type': 'checks', 'label', 'options': [{'label', 'checked'}, ...]}
+      {'type': 'text', 'value'}                     — full-width free-text box
+      {'type': 'checklist', 'items': [str, ...]}    — static, hand-ticked
+    """
+    asset = ticket.asset_type
+    asset_known = asset in {'Computer', 'Server', 'Network Device'}
+
+    def kv(label, value):
+        return {'type': 'kv', 'label': label, 'value': value}
+
+    def checks(label, options):
+        return {'type': 'checks', 'label': label,
+                'options': [{'label': lbl, 'checked': flag} for lbl, flag in options]}
+
+    def text(value):
+        return {'type': 'text', 'value': value}
+
+    asset_options = [
+        ('Computer', asset == 'Computer'),
+        ('Server', asset == 'Server'),
+        ('Network Device', asset == 'Network Device'),
+    ]
+    spread_options = [
+        ('ใช่', ticket.spread_to_others is True),
+        ('ไม่ใช่', ticket.spread_to_others is False),
+    ]
+
     return [
-        {
-            'id': 'general-info',
-            'number': '1',
-            'title': 'General Info',
-            'subtitle': 'ข้อมูลทั่วไป',
-            'layout': 'grid',
-            'rows': [
-                ('Incident No.', report['ticket_id'], 'Reference', report['reference_id']),
-                ('Detected Date/Time', report['incident_datetime'], 'Incident/Event Name', report['incident_name']),
-                ('Type', report['classification'], 'Current Status', report['status']),
-                ('SIEM Severity', report['siem_severity'], 'NCSA Severity', report['ncsa_severity']),
-                ('Threat Category', report['category'], 'Category Detail', report['category_detail']),
-                ('Reporter', report['reporter'], 'Log Source', report['log_source']),
-                ('Source Channel', report['source_channel'], 'Template', report['template_version']),
-                ('Actions Taken', report['actions_taken_summary'], 'Next Steps', report['next_steps_summary']),
-            ],
-        },
-        {
-            'id': 'incident-description',
-            'number': '2',
-            'title': 'Incident Description',
-            'subtitle': 'รายละเอียดเหตุการณ์',
-            'layout': 'single',
-            'rows': [('Incident Description', report['incident_description'])],
-        },
-        {
-            'id': 'scope',
-            'number': '3',
-            'title': 'Scope / Affected Asset',
-            'subtitle': 'ทรัพย์สินที่ได้รับผลกระทบ',
-            'layout': 'grid',
-            'rows': [
-                ('System / Service', report['system_name'], 'Asset Owner', report['asset_owner']),
-                ('Host Name', report['host_name'], 'IP Address', report['ip_address']),
-                ('MAC Address', report['mac_address'], 'Operating System', report['operating_system']),
-                ('Asset Type', report['asset_type'], 'Spread to Other Systems', report['spread_to_others']),
-            ],
-        },
-        {
-            'id': 'iocs',
-            'number': '4',
-            'title': 'IoCs / Evidence / MITRE Phases',
-            'subtitle': 'Indicators of Compromise และหลักฐาน',
-            'layout': 'single',
-            'rows': [
-                ('Destination IP', report['destination_ip']),
-                ('IoC Details', report['ioc_details']),
-                ('Evidence / Attachments', report['evidence_files']),
-                ('MITRE ATT&CK Phases', report['mitre_phases']),
-            ],
-        },
-        {
-            'id': 'containment',
-            'number': '5',
-            'title': 'Containment / Precautions',
-            'subtitle': 'สิ่งที่ต้องดำเนินการและข้อควรระวัง',
-            'layout': 'single',
-            'rows': [
-                ('Containment', report['action_required']),
-                ('Precautions', report['action_precautions']),
-            ],
-        },
-        {
-            'id': 'remediation',
-            'number': '6',
-            'title': 'Remediation / Results',
-            'subtitle': 'สรุปผลการดำเนินการแก้ไข',
-            'layout': 'single',
-            'rows': [
-                ('Investigation Findings', report['remediation_summary']),
-                ('Countermeasure', report['containment_report']),
-            ],
-        },
-        {
-            'id': 'sign-off',
-            'number': '7',
-            'title': 'Sign-off',
-            'subtitle': 'ผู้ดำเนินการ ตรวจสอบ และอนุมัติ',
-            'layout': 'signoff',
-            'rows': [
-                ('Created by', report['created_by'], report['created_at']),
-                ('Verified by', report['verified_by'], report['verified_at']),
-                ('Approved by', report['approved_by'], report['approved_at']),
-            ],
-        },
+        {'number': '1', 'title': 'ข้อมูลทั่วไป (General Information)', 'rows': [
+            kv('หมายเลข Incident', report['ticket_id']),
+            kv('วันที่ เวลา ที่พบเหตุ', report['incident_datetime']),
+            kv('วันที่ เวลา ที่เกิดเหตุ', report['incident_datetime']),
+            kv('ชื่อ incident/event', report['incident_name']),
+            checks('ประเภท: event หรือ incident', [
+                ('Event', ticket.classification == Ticket.CLASSIFICATION_EVENT),
+                ('Incident', ticket.classification == Ticket.CLASSIFICATION_INCIDENT)]),
+            checks('ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
+                ('Critical', ticket.severity == 'Critical'),
+                ('High', ticket.severity == 'High'),
+                ('Medium', ticket.severity == 'Medium'),
+                ('Low', ticket.severity == 'Low')]),
+            checks('ระดับความสำคัญ', [
+                ('สำคัญ', not ticket.is_emergency),
+                ('สำคัญมาก', ticket.is_emergency)]),
+            checks('มีการกระจายไปยังจุดอื่น', spread_options),
+            checks('ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
+                ('วิกฤต', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),
+                ('ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_SEVERE),
+                ('ไม่ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE)]),
+            kv('*หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', report['category']),
+            kv('ทรัพย์สินที่ได้รับผลกระทบ', report['host_ip']),
+            checks('ประเภททรัพย์สินที่ได้รับผลกระทบ', asset_options),
+            kv('ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', report['asset_owner']),
+            kv('ระบบที่ได้รับผลกระทบ', report['system_name']),
+            kv('สถานะปัจจุบัน', report['status']),
+            kv('เรื่องที่ดำเนินการแล้ว', report['actions_taken_summary']),
+            kv('การที่จะดำเนินการลำดับถัดไป', report['next_steps_summary']),
+            kv('ผู้รายงาน', report['reporter']),
+            kv('แหล่งข้อมูล', report['log_source']),
+        ]},
+        {'number': '2', 'title': 'รายละเอียดเหตุการณ์ (Incident Description)', 'rows': [
+            text(report['incident_description'])]},
+        {'number': '3', 'title': 'Scope ทรัพย์สินที่ได้รับผลกระทบ', 'rows': [
+            kv('ระบบ/บริการ', report['system_name']),
+            kv('หน่วยงานเจ้าของทรัพย์สิน', report['asset_owner']),
+            kv('Host Name', report['host_name']),
+            kv('IP Address', report['ip_address']),
+            kv('Operating System', report['operating_system']),
+            checks('ประเภทของทรัพย์สิน', asset_options + [('ไม่ทราบ', not asset_known)]),
+            checks('มีการกระจายไปยังจุดอื่น', spread_options),
+        ]},
+        {'number': '4', 'title': 'Indicators of Compromise หรือหลักฐานที่พบ', 'rows': [
+            kv('Process/File Path', report['ioc_process']),
+            kv('คำสั่ง', report['ioc_command']),
+            kv('Hash', report['ioc_hash']),
+            kv('IP', report['ioc_ip']),
+        ]},
+        {'number': '5', 'title': 'Evidence / Log', 'rows': [text(report['evidence_log'])]},
+        {'number': '6', 'title': 'สิ่งที่ต้องดำเนินการ (Containment)', 'rows': [
+            text(report['action_required'])]},
+        {'number': '7', 'title': 'ข้อควรระวังในการดำเนินการ', 'rows': [
+            text(report['action_precautions'])]},
+        {'number': '8', 'title': 'สรุปผลการดำเนินการแก้ไข', 'rows': [
+            {'type': 'checklist', 'items': REMEDIATION_CHECKLIST},
+            kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
+            kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
+        ]},
     ]
 
 
@@ -336,6 +359,31 @@ def _register_pdf_font():
         for italic in (0, 1):
             addMapping(REPORT_FONT_NAME, bold, italic, registered.get((bold, italic), regular))
 
+    _register_symbol_font()
+
+
+def _register_symbol_font():
+    """Register DejaVu Sans for the checkbox glyphs the PDF path needs."""
+    xhtml2pdf_default.DEFAULT_FONT[SYMBOL_FONT_NAME.lower()] = SYMBOL_FONT_NAME
+    if SYMBOL_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return
+    symbol_regular = None
+    for bold, filename, font_name in SYMBOL_FONT_VARIANTS:
+        font_path = REPORT_FONT_DIR / filename
+        if not font_path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+        except (OSError, TTFError):
+            continue
+        if bold == 0:
+            symbol_regular = font_name
+    if symbol_regular is None:
+        logger.warning(
+            'Checkbox symbol font (DejaVu Sans) missing in %s; PDF checkboxes '
+            'may render as blank boxes', REPORT_FONT_DIR,
+        )
+
 
 def _resolve_pdf_resource(uri, rel):
     parsed = urlparse(uri)
@@ -360,16 +408,24 @@ def _load_ticket(ticket_id):
 
 
 def _replace_placeholders(doc, context):
+    # Replace within individual runs (not whole paragraphs) so each run keeps
+    # its own font — the template authors every {{placeholder}} as its own run,
+    # letting checkbox glyphs (DejaVu Sans) and labels (TH Sarabun New) coexist
+    # in one cell. run.text's setter turns \n into <w:br>, so multi-line values
+    # keep their line breaks. A placeholder split across runs is left in place
+    # and caught by the unresolved-placeholder check below.
     replacements = {f'{{{{{key}}}}}': str(value) for key, value in context.items()}
     for paragraph in _iter_paragraphs(doc):
-        text = paragraph.text
-        if not text or '{{' not in text:
-            continue
-        replaced = text
-        for placeholder, value in replacements.items():
-            replaced = replaced.replace(placeholder, value)
-        if replaced != text:
-            _set_paragraph_text(paragraph, replaced)
+        for run in paragraph.runs:
+            text = run.text
+            if '{{' not in text:
+                continue
+            replaced = text
+            for placeholder, value in replacements.items():
+                if placeholder in replaced:
+                    replaced = replaced.replace(placeholder, value)
+            if replaced != text:
+                run.text = replaced
     remaining = sorted({
         match
         for paragraph in _iter_paragraphs(doc)
@@ -401,16 +457,6 @@ def _iter_table_paragraphs(table):
                 yield from _iter_table_paragraphs(nested)
 
 
-def _set_paragraph_text(paragraph, text):
-    if paragraph.runs:
-        first = paragraph.runs[0]
-        first.text = text
-        for run in paragraph.runs[1:]:
-            run.text = ''
-    else:
-        paragraph.add_run(text)
-
-
 def _format_dt(value):
     if not value:
         return '-'
@@ -437,14 +483,6 @@ def _user_label(user, include_phone=False):
     return label
 
 
-def _spread_label(value):
-    if value is True:
-        return 'ใช่'
-    if value is False:
-        return 'ไม่ใช่'
-    return 'รอตรวจสอบ'
-
-
 def _attachment_summary(ticket):
     parts = []
     for attachment in ticket.attachments.all():
@@ -453,3 +491,32 @@ def _attachment_summary(ticket):
             label = f'{label} - {attachment.description}'
         parts.append(label)
     return '\n'.join(parts) if parts else '-'
+
+
+def _host_ip(ticket):
+    parts = [p for p in (ticket.device_name, ticket.ip_address) if p]
+    return ' / '.join(parts) if parts else '-'
+
+
+def _evidence_log(ticket):
+    parts = []
+    attachments = _attachment_summary(ticket)
+    if attachments != '-':
+        parts.append(attachments)
+    mitre = ', '.join(ticket.mitre_phase_labels)
+    if mitre:
+        parts.append(f'MITRE ATT&CK: {mitre}')
+    return '\n'.join(parts) if parts else '-'
+
+
+def _signoff_name(user):
+    if not user:
+        return '(........................................................)'
+    return f'( {user.get_full_name() or user.username} )'
+
+
+def _logo_data_uri():
+    if not REPORT_LOGO_PATH.exists():
+        return ''
+    encoded = base64.b64encode(REPORT_LOGO_PATH.read_bytes()).decode('ascii')
+    return f'data:image/png;base64,{encoded}'
