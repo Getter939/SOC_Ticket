@@ -211,18 +211,33 @@ def escalation_queue(request):
         return redirect('ticket_list')
 
     emergency_filter = request.GET.get('emergency', '').strip()
+    stage_filter = request.GET.get('stage', '').strip()
     sort = request.GET.get('sort', 'emergency').strip()
-    tickets_qs = Ticket.objects.filter(status=Ticket.STATUS_ESCALATED_T2).select_related(
-        'created_by', 'assigned_admin',
-    )
+
+    # The Tier 2 queue covers all three T2 stages: escalation triage plus the
+    # two verification stages (admin containment / owner remediation).
+    stage_map = {
+        'escalated': Ticket.STATUS_ESCALATED_T2,
+        'containment': Ticket.STATUS_CONTAINMENT_REPORTED,
+        'owner': Ticket.STATUS_PENDING_T2_REVIEW,
+    }
+    if stage_filter in stage_map:
+        tickets_qs = Ticket.objects.filter(status=stage_map[stage_filter])
+    else:
+        stage_filter = ''
+        tickets_qs = Ticket.objects.filter(status__in=Ticket.TIER2_QUEUE_STATUSES)
+    tickets_qs = tickets_qs.select_related('created_by', 'assigned_admin')
+
     if emergency_filter in ('1', '0'):
         tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')
     else:
         emergency_filter = ''
+    # status_changed_at = when the ticket entered its current (queue) status —
+    # meaningful for all three stages, unlike escalated_to_t2_at.
     sort_map = {
-        'emergency': ('-is_emergency', '-escalated_to_t2_at'),
-        'newest': ('-escalated_to_t2_at',),
-        'severity': ('severity', '-escalated_to_t2_at'),
+        'emergency': ('-is_emergency', '-status_changed_at'),
+        'newest': ('-status_changed_at',),
+        'severity': ('severity', '-status_changed_at'),
     }
     if sort not in sort_map:
         sort = 'emergency'
@@ -236,6 +251,7 @@ def escalation_queue(request):
         'tickets': page_obj,
         'escalated_count': tickets_qs.count(),
         'emergency_filter': emergency_filter,
+        'stage_filter': stage_filter,
         'sort': sort,
     })
 

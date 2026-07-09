@@ -193,9 +193,10 @@ class Ticket(models.Model):
     # A T1 handling route that skips the System Admin entirely: the analyst
     # contacts the asset owner directly (e.g. by phone) and the owner remediates
     # it themselves — no admin ticket, no containment email. The case is still
-    # tracked (AWAITING_OWNER) and still passes a mandatory review before it can
-    # close (OWNER_REMEDIATED → PENDING_T2_REVIEW / PENDING_MANAGER). See the
-    # deterministic review split in can_transition_to / transition_to.
+    # tracked (AWAITING_OWNER) and always passes mandatory Tier 2 verification
+    # (OWNER_REMEDIATED → PENDING_T2_REVIEW); emergency tickets additionally
+    # pass the SOC manager (PENDING_T2_REVIEW → PENDING_MANAGER). See the
+    # deterministic emergency split in can_transition_to / transition_to.
     STATUS_AWAITING_OWNER       = 'AWAITING_OWNER'
     STATUS_OWNER_REMEDIATED     = 'OWNER_REMEDIATED'
     STATUS_PENDING_T2_REVIEW    = 'PENDING_T2_REVIEW'
@@ -211,7 +212,7 @@ class Ticket(models.Model):
         (STATUS_CONTAINMENT_REPORTED, 'รายงานการควบคุมแล้ว'),
         (STATUS_AWAITING_OWNER,       'รอเจ้าของระบบดำเนินการเอง'),
         (STATUS_OWNER_REMEDIATED,     'เจ้าของแจ้งแก้ไขแล้ว — รอ SOC ตรวจ'),
-        (STATUS_PENDING_T2_REVIEW,    'รอ Tier 2 ตรวจสอบ (ปิดเคสทางลัด)'),
+        (STATUS_PENDING_T2_REVIEW,    'รอ Tier 2 ตรวจสอบ'),
         (STATUS_PENDING_MANAGER,      'รอผู้จัดการตรวจสอบ'),
         (STATUS_APPROVED,             'อนุมัติแล้ว'),
         (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
@@ -254,12 +255,12 @@ class Ticket(models.Model):
             STATUS_AWAITING_OWNER,         # T1 reviews → direct-to-owner
         ],
         STATUS_AWAITING_CONTAINMENT: [
-            STATUS_CONTAINMENT_REPORTED,   # admin returns to T1
+            STATUS_CONTAINMENT_REPORTED,   # admin submits report → Tier 2 verifies
         ],
         STATUS_CONTAINMENT_REPORTED: [
-            STATUS_AWAITING_CONTAINMENT,   # not contained → back to admin (loop)
-            STATUS_PENDING_MANAGER,        # contained + needs manager verification
-            STATUS_APPROVED,               # contained + no manager needed → T1 closes
+            STATUS_AWAITING_CONTAINMENT,   # T2: not contained → back to admin (loop)
+            STATUS_PENDING_MANAGER,        # T2 verified + emergency → SOC Manager
+            STATUS_APPROVED,               # T2 verified + not emergency → close
         ],
         # ── Direct-to-Owner path ─────────────────────────────────────── #
         STATUS_AWAITING_OWNER: [
@@ -267,11 +268,11 @@ class Ticket(models.Model):
         ],
         STATUS_OWNER_REMEDIATED: [
             STATUS_AWAITING_OWNER,         # not actually fixed → keep tracking (loop)
-            STATUS_PENDING_T2_REVIEW,      # normal → Tier 2 reviews (mandatory)
-            STATUS_PENDING_MANAGER,        # emergency → SOC Manager reviews
+            STATUS_PENDING_T2_REVIEW,      # always → Tier 2 verifies (mandatory)
         ],
         STATUS_PENDING_T2_REVIEW: [
-            STATUS_APPROVED,               # Tier 2 verifies → close
+            STATUS_APPROVED,               # T2 verified + not emergency → close
+            STATUS_PENDING_MANAGER,        # T2 verified + emergency → SOC Manager
             STATUS_AWAITING_OWNER,         # Tier 2 rejects → back to owner
         ],
         STATUS_PENDING_MANAGER: [
@@ -298,15 +299,16 @@ class Ticket(models.Model):
         (STATUS_T1_REVIEW,            STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
         (STATUS_T1_REVIEW,            STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
         (STATUS_AWAITING_CONTAINMENT, STATUS_CONTAINMENT_REPORTED): 'ASSIGNED_ADMIN',
-        (STATUS_CONTAINMENT_REPORTED, STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
-        (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER1_CREATOR',
-        (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER1_CREATOR',
+        # Containment verification is Tier 2's job (any Tier 2, not the creator).
+        (STATUS_CONTAINMENT_REPORTED, STATUS_AWAITING_CONTAINMENT): 'TIER2',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER2',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER2',
         # Direct-to-Owner path
         (STATUS_AWAITING_OWNER,       STATUS_OWNER_REMEDIATED):     'TIER1_CREATOR',
         (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
         (STATUS_OWNER_REMEDIATED,     STATUS_PENDING_T2_REVIEW):    'TIER1_CREATOR',
-        (STATUS_OWNER_REMEDIATED,     STATUS_PENDING_MANAGER):      'TIER1_CREATOR',
         (STATUS_PENDING_T2_REVIEW,    STATUS_APPROVED):             'TIER2',
+        (STATUS_PENDING_T2_REVIEW,    STATUS_PENDING_MANAGER):      'TIER2',
         (STATUS_PENDING_T2_REVIEW,    STATUS_AWAITING_OWNER):       'TIER2',
         (STATUS_PENDING_MANAGER,      STATUS_APPROVED):             'MANAGER',
     }
@@ -315,12 +317,19 @@ class Ticket(models.Model):
     # ticket's original creator (same analyst who opened it). Used both by
     # transition_to and the same-status note guard.
     CREATOR_REVIEW_STATUSES = frozenset({
-        STATUS_T1_REVIEW, STATUS_CONTAINMENT_REPORTED,
+        STATUS_T1_REVIEW,
         # Direct-to-Owner tracking sits with the opening analyst too. (The
-        # PENDING_T2_REVIEW queue is deliberately NOT here — it is the reviewer's
-        # queue, so a non-creator Tier 2 must be able to annotate it.)
+        # CONTAINMENT_REPORTED and PENDING_T2_REVIEW queues are deliberately NOT
+        # here — they are Tier 2 verification queues, so a non-creator Tier 2
+        # must be able to act on and annotate them.)
         STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
     })
+
+    # Statuses that sit in the Tier 2 work queue: escalation triage plus the
+    # two verification stages (admin containment / owner remediation).
+    TIER2_QUEUE_STATUSES = (
+        STATUS_ESCALATED_T2, STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_T2_REVIEW,
+    )
 
     # Edges that close a benign Event — require classification == EVENT.
     EVENT_CLOSE_TRANSITIONS = frozenset({
@@ -345,21 +354,15 @@ class Ticket(models.Model):
         ('Medium',   'Medium'),
         ('Low',      'Low'),
         # Unknown = analyst cannot yet classify severity. It is unclassified,
-        # NOT low-risk, so it sits below Low only for queue ordering — it never
-        # auto-routes to the manager (rank 0 < floor) and reaches the manager
-        # solely via the emergency flag. Human-assigned only (not Wazuh ingest).
+        # NOT low-risk, so it sits below Low only for queue ordering. Severity
+        # never routes to the manager — only the emergency flag does.
+        # Human-assigned only (not Wazuh ingest).
         ('Unknown',  'Unknown'),
     ]
 
-    # Ordered severity ranks for the manager-routing floor and queue ordering.
-    # Unknown ranks 0 (lowest) so it sorts last and never meets the floor.
-    # Severities not in this map (e.g. blank) also rank 0.
+    # Ordered severity ranks for queue ordering. Unknown ranks 0 (lowest) so it
+    # sorts last. Severities not in this map (e.g. blank) also rank 0.
     SEVERITY_RANK = {'Unknown': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
-
-    # Manager-verification floor (config constant). A ticket at or above this
-    # severity always routes to the SOC manager. Default Critical → High/Unknown
-    # reach the manager only via the emergency flag. Override in settings.
-    SEVERITY_FLOOR = 'Critical'
 
     # NCSA (สกมช.) statutory threat-severity level — the 3-tier classification
     # required on the official incident report, distinct from the SIEM-derived
@@ -656,6 +659,17 @@ class Ticket(models.Model):
         verbose_name='ข้อควรระวังในการดำเนินการ',
     )
 
+    # Report-only prose: lets analysts polish the official document wording
+    # without overloading lifecycle logs or containment fields.
+    actions_taken_summary = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปเรื่องที่ดำเนินการแล้ว',
+    )
+    next_steps_summary = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปการดำเนินการลำดับถัดไป',
+    )
+
     # ── Section 9: Remediation ──────────────────────────────────────── #
     remediation_summary = models.TextField(
         blank=True, default='',
@@ -774,6 +788,19 @@ class Ticket(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True, verbose_name='วันที่อนุมัติ')
 
+    # Report export metadata. These are audit fields for the latest generated
+    # report artifact (report_format says whether that artifact was DOCX or
+    # PDF), not the canonical ticket content itself.
+    report_template_version = models.CharField(max_length=20, blank=True, default='')
+    report_format = models.CharField(max_length=8, blank=True, default='')
+    report_generated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='generated_ticket_reports',
+    )
+    report_generated_at = models.DateTimeField(null=True, blank=True)
+    report_ticket_updated_at = models.DateTimeField(null=True, blank=True)
+    report_sha256 = models.CharField(max_length=64, blank=True, default='')
+
     update_notes = models.TextField(blank=True, null=True, verbose_name='บันทึกการติดตามงาน')
     ola_triage_deadline = models.DateTimeField(
         null=True, blank=True, verbose_name='OLA Triage Deadline')
@@ -878,19 +905,13 @@ class Ticket(models.Model):
 
     @property
     def requires_manager_verification(self):
-        """Single tunable rule deciding whether a contained ticket must be
-        verified by the SOC manager before it can close.
+        """Single rule deciding whether a verified ticket must additionally be
+        approved by the SOC manager before it can close.
 
-        True when the severity is at or above ``SEVERITY_FLOOR`` (default
-        Critical, override via ``settings.SOC_SEVERITY_FLOOR``) OR the emergency
-        flag is set. No other auto-triggers.
+        True only when the emergency flag is set. Severity alone never routes
+        to the manager — Tier 2 verification is the standard closing gate.
         """
-        floor = getattr(settings, 'SOC_SEVERITY_FLOOR', self.SEVERITY_FLOOR)
-        severity_meets_floor = (
-            self.SEVERITY_RANK.get(self.severity, 0)
-            >= self.SEVERITY_RANK.get(floor, 99)
-        )
-        return severity_meets_floor or self.is_emergency
+        return self.is_emergency
 
     @property
     def is_ola_triage_breached(self):
@@ -1026,19 +1047,19 @@ class Ticket(models.Model):
             return False
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             return False
+        # Emergency split at Tier 2 verification (both lanes): an emergency
+        # ticket must additionally pass the SOC manager; a non-emergency ticket
+        # is closed by Tier 2 directly and never reaches the manager.
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
                 and self.requires_manager_verification):
             return False
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             return False
-        # Direct-to-Owner review split (any severity): the manager branch fires
-        # when requires_manager_verification — i.e. Critical (severity floor) or
-        # the emergency flag; every other case reviews via Tier 2.
-        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_T2_REVIEW)
+        if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_APPROVED)
                 and self.requires_manager_verification):
             return False
-        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_MANAGER)
+        if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             return False
         return True
@@ -1093,26 +1114,27 @@ class Ticket(models.Model):
             )
 
         # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #
+        # Emergency tickets must pass the SOC manager after Tier 2 verifies;
+        # non-emergency tickets are closed by Tier 2 and never reach the manager.
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
                 and self.requires_manager_verification):
             raise ValidationError(
-                'Ticket นี้ต้องผ่านการตรวจสอบจากผู้จัดการ SOC ก่อนปิด'
+                'Ticket ฉุกเฉินต้องผ่านการตรวจสอบจากผู้จัดการ SOC ก่อนปิด'
             )
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             raise ValidationError(
-                'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 1 ปิดได้ทันที'
+                'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 2 ปิดได้ทันที'
             )
-        # Direct-to-Owner review split (emergency → Manager, else → Tier 2).
-        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_T2_REVIEW)
+        if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_APPROVED)
                 and self.requires_manager_verification):
             raise ValidationError(
-                'Ticket ฉุกเฉินต้องส่งให้ผู้จัดการ SOC ตรวจสอบ ไม่ใช่ Tier 2'
+                'Ticket ฉุกเฉินต้องผ่านการตรวจสอบจากผู้จัดการ SOC ก่อนปิด'
             )
-        if (edge == (self.STATUS_OWNER_REMEDIATED, self.STATUS_PENDING_MANAGER)
+        if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             raise ValidationError(
-                'Ticket นี้ให้ Tier 2 ตรวจสอบ — ไม่ต้องส่งผู้จัดการ SOC'
+                'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 2 ปิดได้ทันที'
             )
 
         # ── 6. Check permission ───────────────────────────────────────── #
@@ -1179,15 +1201,12 @@ class Ticket(models.Model):
         if new_status in self.TERMINAL_STATUSES and self.closed_at is None:
             self.closed_at = now
 
-        # T1 verification sign-off (write-once): set when Tier 1 marks a case
-        # done — the admin-containment review OR the direct-to-owner review —
-        # whether it routes to a reviewer or closes.
+        # Tier 2 verification sign-off (write-once): set when Tier 2 confirms
+        # the containment/remediation was effective and moves the case forward
+        # — whether it closes directly or routes to the SOC manager.
         if (
-            prev_status in (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_OWNER_REMEDIATED)
-            and new_status in (
-                self.STATUS_PENDING_MANAGER, self.STATUS_PENDING_T2_REVIEW,
-                self.STATUS_APPROVED,
-            )
+            prev_status in (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_PENDING_T2_REVIEW)
+            and new_status in (self.STATUS_PENDING_MANAGER, self.STATUS_APPROVED)
             and self.verified_by_id is None
         ):
             self.verified_by = user

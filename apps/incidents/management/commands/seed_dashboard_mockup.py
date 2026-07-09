@@ -545,14 +545,16 @@ class Command(BaseCommand):
             status=status,
             classification=classification,
             escalated_to_t2_at=timeline.get(Ticket.STATUS_ESCALATED_T2),
-            is_emergency=severity == 'Critical' and spec['index'] % 9 == 0,
+            # PENDING_MANAGER is reachable only via the emergency flag now.
+            is_emergency=(severity == 'Critical' and spec['index'] % 9 == 0)
+                         or status == Ticket.STATUS_PENDING_MANAGER,
             assigned_to=current_owner,
             assigned_admin=admin if self._has_admin(status, classification) else None,
-            verified_by=t1 if timeline.get(Ticket.STATUS_PENDING_MANAGER) or (
+            verified_by=t2 if timeline.get(Ticket.STATUS_PENDING_MANAGER) or (
                 status == Ticket.STATUS_APPROVED and classification == Ticket.CLASSIFICATION_INCIDENT
             ) else None,
             verified_at=self._verified_at(timeline, status, classification),
-            approved_by=self._approved_by(status, severity, manager, t1),
+            approved_by=self._approved_by(status, severity, manager, t2, spec['index']),
             approved_at=terminal_time if status == Ticket.STATUS_APPROVED else None,
             update_notes=self._update_notes(spec),
             ola_contain_deadline=ola_deadline,
@@ -931,10 +933,13 @@ class Command(BaseCommand):
             timeline.get(Ticket.STATUS_APPROVED) if status == Ticket.STATUS_APPROVED else None)
 
     @staticmethod
-    def _approved_by(status, severity, manager, t1):
+    def _approved_by(status, severity, manager, t2, index):
         if status != Ticket.STATUS_APPROVED:
             return None
-        return manager if severity == 'Critical' else t1
+        # Only emergency tickets carry the manager's final sign-off; Tier 2
+        # closes everything else. Mirror the is_emergency seeding rule.
+        was_emergency = severity == 'Critical' and index % 9 == 0
+        return manager if was_emergency else t2
 
     @staticmethod
     def _update_notes(spec):

@@ -16,6 +16,7 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
@@ -33,6 +34,11 @@ from .notifications import (
     notify_containment_submitted,
     notify_system_owner_created,
     notify_system_owner_closed,
+)
+from .reports import (
+    build_ticket_report_render_context,
+    generate_ticket_report,
+    generate_ticket_report_pdf,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,6 +110,7 @@ def _transition_actions(ticket, user):
             'Verify -> Close'
             if ticket.status in (
                 Ticket.STATUS_PENDING_MANAGER, Ticket.STATUS_PENDING_T2_REVIEW,
+                Ticket.STATUS_CONTAINMENT_REPORTED,
             ) else 'Close case'
         ),
     }
@@ -825,8 +832,8 @@ def ticket_detail(request, pk):
             else:
                 # The System Admin writes the countermeasure (containment_report)
                 # and investigation-findings (remediation_summary) fields, then
-                # returns the ticket to Tier 1. Classification is NOT set here —
-                # it is Tier 1's (or Tier 2's) decision.
+                # submits the ticket for Tier 2 verification. Classification is
+                # NOT set here — it is Tier 1's (or Tier 2's) decision.
                 report = request.POST.get('containment_report', '').strip()
                 remediation = request.POST.get('remediation_summary', '').strip()
                 note = request.POST.get('note', '').strip()
@@ -917,6 +924,56 @@ def ticket_detail(request, pk):
         'subtask_update_form': subtask_update_form,
         'can_create_subtask': can_create_subtask,
     })
+
+
+@login_required
+@require_POST
+def ticket_report_docx(request, pk):
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    try:
+        report = generate_ticket_report(pk, generated_by=request.user)
+    except Exception:
+        logger.exception('DOCX report generation failed for ticket %s', pk)
+        messages.error(request, 'ไม่สามารถสร้างรายงาน DOCX ได้ — โปรดแจ้งผู้ดูแลระบบ')
+        return redirect('ticket_detail', pk=pk)
+    return FileResponse(
+        report.as_file(),
+        as_attachment=True,
+        filename=report.filename,
+        content_type=report.content_type,
+    )
+
+
+@login_required
+@require_POST
+def ticket_report_pdf(request, pk):
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    try:
+        report = generate_ticket_report_pdf(
+            pk,
+            generated_by=request.user,
+            base_url=request.build_absolute_uri('/'),
+        )
+    except Exception:
+        logger.exception('PDF report generation failed for ticket %s', pk)
+        messages.error(request, 'ไม่สามารถสร้างรายงาน PDF ได้ — โปรดแจ้งผู้ดูแลระบบ')
+        return redirect('ticket_detail', pk=pk)
+    return FileResponse(
+        report.as_file(),
+        as_attachment=True,
+        filename=report.filename,
+        content_type=report.content_type,
+    )
+
+
+@login_required
+def ticket_report_preview(request, pk):
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    return render(
+        request,
+        'incidents/report_preview.html',
+        build_ticket_report_render_context(ticket),
+    )
 
 
 @login_required

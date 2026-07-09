@@ -268,9 +268,9 @@
     </a>
     {% endif %}
     {% if request.user.is_superuser or profile.is_tier2 %}
-    <a href="{% url 'escalation_queue' %}" data-label="Escalation Queue"
+    <a href="{% url 'escalation_queue' %}" data-label="Tier 2 Queue"
        class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
-        <i class="bi bi-arrow-up-circle-fill"></i> <span class="nav-label">Escalation Queue</span>
+        <i class="bi bi-arrow-up-circle-fill"></i> <span class="nav-label">Tier 2 Queue</span>
         {% if escalation_queue_count %}
         <span class="badge bg-warning text-dark ms-auto">{{ escalation_queue_count }}</span>
         {% endif %}

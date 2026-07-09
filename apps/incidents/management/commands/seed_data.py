@@ -30,8 +30,8 @@ STATUS_POOL = [
 ]
 STATUS_WEIGHTS = [20, 10, 10, 10, 10, 10, 15, 15]
 
-# Statuses that imply T1 has already signed off (verified_by populated).
-PAST_T1_SIGNOFF = {"PENDING_MANAGER", "APPROVED"}
+# Statuses that imply Tier 2 has already verified (verified_by populated).
+PAST_T2_SIGNOFF = {"PENDING_MANAGER", "APPROVED"}
 # Statuses that have manager final sign-off (approved_by populated).
 MANAGER_APPROVED = {"APPROVED"}
 # Statuses that are part of the incident-handling flow (classification=INCIDENT).
@@ -178,6 +178,9 @@ class Command(BaseCommand):
             weights=[10, 35, 30, 20, 5], k=1,
         )[0]
         is_emergency = random.random() < 0.10
+        # PENDING_MANAGER is reachable only via the emergency flag now.
+        if status == "PENDING_MANAGER":
+            is_emergency = True
         opener       = random.choice([t1, t2])
 
         offset_s = random.randint(0, int((now - start_dt).total_seconds()))
@@ -189,13 +192,15 @@ class Command(BaseCommand):
         )
 
         verified_by = verified_at = None
-        if status in PAST_T1_SIGNOFF:
-            verified_by = t1
+        if status in PAST_T2_SIGNOFF:
+            verified_by = t2
             verified_at = inc_time + timedelta(hours=random.uniform(1, 6))
 
         approved_by = approved_at = None
         if status in MANAGER_APPROVED:
-            approved_by = manager
+            # Non-emergency cases are closed by Tier 2; only emergencies
+            # carry the SOC manager's final sign-off.
+            approved_by = manager if is_emergency else t2
             approved_at = inc_time + timedelta(hours=random.uniform(6, 24))
 
         def rand_ip():

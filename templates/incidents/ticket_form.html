@@ -318,6 +318,18 @@
           {{ form.action_precautions }}
           {% if form.action_precautions.errors %}<div class="text-danger small">{{ form.action_precautions.errors }}</div>{% endif %}
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">เรื่องที่ดำเนินการแล้ว <small class="text-muted">(Report)</small></label>
+          {{ form.actions_taken_summary }}
+          <div class="field-hint">ถ้อยคำสรุปสำหรับรายงาน DOCX แยกจาก timeline และ log ภายในระบบ</div>
+          {% if form.actions_taken_summary.errors %}<div class="text-danger small">{{ form.actions_taken_summary.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">การดำเนินการลำดับถัดไป <small class="text-muted">(Report)</small></label>
+          {{ form.next_steps_summary }}
+          <div class="field-hint">ถ้อยคำสรุปขั้นตอนถัดไปสำหรับรายงาน DOCX</div>
+          {% if form.next_steps_summary.errors %}<div class="text-danger small">{{ form.next_steps_summary.errors }}</div>{% endif %}
+        </div>
       </div>
     </div>
 

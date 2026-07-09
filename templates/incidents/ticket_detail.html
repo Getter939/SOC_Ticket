@@ -65,7 +65,15 @@
       </div>
       <div class="hero-summary">{{ ticket.issue_description|truncatechars:180 }}</div>
     </div>
-    <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_preview' ticket.pk %}"><i class="bi bi-eye me-1"></i>Report Preview</a>
+      <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</button></form>
+      <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</button></form>
+      <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+      {% if ticket.report_generated_at and ticket.report_ticket_updated_at and ticket.updated_at > ticket.report_ticket_updated_at %}
+      <span class="badge bg-warning text-dark w-100"><i class="bi bi-exclamation-triangle-fill me-1"></i>Ticket ถูกแก้ไขหลังสร้างรายงานล่าสุด ({{ ticket.report_format|upper }} {{ ticket.report_generated_at|date:"d/m/Y H:i" }}) — ควรสร้างรายงานใหม่</span>
+      {% endif %}
+    </div>
   </div>
 </section>
 
@@ -135,12 +143,14 @@
       </div>
     </section>
 
-    {% if ticket.action_required or ticket.action_precautions %}
+    {% if ticket.action_required or ticket.action_precautions or ticket.actions_taken_summary or ticket.next_steps_summary %}
     <section id="response" class="card section-card mb-4">
       <div class="card-header"><h2 class="section-title"><i class="bi bi-shield-check me-2"></i>แนวทางตอบสนอง</h2><div class="section-hint">สิ่งที่ต้องทำและข้อควรระวังก่อนเปลี่ยนแปลงระบบ</div></div>
       <div class="card-body"><div class="row g-3">
         {% if ticket.action_required %}<div class="col-md-7"><div class="response-panel info"><div class="panel-title text-primary">สิ่งที่ต้องดำเนินการ</div><div class="panel-copy">{{ ticket.action_required|linebreaks }}</div></div></div>{% endif %}
         {% if ticket.action_precautions %}<div class="col-md-5"><div class="response-panel warning"><div class="panel-title text-warning-emphasis">ข้อควรระวัง</div><div class="panel-copy">{{ ticket.action_precautions|linebreaks }}</div></div></div>{% endif %}
+        {% if ticket.actions_taken_summary %}<div class="col-md-6"><div class="response-panel success"><div class="panel-title text-success">เรื่องที่ดำเนินการแล้ว</div><div class="panel-copy">{{ ticket.actions_taken_summary|linebreaks }}</div></div></div>{% endif %}
+        {% if ticket.next_steps_summary %}<div class="col-md-6"><div class="response-panel info"><div class="panel-title text-primary">การดำเนินการลำดับถัดไป</div><div class="panel-copy">{{ ticket.next_steps_summary|linebreaks }}</div></div></div>{% endif %}
       </div></div>
     </section>
     {% endif %}
@@ -194,7 +204,7 @@
   <div class="col-xl-4">
     <div class="action-stack">
       {% if is_terminal %}
-      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 1 verify</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
+      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 verify</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
       {% endif %}
 
       <div class="card shadow-sm mb-3 {% if ticket.is_emergency %}emergency-card{% else %}border-0{% endif %}"><div class="card-header {% if ticket.is_emergency %}bg-danger text-white{% else %}bg-white{% endif %} fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Emergency</div><div class="card-body"><p class="small text-muted">สถานะฉุกเฉินมีผลต่อการส่งให้ SOC Manager และเปลี่ยนได้ทุกช่วงของ lifecycle</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="toggle_emergency"><input type="hidden" name="emergency_value" value="{% if ticket.is_emergency %}0{% else %}1{% endif %}"><label class="form-label small fw-bold">เหตุผล / หมายเหตุ</label><textarea name="emergency_note" class="form-control mb-2" rows="2" {% if not can_set_emergency %}disabled{% endif %}></textarea><button class="btn {% if ticket.is_emergency %}btn-outline-danger{% else %}btn-danger{% endif %} w-100" type="submit" {% if not can_set_emergency %}disabled{% endif %}>{% if ticket.is_emergency %}ยกเลิก Emergency{% else %}ตั้งเป็น Emergency{% endif %}</button></form>{% if not can_set_emergency %}<div class="alert alert-secondary small py-2 mt-2 mb-0">Tier 1 เปิดใช้ Emergency ได้หลังจาก Ticket เคยส่งต่อให้ Tier 2 แล้วเท่านั้น</div>{% endif %}</div></div>
@@ -214,13 +224,9 @@
           <input type="checkbox" id="fruit1" name="fruit" value="Apple">
           <label class="form-label fw-bold" for="fruit1">ทดสอบ1</label>
         </div>
-        
-
-
-
-       <input type="hidden" name="action" value="containment"><label class="form-label fw-bold">ผลการตรวจสอบ (Investigation findings)</label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ (Countermeasure) <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit">Return to Tier 1</button></form></div></div>
+        <label class="form-label fw-bold">ผลการตรวจสอบ (Investigation findings)</label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ (Countermeasure) <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit">Submit for Tier 2 review</button></form></div></div>
       {% elif transition_actions %}
-      <div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 1 Verification{% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 Verification (เจ้าของระบบแก้ไขเอง){% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 Review (ปิดเคสทางลัด){% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+      <div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 Verification (การควบคุมของ System Admin){% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 — ส่งผลการแก้ไขให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 Verification (การแก้ไขของเจ้าของระบบ){% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
       {% else %}<div class="alert alert-light border text-center text-muted">ไม่มี action สำหรับบทบาทของคุณในขั้นตอนนี้</div>{% endif %}
     </div>
   </div>

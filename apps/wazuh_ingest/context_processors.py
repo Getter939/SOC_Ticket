@@ -19,8 +19,10 @@ def pending_triage_count(request):
     }
 
     if user.is_superuser or (profile and profile.is_tier2):
+        # Everything waiting on Tier 2: escalation triage + both verification
+        # stages (admin containment / owner remediation).
         context['escalation_queue_count'] = Ticket.objects.filter(
-            status=Ticket.STATUS_ESCALATED_T2,
+            status__in=Ticket.TIER2_QUEUE_STATUSES,
         ).count()
 
     return context

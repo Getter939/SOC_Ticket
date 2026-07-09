@@ -9,7 +9,7 @@ Test classes
 4.  WorkflowPermissionTest        — Per-transition role/tier permissions (positive + negative)
 5.  T1ClassificationCreateTest    — Tier 1 Event/Incident disposition at creation
 6.  Tier2EscalationTest           — Tier 2 return-only constraint (never assign / never create)
-7.  ManagerRoutingTest            — requires_manager_verification (Critical floor + emergency)
+7.  ManagerRoutingTest            — requires_manager_verification (emergency flag only)
 8.  EmergencyFlagTest             — emergency-flag permissions + audit
 9.  AdminFieldAccessTest          — System Admin write access to containment/remediation fields
 10. SignOffFieldsTest             — verified_by/at and approved_by/at are write-once
@@ -18,12 +18,18 @@ Test classes
 13. TriageWorkflowIntegrityTest   — manual-triage + wazuh-alert ticket creation
 14. SuperuserAccessTest           — superuser bypass across the redesigned flow
 15. AttachmentDownloadSecurityTest / AttachmentUploadLimitTest
+16. TicketReportExportTest       — preview, DOCX/PDF generation + metadata
 
 Run with:  py manage.py test apps.incidents --settings=config.settings_local
 """
 
+import hashlib
+import importlib.util
+import re
 import shutil
 import tempfile
+from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 from datetime import timedelta
@@ -36,6 +42,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from docx import Document
+from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
 from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
@@ -44,6 +52,11 @@ from apps.incidents.models import (
     bundle_suffix_for_index,
 )
 from apps.incidents.notifications import notify_containment_required
+from apps.incidents.reports import (
+    REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
+    build_ticket_report_context, build_ticket_report_sections,
+    generate_ticket_report, _iter_paragraphs,
+)
 from apps.wazuh_ingest.models import WazuhAlert
 
 
@@ -85,6 +98,8 @@ def _ticket_post_data(**overrides):
         'classification': Ticket.CLASSIFICATION_INCIDENT,
         't1_route': TicketForm.ROUTE_ESCALATE_T2,
         'severity': 'High',
+        'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Investigating',
         'detailed_issue2': 'Investigating Other',
@@ -96,11 +111,11 @@ def _ticket_post_data(**overrides):
     return data
 
 
-def _advance_to(ticket, target_status, t1, admin=None, mgr=None):
+def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
     """
     Drive a ticket from its current status to target_status along the
-    Incident → assign-admin happy path. Chooses the manager step automatically
-    based on requires_manager_verification (severity / emergency).
+    Incident → assign-admin happy path. Tier 2 verifies the containment report;
+    the manager step fires automatically when the emergency flag requires it.
     """
     if ticket.created_by_id is None:
         ticket.created_by = t1
@@ -125,12 +140,25 @@ def _advance_to(ticket, target_status, t1, admin=None, mgr=None):
             ticket.containment_report = 'Contained.'
             ticket.transition_to(step, admin, 'containment note')
         elif step == Ticket.STATUS_PENDING_MANAGER:
-            ticket.transition_to(step, t1, 'verified — route to manager')
+            ticket.transition_to(step, t2, 'T2 verified — route to manager')
         elif step == Ticket.STATUS_APPROVED:
-            actor = mgr if ticket.requires_manager_verification else t1
+            actor = mgr if ticket.requires_manager_verification else t2
             ticket.transition_to(step, actor, 'close')
         else:  # AWAITING_CONTAINMENT
             ticket.transition_to(step, t1, 'assign admin')
+
+
+def _docx_text(content):
+    doc = Document(BytesIO(content))
+    parts = [p.text for p in doc.paragraphs]
+    parts.extend(
+        p.text
+        for table in doc.tables
+        for row in table.rows
+        for cell in row.cells
+        for p in cell.paragraphs
+    )
+    return '\n'.join(parts)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -202,6 +230,291 @@ class TicketVisibilityViewTest(TestCase):
 # 3. Workflow transition tests                                                  #
 # ──────────────────────────────────────────────────────────────────────────── #
 
+class TicketReportExportTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('report_t1', phone='02-574-8209')
+        cls.admin = _make_user('report_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.other_admin = _make_user('report_other_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.ticket = _make_ticket(
+            created_by=cls.t1,
+            assigned_admin=cls.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            incident_name='Suspicious SoftEther Signed File',
+            incident_datetime=timezone.now(),
+            reference_id='INC-2026-0001',
+            log_source='Wazuh',
+            severity='High',
+            ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            issue_type='SIEM',
+            detailed_issue='Malicious Logic',
+            detailed_issue2='Malware EDR',
+            device_name='SRV-SQL-01',
+            ip_address='192.0.2.10',
+            mac_address='AA:BB:CC:DD:EE:FF',
+            asset_type='Server',
+            operating_system='Windows Server 2019',
+            asset_owner='IT Operations',
+            spread_to_others=False,
+            destination_ip='203.0.113.50',
+            ioc_details='203.0.113.50\nsoftether.example',
+            mitre_phase='Initial Access,Execution',
+            action_required='Block IoC and inspect persistence.',
+            action_precautions='Preserve memory and logs before reboot.',
+            actions_taken_summary='SOC contacted the owner and blocked the IP.',
+            next_steps_summary='Monitor endpoint telemetry for 24 hours.',
+            remediation_summary='Unauthorized service removed.',
+            containment_report='Host isolated and C2 destination blocked.',
+        )
+        TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file='ticket_attachments/report/evidence.log',
+            original_name='evidence.log',
+            uploaded_by=cls.t1,
+        )
+
+    def test_generate_ticket_report_renders_docx_and_updates_metadata(self):
+        snapshot_updated_at = self.ticket.updated_at
+
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        content = report.content
+        text = _docx_text(content)
+
+        self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
+        self.assertIn('Suspicious SoftEther Signed File', text)
+        self.assertIn('SOC contacted the owner and blocked the IP.', text)
+        self.assertIn('Host isolated and C2 destination blocked.', text)
+        self.assertIn('Initial Access, Execution', text)
+        self.assertIn('evidence.log', text)
+        self.assertNotIn('{{ticket_id}}', text)
+        # Checkbox states reflect the ticket: INCIDENT / High / SEVERE / Server.
+        self.assertIn('☑ Incident', text)
+        self.assertIn('☐ Event', text)
+        self.assertIn('☑ High', text)
+        self.assertIn('☑ ร้ายแรง', text)   # NCSA severe
+        self.assertIn('☑ Server', text)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_format, 'docx')
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_ticket_updated_at, snapshot_updated_at)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+        self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_ticket_report_docx_endpoint_streams_authorized_download(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx', response['Content-Disposition'])
+        content = b''.join(response.streaming_content)
+        self.assertIn('Suspicious SoftEther Signed File', _docx_text(content))
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_format, 'docx')
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+
+    def test_ticket_report_export_rejects_get(self):
+        self.client.force_login(self.t1)
+        snapshot = self.ticket.report_generated_at
+        for url_name in ('ticket_report_docx', 'ticket_report_pdf'):
+            response = self.client.get(reverse(url_name, args=[self.ticket.pk]))
+            self.assertEqual(response.status_code, 405)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_generated_at, snapshot)
+
+    def test_ticket_report_export_failure_redirects_with_message(self):
+        self.client.force_login(self.t1)
+        with patch(
+            'apps.incidents.views.generate_ticket_report',
+            side_effect=ValueError('Unresolved report template placeholders: {{bogus}}'),
+        ):
+            response = self.client.post(
+                reverse('ticket_report_docx', args=[self.ticket.pk]), follow=True,
+            )
+        self.assertRedirects(response, reverse('ticket_detail', args=[self.ticket.pk]))
+        message_texts = [str(m) for m in response.context['messages']]
+        self.assertTrue(any('ไม่สามารถสร้างรายงาน DOCX ได้' in m for m in message_texts))
+
+    def test_ticket_report_preview_returns_read_only_html(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        # NT-form section titles.
+        self.assertContains(response, 'ข้อมูลทั่วไป (General Information)')
+        self.assertContains(response, 'รายละเอียดเหตุการณ์ (Incident Description)')
+        self.assertContains(response, 'Scope ทรัพย์สินที่ได้รับผลกระทบ')
+        self.assertContains(response, 'Indicators of Compromise หรือหลักฐานที่พบ')
+        self.assertContains(response, 'สิ่งที่ต้องดำเนินการ (Containment)')
+        self.assertContains(response, 'สรุปผลการดำเนินการแก้ไข')
+        self.assertContains(response, 'หมวดหมู่ของภัยคุกคามทางไซเบอร์')
+        # Ticket data filled in.
+        self.assertContains(response, 'Suspicious SoftEther Signed File')
+        self.assertContains(response, 'SOC contacted the owner and blocked the IP.')
+        self.assertContains(response, 'Host isolated and C2 destination blocked.')
+        self.assertContains(response, 'กลับไปแก้ไข Ticket')
+        # Data-driven checkbox: INCIDENT is checked, Event is not (☑=&#9745;, ☐=&#9744;).
+        self.assertContains(response, '&#9745;</span>&#160;Incident')
+        self.assertContains(response, '&#9744;</span>&#160;Event')
+        # NT logo embedded as a data URI.
+        self.assertContains(response, 'data:image/png;base64,')
+
+    def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.pdf', response['Content-Disposition'])
+
+        content = b''.join(response.streaming_content)
+        self.assertTrue(content.startswith(b'%PDF'))
+        pdf = PdfReader(BytesIO(content))
+        self.assertGreaterEqual(len(pdf.pages), 1)
+        text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+        normalized_text = ' '.join(text.split())
+        self.assertIn('Suspicious SoftEther Signed File', normalized_text)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
+        self.assertEqual(self.ticket.report_format, 'pdf')
+        self.assertEqual(self.ticket.report_generated_by, self.t1)
+        self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
+        self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_pdf_export_embeds_bundled_thai_font(self):
+        from reportlab.pdfbase import pdfmetrics
+        from apps.incidents.reports import REPORT_FONT_NAME, _register_pdf_font
+
+        _register_pdf_font()
+        registered = pdfmetrics.getRegisteredFontNames()
+        self.assertIn(REPORT_FONT_NAME, registered)
+        self.assertIn(f'{REPORT_FONT_NAME}-Bold', registered)
+
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+        content = b''.join(response.streaming_content)
+        # The bundled TH Sarabun New faces must be embedded so Thai headings and
+        # values render as real glyphs instead of blank boxes on any host.
+        self.assertIn(b'THSarabunNew', content)
+        self.assertIn(b'THSarabunNew-Bold', content)
+
+    def test_ticket_report_docx_endpoint_respects_ticket_visibility(self):
+        self.client.force_login(self.other_admin)
+        response = self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    @staticmethod
+    def _docx_placeholders(path):
+        doc = Document(str(path))
+        found = set()
+        for paragraph in _iter_paragraphs(doc):
+            found.update(re.findall(r'\{\{([^}]+)\}\}', paragraph.text))
+        return found
+
+    def test_template_placeholders_match_context_keys(self):
+        # Both directions: an orphan placeholder in the .docx would raise at
+        # export time, and an unused context key is silent drift.
+        context_keys = set(build_ticket_report_context(self.ticket))
+        self.assertEqual(self._docx_placeholders(REPORT_TEMPLATE_PATH), context_keys)
+
+    def test_build_script_matches_committed_template(self):
+        script_path = Path(settings.BASE_DIR) / 'scripts' / 'build_report_template_v2.py'
+        spec = importlib.util.spec_from_file_location('build_report_template_v2', script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rebuilt_path = Path(tmp) / 'rebuilt_template.docx'
+            module.build(rebuilt_path)
+            rebuilt = self._docx_placeholders(rebuilt_path)
+
+        self.assertEqual(rebuilt, self._docx_placeholders(REPORT_TEMPLATE_PATH))
+
+    def _checkbox_options(self, ticket, label):
+        """Return the {label: checked} options for a named checkbox row."""
+        report = build_ticket_report_context(ticket)
+        for section in build_ticket_report_sections(report, ticket):
+            for row in section['rows']:
+                if row.get('type') == 'checks' and row['label'] == label:
+                    return {opt['label']: opt['checked'] for opt in row['options']}
+        raise AssertionError(f'checkbox row {label!r} not found')
+
+    def test_report_sections_reflect_ticket_checkbox_state(self):
+        opts = self._checkbox_options(self.ticket, 'ประเภท: event หรือ incident')
+        self.assertTrue(opts['Incident'])
+        self.assertFalse(opts['Event'])
+
+        sev = self._checkbox_options(self.ticket, 'ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)')
+        self.assertEqual([k for k, v in sev.items() if v], ['High'])
+
+        ncsa = self._checkbox_options(self.ticket, 'ระดับความรุนแรง (อ้างอิงตาม สกมช.)')
+        self.assertEqual([k for k, v in ncsa.items() if v], ['ร้ายแรง'])
+
+        # is_emergency drives ระดับความสำคัญ (สำคัญ vs สำคัญมาก).
+        imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+        self.assertEqual([k for k, v in imp.items() if v], ['สำคัญ'])
+
+    def test_emergency_flag_flips_importance_checkbox(self):
+        self.ticket.is_emergency = True
+        imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+        self.assertEqual([k for k, v in imp.items() if v], ['สำคัญมาก'])
+
+    def test_pdf_repeats_footer_on_every_page(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+        pdf = PdfReader(BytesIO(b''.join(response.streaming_content)))
+        pages_with_footer = sum(
+            1 for page in pdf.pages
+            if 'INCIDENT REPORT CONTAINMENT' in (page.extract_text() or '')
+        )
+        self.assertEqual(pages_with_footer, len(pdf.pages))
+
+    def test_docx_renders_multiline_values_as_line_breaks(self):
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        doc = Document(BytesIO(report.content))
+
+        target = next(
+            (p for p in _iter_paragraphs(doc)
+             if '203.0.113.50' in p.text and 'softether.example' in p.text),
+            None,
+        )
+        self.assertIsNotNone(target, 'ioc_details paragraph not found in DOCX')
+        # python-docx turns \n into <w:br/> (older versions used <w:cr/>);
+        # either way the two IoC lines must not collapse into one.
+        breaks = target._p.findall(f'.//{{{target._p.nsmap["w"]}}}br')
+        carriage = target._p.findall(f'.//{{{target._p.nsmap["w"]}}}cr')
+        self.assertTrue(breaks or carriage, 'multiline value lost its line break')
+
+    def test_ticket_detail_shows_stale_report_badge(self):
+        stale_marker = 'หลังสร้างรายงานล่าสุด'
+        self.client.force_login(self.t1)
+
+        # No report generated yet — no badge.
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertNotContains(response, stale_marker)
+
+        # Fresh report — still no badge.
+        self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertNotContains(response, stale_marker)
+
+        # Ticket modified after the export — badge appears.
+        Ticket.objects.filter(pk=self.ticket.pk).update(
+            updated_at=timezone.now() + timedelta(seconds=5),
+        )
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertContains(response, stale_marker)
+        self.assertContains(response, 'ล่าสุด (DOCX')
+
+
 class WorkflowTransitionTest(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -265,22 +578,26 @@ class WorkflowTransitionTest(TestCase):
         t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign admin')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
 
-    def test_full_happy_path_high_severity_no_manager(self):
+    def test_full_happy_path_t2_closes_without_manager(self):
         t = self._incident(severity='High')
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_full_happy_path_critical_via_manager(self):
+    def test_full_happy_path_emergency_via_manager(self):
         t = self._incident(severity='Critical')
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, mgr=self.mgr)
+        t.is_emergency = True
+        t.save(update_fields=['is_emergency'])
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     def test_containment_rejection_loop(self):
         t = self._incident()
         _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'not contained')
+        # Tier 2 (not Tier 1) judges the containment report and sends it back.
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'not contained')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
 
     # ── Illegal transitions ─────────────────────────────────────────────── #
@@ -292,7 +609,7 @@ class WorkflowTransitionTest(TestCase):
 
     def test_approved_is_terminal(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'reopen')
 
@@ -400,17 +717,37 @@ class WorkflowPermissionTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, 'denied')
 
-    # CONTAINMENT_REPORTED close  requires TIER1_CREATOR ──────────────────
+    # CONTAINMENT_REPORTED close  requires TIER2 ──────────────────────────
 
-    def test_creator_t1_can_close_when_no_manager(self):
+    def test_t2_can_verify_and_close_when_no_manager(self):
         t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'close')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — close')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_non_creator_t1_cannot_close(self):
+    def test_creator_t1_cannot_close_containment(self):
+        """Containment verification moved to Tier 2 — even the creator may not close."""
         t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.other_t1, 'denied')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'denied')
+
+    def test_t2_must_route_emergency_to_manager(self):
+        t = self._ticket_at(
+            Ticket.STATUS_CONTAINMENT_REPORTED, severity='High', is_emergency=True,
+        )
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'denied — emergency')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'to manager')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MANAGER)
+
+    def test_t2_can_reject_containment_back_to_admin(self):
+        t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'not contained')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_t1_cannot_reject_containment(self):
+        t = self._ticket_at(Ticket.STATUS_CONTAINMENT_REPORTED, severity='High')
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'denied')
 
     # PENDING_MANAGER → APPROVED  requires MANAGER ────────────────────────
 
@@ -553,6 +890,7 @@ class ManagerRoutingTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('mr_t1')
+        cls.t2    = _make_t2('mr_t2')
         cls.mgr   = _make_user('mr_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('mr_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -563,9 +901,10 @@ class ManagerRoutingTest(TestCase):
             severity=severity, is_emergency=is_emergency, containment_report='done',
         )
 
-    def test_critical_requires_manager(self):
+    def test_critical_does_not_require_manager(self):
+        """Severity alone never routes to the manager — only the emergency flag."""
         t = self._contained(severity='Critical')
-        self.assertTrue(t.requires_manager_verification)
+        self.assertFalse(t.requires_manager_verification)
 
     def test_high_does_not_require_manager(self):
         t = self._contained(severity='High')
@@ -575,38 +914,31 @@ class ManagerRoutingTest(TestCase):
         t = self._contained(severity='High', is_emergency=True)
         self.assertTrue(t.requires_manager_verification)
 
-    def test_high_ticket_t1_closes_directly(self):
+    def test_non_emergency_ticket_t2_closes_directly(self):
         t = self._contained(severity='High')
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'closed')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_high_ticket_cannot_route_to_manager(self):
-        t = self._contained(severity='High')
-        with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no need')
-
-    def test_critical_ticket_t1_cannot_close_directly(self):
+    def test_critical_non_emergency_t2_closes_directly(self):
         t = self._contained(severity='Critical')
-        with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'must go to manager')
-
-    def test_critical_ticket_routes_to_manager_then_closes(self):
-        t = self._contained(severity='Critical')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'verified')
-        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    def test_emergency_high_must_route_to_manager(self):
+    def test_non_emergency_ticket_cannot_route_to_manager(self):
+        t = self._contained(severity='High')
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'no need')
+
+    def test_emergency_ticket_t2_cannot_close_directly(self):
         t = self._contained(severity='High', is_emergency=True)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'blocked by emergency')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'route')
-        self.assertEqual(t.status, Ticket.STATUS_PENDING_MANAGER)
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'must go to manager')
 
-    @override_settings(SOC_SEVERITY_FLOOR='High')
-    def test_severity_floor_is_tunable(self):
-        t = self._contained(severity='High')
-        self.assertTrue(t.requires_manager_verification)
+    def test_emergency_ticket_routes_to_manager_then_closes(self):
+        t = self._contained(severity='High', is_emergency=True)
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'T2 verified')
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -616,8 +948,8 @@ class ManagerRoutingTest(TestCase):
 def _owner_payload(severity='Low', **overrides):
     """A valid create_ticket POST payload for the direct-to-owner route.
 
-    Extends _ticket_post_data with the two fields the create form requires that
-    the base helper omits (ncsa_severity, log_source), so the form validates.
+    Extends _ticket_post_data with the direct-owner route and a lower default
+    statutory severity suitable for the owner-remediation fast path.
     """
     data = _ticket_post_data(
         classification=Ticket.CLASSIFICATION_INCIDENT,
@@ -654,10 +986,11 @@ class DirectToOwnerPathTest(TestCase):
 
         t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.t1, 'owner fixed')
         t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
-        self.assertEqual(t.verified_by, self.t1)   # T1 sign-off stamped
+        self.assertIsNone(t.verified_by)           # verification is T2's act now
 
         t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'reviewed & closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(t.verified_by, self.t2)   # T2 sign-off stamped at close
         self.assertEqual(t.approved_by, self.t2)
         self.assertIsNotNone(t.closed_at)
 
@@ -669,15 +1002,17 @@ class DirectToOwnerPathTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no')
 
-    # ── Review split: emergency forces the SOC Manager ─────────────────── #
-    def test_emergency_routes_to_manager_not_tier2(self):
+    # ── Review split: emergency passes Tier 2 first, then the Manager ───── #
+    def test_emergency_owner_path_passes_t2_then_manager(self):
         t = self._owner_case(is_emergency=True,
                              status=Ticket.STATUS_OWNER_REMEDIATED)
-        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
-        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
+        # Every owner case goes to Tier 2 review — including emergencies.
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        # Tier 2 may not close an emergency directly; it must go to the manager.
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_APPROVED))
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'no')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'no')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'to manager')
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
@@ -698,14 +1033,13 @@ class DirectToOwnerPathTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'T1 cannot close a T2 review')
 
-    # ── Critical (severity floor) routes the review to the SOC Manager ──── #
-    def test_critical_severity_routes_to_manager_not_tier2(self):
+    # ── Critical severity alone no longer routes to the SOC Manager ─────── #
+    def test_critical_severity_still_closes_via_tier2(self):
         t = self._owner_case(severity='Critical',
                              status=Ticket.STATUS_OWNER_REMEDIATED)
-        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
-        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_MANAGER))
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'to manager')
-        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
+        self.assertTrue(t.can_transition_to(Ticket.STATUS_PENDING_T2_REVIEW))
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'verified — closed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     # ── Form gating: route valid at any severity ───────────────────────── #
@@ -880,47 +1214,55 @@ class SignOffFieldsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('sf_t1')
+        cls.t2    = _make_t2('sf_t2')
+        cls.t2b   = _make_t2('sf_t2b')
         cls.mgr   = _make_user('sf_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('sf_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
-    def _incident(self, severity='Critical'):
+    def _incident(self, severity='Critical', is_emergency=True):
+        # Manager routing now keys off the emergency flag, not severity.
         return _make_ticket(
             assigned_admin=self.admin, created_by=self.t1,
             classification=Ticket.CLASSIFICATION_INCIDENT, severity=severity,
+            is_emergency=is_emergency,
         )
 
-    def test_verified_by_set_when_t1_marks_contained(self):
+    def test_verified_by_set_when_t2_marks_contained(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
         self.assertIsNotNone(t.verified_at)
 
     def test_approved_by_set_to_manager(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
         self.assertEqual(t.approved_by, self.mgr)
 
-    def test_direct_close_sets_both_signoffs_to_t1(self):
-        t = self._incident(severity='High')  # no manager needed
-        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin)
+    def test_direct_close_sets_both_signoffs_to_t2(self):
+        t = self._incident(severity='High', is_emergency=False)  # no manager needed
+        _advance_to(t, Ticket.STATUS_APPROVED, self.t1, self.admin, t2=self.t2)
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
-        self.assertEqual(t.approved_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
+        self.assertEqual(t.approved_by, self.t2)
 
     def test_verified_by_write_once(self):
         t = self._incident()
-        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin, mgr=self.mgr)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
         t.refresh_from_db()
-        # Force back to CONTAINMENT_REPORTED with a different creator; verified_by must hold.
+        # Force back to CONTAINMENT_REPORTED; a different Tier 2 re-verifies —
+        # the original verified_by must hold (write-once).
         Ticket.objects.filter(pk=t.pk).update(
-            status=Ticket.STATUS_CONTAINMENT_REPORTED, created_by=self.t1.pk,
+            status=Ticket.STATUS_CONTAINMENT_REPORTED,
         )
         t.refresh_from_db()
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'again')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2b, 'again')
         t.refresh_from_db()
-        self.assertEqual(t.verified_by, self.t1)
+        self.assertEqual(t.verified_by, self.t2)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -1227,9 +1569,11 @@ class SuperuserAccessTest(TestCase):
                 self.assertEqual(self.client.get(url).status_code, 200)
 
     def test_superuser_can_perform_every_ticket_role_transition(self):
+        # Emergency flag set so the ticket legally routes through PENDING_MANAGER
+        # (severity alone no longer triggers the manager gate).
         ticket = _make_ticket(
             assigned_admin=self.system_admin, severity='Critical',
-            classification=Ticket.CLASSIFICATION_INCIDENT,
+            classification=Ticket.CLASSIFICATION_INCIDENT, is_emergency=True,
         )
         ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.superuser, 'as t1')
         ticket.containment_report = 'Contained by superuser.'
@@ -1386,13 +1730,15 @@ class UnknownSeverityTest(TestCase):
     """
     'Unknown' is a human-assigned severity for cases the analyst cannot yet
     classify. It is selectable in the manual create + manual triage forms,
-    absent from the automated Wazuh mapping, ranks lowest (never meets the
-    manager floor on its own), and renders a distinct badge.
+    absent from the automated Wazuh mapping, ranks lowest for queue ordering
+    (severity never routes to the manager — only the emergency flag), and
+    renders a distinct badge.
     """
 
     @classmethod
     def setUpTestData(cls):
         cls.t1    = _make_t1('uk_t1')
+        cls.t2    = _make_t2('uk_t2')
         cls.mgr   = _make_user('uk_mgr',   UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('uk_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -1455,15 +1801,15 @@ class UnknownSeverityTest(TestCase):
     def test_unknown_without_emergency_does_not_require_manager(self):
         self.assertFalse(self._contained().requires_manager_verification)
 
-    def test_unknown_without_emergency_t1_closes_directly(self):
+    def test_unknown_without_emergency_t2_closes_directly(self):
         t = self._contained()
-        t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'closed — no manager needed')
+        t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'closed — no manager needed')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
     def test_unknown_without_emergency_cannot_route_to_manager(self):
         t = self._contained()
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'no need')
+            t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'no need')
 
     def test_unknown_with_emergency_requires_manager(self):
         self.assertTrue(self._contained(is_emergency=True).requires_manager_verification)
@@ -1471,8 +1817,8 @@ class UnknownSeverityTest(TestCase):
     def test_unknown_with_emergency_routes_to_manager(self):
         t = self._contained(is_emergency=True)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_APPROVED, self.t1, 'blocked by emergency')
-        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t1, 'route to manager')
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'blocked by emergency')
+        t.transition_to(Ticket.STATUS_PENDING_MANAGER, self.t2, 'route to manager')
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
@@ -1645,6 +1991,8 @@ def _pi_post_data(admin_a, admin_b, **overrides):
         # shared incident facts
         'title': 'Multi-system intrusion via public-facing app',
         'severity': 'High',
+        'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Malicious Logic',
         'detailed_issue2': 'C2 Server',
@@ -1726,7 +2074,7 @@ class ProjectIncidentFanOutTest(TestCase):
         )
         project = ProjectIncident.objects.get()
         first, second = list(project.members)
-        _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a)
+        _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a, t2=self.t2)
         second.refresh_from_db()
         self.assertEqual(second.status, Ticket.STATUS_AWAITING_CONTAINMENT)
         self.assertEqual(project.open_member_count, 1)

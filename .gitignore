@@ -51,6 +51,8 @@ backups/
 .DS_Store
 Thumbs.db
 desktop.ini
+# LibreOffice/OpenOffice editor locks (e.g. .~lock.report_template_v1.docx#)
+.~lock.*#
 *.js
 
 .codex_work/

@@ -1,0 +1,104 @@
+<svg width="680" height="1260" viewBox="0 0 680 1260" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>SOC ticket workflow as a vertical flow with role badges</title>
+<desc>A single top-to-bottom flow of the ticket lifecycle. Each step is colored by the responsible role (Tier 1, Tier 2, System Admin, SOC Manager); SANS-IR phases run down the left. Branches cover event-closes, Tier 2 escalation, the manager gate, and the not-contained loop.</desc>
+<style>
+  text{font-family:'Segoe UI','Leelawadee UI',Tahoma,Arial,sans-serif;}
+  .t{font-size:14px;font-weight:400;}
+  .ts{font-size:12px;font-weight:400;}
+  .th{font-size:14px;font-weight:500;}
+  .s-blue{fill:#e7f0ff;stroke:#3b82f6;stroke-width:1.2;}
+  .s-purple{fill:#f1ebfe;stroke:#8b5cf6;stroke-width:1.2;}
+  .s-amber{fill:#fef3e2;stroke:#f59e0b;stroke-width:1.2;}
+  .s-coral{fill:#ffece7;stroke:#fb7185;stroke-width:1.2;}
+  .s-green{fill:#e6f6ec;stroke:#34d399;stroke-width:1.2;}
+  .s-gray{fill:#eef0f2;stroke:#adb5bd;stroke-width:1.2;}
+  .s-phase{fill:#f8f9fa;stroke:#dee2e6;stroke-width:1;}
+</style>
+<defs>
+  <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="arA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#d97706" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+
+<rect x="0" y="0" width="680" height="1260" fill="#ffffff"/>
+
+<text class="th" x="340" y="22" text-anchor="middle" fill="#1f2937">SOC ticket workflow — by responsible role</text>
+<rect x="150" y="40" width="11" height="11" rx="2" class="s-blue"/><text class="ts" x="166" y="49" text-anchor="start" fill="#495057">Tier 1</text>
+<rect x="222" y="40" width="11" height="11" rx="2" class="s-purple"/><text class="ts" x="238" y="49" text-anchor="start" fill="#495057">Tier 2</text>
+<rect x="296" y="40" width="11" height="11" rx="2" class="s-amber"/><text class="ts" x="312" y="49" text-anchor="start" fill="#495057">System Admin</text>
+<rect x="404" y="40" width="11" height="11" rx="2" class="s-coral"/><text class="ts" x="420" y="49" text-anchor="start" fill="#495057">SOC Manager</text>
+<rect x="500" y="40" width="11" height="11" rx="2" class="s-green"/><text class="ts" x="516" y="49" text-anchor="start" fill="#495057">ปิดเคส</text>
+
+<g fill="#6c757d">
+<rect x="8" y="70" width="84" height="124" rx="4" class="s-phase"/><text class="th" x="50" y="126" text-anchor="middle" fill="#495057">P</text><text class="ts" x="50" y="142" text-anchor="middle">Prepare</text>
+<rect x="8" y="194" width="84" height="524" rx="4" class="s-phase"/><text class="th" x="50" y="450" text-anchor="middle" fill="#495057">I</text><text class="ts" x="50" y="466" text-anchor="middle">Identify</text>
+<rect x="8" y="718" width="84" height="94" rx="4" class="s-phase"/><text class="th" x="50" y="758" text-anchor="middle" fill="#495057">C</text><text class="ts" x="50" y="774" text-anchor="middle">Contain</text>
+<rect x="8" y="812" width="84" height="80" rx="4" class="s-phase"/><text class="th" x="50" y="846" text-anchor="middle" fill="#495057">E</text><text class="ts" x="50" y="862" text-anchor="middle">Eradicate</text>
+<rect x="8" y="892" width="84" height="96" rx="4" class="s-phase"/><text class="th" x="50" y="934" text-anchor="middle" fill="#495057">R</text><text class="ts" x="50" y="950" text-anchor="middle">Recover</text>
+<rect x="8" y="988" width="84" height="252" rx="4" class="s-phase"/><text class="th" x="50" y="1108" text-anchor="middle" fill="#495057">L</text><text class="ts" x="50" y="1124" text-anchor="middle">Lessons</text>
+</g>
+
+<line x1="96" y1="194" x2="672" y2="194" stroke="#ced4da" stroke-dasharray="3 4"/>
+<line x1="96" y1="718" x2="672" y2="718" stroke="#ced4da" stroke-dasharray="3 4"/>
+<line x1="96" y1="812" x2="672" y2="812" stroke="#ced4da" stroke-dasharray="3 4"/>
+<line x1="96" y1="892" x2="672" y2="892" stroke="#ced4da" stroke-dasharray="3 4"/>
+<line x1="96" y1="988" x2="672" y2="988" stroke="#ced4da" stroke-dasharray="3 4"/>
+
+<line x1="320" y1="110" x2="320" y2="136" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="184" x2="320" y2="210" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="258" x2="320" y2="281" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="343" x2="320" y2="369" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="435" x2="320" y2="475" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="525" x2="320" y2="557" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="619" x2="320" y2="653" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="703" x2="320" y2="743" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="797" x2="320" y2="831" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="885" x2="320" y2="913" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="975" x2="320" y2="1007" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="1073" x2="320" y2="1108" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="320" y1="1156" x2="320" y2="1190" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+
+<line x1="415" y1="312" x2="478" y2="312" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<line x1="415" y1="588" x2="478" y2="588" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<polyline points="420,402 448,402 448,728 398,728 398,743" fill="none" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<polyline points="232,944 150,944 150,770 208,770" fill="none" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arA)"/>
+<line x1="420" y1="1040" x2="468" y2="1040" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+<polyline points="560,1065 560,1132 427,1132" fill="none" stroke="#6b7280" stroke-width="1.5" marker-end="url(#ar)"/>
+
+<g fill="#1e3a8a"><ellipse cx="320" cy="92" rx="52" ry="18" class="s-blue"/><text class="t" x="320" y="97" text-anchor="middle">เริ่มต้น</text></g>
+<g fill="#1e3a8a"><rect x="215" y="136" width="210" height="48" rx="6" class="s-blue"/><text class="t" x="320" y="158" text-anchor="middle">รับแจ้งเหตุ &amp; Triage</text><text class="ts" x="320" y="175" text-anchor="middle">SIEM · โทร · ภายนอก (คืนคิวได้)</text></g>
+<g fill="#1e3a8a"><rect x="215" y="210" width="210" height="48" rx="6" class="s-blue"/><text class="t" x="320" y="232" text-anchor="middle">สร้าง Ticket — NEW</text><text class="ts" x="320" y="249" text-anchor="middle">ระบุความรุนแรง + จัดประเภท</text></g>
+
+<g fill="#343a40"><polygon points="320,281 415,312 320,343 225,312" class="s-gray"/><text class="t" x="320" y="309" text-anchor="middle">Event หรือ Incident?</text><text class="ts" x="320" y="325" text-anchor="middle">ตัดสินโดย Tier 1</text></g>
+<g fill="#065f46"><rect x="478" y="292" width="174" height="40" rx="6" class="s-green"/><text class="t" x="565" y="316" text-anchor="middle">ปิดเคส (CLOSED_EVENT)</text></g>
+
+<g fill="#343a40"><polygon points="320,369 420,402 320,435 220,402" class="s-gray"/><text class="t" x="320" y="399" text-anchor="middle">Incident: มอบหมาย Admin</text><text class="t" x="320" y="415" text-anchor="middle">หรือ ส่ง Tier 2?</text></g>
+
+<g fill="#5b21b6"><rect x="215" y="475" width="210" height="50" rx="6" class="s-purple"/><text class="t" x="320" y="497" text-anchor="middle">Tier 2 ทบทวน</text><text class="ts" x="320" y="514" text-anchor="middle">(ESCALATED_T2)</text></g>
+<g fill="#343a40"><polygon points="320,557 415,588 320,619 225,588" class="s-gray"/><text class="t" x="320" y="585" text-anchor="middle">Event หรือ Incident?</text><text class="ts" x="320" y="601" text-anchor="middle">ตัดสินโดย Tier 2</text></g>
+<g fill="#065f46"><rect x="478" y="568" width="174" height="40" rx="6" class="s-green"/><text class="t" x="565" y="592" text-anchor="middle">ปิดเคส (CLOSED_EVENT)</text></g>
+
+<g fill="#1e3a8a"><rect x="215" y="653" width="210" height="50" rx="6" class="s-blue"/><text class="t" x="320" y="675" text-anchor="middle">Tier 1 มอบหมายผู้ดูแลระบบ</text><text class="ts" x="320" y="692" text-anchor="middle">(T1_REVIEW)</text></g>
+
+<g fill="#8a4d0a"><rect x="210" y="743" width="220" height="54" rx="6" class="s-amber"/><text class="t" x="320" y="766" text-anchor="middle">ผู้ดูแลระบบดำเนินการควบคุม</text><text class="ts" x="320" y="783" text-anchor="middle">(AWAITING_CONTAINMENT)</text></g>
+<g fill="#8a4d0a"><rect x="210" y="831" width="220" height="54" rx="6" class="s-amber"/><text class="t" x="320" y="854" text-anchor="middle">ส่งรายงานควบคุม + การแก้ไข</text><text class="ts" x="320" y="871" text-anchor="middle">(CONTAINMENT_REPORTED)</text></g>
+
+<g fill="#343a40"><polygon points="320,913 408,944 320,975 232,944" class="s-gray"/><text class="t" x="320" y="941" text-anchor="middle">ควบคุมสำเร็จ?</text><text class="ts" x="320" y="957" text-anchor="middle">ตัดสินโดย Tier 1</text></g>
+<g fill="#343a40"><polygon points="320,1007 420,1040 320,1073 220,1040" class="s-gray"/><text class="t" x="320" y="1037" text-anchor="middle">ต้องผ่านผู้จัดการ?</text><text class="ts" x="320" y="1053" text-anchor="middle">Critical / ฉุกเฉิน</text></g>
+<g fill="#9f1239"><rect x="468" y="1015" width="184" height="50" rx="6" class="s-coral"/><text class="t" x="560" y="1037" text-anchor="middle">ผู้จัดการ SOC ตรวจสอบ</text><text class="ts" x="560" y="1054" text-anchor="middle">(PENDING_MANAGER)</text></g>
+
+<g fill="#1e3a8a"><rect x="215" y="1108" width="210" height="48" rx="6" class="s-blue"/><text class="t" x="320" y="1130" text-anchor="middle">บันทึกผล + แจ้งเจ้าของระบบ</text><text class="ts" x="320" y="1147" text-anchor="middle">audit log + อีเมล</text></g>
+<g fill="#065f46"><ellipse cx="320" cy="1210" rx="68" ry="20" class="s-green"/><text class="t" x="320" y="1207" text-anchor="middle">ปิดเคส</text><text class="ts" x="320" y="1222" text-anchor="middle">(APPROVED)</text></g>
+
+<text class="ts" x="330" y="362" text-anchor="start" fill="#495057">Incident</text>
+<text class="ts" x="447" y="306" text-anchor="middle" fill="#495057">Event</text>
+<text class="ts" x="330" y="460" text-anchor="start" fill="#495057">ส่ง Tier 2</text>
+<text class="ts" x="330" y="640" text-anchor="start" fill="#495057">Incident</text>
+<text class="ts" x="447" y="582" text-anchor="middle" fill="#495057">Event</text>
+<text class="ts" x="452" y="470" text-anchor="start" fill="#495057">มอบหมาย Admin</text>
+<text class="ts" x="452" y="484" text-anchor="start" fill="#495057">(ข้ามขั้นตอน)</text>
+<text class="ts" x="100" y="908" text-anchor="start" fill="#d97706">ยังไม่สำเร็จ</text>
+<text class="ts" x="330" y="998" text-anchor="start" fill="#495057">สำเร็จ</text>
+<text class="ts" x="330" y="1098" text-anchor="start" fill="#495057">ไม่ต้อง</text>
+<text class="ts" x="432" y="1033" text-anchor="start" fill="#495057">ใช่</text>
+<text class="ts" x="503" y="1126" text-anchor="middle" fill="#495057">อนุมัติ</text>
+</svg>

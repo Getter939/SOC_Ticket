@@ -80,7 +80,7 @@ class UiSmokeTest(TestCase):
         self.client.force_login(self.admin)
         resp = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'Return to Tier 1')
+        self.assertContains(resp, 'Submit for Tier 2 review')
         self.assertContains(resp, 'Investigation findings')
         self.assertContains(resp, 'Countermeasure')
 
@@ -168,6 +168,8 @@ class WorkflowUiContractTest(TestCase):
             'status': Ticket.STATUS_T1_REVIEW,
             'classification': Ticket.CLASSIFICATION_INCIDENT,
             'severity': 'High',
+            'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'log_source': 'Wazuh',
             'issue_type': 'SIEM',
             'detailed_issue': 'Investigating',
             'detailed_issue2': 'Investigating Other',
@@ -193,24 +195,29 @@ class WorkflowUiContractTest(TestCase):
         self.assertContains(before, reason)
         self.assertNotContains(after, reason)
 
-    def test_t1_review_admin_and_verification_actions_match_routing(self):
+    def test_t2_verification_actions_match_routing(self):
         review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())
-        high = self.make_ticket(Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done')
-        critical = self.make_ticket(
-            Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done', severity='Critical',
+        normal = self.make_ticket(Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done')
+        emergency = self.make_ticket(
+            Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done', is_emergency=True,
         )
         self.client.force_login(self.t1)
         self.assertContains(
             self.client.get(reverse('ticket_detail', args=[review.pk])),
             'Send to System Admin',
         )
-        high_response = self.client.get(reverse('ticket_detail', args=[high.pk]))
-        self.assertContains(high_response, 'Return to System Admin (not contained)')
-        self.assertContains(high_response, 'Close case')
-        self.assertNotContains(high_response, 'Send to SOC Manager')
-        critical_response = self.client.get(reverse('ticket_detail', args=[critical.pk]))
-        self.assertContains(critical_response, 'Send to SOC Manager')
-        self.assertNotContains(critical_response, '>Close case<')
+        # Containment verification belongs to Tier 2 now — Tier 1 gets no actions.
+        t1_response = self.client.get(reverse('ticket_detail', args=[normal.pk]))
+        self.assertNotContains(t1_response, 'Return to System Admin (not contained)')
+
+        self.client.force_login(self.t2)
+        normal_response = self.client.get(reverse('ticket_detail', args=[normal.pk]))
+        self.assertContains(normal_response, 'Return to System Admin (not contained)')
+        self.assertContains(normal_response, 'Verify -&gt; Close')
+        self.assertNotContains(normal_response, 'Send to SOC Manager')
+        emergency_response = self.client.get(reverse('ticket_detail', args=[emergency.pk]))
+        self.assertContains(emergency_response, 'Send to SOC Manager')
+        self.assertNotContains(emergency_response, 'Verify -&gt; Close')
 
     def test_manager_list_and_detail_only_show_manager_verification_work(self):
         pending = self.make_ticket(Ticket.STATUS_PENDING_MANAGER, severity='Critical')
