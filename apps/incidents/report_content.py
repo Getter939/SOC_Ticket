@@ -9,6 +9,17 @@ drifting apart.
 FOOTER_LEFT = 'ส่วนปฏิบัติการความมั่นคงปลอดภัยไซเบอร์ (ปปกก)   โทร.0-2574-8209-10'
 FOOTER_RIGHT = 'INCIDENT REPORT CONTAINMENT แบบฟอร์มรายงานเหตุการณ์ผิดปกติ'
 
+# Global coordination note appended once when standard guidance is inserted on
+# the create-ticket form. Contact numbers taken verbatim from the official NT
+# incident-report form (SOC Report Template).
+GUIDANCE_COORDINATION_NOTE = (
+    'หมายเหตุ: สามารถประสานงานเรื่องเหตุละเมิดได้ดังนี้\n'
+    'เรื่องการเฝ้าระวัง: 02-574-8209-10 (ปปกก.)\n'
+    'เรื่องการส่ง log เพื่อให้ตรวจหาต้นเหตุของเหตุละเมิด: 02-574-8209-10 (ปปกก.)\n'
+    'เรื่องการตรวจประเมินช่องโหว่ (VA) และการทดสอบเจาะระบบ (PT): 02-575-6883 (มปกก.)\n'
+    'เรื่องขอคำแนะนำ Network Security และ Infrastructure Security: 02-574-8186 (วปกก.)'
+)
+
 # Section 8's fixed remediation checklist — ticked by hand on the printed form.
 REMEDIATION_CHECKLIST = [
     'Isolate เครื่อง – แยกเครื่องที่ได้รับผลกระทบออกจากเครือข่าย',

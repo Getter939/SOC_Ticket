@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
-    NotificationTemplate, ProjectIncident, Ticket, TicketLog, TicketSubtask,
-    TriageRecord,
+    NotificationTemplate, ProjectIncident, ThreatGuidance, Ticket, TicketLog,
+    TicketSubtask, TriageRecord,
 )
 
 
@@ -121,3 +121,11 @@ class TriageRecordAdmin(admin.ModelAdmin):
     )
     readonly_fields = ('created_at', 't2_decided_at')
     raw_id_fields = ('analyst', 'escalated_to', 'ticket', 'project_incident')
+
+
+@admin.register(ThreatGuidance)
+class ThreatGuidanceAdmin(admin.ModelAdmin):
+    list_display = ('detailed_issue', 'is_active', 'updated_at')
+    list_filter = ('is_active',)
+    search_fields = ('detailed_issue', 'action_required', 'action_precautions')
+    readonly_fields = ('updated_at',)

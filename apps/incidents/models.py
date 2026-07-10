@@ -1664,3 +1664,37 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return f'{self.original_name} → {self.ticket.ticket_id}'
+
+
+class ThreatGuidance(models.Model):
+    """Standard containment guidance per threat category (admin-editable).
+
+    Backing data for the "แทรกแนวทางมาตรฐาน" button on the create-ticket form:
+    the analyst picks a threat category (``detailed_issue``) and can insert the
+    category's standard สิ่งที่ต้องดำเนินการ / ข้อควรระวัง text, then edit it.
+    Content lives here (not in code) so the SOC lead can revise the playbook
+    wording in Django admin without a deploy. Seeded by migration 0041.
+    """
+
+    detailed_issue = models.CharField(
+        max_length=50, unique=True, choices=Ticket.DETAILED_ISSUE_CHOICES,
+        verbose_name='หมวดหมู่ภัยคุกคาม',
+    )
+    action_required = models.TextField(
+        blank=True, default='',
+        verbose_name='สิ่งที่ต้องดำเนินการ (มาตรฐาน)',
+    )
+    action_precautions = models.TextField(
+        blank=True, default='',
+        verbose_name='ข้อควรระวังในการดำเนินการ (มาตรฐาน)',
+    )
+    is_active = models.BooleanField(default=True, verbose_name='ใช้งาน')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['detailed_issue']
+        verbose_name = 'แนวทางมาตรฐานตามหมวดหมู่ภัยคุกคาม'
+        verbose_name_plural = 'แนวทางมาตรฐานตามหมวดหมู่ภัยคุกคาม'
+
+    def __str__(self):
+        return self.get_detailed_issue_display()

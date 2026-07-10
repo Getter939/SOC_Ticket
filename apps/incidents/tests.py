@@ -25,6 +25,7 @@ Run with:  py manage.py test apps.incidents --settings=config.settings_local
 
 import hashlib
 import importlib.util
+import json
 import re
 import shutil
 import tempfile
@@ -48,8 +49,8 @@ from pypdf import PdfReader
 from apps.accounts.models import UserProfile
 from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
 from apps.incidents.models import (
-    ProjectIncident, Ticket, TicketAttachment, TicketLog, TriageRecord,
-    bundle_suffix_for_index,
+    ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
+    TriageRecord, bundle_suffix_for_index,
 )
 from apps.incidents.notifications import notify_containment_required
 from apps.incidents.reports import (
@@ -2237,3 +2238,71 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertEqual(triage.decision, TriageRecord.DECISION_TP)
         self.assertIsNone(triage.claimed_by)
         self.assertEqual(project.source_triages.first(), triage)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 17. Threat guidance (แทรกแนวทางมาตรฐาน) tests                                 #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ThreatGuidanceTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('guidance_t1')
+
+    @staticmethod
+    def _embedded_json(response, script_id):
+        match = re.search(
+            rf'<script id="{script_id}"[^>]*>(.*?)</script>',
+            response.content.decode(), re.S,
+        )
+        assert match, f'json_script {script_id!r} not found in page'
+        return json.loads(match.group(1))
+
+    def test_seed_covers_every_form_category(self):
+        # Migration 0041 must leave one active row per clean threat category.
+        for category in Ticket.DETAILED_ISSUE_HIERARCHY:
+            guidance = ThreatGuidance.objects.get(detailed_issue=category)
+            self.assertTrue(guidance.is_active)
+            self.assertTrue(guidance.action_required.strip(), category)
+            self.assertTrue(guidance.action_precautions.strip(), category)
+
+    def test_create_form_embeds_guidance_data_and_button(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'))
+
+        self.assertContains(response, 'id="insert-guidance-btn"')
+        data = self._embedded_json(response, 'threat-guidance-data')
+        self.assertIn('Malicious Logic', data)
+        self.assertIn(
+            'Isolate เครื่องที่ติดมัลแวร์ออกจากเครือข่ายทันที',
+            data['Malicious Logic']['action_required'],
+        )
+        self.assertIn(
+            'ห้ามลบไฟล์ต้องสงสัยก่อนเก็บหลักฐาน',
+            data['Malicious Logic']['action_precautions'],
+        )
+        note = self._embedded_json(response, 'guidance-note-data')
+        self.assertIn('หมายเหตุ: สามารถประสานงานเรื่องเหตุละเมิดได้ดังนี้', note)
+        self.assertIn('02-574-8209-10', note)
+
+    def test_inactive_guidance_left_out_of_form_payload(self):
+        ThreatGuidance.objects.filter(detailed_issue='Malicious Logic').update(is_active=False)
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'))
+        data = self._embedded_json(response, 'threat-guidance-data')
+        self.assertNotIn('Malicious Logic', data)
+        self.assertIn('User Intrusion', data)  # others unaffected
+
+    def test_containment_form_has_no_leftover_test_markup(self):
+        # Regression: WIP markup (ทดสอบ1/fruit checkbox) must not resurface in
+        # the System Admin Investigation form on the ticket detail page.
+        admin_user = _make_user('guidance_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        ticket = _make_ticket(
+            assigned_admin=admin_user,
+            status=Ticket.STATUS_AWAITING_CONTAINMENT,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertNotContains(response, 'ทดสอบ1')
+        self.assertNotContains(response, 'name="fruit"')

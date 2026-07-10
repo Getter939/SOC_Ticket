@@ -3,9 +3,6 @@
 {% block title %}เปิดเคสใหม่ — SOC Support System{% endblock %}
 
 {% block content %}
-
-<!-- {{ issue_detail|json_script:"issue_data_description" }}
-{{ issue_precaution|json_script:"issue_data_precautions" }} -->
 <style>
   .section-header {
     background: #1a1a2e; color: #fff;
@@ -87,8 +84,8 @@
 
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
-    {{ issue_detail|json_script:"issue_data_description" }}
-    {{ issue_precaution|json_script:"issue_data_precautions" }}
+    {{ threat_guidance|json_script:"threat-guidance-data" }}
+    {{ guidance_note|json_script:"guidance-note-data" }}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
     {% if form.errors %}
     <div class="alert alert-danger" id="error-summary">
@@ -308,6 +305,12 @@
     <div class="form-section">
       <div class="section-header">3. แนวทางการดำเนินการ <small>Recommended Actions</small></div>
       <div class="row g-3">
+        <div class="col-12 d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-outline-primary btn-sm" id="insert-guidance-btn" disabled>
+            <i class="bi bi-lightbulb me-1"></i>แทรกแนวทางมาตรฐาน
+          </button>
+          <span id="insert-guidance-hint" class="text-muted small"></span>
+        </div>
         <div class="col-md-6">
           <label class="form-label fw-semibold">สิ่งที่ต้องดำเนินการ</label>
           {{ form.action_required }}
@@ -571,31 +574,52 @@ updateDecisionPanels();
   });
 
 
-  // Test alert
-document.getElementById('id_detailed_issue')?.addEventListener('change', function () {
-  const opt = this.value;
-  const issue_data_description = JSON.parse(document.getElementById('issue_data_description').textContent);
-  const issue_data_precautions = JSON.parse(document.getElementById('issue_data_precautions').textContent);
-  
-  const issue_Textarea = document.getElementById('id_action_required');
-  const issue_precautions = document.getElementById('id_action_precautions');
-  
-  
-  if (opt && issue_data_description[opt] && issue_data_precautions[opt] ) {
-      issue_Textarea.value = issue_data_description[opt];
-      issue_precautions.value = issue_data_precautions[opt];
-  } else {
-    //alert('none');
-    issue_Textarea.value = '';
-    issue_precautions.value = '';
+  // ── Insert standard containment guidance (แทรกแนวทางมาตรฐาน) ──
+  // Appends the selected threat category's standard guidance into the two
+  // action textareas. Never clears or overwrites what the analyst typed.
+  const guidanceBtn = document.getElementById('insert-guidance-btn');
+  if (guidanceBtn) {
+    const guidanceData = JSON.parse(document.getElementById('threat-guidance-data').textContent);
+    const guidanceNote = JSON.parse(document.getElementById('guidance-note-data').textContent);
+    const guidanceHint = document.getElementById('insert-guidance-hint');
+    const categorySelect = document.getElementById('id_detailed_issue');
+    const actionField = document.getElementById('id_action_required');
+    const precautionField = document.getElementById('id_action_precautions');
+
+    function selectedGuidance() {
+      const category = categorySelect ? categorySelect.value : '';
+      return category && guidanceData[category] ? guidanceData[category] : null;
+    }
+
+    function refreshGuidanceButton() {
+      const category = categorySelect ? categorySelect.value : '';
+      const available = !!selectedGuidance();
+      guidanceBtn.disabled = !available;
+      guidanceHint.textContent = !category
+        ? 'เลือกหมวดหมู่ภัยคุกคามก่อน'
+        : (available ? '' : 'ไม่มีแนวทางมาตรฐานสำหรับหมวดหมู่นี้');
+    }
+
+    function appendText(field, text) {
+      if (!field || !text) return;
+      const existing = field.value.trim();
+      if (existing.includes(text.trim())) return; // already inserted — no duplicates
+      field.value = existing ? existing + '\n\n' + text : text;
+    }
+
+    guidanceBtn.addEventListener('click', function () {
+      const guidance = selectedGuidance();
+      if (!guidance) return;
+      appendText(actionField, guidance.action_required);
+      if (guidanceNote && !actionField.value.includes('หมายเหตุ: สามารถประสานงาน')) {
+        appendText(actionField, guidanceNote);
+      }
+      appendText(precautionField, guidance.action_precautions);
+    });
+
+    categorySelect?.addEventListener('change', refreshGuidanceButton);
+    refreshGuidanceButton();
   }
-    
-    //fillText(document.getElementById('id_issue_description'), opt.val, 'test');
-});
-
-
-
-
 
 
 })();
@@ -626,17 +650,6 @@ document.getElementById('id_detailed_issue')?.addEventListener('change', functio
   const first = summary.querySelector('.error-jump');
   if (first) setTimeout(() => jump(first.dataset.target), 200);
 })();
-
-// Test alert
-/*document.getElementById('id_detailed_issue')?.addEventListener('change', function () {
-  const opt = this.options[this.selectedIndex];
-    //if (opt.value) return;
-    //alert(opt.value);
-    //document.getElementById('id_issue_description').innerText = opt.value; 
-    fillText(document.getElementById('id_issue_description'), opt, 'test');
-});*/
-
-
 </script>
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% endblock %}
