@@ -2306,3 +2306,140 @@ class ThreatGuidanceTest(TestCase):
         response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
         self.assertNotContains(response, 'ทดสอบ1')
         self.assertNotContains(response, 'name="fruit"')
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 18. Containment checklist tests                                               #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ContainmentChecklistTest(TestCase):
+    ACTION = '1) Isolate เครื่อง\n2) Block IoC\n3) Patch\nหมายเหตุ: ประสาน 02-574-8209-10'
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('cl_t1')
+        cls.admin = _make_user('cl_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def _awaiting_ticket(self, **kw):
+        kw.setdefault('action_required', self.ACTION)
+        kw.setdefault('status', Ticket.STATUS_AWAITING_CONTAINMENT)
+        return _make_ticket(
+            created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT, **kw,
+        )
+
+    def test_parse_items_vs_trailing(self):
+        items, trailing = Ticket.parse_checklist_items('1) A\n- B\n• C\nnote line\n\n2. D')
+        self.assertEqual(items, ['1) A', '- B', '• C', '2. D'])
+        self.assertEqual(trailing, ['note line'])
+
+    def test_display_restores_saved_states(self):
+        t = self._awaiting_ticket()
+        t.containment_checklist = [
+            {'text': '1) Isolate เครื่อง', 'done': True},
+            {'text': '2) Block IoC', 'done': False},
+        ]
+        items, trailing = t.containment_checklist_display()
+        done = {i['text']: i['done'] for i in items}
+        self.assertTrue(done['1) Isolate เครื่อง'])
+        self.assertFalse(done['2) Block IoC'])
+        self.assertFalse(done['3) Patch'])  # never saved → unchecked
+        self.assertIn('หมายเหตุ', trailing)
+
+    def test_rejection_loop_keeps_matching_ticks(self):
+        t = self._awaiting_ticket()
+        t.containment_checklist = [
+            {'text': '1) Isolate เครื่อง', 'done': True},
+            {'text': '2) Block IoC', 'done': True},
+            {'text': '3) Patch', 'done': False},
+        ]
+        t.save()
+        # Tier 1 rewords item 2 during the rejection loop.
+        t.action_required = '1) Isolate เครื่อง\n2) Block IoC และ Domain\n3) Patch'
+        done = {i['text']: i['done'] for i in t.containment_checklist_display()[0]}
+        self.assertTrue(done['1) Isolate เครื่อง'])          # unchanged text → kept
+        self.assertFalse(done['2) Block IoC และ Domain'])    # reworded → unticked
+        self.assertFalse(done['3) Patch'])
+
+    def test_submit_saves_checklist_and_logs_progress(self):
+        t = self._awaiting_ticket()
+        self.client.force_login(self.admin)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'containment',
+            'containment_report': 'Contained and cleaned.',
+            'checklist_done': ['0', '2'],  # items 1 and 3 done
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+        done = {c['text']: c['done'] for c in t.containment_checklist}
+        self.assertEqual(done, {
+            '1) Isolate เครื่อง': True,
+            '2) Block IoC': False,
+            '3) Patch': True,
+        })
+        last_note = TicketLog.objects.filter(ticket=t).order_by('-created_at').first().note
+        self.assertIn('ดำเนินการแล้ว 2/3 รายการ', last_note)
+
+    def test_admin_card_renders_editable_checklist(self):
+        t = self._awaiting_ticket()
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(response, 'name="checklist_done"')
+        self.assertContains(response, '1) Isolate เครื่อง')
+
+    def test_detail_shows_readonly_checklist_after_submit(self):
+        t = self._awaiting_ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+        t.containment_checklist = [
+            {'text': '1) Isolate เครื่อง', 'done': True},
+            {'text': '2) Block IoC', 'done': False},
+            {'text': '3) Patch', 'done': False},
+        ]
+        t.save()
+        self.client.force_login(self.t1)  # reviewer, not the admin
+        response = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertNotContains(response, 'name="checklist_done"')  # read-only
+        self.assertContains(response, '☑')  # a done item is ticked
+        self.assertContains(response, '1) Isolate เครื่อง')
+
+    def test_report_docx_renders_checklist_with_dejavu_ballots(self):
+        t = self._awaiting_ticket()
+        t.containment_checklist = [
+            {'text': '1) Isolate เครื่อง', 'done': True},
+            {'text': '2) Block IoC', 'done': False},
+            {'text': '3) Patch', 'done': False},
+        ]
+        t.save()
+        report = generate_ticket_report(t.pk)
+        text = _docx_text(report.content)
+        self.assertIn('☑ 1) Isolate เครื่อง', text)
+        self.assertIn('☐ 2) Block IoC', text)
+        # Ballot glyphs must sit in DejaVu Sans runs (TH Sarabun has no such
+        # glyph) so they render instead of tofu.
+        doc = Document(BytesIO(report.content))
+        ballot_fonts = {
+            r.font.name
+            for p in _iter_paragraphs(doc) for r in p.runs
+            if r.text in ('☑', '☐')
+        }
+        self.assertEqual(ballot_fonts, {'DejaVu Sans'})
+
+    def test_preview_shows_containment_checklist(self):
+        t = self._awaiting_ticket()
+        t.containment_checklist = [
+            {'text': '1) Isolate เครื่อง', 'done': True},
+            {'text': '2) Block IoC', 'done': False},
+            {'text': '3) Patch', 'done': False},
+        ]
+        t.save()
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('ticket_report_preview', args=[t.pk]))
+        self.assertContains(response, '&#9745;</span>&#160;1) Isolate เครื่อง')
+        self.assertContains(response, '&#9744;</span>&#160;2) Block IoC')
+
+    def test_no_items_falls_back_to_plain_text(self):
+        # action_required with no numbered/bulleted lines → no checklist.
+        t = self._awaiting_ticket(action_required='ดำเนินการตามความเหมาะสม')
+        items, trailing = t.containment_checklist_display()
+        self.assertEqual(items, [])
+        self.assertEqual(trailing, 'ดำเนินการตามความเหมาะสม')
+        self.assertIsNone(__import__('apps.incidents.reports', fromlist=['_containment_checklist_row'])._containment_checklist_row(t))

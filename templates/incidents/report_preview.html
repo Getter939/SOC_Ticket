@@ -145,6 +145,13 @@
       <div class="section-band"><span class="secnum">{{ section.number }}.</span> {{ section.title }}</div>
       {% if section.rows.0.type == 'text' %}
         <div class="textbox">{{ section.rows.0.value }}</div>
+      {% elif section.rows.0.type == 'containment_checklist' %}
+        <div class="textbox">
+          {% for item in section.rows.0.items %}
+            <div class="check-item"><span class="cb">{% if item.done %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ item.text }}</div>
+          {% endfor %}
+          {% if section.rows.0.trailing %}<div style="margin-top:6px; white-space:pre-wrap;">{{ section.rows.0.trailing }}</div>{% endif %}
+        </div>
       {% elif section.rows.0.type == 'checklist' %}
         <div class="checklist">
           {% for item in section.rows.0.items %}

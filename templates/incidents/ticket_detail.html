@@ -147,7 +147,16 @@
     <section id="response" class="card section-card mb-4">
       <div class="card-header"><h2 class="section-title"><i class="bi bi-shield-check me-2"></i>แนวทางตอบสนอง</h2><div class="section-hint">สิ่งที่ต้องทำและข้อควรระวังก่อนเปลี่ยนแปลงระบบ</div></div>
       <div class="card-body"><div class="row g-3">
-        {% if ticket.action_required %}<div class="col-md-7"><div class="response-panel info"><div class="panel-title text-primary">สิ่งที่ต้องดำเนินการ</div><div class="panel-copy">{{ ticket.action_required|linebreaks }}</div></div></div>{% endif %}
+        {% if ticket.action_required %}<div class="col-md-7"><div class="response-panel info"><div class="panel-title text-primary">สิ่งที่ต้องดำเนินการ</div><div class="panel-copy">
+          {% if has_saved_checklist and checklist_items %}
+            <ul class="list-unstyled mb-0">
+              {% for item in checklist_items %}
+              <li>{% if item.done %}<span class="text-success">☑</span>{% else %}<span class="text-muted">☐</span>{% endif %} {{ item.text }}</li>
+              {% endfor %}
+            </ul>
+            {% if checklist_trailing %}<div class="mt-2 small text-muted" style="white-space:pre-wrap;">{{ checklist_trailing }}</div>{% endif %}
+          {% else %}{{ ticket.action_required|linebreaks }}{% endif %}
+        </div></div></div>{% endif %}
         {% if ticket.action_precautions %}<div class="col-md-5"><div class="response-panel warning"><div class="panel-title text-warning-emphasis">ข้อควรระวัง</div><div class="panel-copy">{{ ticket.action_precautions|linebreaks }}</div></div></div>{% endif %}
         {% if ticket.actions_taken_summary %}<div class="col-md-6"><div class="response-panel success"><div class="panel-title text-success">เรื่องที่ดำเนินการแล้ว</div><div class="panel-copy">{{ ticket.actions_taken_summary|linebreaks }}</div></div></div>{% endif %}
         {% if ticket.next_steps_summary %}<div class="col-md-6"><div class="response-panel info"><div class="panel-title text-primary">การดำเนินการลำดับถัดไป</div><div class="panel-copy">{{ ticket.next_steps_summary|linebreaks }}</div></div></div>{% endif %}
@@ -219,6 +228,19 @@
       {% elif can_submit_containment %}
       <div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">System Admin Investigation</h5></div><div class="card-body"><form method="post">{% csrf_token %}
         <input type="hidden" name="action" value="containment">
+        {% if checklist_items %}
+        <label class="form-label fw-bold mb-1">สิ่งที่ต้องดำเนินการ (เช็กลิสต์)</label>
+        <div class="small text-muted mb-2">ทำเครื่องหมายรายการที่ดำเนินการแล้ว — ไม่บังคับ</div>
+        <div class="mb-3">
+          {% for item in checklist_items %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="checklist_done" value="{{ forloop.counter0 }}" id="chk-item-{{ forloop.counter0 }}"{% if item.done %} checked{% endif %}>
+            <label class="form-check-label" for="chk-item-{{ forloop.counter0 }}">{{ item.text }}</label>
+          </div>
+          {% endfor %}
+          {% if checklist_trailing %}<div class="small text-muted mt-2" style="white-space:pre-wrap;">{{ checklist_trailing }}</div>{% endif %}
+        </div>
+        {% endif %}
         <label class="form-label fw-bold">ผลการตรวจสอบ (Investigation findings)</label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ (Countermeasure) <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit">Submit for Tier 2 review</button></form></div></div>
       {% elif transition_actions %}
       <div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 Verification (การควบคุมของ System Admin){% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 — ส่งผลการแก้ไขให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 Verification (การแก้ไขของเจ้าของระบบ){% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>

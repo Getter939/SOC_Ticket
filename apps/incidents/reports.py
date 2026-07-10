@@ -2,6 +2,7 @@ import base64
 import hashlib
 import logging
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,8 @@ from urllib.parse import unquote, urlparse
 from django.template.loader import render_to_string
 from django.utils import timezone
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from reportlab.lib.fonts import addMapping
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFError, TTFont
@@ -63,6 +66,9 @@ SYMBOL_FONT_VARIANTS = (
 
 CHECKED = '☑'
 UNCHECKED = '☐'
+# Font Word uses for the ballot glyphs in a filled DOCX (TH Sarabun lacks them).
+DOCX_SYMBOL_FONT = 'DejaVu Sans'
+_BALLOT_CHARS = frozenset('☑☐☒')
 
 
 def _chk(flag):
@@ -162,7 +168,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'ioc_hash': '-',
         'ioc_ip': _value(ticket.destination_ip),
         'evidence_log': _evidence_log(ticket),
-        'action_required': _value(ticket.action_required),
+        'action_required': _containment_checklist_flat(ticket),
         'action_precautions': _value(ticket.action_precautions),
         'remediation_summary': _value(ticket.remediation_summary),
         'containment_report': _value(ticket.containment_report),
@@ -275,7 +281,7 @@ def build_ticket_report_sections(report, ticket):
         ]},
         {'number': '5', 'title': 'Evidence / Log', 'rows': [text(report['evidence_log'])]},
         {'number': '6', 'title': 'สิ่งที่ต้องดำเนินการ (Containment)', 'rows': [
-            text(report['action_required'])]},
+            _containment_checklist_row(ticket) or text(report['action_required'])]},
         {'number': '7', 'title': 'ข้อควรระวังในการดำเนินการ', 'rows': [
             text(report['action_precautions'])]},
         {'number': '8', 'title': 'สรุปผลการดำเนินการแก้ไข', 'rows': [
@@ -425,7 +431,7 @@ def _replace_placeholders(doc, context):
                 if placeholder in replaced:
                     replaced = replaced.replace(placeholder, value)
             if replaced != text:
-                run.text = replaced
+                _fill_run(run, replaced)
     remaining = sorted({
         match
         for paragraph in _iter_paragraphs(doc)
@@ -433,6 +439,70 @@ def _replace_placeholders(doc, context):
     })
     if remaining:
         raise ValueError(f'Unresolved report template placeholders: {", ".join(remaining)}')
+
+
+def _fill_run(run, text):
+    """Assign ``text`` to a run. Ballot glyphs (☑/☐/☒) are emitted in DejaVu Sans
+    — TH Sarabun New has no such glyphs — while the rest keeps the run's own
+    font. \\n becomes a Word line break. The common no-ballot case is a plain
+    ``run.text = text`` (which itself converts \\n to <w:br>)."""
+    if not any(ch in _BALLOT_CHARS for ch in text):
+        run.text = text
+        return
+
+    r = run._r
+    rpr = r.find(qn('w:rPr'))
+    parent = r.getparent()
+    index = parent.index(r)
+    parent.remove(r)
+    for offset, (is_ballot, chunk) in enumerate(_segment_ballots(text)):
+        new_r = OxmlElement('w:r')
+        if rpr is not None:
+            new_rpr = deepcopy(rpr)
+            if is_ballot:
+                _force_run_font(new_rpr, DOCX_SYMBOL_FONT)
+            new_r.append(new_rpr)
+        _append_run_text(new_r, chunk)
+        parent.insert(index + offset, new_r)
+
+
+def _segment_ballots(text):
+    """Split text into alternating (is_ballot, chunk) runs."""
+    segments = []
+    buf, buf_is_ballot = '', None
+    for ch in text:
+        is_ballot = ch in _BALLOT_CHARS
+        if buf_is_ballot is None:
+            buf, buf_is_ballot = ch, is_ballot
+        elif is_ballot == buf_is_ballot:
+            buf += ch
+        else:
+            segments.append((buf_is_ballot, buf))
+            buf, buf_is_ballot = ch, is_ballot
+    if buf:
+        segments.append((buf_is_ballot, buf))
+    return segments
+
+
+def _append_run_text(r_el, chunk):
+    """Append <w:t>/<w:br> children to a run element, turning \\n into breaks."""
+    for i, part in enumerate(chunk.split('\n')):
+        if i:
+            r_el.append(OxmlElement('w:br'))
+        if part:
+            t = OxmlElement('w:t')
+            t.set(qn('xml:space'), 'preserve')
+            t.text = part
+            r_el.append(t)
+
+
+def _force_run_font(rpr, name):
+    rfonts = rpr.find(qn('w:rFonts'))
+    if rfonts is None:
+        rfonts = OxmlElement('w:rFonts')
+        rpr.insert(0, rfonts)
+    for attr in ('w:ascii', 'w:hAnsi', 'w:cs', 'w:eastAsia'):
+        rfonts.set(qn(attr), name)
 
 
 def _iter_paragraphs(doc):
@@ -520,3 +590,25 @@ def _logo_data_uri():
         return ''
     encoded = base64.b64encode(REPORT_LOGO_PATH.read_bytes()).decode('ascii')
     return f'data:image/png;base64,{encoded}'
+
+
+def _containment_checklist_flat(ticket):
+    """Section-6 value for the DOCX: ☑/☐-prefixed items + trailing text, or the
+    plain action_required when nothing is itemized."""
+    items, trailing = ticket.containment_checklist_display()
+    if not items:
+        return _value(ticket.action_required)
+    lines = [f'{_chk(item["done"])} {item["text"]}' for item in items]
+    text = '\n'.join(lines)
+    if trailing:
+        text = f'{text}\n{trailing}'
+    return text
+
+
+def _containment_checklist_row(ticket):
+    """Structured section-6 row for the HTML/PDF preview, or None to fall back to
+    plain text when action_required has no checklist items."""
+    items, trailing = ticket.containment_checklist_display()
+    if not items:
+        return None
+    return {'type': 'containment_checklist', 'items': items, 'trailing': trailing}

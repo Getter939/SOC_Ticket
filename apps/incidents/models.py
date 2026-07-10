@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -658,6 +660,11 @@ class Ticket(models.Model):
         blank=True, default='',
         verbose_name='ข้อควรระวังในการดำเนินการ',
     )
+    # Per-item done-state for the สิ่งที่ต้องดำเนินการ checklist the assigned
+    # System Admin ticks while containing the incident. A non-mandatory aid:
+    # [{"text": "<item line>", "done": true|false}, ...]. Restored by text match
+    # across the Tier 2 rejection loop; see ``containment_checklist_display``.
+    containment_checklist = models.JSONField(default=list, blank=True)
 
     # Report-only prose: lets analysts polish the official document wording
     # without overloading lifecycle logs or containment fields.
@@ -869,6 +876,37 @@ class Ticket(models.Model):
     def is_incident(self):
         """Actionable Incident (was True Positive) — proceeds to containment."""
         return self.classification == self.CLASSIFICATION_INCIDENT
+
+    # Lines like "1) ...", "1. ...", "- ..." or "• ..." are checklist items;
+    # anything else (the หมายเหตุ coordination note, free prose) is trailing text.
+    _CHECKLIST_ITEM_RE = re.compile(r'^\s*(?:\d+[.)]|[-•])\s+\S')
+
+    @classmethod
+    def parse_checklist_items(cls, text):
+        """Split action_required text into (item_lines, trailing_lines)."""
+        items, trailing = [], []
+        for line in (text or '').splitlines():
+            if cls._CHECKLIST_ITEM_RE.match(line):
+                items.append(line.strip())
+            elif line.strip():
+                trailing.append(line.rstrip())
+        return items, trailing
+
+    def containment_checklist_display(self):
+        """Checklist for the *current* action_required with done-states restored.
+
+        Returns ``(items, trailing)`` where items is ``[{'text', 'done'}]`` and
+        trailing is the non-item text. Done-states are matched by item text
+        against the saved ``containment_checklist`` so a Tier 2 rejection keeps
+        prior ticks (an item whose wording changed comes back unticked).
+        """
+        saved = {
+            entry.get('text'): bool(entry.get('done'))
+            for entry in (self.containment_checklist or [])
+        }
+        item_lines, trailing_lines = self.parse_checklist_items(self.action_required)
+        items = [{'text': line, 'done': saved.get(line, False)} for line in item_lines]
+        return items, '\n'.join(trailing_lines)
 
     @property
     def mitre_phase_list(self):

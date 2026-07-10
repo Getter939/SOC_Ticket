@@ -600,11 +600,21 @@ updateDecisionPanels();
         : (available ? '' : 'ไม่มีแนวทางมาตรฐานสำหรับหมวดหมู่นี้');
     }
 
+    // Grow the guidance textareas to fit their content so the analyst can see
+    // the whole inserted text without scrolling inside the box.
+    function autoGrow(field) {
+      if (!field) return;
+      field.style.overflowY = 'hidden';
+      field.style.height = 'auto';
+      field.style.height = Math.max(field.scrollHeight, 110) + 'px';
+    }
+
     function appendText(field, text) {
       if (!field || !text) return;
       const existing = field.value.trim();
       if (existing.includes(text.trim())) return; // already inserted — no duplicates
       field.value = existing ? existing + '\n\n' + text : text;
+      autoGrow(field);
     }
 
     guidanceBtn.addEventListener('click', function () {
@@ -615,6 +625,12 @@ updateDecisionPanels();
         appendText(actionField, guidanceNote);
       }
       appendText(precautionField, guidance.action_precautions);
+    });
+
+    [actionField, precautionField].forEach(function (field) {
+      if (!field) return;
+      field.addEventListener('input', function () { autoGrow(field); });
+      autoGrow(field);  // fit any server-rendered value on load
     });
 
     categorySelect?.addEventListener('change', refreshGuidanceButton);

@@ -748,6 +748,7 @@ def ticket_detail(request, pk):
             )
         )
     )
+    checklist_items, checklist_trailing = ticket.containment_checklist_display()
     transition_actions = _transition_actions(ticket, request.user)
     transition_codes = {item['status'] for item in transition_actions}
     can_t2_review = (
@@ -835,11 +836,31 @@ def ticket_detail(request, pk):
                     ticket.containment_report = report
                     if remediation:
                         ticket.remediation_summary = remediation
+
+                    # Save the (non-mandatory) containment checklist. Items are
+                    # parsed from the current action_required so indices line up
+                    # with the checkboxes rendered on the form.
+                    item_lines, _ = Ticket.parse_checklist_items(ticket.action_required)
+                    checked = set(request.POST.getlist('checklist_done'))
+                    ticket.containment_checklist = [
+                        {'text': line, 'done': str(idx) in checked}
+                        for idx, line in enumerate(item_lines)
+                    ]
+                    done_count = sum(1 for c in ticket.containment_checklist if c['done'])
+                    total_count = len(ticket.containment_checklist)
+
+                    transition_note = note or 'ส่งรายงานการควบคุมแล้ว'
+                    if total_count:
+                        transition_note = (
+                            f'{transition_note}\n'
+                            f'(เช็กลิสต์สิ่งที่ต้องดำเนินการ: '
+                            f'ดำเนินการแล้ว {done_count}/{total_count} รายการ)'
+                        )
                     try:
                         ticket.transition_to(
                             Ticket.STATUS_CONTAINMENT_REPORTED,
                             request.user,
-                            note or 'ส่งรายงานการควบคุมแล้ว',
+                            transition_note,
                         )
                         if not notify_containment_submitted(ticket):
                             messages.warning(
@@ -901,6 +922,9 @@ def ticket_detail(request, pk):
         'profile': profile,
         'is_terminal': is_terminal,
         'can_submit_containment': can_submit_containment,
+        'checklist_items': checklist_items,
+        'checklist_trailing': checklist_trailing,
+        'has_saved_checklist': bool(ticket.containment_checklist),
         'valid_status_choices': valid_status_choices,
         'transition_actions': transition_actions,
         'can_t2_review': can_t2_review,
