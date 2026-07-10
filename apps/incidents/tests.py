@@ -33,7 +33,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -160,6 +160,17 @@ def _docx_text(content):
         for p in cell.paragraphs
     )
     return '\n'.join(parts)
+
+
+class TicketReferenceTest(TestCase):
+    def test_new_tickets_receive_monthly_soc_references(self):
+        when = timezone.make_aware(datetime(2026, 7, 10, 8, 30))
+        with patch('apps.incidents.models.timezone.now', return_value=when):
+            first = _make_ticket()
+            second = _make_ticket()
+
+        self.assertEqual(first.ticket_id, 'SOC-202607-0001')
+        self.assertEqual(second.ticket_id, 'SOC-202607-0002')
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -2051,7 +2062,7 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertTrue(project.project_code.startswith('PI-'))
         self.assertEqual([m.bundle_suffix for m in members], ['A', 'B'])
         self.assertEqual(members[0].bundle_ref, f'{project.project_code}-A')
-        self.assertEqual(members[1].display_id, f'{project.project_code}-B')
+        self.assertEqual(members[1].display_id, members[1].ticket_id)
 
         # Each member routed to its own admin, awaiting containment, as Incident.
         self.assertEqual({m.assigned_admin for m in members}, {self.admin_a, self.admin_b})

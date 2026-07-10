@@ -227,17 +227,17 @@ class Command(BaseCommand):
         return user
 
     def _next_ticket_id(self, when):
-        prefix = f'{when.year % 100:02d}{when.month:02d}'
+        prefix = Ticket.ticket_id_prefix(when)
         if prefix not in self.ticket_seq:
             seqs = [
-                int(t[4:]) for t in Ticket.objects.filter(
+                int(t.rsplit('-', 1)[1]) for t in Ticket.objects.filter(
                     ticket_id__startswith=prefix
                 ).values_list('ticket_id', flat=True)
-                if t[4:].isdigit()
+                if t.rsplit('-', 1)[-1].isdigit()
             ]
             self.ticket_seq[prefix] = max(seqs, default=0)
         self.ticket_seq[prefix] += 1
-        return f'{prefix}{self.ticket_seq[prefix]:02d}'
+        return f'{prefix}{self.ticket_seq[prefix]:04d}'
 
     # ------------------------------------------------------------------ #
     def _import_group(self, iid, grp, opts, warnings):

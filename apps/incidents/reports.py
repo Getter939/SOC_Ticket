@@ -147,7 +147,7 @@ def build_ticket_report_context(ticket, generated_at=None):
     asset = ticket.asset_type
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
     return {
-        'ticket_id': _value(ticket.display_id or ticket.ticket_id),
+        'ticket_id': _value(ticket.ticket_id),
         'incident_datetime': _format_dt(ticket.incident_datetime),
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),

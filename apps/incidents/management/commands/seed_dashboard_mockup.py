@@ -965,6 +965,6 @@ class Command(BaseCommand):
         )
 
     def _next_ticket_id(self, opened):
-        prefix = f'{opened.year % 100:02d}{opened.month:02d}'
+        prefix = Ticket.ticket_id_prefix(opened)
         self.ticket_sequences[prefix] = self.ticket_sequences.get(prefix, 0) + 1
-        return f'{prefix}{self.ticket_sequences[prefix]:03d}'
+        return f'{prefix}{self.ticket_sequences[prefix]:04d}'

@@ -938,8 +938,8 @@ class Ticket(models.Model):
 
     @property
     def display_id(self):
-        """Bundle ref when part of a Project Incident, else the plain ticket id."""
-        return self.bundle_ref or self.ticket_id
+        """The stable public Ticket Reference, regardless of bundle membership."""
+        return self.ticket_id
 
     @property
     def requires_manager_verification(self):
@@ -1007,12 +1007,19 @@ class Ticket(models.Model):
     # unique-constraint race before giving up.
     _ID_MAX_RETRIES = 5
 
+    @staticmethod
+    def ticket_id_prefix(when):
+        """Return the monthly public-reference prefix for ``when``."""
+        return f'SOC-{when.year:04d}{when.month:02d}-'
+
     def _assign_ticket_id(self):
-        """Compute the next per-month sequential id YYMMNN. Racy on its own —
-        save() wraps it in a retry that closes the window against committed rows.
+        """Compute the next monthly Ticket Reference: SOC-YYYYMM-NNNN.
+
+        This read-then-write is racy on its own; ``save()`` retries after a
+        unique-constraint collision to close the window against committed rows.
         """
         now = timezone.now()
-        prefix = f'{now.year % 100:02d}{now.month:02d}'  # e.g. '2606' for June 2026
+        prefix = self.ticket_id_prefix(now)
         last = (
             Ticket.objects.filter(ticket_id__startswith=prefix)
             .order_by('-ticket_id')
@@ -1020,16 +1027,16 @@ class Ticket(models.Model):
         )
         if last:
             try:
-                seq = int(last.ticket_id[4:]) + 1
+                seq = int(last.ticket_id.rsplit('-', 1)[1]) + 1
             except (ValueError, IndexError):
                 seq = 1
         else:
             seq = 1
 
-        self.ticket_id = f'{prefix}{seq:02d}'
+        self.ticket_id = f'{prefix}{seq:04d}'
         while Ticket.objects.filter(ticket_id=self.ticket_id).exists():
             seq += 1
-            self.ticket_id = f'{prefix}{seq:02d}'
+            self.ticket_id = f'{prefix}{seq:04d}'
 
     def save(self, *args, **kwargs):
         if not self.pk:

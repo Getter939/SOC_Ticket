@@ -32,6 +32,10 @@ _Avoid_: Disposition, verdict, TP/FP
 A case opened for an Incident. Carries the full lifecycle, ownership, OLA clocks, and audit trail. Only Incidents become Tickets; Events never do.
 _Avoid_: Case, issue, report
 
+**Ticket Reference**:
+The permanent, public identifier for exactly one Ticket. It is used when people, reports, notifications, and integrations refer to that Ticket, and never changes when the Ticket joins a Project Incident.
+_Avoid_: Database ID, case number, bundle reference
+
 **Containment**:
 The system-admin action that stops or limits an active Incident, reported back to the SOC as a containment report. The middle phase of a Ticket's lifecycle.
 _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, resolution
@@ -45,6 +49,10 @@ _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Inciden
 **Member Ticket**:
 A Ticket that belongs to a Project Incident. Each member is contained and closed independently on its own OLA clock; only its target (device / IP / owner / admin) differs from its siblings.
 _Avoid_: Child ticket, sub-ticket
+
+**Member Reference**:
+The Project Incident Reference plus a member suffix, identifying a Ticket's place in that group. It supplements the Ticket Reference; it does not replace it.
+_Avoid_: Ticket Reference, Ticket ID
 
 **Subtask**:
 A work stream spawned off a single Ticket — either an Investigation or a Countermeasure — tracked independently of the parent Ticket's status.
