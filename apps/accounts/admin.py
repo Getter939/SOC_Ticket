@@ -1,15 +1,13 @@
-import secrets
-import string
-
 from django import forms
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
-from django.conf import settings
 
 from .models import UserProfile
+from .passwords import send_password_reset_email
 
 
 class UserProfileInline(admin.StackedInline):
@@ -18,60 +16,54 @@ class UserProfileInline(admin.StackedInline):
 
 
 class MyUserCreationForm(UserCreationForm):
-    email = forms.EmailField(required=True, help_text="ใส่อีเมลเพื่อใช้ส่งรหัสผ่านให้ผู้ใช้งาน")
+    email = forms.EmailField(required=True, help_text='Required for secure password setup.')
     first_name = forms.CharField(required=True)
     last_name = forms.CharField(required=True)
 
     class Meta:
         model = User
-        fields = ("username", "email", "first_name", "last_name")
+        fields = ('username', 'email', 'first_name', 'last_name')
 
 
-@admin.action(description='ส่ง Email แจ้ง Username ให้ผู้ใช้งานที่เลือก')
+@admin.action(description='Send username details to selected users')
 def send_welcome_email_action(modeladmin, request, queryset):
     success_count = 0
     for user in queryset:
-        if user.email:
-            subject = 'ข้อมูลบัญชีผู้ใช้งานระบบ SOC Support'
-            message = (
-                f"สวัสดีคุณ {user.first_name},\n\n"
-                f"Username: {user.username}\n\n"
-                f"เข้าใช้งานได้ที่: {request.build_absolute_uri('/login/')}\n\n"
-                f"หากลืมรหัสผ่าน กรุณาติดต่อ Admin เพื่อขอรีเซ็ตรหัสผ่านใหม่"
-            )
-            try:
-                send_mail(subject, message, settings.EMAIL_HOST_USER, [user.email])
-                success_count += 1
-            except Exception as e:
-                messages.error(request, f"Error sending to {user.email}: {e}")
-    messages.success(request, f"ส่งข้อมูล Username ให้ผู้ใช้ {success_count} รายสำเร็จแล้ว")
+        if not user.email:
+            continue
+        subject = 'SOC Support System account details'
+        message = (
+            f'Hello {user.first_name},\n\n'
+            f'Username: {user.username}\n\n'
+            f'Sign in at: {request.build_absolute_uri("/login/")}\n\n'
+            'Use the secure password-reset link on the sign-in page if needed.'
+        )
+        try:
+            send_mail(subject, message, settings.DEFAULT_FROM_EMAIL or None, [user.email])
+            success_count += 1
+        except Exception:
+            messages.error(request, f'Unable to send account details for {user.username}.')
+    messages.success(request, f'Sent account details to {success_count} user(s).')
 
 
-@admin.action(description='รีเซ็ตรหัสผ่านและส่งเมลแจ้ง User')
-def reset_and_send_password(modeladmin, request, queryset):
+@admin.action(description='Send secure password-reset links to selected users')
+def send_password_reset_link(modeladmin, request, queryset):
+    success_count = 0
     for user in queryset:
-        if user.email:
-            new_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
-            user.set_password(new_password)
-            user.save()
-            subject = 'รหัสผ่านใหม่สำหรับระบบ SOC Support'
-            message = (
-                f"สวัสดีคุณ {user.first_name}\n\n"
-                f"Username: {user.username}\n"
-                f"Password ใหม่: {new_password}\n\n"
-                f"กรุณาเปลี่ยนรหัสผ่านหลังจากเข้าสู่ระบบ"
-            )
-            try:
-                send_mail(subject, message, settings.EMAIL_HOST_USER, [user.email])
-            except Exception as e:
-                messages.error(request, f"รีเซ็ตรหัสผ่านสำเร็จแต่ส่งเมลล้มเหลวสำหรับ {user.email}: {e}")
-    messages.success(request, "รีเซ็ตรหัสผ่านและส่งเมลเรียบร้อยแล้ว")
+        if not (user.email and user.is_active and user.has_usable_password()):
+            continue
+        try:
+            send_password_reset_email(user=user, request=request)
+            success_count += 1
+        except Exception:
+            messages.error(request, f'Unable to send a reset link for {user.username}.')
+    messages.success(request, f'Sent {success_count} secure password-reset link(s).')
 
 
 class UserAdmin(BaseUserAdmin):
     add_form = MyUserCreationForm
     inlines = (UserProfileInline,)
-    actions = [send_welcome_email_action, reset_and_send_password]
+    actions = [send_welcome_email_action, send_password_reset_link]
     list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff')
     add_fieldsets = (
         (None, {
@@ -82,24 +74,17 @@ class UserAdmin(BaseUserAdmin):
 
     def save_model(self, request, obj, form, change):
         is_new_user = not change and obj.pk is None
-        raw_password = form.cleaned_data.get('password1')
         super().save_model(request, obj, form, change)
 
-        if is_new_user and obj.email and raw_password:
-            login_url = request.build_absolute_uri('/login/')
-            subject = 'ยืนยันการเข้าใช้งานระบบ SOC Support'
-            message = (
-                f"สวัสดีคุณ {obj.first_name},\n\n"
-                f"Username: {obj.username}\n"
-                f"Password: {raw_password}\n\n"
-                f"เข้าใช้งานได้ที่: {login_url}\n\n"
-                f"กรุณาเปลี่ยนรหัสผ่านทันทีหลังการเข้าใช้งานครั้งแรก"
-            )
+        if is_new_user and obj.email:
             try:
-                send_mail(subject, message, settings.EMAIL_HOST_USER, [obj.email])
-                messages.success(request, f"ส่งข้อมูลการเข้าใช้งานไปที่ {obj.email} เรียบร้อยแล้ว")
-            except Exception as e:
-                messages.error(request, f"บันทึกสำเร็จแต่ส่งเมลล้มเหลว: {e}")
+                send_password_reset_email(user=obj, request=request)
+                messages.success(request, f'Sent a secure first-password link to {obj.email}.')
+            except Exception:
+                messages.error(
+                    request,
+                    'User saved, but the first-password link could not be sent.',
+                )
 
 
 admin.site.unregister(User)

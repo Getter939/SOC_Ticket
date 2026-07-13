@@ -15,8 +15,15 @@ The HTTPS-dependent settings (SECURE_SSL_REDIRECT, *_COOKIE_SECURE) default OFF
 so internal-HTTP deployments keep working; the tests that exercise them turn
 them on with override_settings to prove the production configuration behaves.
 """
+import re
+from datetime import timedelta
+from urllib.parse import urlsplit
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 
@@ -113,3 +120,122 @@ class SessionCookieSecurityTest(TestCase):
     @override_settings(SESSION_COOKIE_SECURE=True)
     def test_session_cookie_secure_when_enabled(self):
         self.assertTrue(self._login_and_get_session_cookie()['secure'])
+
+
+@override_settings(
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+    PASSWORD_RESET_RATE_LIMIT_PER_EMAIL=3,
+    PASSWORD_RESET_RATE_LIMIT_PER_IP=100,
+)
+class PasswordManagementSecurityTest(TestCase):
+    """Regression tests for self-service password management controls."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='password_user',
+            email='password.user@example.test',
+            password='OldPassword!123',
+        )
+
+    def _request_reset(self, email=None, client=None):
+        return (client or self.client).post(
+            reverse('password_reset'),
+            {'email': email or self.user.email},
+        )
+
+    def _complete_reset(self, password='NewPassword!456'):
+        self._request_reset()
+        match = re.search(r'https?://[^\s]+', mail.outbox[-1].body)
+        self.assertIsNotNone(match)
+        reset_path = urlsplit(match.group()).path
+
+        start_response = self.client.get(reset_path)
+        self.assertEqual(start_response.status_code, 302)
+        finish_response = self.client.post(
+            start_response['Location'],
+            {'new_password1': password, 'new_password2': password},
+        )
+        self.assertRedirects(finish_response, reverse('password_reset_complete'))
+        return reset_path
+
+    def test_password_change_requires_current_password_and_updates_session(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('password_change'),
+            {
+                'old_password': 'OldPassword!123',
+                'new_password1': 'NewPassword!456',
+                'new_password2': 'NewPassword!456',
+            },
+        )
+
+        self.assertRedirects(response, reverse('password_change_done'))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('NewPassword!456'))
+        # PasswordChangeView updates this session's auth hash so the user does
+        # not get unexpectedly logged out of the password-change screen.
+        self.assertEqual(
+            self.client.session['_auth_user_hash'], self.user.get_session_auth_hash()
+        )
+
+    def test_password_change_enforces_minimum_length(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('password_change'),
+            {
+                'old_password': 'OldPassword!123',
+                'new_password1': 'too-short',
+                'new_password2': 'too-short',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'This password is too short')
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('OldPassword!123'))
+
+    def test_reset_response_does_not_reveal_account_existence(self):
+        known = self._request_reset()
+        unknown = self._request_reset('unknown@example.test')
+
+        self.assertEqual(known.status_code, unknown.status_code)
+        self.assertEqual(known['Location'], unknown['Location'])
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_reset_link_is_single_use_and_invalidates_other_sessions(self):
+        other_session = Client()
+        self.assertTrue(other_session.login(
+            username='password_user', password='OldPassword!123'
+        ))
+
+        reset_path = self._complete_reset()
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('NewPassword!456'))
+
+        # Auth-hash rotation forces every pre-existing session to reauthenticate.
+        response = other_session.get(reverse('home'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+        used_link = Client().get(reset_path)
+        self.assertEqual(used_link.status_code, 200)
+        self.assertContains(used_link, 'invalid or expired')
+
+    def test_reset_link_expires_after_the_configured_timeout(self):
+        self._request_reset()
+        match = re.search(r'https?://[^\s]+', mail.outbox[-1].body)
+        reset_path = urlsplit(match.group()).path
+
+        future = default_token_generator._now() + timedelta(hours=2)
+        with patch.object(default_token_generator, '_now', return_value=future):
+            response = Client().get(reset_path)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'invalid or expired')
+
+    def test_reset_requests_are_limited_per_email(self):
+        for _ in range(4):
+            response = self._request_reset()
+            self.assertRedirects(response, reverse('password_reset_done'))
+
+        self.assertEqual(len(mail.outbox), 3)

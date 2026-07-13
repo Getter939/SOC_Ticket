@@ -195,11 +195,14 @@
     </div>
 
     {% if user.is_authenticated %}
-    <div class="ms-auto d-flex align-items-center gap-2">
-        <div class="user-pill">
-            <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
-        </div>
-        <form method="post" action="{% url 'logout' %}" id="logout-form">
+        <div class="ms-auto d-flex align-items-center gap-2">
+            <div class="user-pill">
+                <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
+            </div>
+            <a href="{% url 'password_change' %}" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:0.9rem;" title="Change password" aria-label="Change password">
+                <i class="bi bi-key-fill"></i>
+            </a>
+            <form method="post" action="{% url 'logout' %}" id="logout-form">
             {% csrf_token %}
             <button type="submit" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:0.75rem;" title="ออกจากระบบ">
                 <i class="bi bi-box-arrow-right"></i>

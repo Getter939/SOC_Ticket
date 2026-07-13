@@ -77,3 +77,24 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile of {self.user.username}"
+
+
+class PasswordResetRateLimit(models.Model):
+    """A short-lived rate-limit counter with no recoverable personal data."""
+
+    KEY_EMAIL = 'email'
+    KEY_IP = 'ip'
+    KEY_TYPES = [(KEY_EMAIL, 'Email'), (KEY_IP, 'IP address')]
+
+    key_type = models.CharField(max_length=5, choices=KEY_TYPES)
+    key_hash = models.CharField(max_length=64)
+    window_started_at = models.DateTimeField()
+    request_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('key_type', 'key_hash'),
+                name='accounts_password_reset_rate_limit_key',
+            ),
+        ]

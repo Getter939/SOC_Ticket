@@ -88,10 +88,25 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 12}},
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
+
+# Password-reset links are single-use (Django's PasswordResetTokenGenerator)
+# and expire quickly to reduce the impact of a compromised mailbox or link.
+PASSWORD_RESET_TIMEOUT = 60 * 60
+# Limit requests by both a privacy-preserving email hash and client IP. Values
+# are deliberately configurable for operational tuning without code changes.
+PASSWORD_RESET_RATE_WINDOW_SECONDS = config(
+    'PASSWORD_RESET_RATE_WINDOW_SECONDS', default=15 * 60, cast=int
+)
+PASSWORD_RESET_RATE_LIMIT_PER_EMAIL = config(
+    'PASSWORD_RESET_RATE_LIMIT_PER_EMAIL', default=3, cast=int
+)
+PASSWORD_RESET_RATE_LIMIT_PER_IP = config(
+    'PASSWORD_RESET_RATE_LIMIT_PER_IP', default=10, cast=int
+)
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Bangkok'
@@ -132,6 +147,12 @@ SECURE_SSL_REDIRECT   = config('SECURE_SSL_REDIRECT',   default=False, cast=bool
 SECURE_HSTS_SECONDS   = config('SECURE_HSTS_SECONDS',   default=0,     cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
 SECURE_HSTS_PRELOAD            = config('SECURE_HSTS_PRELOAD',            default=True, cast=bool)
+# In a TLS deployment this keeps reset links HTTPS even if a proxy forwards a
+# request to Django over HTTP. It follows SSL redirect by default; explicitly
+# set it only for an HTTPS deployment that does not redirect every request.
+PASSWORD_RESET_USE_HTTPS = config(
+    'PASSWORD_RESET_USE_HTTPS', default=SECURE_SSL_REDIRECT, cast=bool
+)
 # Deployed behind a TLS-terminating reverse proxy (nginx/traefik) that sets
 # X-Forwarded-Proto? Set USE_PROXY_SSL_HEADER=True so Django trusts it and
 # request.is_secure() reflects the client→proxy leg. This is REQUIRED for
@@ -142,6 +163,12 @@ SECURE_HSTS_PRELOAD            = config('SECURE_HSTS_PRELOAD',            defaul
 _BEHIND_PROXY = config('USE_PROXY_SSL_HEADER', default=False, cast=bool)
 if _BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Only trust X-Forwarded-For when the reverse proxy strips a client-supplied
+# header. The bundled nginx configuration does so before forwarding traffic.
+TRUST_X_FORWARDED_FOR = config(
+    'TRUST_X_FORWARDED_FOR', default=_BEHIND_PROXY, cast=bool
+)
 
 # ── Login brute-force protection (django-axes) ─────────────────────────────
 # Locks out a client after AXES_FAILURE_LIMIT failed logins for a cooloff
