@@ -195,8 +195,10 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = config(
 
 # ── Email / SMTP ──────────────────────────────────────────────────────────
 # Production: set EMAIL_* vars in .env (see .env.example).
-# Local dev:  settings_local.py overrides EMAIL_BACKEND to console so
-#             notifications print to the terminal instead of hitting SMTP.
+# Local dev:  config/settings_local.py (gitignored) overrides EMAIL_BACKEND to
+#             console so notifications print to the terminal instead of hitting
+#             SMTP. It is NOT auto-loaded — opt in explicitly per command:
+#             py manage.py runserver --settings=config.settings_local
 #
 # Port guide: 587 = STARTTLS submission (EMAIL_USE_TLS=True)  ← default
 #             465 = SMTPS / implicit SSL  (EMAIL_USE_SSL=True, TLS=False)

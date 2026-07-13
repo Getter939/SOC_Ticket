@@ -16,10 +16,6 @@ whitenoise==6.9.0
 # WSGI server (production — Dockerfile CMD). Never run `runserver` in prod.
 gunicorn==23.0.0
 
-# Excel export (incidents/views.py → export_tickets_excel)
-openpyxl==3.1.5
-et_xmlfile==2.0.0    # required by openpyxl
-
 # Word report export (apps/incidents/reports.py → DOCX incident reports)
 python-docx==1.2.0
 lxml==6.1.1              # required by python-docx

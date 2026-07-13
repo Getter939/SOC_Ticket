@@ -16,6 +16,10 @@ env/
 
 # Environment / secrets
 .env
+# Local-dev settings override (DEBUG=True, console email). Gitignored, but
+# docker builds copy the working tree — keep it out of the image so a local
+# build can never ship DEBUG=True.
+config/settings_local.py
 
 # Database files
 *.sqlite3

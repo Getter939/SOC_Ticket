@@ -8,10 +8,11 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket
-from .ingest import fetch_and_store_alerts
+from .ingest import _build_query, fetch_and_store_alerts
 from .models import IngestWatermark, WazuhAlert
 
 
@@ -153,6 +154,115 @@ class FetchAndStoreAlertsTest(TestCase):
         self.assertEqual(watermark.last_timestamp.year, 2025)
         self.assertEqual(watermark.last_timestamp.month, 9)
         self.assertEqual(watermark.last_timestamp.day, 9)
+
+
+class FetchPaginationBoundaryTest(TestCase):
+    """Regression tests for the watermark batch-boundary loss (2026-07 audit,
+    M1): alerts sharing the watermark timestamp — or arriving in a burst
+    larger than one batch — must never be silently dropped."""
+
+    def test_query_uses_gte_and_optional_id_exclusion(self):
+        since = timezone.now()
+        query = _build_query(10, since, 500)
+        self.assertEqual(
+            query['query']['bool']['filter'][1],
+            {'range': {'@timestamp': {'gte': since.isoformat()}}},
+        )
+        self.assertNotIn('must_not', query['query']['bool'])
+
+        query = _build_query(10, since, 500, exclude_ids=['a', 'b'])
+        self.assertEqual(
+            query['query']['bool']['must_not'],
+            [{'ids': {'values': ['a', 'b']}}],
+        )
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_unseen_alert_at_watermark_timestamp_is_ingested(self, mock_post):
+        # A previous run stored alert A at T and advanced the watermark to T,
+        # while alert B (same T) missed the batch cut. The gte range must
+        # re-fetch the boundary; the opensearch_id dedup absorbs A.
+        t = '2025-09-09T23:25:29.409Z'
+        WazuhAlert.objects.create(
+            opensearch_id='boundary-A', timestamp=parse_datetime(t), rule_level=12,
+        )
+        IngestWatermark.objects.create(pk=1, last_timestamp=parse_datetime(t))
+
+        mock_post.return_value = _mock_response([
+            _make_hit('boundary-A', timestamp=t),
+            _make_hit('boundary-B', timestamp=t),
+        ])
+
+        result = fetch_and_store_alerts(min_level=10)
+
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(result['skipped'], 1)
+        self.assertTrue(
+            WazuhAlert.objects.filter(opensearch_id='boundary-B').exists()
+        )
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_burst_larger_than_batch_is_drained_in_one_run(self, mock_post):
+        # 5 alerts, batch_size=2 → 3 pages, with a 3-alert timestamp group
+        # (t2) both spanning a page boundary and exceeding the page size.
+        # The fake below honours the actual query (range + id exclusion), so
+        # this exercises the real pagination contract.
+        t0 = '2025-09-09T09:00:00.000Z'
+        t1 = '2025-09-09T10:00:00.000Z'
+        t2 = '2025-09-09T10:00:01.000Z'
+        t3 = '2025-09-09T10:00:02.000Z'
+        index = [
+            ('burst-A', t1), ('burst-B', t2), ('burst-C', t2),
+            ('burst-D', t2), ('burst-E', t3),
+        ]
+        IngestWatermark.objects.create(pk=1, last_timestamp=parse_datetime(t0))
+
+        def fake_search(url, json=None, **kwargs):
+            since = json['query']['bool']['filter'][1]['range']['@timestamp']['gte']
+            excluded = set()
+            for clause in json['query']['bool'].get('must_not', []):
+                excluded.update(clause['ids']['values'])
+            matching = [
+                _make_hit(doc_id, timestamp=ts)
+                for doc_id, ts in index
+                if parse_datetime(ts) >= parse_datetime(since)
+                and doc_id not in excluded
+            ]
+            return _mock_response(matching[:json['size']])
+
+        mock_post.side_effect = fake_search
+
+        result = fetch_and_store_alerts(min_level=10, batch_size=2)
+
+        self.assertEqual(result['created'], 5)
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(
+            set(WazuhAlert.objects.values_list('opensearch_id', flat=True)),
+            {'burst-A', 'burst-B', 'burst-C', 'burst-D', 'burst-E'},
+        )
+        watermark = IngestWatermark.objects.get(pk=1)
+        self.assertEqual(watermark.last_timestamp, parse_datetime(t3))
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_max_pages_cap_stops_the_run_without_error(self, mock_post):
+        # An endless stream of full pages must stop at max_pages; the alerts
+        # beyond the cap are picked up by the next run via the watermark.
+        IngestWatermark.objects.create(
+            pk=1, last_timestamp=parse_datetime('2025-09-09T09:00:00.000Z'),
+        )
+        counter = {'n': 0}
+
+        def endless(url, json=None, **kwargs):
+            counter['n'] += 1
+            ts = f'2025-09-09T10:00:{counter["n"]:02d}.000Z'
+            return _mock_response([_make_hit(f'endless-{counter["n"]}', timestamp=ts)])
+
+        mock_post.side_effect = endless
+
+        result = fetch_and_store_alerts(min_level=10, batch_size=1, max_pages=3)
+
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(result['created'], 3)
+        self.assertEqual(result['errors'], [])
 
 
 class OfflineFixtureIngestionTest(TestCase):
