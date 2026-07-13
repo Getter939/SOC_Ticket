@@ -133,10 +133,6 @@
             width: auto;
             font-size: 1.1rem;
         }
-        /* Tooltip on hover when collapsed */
-        body.sidebar-collapsed #sidebar .nav-link {
-            position: relative;
-        }
         /* Badges become a small overlay dot on the icon instead of a flex
            sibling — avoids the cramped icon+number overlap when collapsed */
         body.sidebar-collapsed #sidebar .nav-link .badge {
@@ -153,18 +149,6 @@
             align-items: center;
             justify-content: center;
         }
-        body.sidebar-collapsed #sidebar .nav-link[data-label]:hover::after {
-            content: attr(data-label);
-            position: absolute;
-            left: calc(var(--sidebar-collapsed-width) + 6px);
-            top: 50%; transform: translateY(-50%);
-            background: #2c2c3e; color: #fff;
-            font-size: 0.75rem; padding: 4px 12px;
-            border-radius: 6px; white-space: nowrap;
-            z-index: 2000; pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
-
         /* ── No sidebar (e.g. login page) — don't reserve sidebar space ── */
         body.no-sidebar #main-content { margin-left: 0; }
 
@@ -334,12 +318,40 @@
 <script nonce="{{ request.csp_nonce }}">
     const sidebar   = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
+    const sidebarTooltips = window.bootstrap?.Tooltip
+        ? Array.from(document.querySelectorAll('#sidebar .nav-link[data-label]')).map((link) => {
+            // The visible label is hidden in the compact rail, so retain an
+            // accessible name and render the hover label outside the sidebar.
+            link.setAttribute('aria-label', link.dataset.label);
+            return new window.bootstrap.Tooltip(link, {
+                boundary: 'viewport',
+                container: document.body,
+                placement: 'right',
+                title: link.dataset.label,
+            });
+        })
+        : [];
+
+    function syncSidebarTooltips() {
+        const compact = window.innerWidth > 768
+            && document.body.classList.contains('sidebar-collapsed');
+        sidebarTooltips.forEach((tooltip) => {
+            if (compact) {
+                tooltip.enable();
+            } else {
+                tooltip.hide();
+                tooltip.disable();
+            }
+        });
+    }
 
     // Sync body class with the pre-collapsed hint applied before paint
     if (window.innerWidth > 768 && localStorage.getItem('sidebar-collapsed') === 'true') {
         document.body.classList.add('sidebar-collapsed');
     }
     document.documentElement.classList.remove('sidebar-pre-collapsed');
+    syncSidebarTooltips();
+    window.addEventListener('resize', syncSidebarTooltips);
 
     toggleBtn?.addEventListener('click', () => {
         if (window.innerWidth <= 768) {
@@ -349,6 +361,7 @@
             // Desktop: collapse to icon rail
             document.body.classList.toggle('sidebar-collapsed');
             localStorage.setItem('sidebar-collapsed', document.body.classList.contains('sidebar-collapsed'));
+            syncSidebarTooltips();
         }
     });
 

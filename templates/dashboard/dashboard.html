@@ -447,16 +447,8 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <span class="status-pill" style="background:
-                                    {% if ticket.status == 'NEW' %}#0d6efd
-                                    {% elif ticket.status == 'ESCALATED_T2' %}#6f42c1
-                                    {% elif ticket.status == 'T1_REVIEW' %}#0dcaf0;color:#212529
-                                    {% elif ticket.status == 'AWAITING_CONTAINMENT' %}#fd7e14
-                                    {% elif ticket.status == 'CONTAINMENT_REPORTED' %}#20c997;color:#212529
-                                    {% elif ticket.status == 'PENDING_MANAGER' %}#ffc107;color:#212529
-                                    {% elif ticket.status == 'APPROVED' %}#198754
-                                    {% elif ticket.status == 'CLOSED_EVENT' %}#6c757d
-                                    {% else %}#6c757d{% endif %};">{{ ticket.get_status_display }}</span>
+                                {# Colors from Ticket.STATUS_PILL_COLORS (single source of truth). #}
+                                <span class="status-pill" style="{{ ticket.status_pill_css }}">{{ ticket.get_status_display }}</span>
                             </td>
                             <td class="text-nowrap">
                                 {% if ticket.status_changed_at %}

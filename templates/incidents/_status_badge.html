@@ -1,31 +1,10 @@
 {% comment %}
 Single source of truth for ticket status badges.
+Colors come from Ticket.STATUS_PILL_COLORS (apps/incidents/models.py) — the one
+canonical status→color map shared by the dashboards, this badge, and the Tier-2
+queue, so a status renders the same color on every page. Red (#dc3545) is
+reserved for severity/emergency/OLA-breach signals and is never a status color.
 Usage: {% include 'incidents/_status_badge.html' with ticket=ticket %}
-Colors match the dashboard pipeline chart (PIPELINE_COLORS).
 {% endcomment %}
-{% if ticket.status == 'NEW' %}
-    <span class="badge rounded-pill bg-danger">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'ESCALATED_T2' %}
-    <span class="badge rounded-pill bg-warning text-dark">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'T1_REVIEW' %}
-    <span class="badge rounded-pill bg-primary">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'AWAITING_CONTAINMENT' %}
-    <span class="badge rounded-pill bg-warning text-dark">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'CONTAINMENT_REPORTED' %}
-    <span class="badge rounded-pill bg-info text-dark">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'AWAITING_OWNER' %}
-    <span class="badge rounded-pill" style="background:#fd7e14;">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'OWNER_REMEDIATED' %}
-    <span class="badge rounded-pill bg-info text-dark">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'PENDING_T2_REVIEW' %}
-    <span class="badge rounded-pill" style="background:#0d9488;">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'PENDING_MANAGER' %}
-    <span class="badge rounded-pill" style="background:#6f42c1;">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'APPROVED' %}
-    <span class="badge rounded-pill bg-success">{{ ticket.get_status_display }}</span>
-{% elif ticket.status == 'CLOSED_EVENT' %}
-    <span class="badge rounded-pill bg-secondary">{{ ticket.get_status_display }}</span>
-{% else %}
-    <span class="badge rounded-pill bg-light text-dark border">{{ ticket.get_status_display }}</span>
-{% endif %}
+<span class="badge rounded-pill" style="{{ ticket.status_pill_css }}">{{ ticket.get_status_display }}</span>
 {% if ticket.is_emergency %}<span class="badge rounded-pill bg-danger ms-1">EMERGENCY</span>{% endif %}

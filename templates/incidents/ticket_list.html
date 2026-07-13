@@ -3,6 +3,32 @@
 {% block title %}Active Incidents — SOC Support System{% endblock %}
 
 {% block content %}
+<style>
+    /* Priority is signalled by a quiet left accent stripe, not a full-row
+       red flood — the stripe cues urgency without hijacking the whole row. */
+    .ticket-table tr.is-emergency > td:first-child { box-shadow: inset 4px 0 0 0 #dc3545; }
+    .ticket-table tr.is-breach > td:first-child   { box-shadow: inset 4px 0 0 0 #fd7e14; }
+
+    /* Emergency flag — deliberately different from the solid Critical
+       severity badge: tinted, outlined, lightning-led, and anchored at the
+       row start rather than sharing the สถานะ column. */
+    .emg-flag {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: 0.68rem; font-weight: 700; letter-spacing: .02em;
+        color: #dc3545; background: #dc35451a; border: 1px solid #dc354566;
+        padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+    }
+
+    /* Soft status pill — a lighter material than the solid severity badge so
+       the two columns never look like the same thing (e.g. High vs
+       รอการจัดการฯ, which share the orange hue). Colors come from the model. */
+    .status-soft {
+        display: inline-flex; align-items: center; gap: 5px;
+        font-size: 0.72rem; font-weight: 600; padding: 2px 9px;
+        border-radius: 12px; white-space: nowrap; line-height: 1.5;
+    }
+    .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="mb-0 fw-bold">รายการแจ้งเหตุที่รอดำเนินการ</h4>
     <span class="text-muted small">{{ result_count }} เคส</span>
@@ -87,7 +113,7 @@
 
 <div class="card border-0 shadow-sm">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 ticket-table">
             <thead class="thead-brand">
                 <tr>
                     <th class="ps-4">Ticket ID</th>
@@ -103,9 +129,12 @@
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr {% if ticket.is_emergency or ticket.is_ola_breached %}class="table-danger"{% endif %}>
+                <tr class="{% if ticket.is_emergency %}is-emergency{% elif ticket.is_ola_breached %}is-breach{% endif %}">
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
+                        {% if ticket.is_emergency %}
+                        <div class="mt-1"><span class="emg-flag"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>EMERGENCY</span></div>
+                        {% endif %}
                     </td>
                     <td>
                         <div class="fw-semibold small">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
@@ -130,7 +159,13 @@
                         {% endif %}
                     </td>
                     <td class="small text-muted">{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
-                    <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
+                    <td>
+                        {# Soft status pill (color from the model's status map). Emergency #}
+                        {# is shown as its own flag by the Ticket ID, not here. #}
+                        <span class="status-soft" style="{{ ticket.status_pill_soft_css }}">
+                            <span class="dot" style="background:{{ ticket.status_color }};"></span>{{ ticket.get_status_display }}
+                        </span>
+                    </td>
                     <td class="pe-3">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3 text-nowrap">ดูรายละเอียด</a>
                     </td>

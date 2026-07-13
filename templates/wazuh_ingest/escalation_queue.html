@@ -15,7 +15,8 @@
   <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th class="text-end">Review</th></tr></thead>
   <tbody>{% for ticket in tickets %}<tr {% if ticket.is_emergency %}class="table-danger"{% endif %}>
     <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
-    <td>{% if ticket.status == 'ESCALATED_T2' %}<span class="badge bg-warning text-dark">รอตรวจสอบ</span>{% elif ticket.status == 'CONTAINMENT_REPORTED' %}<span class="badge bg-info text-dark">ยืนยันการควบคุม (Admin)</span>{% else %}<span class="badge bg-primary">ยืนยันการแก้ไข (Owner)</span>{% endif %}</td>
+    {# Stage labels are queue-specific, but colors come from Ticket.STATUS_PILL_COLORS (single source of truth). #}
+    <td>{% if ticket.status == 'ESCALATED_T2' %}<span class="badge" style="{{ ticket.status_pill_css }}">รอตรวจสอบ</span>{% elif ticket.status == 'CONTAINMENT_REPORTED' %}<span class="badge" style="{{ ticket.status_pill_css }}">ยืนยันการควบคุม (Admin)</span>{% else %}<span class="badge" style="{{ ticket.status_pill_css }}">ยืนยันการแก้ไข (Owner)</span>{% endif %}</td>
     <td>{% if ticket.is_emergency %}<span class="badge bg-danger">EMERGENCY</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
     <td><div class="fw-semibold">{{ ticket.device_name }}</div><small class="text-muted">{{ ticket.issue_description|truncatechars:80 }}</small></td>

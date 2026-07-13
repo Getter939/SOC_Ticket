@@ -16,9 +16,6 @@ from docx.oxml.ns import qn
 from reportlab.lib.fonts import addMapping
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFError, TTFont
-from xhtml2pdf import default as xhtml2pdf_default
-from xhtml2pdf import pisa
-
 from .models import Ticket
 from .report_content import (
     APPENDIX_CATEGORIES,
@@ -305,7 +302,8 @@ def _record_export_metadata(ticket, generated_by, generated_at, digest, report_f
 
 
 def _render_pdf_from_html(html, base_url=None):
-    _register_pdf_font()
+    xhtml2pdf_default, pisa = _load_pdf_dependencies()
+    _register_pdf_font(xhtml2pdf_default)
     output = BytesIO()
     result = pisa.CreatePDF(
         src=html,
@@ -319,7 +317,28 @@ def _render_pdf_from_html(html, base_url=None):
     return output.getvalue()
 
 
-def _register_pdf_font():
+def _load_pdf_dependencies():
+    """Load PDF support only when an export is requested.
+
+    ``python-bidi`` ships a compiled extension on Windows. Some managed
+    workstations block that extension through application-control policy;
+    importing it while Django resolves URLs would otherwise prevent the whole
+    site from starting, including features that do not create PDFs.
+    """
+    try:
+        from xhtml2pdf import default as xhtml2pdf_default
+        from xhtml2pdf import pisa
+    except ImportError as exc:
+        raise RuntimeError(
+            'PDF export is unavailable because its xhtml2pdf dependency could '
+            'not be loaded. Ask IT to allow the python-bidi package, then retry.'
+        ) from exc
+    return xhtml2pdf_default, pisa
+
+
+def _register_pdf_font(xhtml2pdf_default=None):
+    if xhtml2pdf_default is None:
+        xhtml2pdf_default, _ = _load_pdf_dependencies()
     xhtml2pdf_default.DEFAULT_FONT[REPORT_FONT_NAME.lower()] = REPORT_FONT_NAME
     if REPORT_FONT_NAME in pdfmetrics.getRegisteredFontNames():
         return
@@ -365,11 +384,13 @@ def _register_pdf_font():
         for italic in (0, 1):
             addMapping(REPORT_FONT_NAME, bold, italic, registered.get((bold, italic), regular))
 
-    _register_symbol_font()
+    _register_symbol_font(xhtml2pdf_default)
 
 
-def _register_symbol_font():
+def _register_symbol_font(xhtml2pdf_default=None):
     """Register DejaVu Sans for the checkbox glyphs the PDF path needs."""
+    if xhtml2pdf_default is None:
+        xhtml2pdf_default, _ = _load_pdf_dependencies()
     xhtml2pdf_default.DEFAULT_FONT[SYMBOL_FONT_NAME.lower()] = SYMBOL_FONT_NAME
     if SYMBOL_FONT_NAME in pdfmetrics.getRegisteredFontNames():
         return

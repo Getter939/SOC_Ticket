@@ -224,6 +224,72 @@ class Ticket(models.Model):
     TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_EVENT})
 
     # ------------------------------------------------------------------ #
+    # Status pill colors — SINGLE SOURCE OF TRUTH                          #
+    #                                                                     #
+    # Every status color-coded surface (dashboard + executive pills,      #
+    # the ticket-list badge, and the Tier-2 queue stage badges) reads     #
+    # from this map via `status_pill_css`, so a status always renders the #
+    # same color everywhere. Each entry is (background, text-color).       #
+    #                                                                     #
+    # Ordering follows the workflow and "whose court the ball is in":     #
+    # SOC intake/review (blue/cyan/purple) → blocked on an external actor #
+    # (orange = admin, pink = owner) → work reported / verifying (teal    #
+    # pair) → awaiting sign-off (steel = T2, amber = manager) → terminal  #
+    # (green = approved, gray = closed event).                            #
+    #                                                                     #
+    # Red (#dc3545) is deliberately RESERVED for danger signals —         #
+    # Critical severity, Emergency, and OLA breach — and is never used    #
+    # as a status color, so those alarms stay unambiguous.                #
+    # ------------------------------------------------------------------ #
+    STATUS_PILL_COLORS = {
+        STATUS_NEW:                  ('#0d6efd', '#ffffff'),  # blue — open, awaiting triage
+        STATUS_ESCALATED_T2:         ('#6f42c1', '#ffffff'),  # purple — up to Tier 2
+        STATUS_T1_REVIEW:            ('#0dcaf0', '#212529'),  # cyan — back to Tier 1
+        STATUS_AWAITING_CONTAINMENT: ('#fd7e14', '#ffffff'),  # orange — blocked on System Admin
+        STATUS_CONTAINMENT_REPORTED: ('#20c997', '#212529'),  # teal — admin reported, verifying
+        STATUS_AWAITING_OWNER:       ('#d63384', '#ffffff'),  # pink — blocked on System Owner
+        STATUS_OWNER_REMEDIATED:     ('#0d9488', '#ffffff'),  # deep teal — owner reported, verifying
+        STATUS_PENDING_T2_REVIEW:    ('#3d5a80', '#ffffff'),  # steel — awaiting Tier 2 sign-off
+        STATUS_PENDING_MANAGER:      ('#ffc107', '#212529'),  # amber — awaiting manager sign-off
+        STATUS_APPROVED:             ('#198754', '#ffffff'),  # green — resolved / approved
+        STATUS_CLOSED_EVENT:         ('#6c757d', '#ffffff'),  # gray — closed as event
+    }
+
+    @property
+    def status_pill_css(self):
+        """Inline ``background``/``color`` for this ticket's status pill.
+
+        Shared by all status color-coded surfaces so a status looks the
+        same everywhere. Unknown statuses fall back to neutral gray.
+        """
+        bg, fg = self.STATUS_PILL_COLORS.get(self.status, ('#6c757d', '#ffffff'))
+        return f'background:{bg};color:{fg};'
+
+    @property
+    def status_color(self):
+        """Base hex for this ticket's status — for dot/stripe accents."""
+        return self.STATUS_PILL_COLORS.get(self.status, ('#6c757d', '#ffffff'))[0]
+
+    @property
+    def status_pill_soft_css(self):
+        """Soft (tinted) status style for dense tables.
+
+        A lighter 'material' than the solid severity badge — a 10% tint of
+        the status hue with a darkened, readable ink — so a status column
+        never reads as another severity column. Same hue as
+        :attr:`status_pill_css`, just a quieter treatment.
+        """
+        bg = self.status_color
+        return f'background:{bg}1a;color:{self._mix_hex(bg, 0.55)};border:1px solid {bg}33;'
+
+    @staticmethod
+    def _mix_hex(hex_color, factor):
+        """Darken ``#rrggbb`` toward black by ``factor`` (0-1). Returns hex."""
+        h = hex_color.lstrip('#')
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        return '#{:02x}{:02x}{:02x}'.format(*(int(c * factor) for c in (r, g, b)))
+
+    # ------------------------------------------------------------------ #
     # Event / Incident classification (replaces the old TP/FP disposition) #
     #   INCIDENT — actionable case that proceeds to containment (was TP)   #
     #   EVENT    — benign case that gets closed (was FP)                   #
