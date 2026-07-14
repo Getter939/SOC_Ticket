@@ -189,6 +189,13 @@ class Ticket(models.Model):
     STATUS_NEW                  = 'NEW'
     STATUS_ESCALATED_T2         = 'ESCALATED_T2'
     STATUS_T1_REVIEW            = 'T1_REVIEW'
+    # ── SOC Manager pre-containment review (blocking) ────────────────── #
+    # Every Incident passes through the SOC Manager before it reaches a
+    # handling lane. The manager flags Emergency (yes/no) and forwards; they
+    # cannot divert the case — the lane is fixed by Tier 1's ``t1_route``
+    # (ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER). See the
+    # deterministic t1_route guard in can_transition_to / transition_to.
+    STATUS_PENDING_MGR_TRIAGE   = 'PENDING_MGR_TRIAGE'
     STATUS_AWAITING_CONTAINMENT = 'AWAITING_CONTAINMENT'
     STATUS_CONTAINMENT_REPORTED = 'CONTAINMENT_REPORTED'
     # ── Direct-to-Owner fast path (any severity) ─────────────────────── #
@@ -210,6 +217,7 @@ class Ticket(models.Model):
         (STATUS_NEW,                  'แจ้งเหตุใหม่'),
         (STATUS_ESCALATED_T2,         'ส่งต่อให้ Tier 2'),
         (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
+        (STATUS_PENDING_MGR_TRIAGE,   'รอผู้จัดการ SOC ตรวจ (ก่อนมอบหมาย)'),
         (STATUS_AWAITING_CONTAINMENT, 'รอการจัดการจากผู้ดูแลระบบ'),
         (STATUS_CONTAINMENT_REPORTED, 'รายงานการควบคุมแล้ว'),
         (STATUS_AWAITING_OWNER,       'รอเจ้าของระบบดำเนินการเอง'),
@@ -245,6 +253,7 @@ class Ticket(models.Model):
         STATUS_NEW:                  ('#0d6efd', '#ffffff'),  # blue — open, awaiting triage
         STATUS_ESCALATED_T2:         ('#6f42c1', '#ffffff'),  # purple — up to Tier 2
         STATUS_T1_REVIEW:            ('#0dcaf0', '#212529'),  # cyan — back to Tier 1
+        STATUS_PENDING_MGR_TRIAGE:   ('#d4a017', '#212529'),  # goldenrod — SOC Manager pre-containment review
         STATUS_AWAITING_CONTAINMENT: ('#fd7e14', '#ffffff'),  # orange — blocked on System Admin
         STATUS_CONTAINMENT_REPORTED: ('#20c997', '#212529'),  # teal — admin reported, verifying
         STATUS_AWAITING_OWNER:       ('#d63384', '#ffffff'),  # pink — blocked on System Owner
@@ -305,22 +314,39 @@ class Ticket(models.Model):
     ]
 
     # ------------------------------------------------------------------ #
+    # Tier-1 handling route for an Incident — chosen by Tier 1, then      #
+    # remembered so the SOC Manager pre-containment review can forward    #
+    # the ticket to the predetermined lane without being able to change   #
+    # it. ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER.           #
+    # Blank until Tier 1 commits an Incident to PENDING_MGR_TRIAGE.        #
+    # ------------------------------------------------------------------ #
+    T1_ROUTE_ADMIN = 'ADMIN'
+    T1_ROUTE_OWNER = 'OWNER'
+
+    T1_ROUTE_CHOICES = [
+        (T1_ROUTE_ADMIN, 'มอบหมายผู้ดูแลระบบ (System Admin)'),
+        (T1_ROUTE_OWNER, 'ให้เจ้าของระบบแก้ไขเอง (Direct-to-Owner)'),
+    ]
+
+    # ------------------------------------------------------------------ #
     # State-machine: legal transitions                                    #
     # ------------------------------------------------------------------ #
     ALLOWED_TRANSITIONS = {
         STATUS_NEW: [
-            STATUS_AWAITING_CONTAINMENT,   # Incident → assign admin directly
-            STATUS_AWAITING_OWNER,         # Incident → direct-to-owner (any severity)
-            STATUS_ESCALATED_T2,           # Incident → escalate to Tier 2
-            STATUS_CLOSED_EVENT,           # Event    → T1 closes
+            STATUS_PENDING_MGR_TRIAGE,     # Incident → SOC Manager pre-containment review
+            STATUS_ESCALATED_T2,           # Event or Incident → escalate to Tier 2
         ],
         STATUS_ESCALATED_T2: [
             STATUS_T1_REVIEW,              # Incident → T2 returns to Tier 1
-            STATUS_CLOSED_EVENT,           # Event    → T2 closes
+            STATUS_CLOSED_EVENT,           # Event    → T2 confirms & closes (no manager)
         ],
         STATUS_T1_REVIEW: [
-            STATUS_AWAITING_CONTAINMENT,   # T1 reviews → assign admin
-            STATUS_AWAITING_OWNER,         # T1 reviews → direct-to-owner
+            STATUS_PENDING_MGR_TRIAGE,     # T1 reviews → SOC Manager pre-containment review
+        ],
+        # ── SOC Manager pre-containment review (blocking, Incident-only) ─ #
+        STATUS_PENDING_MGR_TRIAGE: [
+            STATUS_AWAITING_CONTAINMENT,   # manager forwards → admin lane (t1_route=ADMIN)
+            STATUS_AWAITING_OWNER,         # manager forwards → owner lane (t1_route=OWNER)
         ],
         STATUS_AWAITING_CONTAINMENT: [
             STATUS_CONTAINMENT_REPORTED,   # admin submits report → Tier 2 verifies
@@ -329,6 +355,7 @@ class Ticket(models.Model):
             STATUS_AWAITING_CONTAINMENT,   # T2: not contained → back to admin (loop)
             STATUS_PENDING_MANAGER,        # T2 verified + emergency → SOC Manager
             STATUS_APPROVED,               # T2 verified + not emergency → close
+            STATUS_CLOSED_EVENT,           # T2 reclassifies as Event → close (no manager)
         ],
         # ── Direct-to-Owner path ─────────────────────────────────────── #
         STATUS_AWAITING_OWNER: [
@@ -342,6 +369,7 @@ class Ticket(models.Model):
             STATUS_APPROVED,               # T2 verified + not emergency → close
             STATUS_PENDING_MANAGER,        # T2 verified + emergency → SOC Manager
             STATUS_AWAITING_OWNER,         # Tier 2 rejects → back to owner
+            STATUS_CLOSED_EVENT,           # T2 reclassifies as Event → close (no manager)
         ],
         STATUS_PENDING_MANAGER: [
             STATUS_APPROVED,               # manager verifies → close
@@ -358,19 +386,20 @@ class Ticket(models.Model):
     #   MANAGER       — profile.is_soc_manager                            #
     # ------------------------------------------------------------------ #
     TRANSITION_PERMISSIONS = {
-        (STATUS_NEW,                  STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
-        (STATUS_NEW,                  STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
+        (STATUS_NEW,                  STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
         (STATUS_NEW,                  STATUS_ESCALATED_T2):         'TIER1_CREATOR',
-        (STATUS_NEW,                  STATUS_CLOSED_EVENT):         'TIER1_CREATOR',
         (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
-        (STATUS_T1_REVIEW,            STATUS_AWAITING_CONTAINMENT): 'TIER1_CREATOR',
-        (STATUS_T1_REVIEW,            STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
+        (STATUS_T1_REVIEW,            STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
+        # SOC Manager pre-containment review forwards to the fixed lane.
+        (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_CONTAINMENT): 'MANAGER',
+        (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_OWNER):       'MANAGER',
         (STATUS_AWAITING_CONTAINMENT, STATUS_CONTAINMENT_REPORTED): 'ASSIGNED_ADMIN',
         # Containment verification is Tier 2's job (any Tier 2, not the creator).
         (STATUS_CONTAINMENT_REPORTED, STATUS_AWAITING_CONTAINMENT): 'TIER2',
         (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER2',
         (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER2',
+        (STATUS_CONTAINMENT_REPORTED, STATUS_CLOSED_EVENT):         'TIER2',
         # Direct-to-Owner path
         (STATUS_AWAITING_OWNER,       STATUS_OWNER_REMEDIATED):     'TIER1_CREATOR',
         (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
@@ -378,6 +407,7 @@ class Ticket(models.Model):
         (STATUS_PENDING_T2_REVIEW,    STATUS_APPROVED):             'TIER2',
         (STATUS_PENDING_T2_REVIEW,    STATUS_PENDING_MANAGER):      'TIER2',
         (STATUS_PENDING_T2_REVIEW,    STATUS_AWAITING_OWNER):       'TIER2',
+        (STATUS_PENDING_T2_REVIEW,    STATUS_CLOSED_EVENT):         'TIER2',
         (STATUS_PENDING_MANAGER,      STATUS_APPROVED):             'MANAGER',
     }
 
@@ -399,17 +429,28 @@ class Ticket(models.Model):
         STATUS_ESCALATED_T2, STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_T2_REVIEW,
     )
 
+    # Statuses that sit in the SOC Manager work queue: the pre-containment
+    # review (flag Emergency + forward) and the post-verification approval.
+    MANAGER_QUEUE_STATUSES = (
+        STATUS_PENDING_MGR_TRIAGE, STATUS_PENDING_MANAGER,
+    )
+
     # Edges that close a benign Event — require classification == EVENT.
+    # Tier 2 confirms an Event and closes directly; the SOC Manager is never
+    # involved in an Event. The two mid-containment edges let Tier 2 reclassify
+    # an in-flight Incident as an Event (after flipping classification → EVENT)
+    # and close it without the manager, even when the emergency flag is set.
     EVENT_CLOSE_TRANSITIONS = frozenset({
-        (STATUS_NEW,          STATUS_CLOSED_EVENT),
-        (STATUS_ESCALATED_T2, STATUS_CLOSED_EVENT),
+        (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT),
+        (STATUS_CONTAINMENT_REPORTED, STATUS_CLOSED_EVENT),
+        (STATUS_PENDING_T2_REVIEW,    STATUS_CLOSED_EVENT),
     })
 
     # Edges that commit to handling an Incident — require classification == INCIDENT.
+    # (NEW→ESCALATED_T2 is deliberately NOT here: an escalation carries either
+    # classification to Tier 2, which then decides Event-close or Incident.)
     INCIDENT_TRANSITIONS = frozenset({
-        (STATUS_NEW,          STATUS_AWAITING_CONTAINMENT),
-        (STATUS_NEW,          STATUS_AWAITING_OWNER),
-        (STATUS_NEW,          STATUS_ESCALATED_T2),
+        (STATUS_NEW,          STATUS_PENDING_MGR_TRIAGE),
         (STATUS_ESCALATED_T2, STATUS_T1_REVIEW),
     })
 
@@ -755,6 +796,14 @@ class Ticket(models.Model):
     classification = models.CharField(
         max_length=20, choices=CLASSIFICATION_CHOICES, blank=True, default='',
         verbose_name='การจัดประเภท (Event/Incident)',
+    )
+    # The handling lane Tier 1 chose for an Incident (ADMIN / OWNER). Set when
+    # Tier 1 routes a ticket into PENDING_MGR_TRIAGE; read by the SOC Manager
+    # forward step to send the ticket to its fixed lane. Blank for Events and
+    # for tickets still awaiting a route decision.
+    t1_route = models.CharField(
+        max_length=10, choices=T1_ROUTE_CHOICES, blank=True, default='',
+        verbose_name='เส้นทางที่ Tier 1 เลือก (Admin/Owner)',
     )
     containment_report = models.TextField(
         blank=True, default='',
@@ -1158,6 +1207,16 @@ class Ticket(models.Model):
             return False
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             return False
+        # SOC Manager forward at the pre-containment review: the manager can only
+        # send the ticket to the lane Tier 1 already chose (t1_route), never the
+        # other one. This keeps the case "on the way either way" — the manager
+        # flags Emergency but cannot divert it.
+        if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_CONTAINMENT)
+                and self.t1_route != self.T1_ROUTE_ADMIN):
+            return False
+        if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_OWNER)
+                and self.t1_route != self.T1_ROUTE_OWNER):
+            return False
         # Emergency split at Tier 2 verification (both lanes): an emergency
         # ticket must additionally pass the SOC manager; a non-emergency ticket
         # is closed by Tier 2 directly and never reaches the manager.
@@ -1225,7 +1284,19 @@ class Ticket(models.Model):
             )
 
         # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #
-        # Emergency tickets must pass the SOC manager after Tier 2 verifies;
+        # 5a. SOC Manager forward honors Tier 1's fixed lane (t1_route): the
+        # manager reviews and forwards, but cannot swap Admin ↔ Owner.
+        if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_CONTAINMENT)
+                and self.t1_route != self.T1_ROUTE_ADMIN):
+            raise ValidationError(
+                'Ticket นี้ถูกกำหนดเส้นทางเป็น "เจ้าของระบบ" — ส่งให้ผู้ดูแลระบบไม่ได้'
+            )
+        if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_OWNER)
+                and self.t1_route != self.T1_ROUTE_OWNER):
+            raise ValidationError(
+                'Ticket นี้ถูกกำหนดเส้นทางเป็น "ผู้ดูแลระบบ" — ส่งให้เจ้าของระบบไม่ได้'
+            )
+        # 5b. Emergency tickets must pass the SOC manager after Tier 2 verifies;
         # non-emergency tickets are closed by Tier 2 and never reach the manager.
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
                 and self.requires_manager_verification):
@@ -1604,12 +1675,14 @@ class NotificationTemplate(models.Model):
 
     KEY_CONTAINMENT_REQUIRED = 'CONTAINMENT_REQUIRED'
     KEY_CONTAINMENT_SUBMITTED = 'CONTAINMENT_SUBMITTED'
+    KEY_MANAGER_TRIAGE_PENDING = 'MANAGER_TRIAGE_PENDING'
     KEY_OWNER_CREATED = 'OWNER_CREATED'
     KEY_OWNER_CLOSED = 'OWNER_CLOSED'
 
     KEY_CHOICES = [
         (KEY_CONTAINMENT_REQUIRED, 'แจ้งผู้ดูแลระบบ — ต้องดำเนินการควบคุม (Containment required)'),
         (KEY_CONTAINMENT_SUBMITTED, 'แจ้งเจ้าหน้าที่ SOC — ผู้ดูแลระบบส่งรายงานการควบคุมแล้ว'),
+        (KEY_MANAGER_TRIAGE_PENDING, 'แจ้งผู้จัดการ SOC — มี Incident รอตรวจก่อนมอบหมาย'),
         (KEY_OWNER_CREATED, 'แจ้งเจ้าของระบบ — เปิด Ticket ใหม่'),
         (KEY_OWNER_CLOSED, 'แจ้งเจ้าของระบบ — ปิด Ticket แล้ว'),
     ]
@@ -1618,6 +1691,9 @@ class NotificationTemplate(models.Model):
     PLACEHOLDERS = {
         KEY_CONTAINMENT_REQUIRED: [
             'ticket_id', 'ticket_url', 'issue_type', 'summary', 'reason_block',
+        ],
+        KEY_MANAGER_TRIAGE_PENDING: [
+            'ticket_id', 'ticket_url', 'issue_type', 'summary', 'severity', 'route',
         ],
         KEY_CONTAINMENT_SUBMITTED: [
             'ticket_id', 'ticket_url', 'issue_type', 'summary',

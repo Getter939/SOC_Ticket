@@ -36,6 +36,14 @@ _Avoid_: Case, issue, report
 The permanent, public identifier for exactly one Ticket. It is used when people, reports, notifications, and integrations refer to that Ticket, and never changes when the Ticket joins a Project Incident.
 _Avoid_: Database ID, case number, bundle reference
 
+**Manager Triage Review**:
+The SOC Manager's pre-containment checkpoint every Incident passes before it reaches a handling lane. The manager flags Emergency (or not) and forwards the Ticket to the lane Tier 1 already chose — the manager cannot change the lane. Held in the `PENDING_MGR_TRIAGE` state; a blocking step, not a parallel one.
+_Avoid_: Manager approval (that is the separate emergency gate at closing), triage (reserved for the Alert/report judgment)
+
+**Handling Route**:
+The lane Tier 1 picks for an Incident — System Admin or Direct-to-Owner — recorded on the Ticket (`t1_route`) so the Manager Triage Review can forward it to the fixed destination. Chosen at Ticket creation or at Tier 1 review; never changed by the manager.
+_Avoid_: Assignment (assignment is the specific admin/owner, not the lane), disposition
+
 **Containment**:
 The system-admin action that stops or limits an active Incident, reported back to the SOC as a containment report. The middle phase of a Ticket's lifecycle.
 _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, resolution
@@ -69,7 +77,7 @@ The SOC analyst who handles escalated cases — may only return a case to Tier 1
 _Avoid_: T2, senior analyst
 
 **SOC Manager**:
-The role that verifies and approves high-severity or emergency Tickets before they may close.
+The role that runs the Manager Triage Review — flagging Emergency and forwarding every Incident to its handling lane before containment — and later verifies and approves emergency Tickets before they may close.
 _Avoid_: Supervisor, lead
 
 **System Admin**:

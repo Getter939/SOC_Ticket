@@ -230,6 +230,76 @@ def notify_containment_submitted(ticket):
 
 
 # ──────────────────────────────────────────────────────────────────────── #
+# SOC Manager notifications                                                 #
+# ──────────────────────────────────────────────────────────────────────── #
+
+def notify_manager_triage_pending(ticket):
+    """
+    Email SOC Managers that an Incident is waiting in the pre-containment
+    review (PENDING_MGR_TRIAGE) — they must flag Emergency and forward it to
+    the lane Tier 1 chose. No fallback: if no manager has an email, skip.
+    """
+    from apps.accounts.models import UserProfile
+
+    recipients = list(
+        User.objects.filter(
+            is_active=True,
+            profile__role=UserProfile.ROLE_SOC_MANAGER,
+        )
+        .exclude(email='')
+        .values_list('email', flat=True)
+    )
+    if not recipients:
+        logger.warning(
+            'notify_manager_triage_pending: ticket %s — no SOC Manager with email.',
+            ticket.ticket_id,
+        )
+        return False
+
+    ticket_url = _ticket_url(ticket)
+    summary = ticket.issue_description[:100]
+    if len(ticket.issue_description) > 100:
+        summary += '…'
+
+    route = ticket.get_t1_route_display() if ticket.t1_route else '-'
+
+    default_subject = '[{ticket_id}] Incident awaiting SOC Manager review'
+    default_body = (
+        'Tier 1 has classified ticket {ticket_id} as an Incident and routed it '
+        'for your pre-containment review.\n'
+        '\n'
+        '  Ticket ID : {ticket_id}\n'
+        '  Type      : {issue_type}\n'
+        '  Severity  : {severity}\n'
+        '  Summary   : {summary}\n'
+        '  Route     : {route}\n'
+        '\n'
+        'Please review, flag Emergency if warranted, and forward it to the '
+        'chosen handling lane.\n'
+        '\n'
+        'View the ticket here (login required):\n'
+        '  {ticket_url}\n'
+        '\n'
+        'Do not reply to this email.'
+    )
+
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': ticket_url,
+        'issue_type': ticket.get_issue_type_display(),
+        'severity': ticket.severity or '-',
+        'summary': summary,
+        'route': route,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_MANAGER_TRIAGE_PENDING, context,
+        default_subject, default_body,
+    )
+    return _send(subject, body, recipients, ticket.ticket_id)
+
+
+# ──────────────────────────────────────────────────────────────────────── #
 # System Owner notifications                                               #
 # ──────────────────────────────────────────────────────────────────────── #
 

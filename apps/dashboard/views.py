@@ -504,6 +504,8 @@ def executive_dashboard(request):
         assigned_to__isnull=True,
     ).count()
     emergency_active = active_qs.filter(is_emergency=True).count()
+    pending_mgr_triage = active_qs.filter(
+        status=Ticket.STATUS_PENDING_MGR_TRIAGE).count()
     awaiting_containment = active_qs.filter(
         status=Ticket.STATUS_AWAITING_CONTAINMENT).count()
     # verified_by is stamped when Tier 2 signs the containment off, so a null
@@ -525,6 +527,12 @@ def executive_dashboard(request):
             'count': emergency_active,
             'level': 'warning' if emergency_active else 'good',
             'filter': 'EMERGENCY',
+        },
+        {
+            'label': 'เคสที่รอผู้จัดการ SOC ตรวจ (ก่อนมอบหมาย)',
+            'count': pending_mgr_triage,
+            'level': 'waiting' if pending_mgr_triage else 'good',
+            'filter': Ticket.STATUS_PENDING_MGR_TRIAGE,
         },
         {
             'label': 'เคสที่รอการจัดการจากผู้ดูแลระบบ',
@@ -553,7 +561,8 @@ def executive_dashboard(request):
     IR_PHASES = [
         ('PREPARATION',    'Preparation',             [Ticket.STATUS_NEW]),
         ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
-                                                       Ticket.STATUS_T1_REVIEW]),
+                                                       Ticket.STATUS_T1_REVIEW,
+                                                       Ticket.STATUS_PENDING_MGR_TRIAGE]),
         ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
                                                        Ticket.STATUS_CONTAINMENT_REPORTED,
                                                        Ticket.STATUS_AWAITING_OWNER,

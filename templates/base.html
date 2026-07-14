@@ -263,6 +263,15 @@
         {% endif %}
     </a>
     {% endif %}
+    {% if request.user.is_superuser or profile.is_soc_manager %}
+    <a href="{% url 'ticket_list' %}" data-label="SOC Manager Queue"
+       class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail' %}active{% endif %}">
+        <i class="bi bi-person-badge-fill"></i> <span class="nav-label">SOC Manager Queue</span>
+        {% if manager_queue_count %}
+        <span class="badge bg-warning text-dark ms-auto">{{ manager_queue_count }}</span>
+        {% endif %}
+    </a>
+    {% endif %}
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>

@@ -343,14 +343,14 @@
       <div class="row g-3" id="classification-options">
         {% for radio in form.classification %}
         <div class="col-md-6"><label class="decision-option d-block" for="{{ radio.id_for_label }}">{{ radio.tag }} <strong class="ms-1">{{ radio.choice_label }}</strong>
-          {% if radio.data.value == 'EVENT' %}<span class="d-block text-muted small mt-2">Event: ปิดเคสโดยไม่ส่งต่อ</span>{% else %}<span class="d-block text-muted small mt-2">Incident: มอบหมาย System Admin หรือส่ง Tier 2</span>{% endif %}
+          {% if radio.data.value == 'EVENT' %}<span class="d-block text-muted small mt-2">Event: ส่งให้ Tier 2 ยืนยันก่อนปิด</span>{% else %}<span class="d-block text-muted small mt-2">Incident: มอบหมาย System Admin หรือส่ง Tier 2</span>{% endif %}
         </label></div>
         {% endfor %}
       </div>
 
       <div id="event-panel" class="conditional-panel alert alert-secondary mt-3 mb-0">
-        <strong><i class="bi bi-check-circle me-1"></i>ปิดเคส (Close case)</strong>
-        <div class="small">ระบบจะบันทึกเป็น Event และปิด Ticket</div>
+        <strong><i class="bi bi-arrow-up-circle me-1"></i>ส่งให้ Tier 2 ยืนยัน</strong>
+        <div class="small">Event จะถูกส่งให้ Tier 2 ตรวจยืนยันก่อนปิดเคส — Tier 1 ไม่ปิดเคส Event เองโดยตรง</div>
       </div>
 
       <div id="incident-panel" class="conditional-panel mt-3">
@@ -364,7 +364,7 @@
         </div>
         <div id="owner-panel" class="conditional-panel mt-3 alert alert-warning mb-0">
           <strong><i class="bi bi-telephone me-1"></i>ให้เจ้าของระบบแก้ไขเอง (ทางลัด)</strong>
-          <div class="small">ติดต่อเจ้าของระบบโดยตรง (เช่น โทรศัพท์) แล้วติดตามผลในหน้า Ticket — ระบบจะ<strong>ไม่ออก Ticket ถึงผู้ดูแลระบบ</strong> และยังต้องผ่านการตรวจสอบก่อนปิดเคส (Tier 2 ปกติ / SOC Manager เมื่อเป็น Critical หรือ Emergency)</div>
+          <div class="small">ติดต่อเจ้าของระบบโดยตรง (เช่น โทรศัพท์) แล้วติดตามผลในหน้า Ticket — ระบบจะ<strong>ไม่ออก Ticket ถึงผู้ดูแลระบบ</strong> ทุก Incident จะผ่าน<strong>ผู้จัดการ SOC ตรวจก่อน</strong> แล้วจึงต้องผ่าน Tier 2 ก่อนปิดเคส (SOC Manager อีกครั้งเมื่อเป็น Emergency)</div>
         </div>
       </div>
     </div>
@@ -406,9 +406,9 @@ function updateDecisionPanels() {
   document.getElementById('incident-panel').classList.toggle('is-visible', classification === 'INCIDENT');
   document.getElementById('admin-panel').classList.toggle('is-visible', classification === 'INCIDENT' && route === 'assign_admin');
   document.getElementById('owner-panel').classList.toggle('is-visible', classification === 'INCIDENT' && route === 'direct_owner');
-  const label = classification === 'EVENT' ? 'ปิดเคส (Close case)'
-    : route === 'assign_admin' ? 'มอบหมายให้ System Admin'
-    : route === 'direct_owner' ? 'ให้เจ้าของระบบแก้ไขเอง'
+  const label = classification === 'EVENT' ? 'ส่งให้ Tier 2 ยืนยัน'
+    : route === 'assign_admin' ? 'ส่งผู้จัดการ SOC (มอบหมาย System Admin)'
+    : route === 'direct_owner' ? 'ส่งผู้จัดการ SOC (เจ้าของระบบแก้ไขเอง)'
     : route === 'escalate_t2' ? 'ส่งต่อให้ Tier 2'
     : 'บันทึก Ticket';
   document.querySelector('#create-submit span').textContent = label;

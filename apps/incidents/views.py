@@ -32,6 +32,7 @@ from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
     notify_containment_alert,
     notify_containment_submitted,
+    notify_manager_triage_pending,
     notify_system_owner_created,
     notify_system_owner_closed,
 )
@@ -103,6 +104,7 @@ def _transition_actions(ticket, user):
     labels = {
         Ticket.STATUS_CLOSED_EVENT: 'Mark as Event -> Close',
         Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
+        Ticket.STATUS_PENDING_MGR_TRIAGE: 'Route to SOC Manager review',
         Ticket.STATUS_OWNER_REMEDIATED: 'Owner fixed it -> Confirm',
         Ticket.STATUS_PENDING_T2_REVIEW: 'Send to Tier 2 review',
         Ticket.STATUS_PENDING_MANAGER: 'Send to SOC Manager',
@@ -280,7 +282,7 @@ def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and profile and profile.is_soc_manager:
-        visible = visible.filter(status=Ticket.STATUS_PENDING_MANAGER)
+        visible = visible.filter(status__in=Ticket.MANAGER_QUEUE_STATUSES)
     tickets_qs = visible.exclude(
         status__in=list(Ticket.TERMINAL_STATUSES)
     ).select_related('assigned_admin', 'created_by')
@@ -419,9 +421,11 @@ def create_ticket(request):
                     # form) plus the chosen route decide where the ticket goes.
                     route = form.cleaned_data.get('t1_route')
                     if ticket.classification == Ticket.CLASSIFICATION_EVENT:
+                        # Event → must be confirmed by Tier 2 before closing.
+                        # Tier 1 can no longer close an Event directly.
                         ticket.transition_to(
-                            Ticket.STATUS_CLOSED_EVENT, request.user,
-                            'จัดประเภทเป็น Event — ปิด Ticket',
+                            Ticket.STATUS_ESCALATED_T2, request.user,
+                            'จัดประเภทเป็น Event — ส่งให้ Tier 2 ยืนยันก่อนปิด',
                         )
                     elif route == TicketForm.ROUTE_ESCALATE_T2:
                         ticket.transition_to(
@@ -429,16 +433,20 @@ def create_ticket(request):
                             'จัดประเภทเป็น Incident — ส่งต่อให้ Tier 2',
                         )
                     elif route == TicketForm.ROUTE_ASSIGN_ADMIN:
+                        # Incident → admin lane, but first the SOC Manager
+                        # pre-containment review. Remember the chosen lane.
+                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
                         ticket.transition_to(
-                            Ticket.STATUS_AWAITING_CONTAINMENT, request.user,
-                            'จัดประเภทเป็น Incident — มอบหมายให้ผู้ดูแลระบบ',
+                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
+                            'จัดประเภทเป็น Incident — เลือกมอบหมายผู้ดูแลระบบ (รอผู้จัดการ SOC ตรวจ)',
                         )
                     elif route == TicketForm.ROUTE_DIRECT_OWNER:
-                        # Fast path: no System Admin ticket / email. The analyst
-                        # contacts the owner directly and tracks the fix here.
+                        # Incident → owner lane (no System Admin ticket / email),
+                        # also via the SOC Manager pre-containment review.
+                        ticket.t1_route = Ticket.T1_ROUTE_OWNER
                         ticket.transition_to(
-                            Ticket.STATUS_AWAITING_OWNER, request.user,
-                            'จัดประเภทเป็น Incident — ให้เจ้าของระบบแก้ไขเอง (ไม่ผ่านผู้ดูแลระบบ)',
+                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
+                            'จัดประเภทเป็น Incident — เลือกให้เจ้าของระบบแก้ไขเอง (รอผู้จัดการ SOC ตรวจ)',
                         )
 
                     if locked_triage:
@@ -472,10 +480,12 @@ def create_ticket(request):
                 if not notify_system_owner_created(ticket):
                     messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
 
-            # Notify the assigned admin immediately if the ticket was
-            # auto-routed to AWAITING_CONTAINMENT above
-            if ticket and ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                _notify_containment(ticket, None, request)
+            # An Incident now waits in the SOC Manager pre-containment review
+            # (PENDING_MGR_TRIAGE) rather than going straight to the lane, so
+            # alert the SOC Managers that a ticket needs their triage. The
+            # admin/owner is notified later, when the manager forwards.
+            if ticket and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE:
+                notify_manager_triage_pending(ticket)
 
             if ticket:
                 return redirect('ticket_detail', pk=ticket.pk)
@@ -589,15 +599,20 @@ def create_project_incident(request):
                         # The bundle title doubles as each member's incident name.
                         ticket.incident_name = shared['title']
                         ticket.classification = Ticket.CLASSIFICATION_INCIDENT
+                        # Each member is an admin-assigned Incident, so it takes
+                        # the same SOC Manager pre-containment review as a single
+                        # ticket before reaching the admin.
+                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
                         ticket.created_by = request.user
                         ticket.assigned_to = request.user
                         ticket.project_incident = project
                         ticket.bundle_suffix = bundle_suffix_for_index(len(created))
                         ticket.save()
                         ticket.transition_to(
-                            Ticket.STATUS_AWAITING_CONTAINMENT, request.user,
+                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
                             f'Project Incident {project.project_code} — '
-                            f'มอบหมายให้ผู้ดูแลระบบ ({ticket.device_name})',
+                            f'จัดประเภทเป็น Incident มอบหมายผู้ดูแลระบบ ({ticket.device_name}) '
+                            f'— รอผู้จัดการ SOC ตรวจ',
                         )
                         created.append(ticket)
 
@@ -665,7 +680,10 @@ def create_project_incident(request):
                                 request,
                                 f'{ticket.bundle_ref}: ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ',
                             )
-                    _notify_containment(ticket, None, request)
+                # Every member waits in the SOC Manager pre-containment review;
+                # one alert covers the bundle (the admin is notified per member
+                # when the manager forwards each one).
+                notify_manager_triage_pending(created[0])
                 messages.success(
                     request,
                     f'สร้าง Project Incident {project.project_code} เรียบร้อย — '
@@ -759,7 +777,28 @@ def ticket_detail(request, pk):
     )
     can_assign_admin = (
         ticket.status == Ticket.STATUS_T1_REVIEW
-        and Ticket.STATUS_AWAITING_CONTAINMENT in transition_codes
+        and Ticket.STATUS_PENDING_MGR_TRIAGE in transition_codes
+    )
+    # SOC Manager pre-containment review: flag Emergency + forward to the lane
+    # Tier 1 already chose (t1_route). The manager cannot change the lane.
+    can_mgr_forward = (
+        not is_terminal
+        and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
+        and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
+    )
+    mgr_forward_target = (
+        Ticket.STATUS_AWAITING_OWNER
+        if ticket.t1_route == Ticket.T1_ROUTE_OWNER
+        else Ticket.STATUS_AWAITING_CONTAINMENT
+    )
+    # Tier 2 may reclassify an in-flight case as an Event and close it directly
+    # (no manager), at either verification stage.
+    can_t2_reclassify = (
+        not is_terminal
+        and ticket.status in (
+            Ticket.STATUS_CONTAINMENT_REPORTED, Ticket.STATUS_PENDING_T2_REVIEW,
+        )
+        and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
 
     if request.method == 'POST':
@@ -803,18 +842,76 @@ def ticket_detail(request, pk):
                 messages.error(request, 'Please correct the Tier 2 review information.')
 
         elif action == 'assign_admin':
-            assignment_form = AdminAssignmentForm(request.POST, instance=ticket)
+            # T1 reviews a returned Incident and picks a handling lane (Admin or
+            # Owner); either way it goes to the SOC Manager pre-containment
+            # review. Only the Admin lane needs an assigned admin.
+            route = request.POST.get('t1_route', Ticket.T1_ROUTE_ADMIN)
             note = request.POST.get('decision_note', '').strip()
+            assignment_form = AdminAssignmentForm(request.POST, instance=ticket)
             if not can_assign_admin:
                 messages.error(request, 'This ticket cannot be assigned by the current user.')
             elif not note:
                 messages.error(request, 'A review note is required.')
+            elif route == Ticket.T1_ROUTE_OWNER:
+                try:
+                    with transaction.atomic():
+                        ticket.t1_route = Ticket.T1_ROUTE_OWNER
+                        ticket.transition_to(
+                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user, note,
+                        )
+                    notify_manager_triage_pending(ticket)
+                except ValidationError as e:
+                    messages.error(request, e.message)
             elif assignment_form.is_valid():
                 try:
                     with transaction.atomic():
-                        ticket = assignment_form.save()
-                        ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, request.user, note)
-                    _notify_containment(ticket, None, request)
+                        ticket = assignment_form.save(commit=False)
+                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+                        ticket.transition_to(
+                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user, note,
+                        )
+                    notify_manager_triage_pending(ticket)
+                except ValidationError as e:
+                    messages.error(request, e.message)
+            else:
+                messages.error(request, 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+
+        elif action == 'mgr_forward':
+            # SOC Manager reviews, optionally flags Emergency, and forwards the
+            # ticket to the lane Tier 1 fixed. The manager cannot divert the lane.
+            note = request.POST.get('decision_note', '').strip()
+            want_emergency = request.POST.get('is_emergency', '') in ('1', 'true', 'on')
+            if not can_mgr_forward:
+                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
+            elif not note:
+                messages.error(request, 'กรุณากรอกบันทึกการตรวจ')
+            else:
+                try:
+                    with transaction.atomic():
+                        if want_emergency != ticket.is_emergency:
+                            ticket.set_emergency(want_emergency, request.user, note)
+                        ticket.transition_to(mgr_forward_target, request.user, note)
+                    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
+                        _notify_containment(ticket, None, request)
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
+        elif action == 't2_reclassify_event':
+            # Tier 2 decides an in-flight case is actually a benign Event: flip
+            # the classification and close directly (never via the manager).
+            note = request.POST.get('decision_note', '').strip()
+            if not can_t2_reclassify:
+                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
+            elif not note:
+                messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
+            else:
+                try:
+                    with transaction.atomic():
+                        ticket.classification = Ticket.CLASSIFICATION_EVENT
+                        ticket.transition_to(
+                            Ticket.STATUS_CLOSED_EVENT, request.user, note,
+                        )
+                    _notify_owner_closed(ticket, request)
                 except ValidationError as e:
                     messages.error(request, e.message)
 
@@ -932,6 +1029,11 @@ def ticket_detail(request, pk):
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'can_assign_admin': can_assign_admin,
         'assignment_form': AdminAssignmentForm(instance=ticket),
+        'can_mgr_forward': can_mgr_forward,
+        'mgr_forward_target': mgr_forward_target,
+        'can_t2_reclassify': can_t2_reclassify,
+        'T1_ROUTE_ADMIN': Ticket.T1_ROUTE_ADMIN,
+        'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,
         'can_set_emergency': ticket.can_set_emergency(request.user),
         'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
         'subtasks': subtasks,

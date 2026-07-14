@@ -74,8 +74,12 @@ class UiSmokeTest(TestCase):
         self.assertContains(resp, 'ประวัติการดำเนินการ')
 
     def test_ticket_detail_renders_for_assigned_admin(self):
+        self.ticket.t1_route = Ticket.T1_ROUTE_ADMIN
         self.ticket.transition_to(
-            Ticket.STATUS_AWAITING_CONTAINMENT, self.soc_staff, 'route',
+            Ticket.STATUS_PENDING_MGR_TRIAGE, self.soc_staff, 'route',
+        )
+        self.ticket.transition_to(
+            Ticket.STATUS_AWAITING_CONTAINMENT, self.soc_manager, 'forward',
         )
         self.client.force_login(self.admin)
         resp = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
@@ -202,9 +206,11 @@ class WorkflowUiContractTest(TestCase):
             Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done', is_emergency=True,
         )
         self.client.force_login(self.t1)
+        # T1_REVIEW now routes to the SOC Manager pre-containment review, not
+        # straight to the admin.
         self.assertContains(
             self.client.get(reverse('ticket_detail', args=[review.pk])),
-            'Send to System Admin',
+            'Route to SOC Manager review',
         )
         # Containment verification belongs to Tier 2 now — Tier 1 gets no actions.
         t1_response = self.client.get(reverse('ticket_detail', args=[normal.pk]))
@@ -221,14 +227,82 @@ class WorkflowUiContractTest(TestCase):
 
     def test_manager_list_and_detail_only_show_manager_verification_work(self):
         pending = self.make_ticket(Ticket.STATUS_PENDING_MANAGER, severity='Critical')
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
         other = self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
         self.client.force_login(self.manager)
         listing = self.client.get(reverse('ticket_list'))
         self.assertContains(listing, pending.ticket_id)
-        self.assertNotContains(listing, other.ticket_id)
+        self.assertContains(listing, triage.ticket_id)   # pre-containment review queue
+        self.assertNotContains(listing, other.ticket_id)  # not the manager's work
         detail = self.client.get(reverse('ticket_detail', args=[pending.pk]))
         self.assertContains(detail, 'Verify -&gt; Close')
         self.assertNotContains(detail, 'Send to System Admin')
+
+    def test_manager_review_panel_shows_forward_and_emergency(self):
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        detail = self.client.get(reverse('ticket_detail', args=[triage.pk]))
+        self.assertContains(detail, 'SOC Manager Review')
+        self.assertContains(detail, 'mgr_forward')
+        self.assertContains(detail, 'Emergency')
+
+    def test_manager_forward_admin_lane_moves_to_containment(self):
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('ticket_detail', args=[triage.pk]), {
+            'action': 'mgr_forward', 'is_emergency': '1',
+            'decision_note': 'Reviewed, flagged emergency, forwarding.',
+        })
+        self.assertRedirects(resp, reverse('ticket_detail', args=[triage.pk]))
+        triage.refresh_from_db()
+        self.assertEqual(triage.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertTrue(triage.is_emergency)
+
+    def test_t1_cannot_forward_from_mgr_triage_via_ui(self):
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.t1)
+        resp = self.client.post(reverse('ticket_detail', args=[triage.pk]), {
+            'action': 'mgr_forward', 'decision_note': 'sneaky',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_t2_reclassify_event_closes_from_containment(self):
+        contained = self.make_ticket(
+            Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done',
+            is_emergency=True,
+        )
+        self.client.force_login(self.t2)
+        detail = self.client.get(reverse('ticket_detail', args=[contained.pk]))
+        self.assertContains(detail, 't2_reclassify_event')
+        resp = self.client.post(reverse('ticket_detail', args=[contained.pk]), {
+            'action': 't2_reclassify_event',
+            'decision_note': 'Benign after review.',
+        })
+        self.assertRedirects(resp, reverse('ticket_detail', args=[contained.pk]))
+        contained.refresh_from_db()
+        self.assertEqual(contained.status, Ticket.STATUS_CLOSED_EVENT)
+        self.assertEqual(contained.classification, Ticket.CLASSIFICATION_EVENT)
+
+    def test_t1_review_owner_route_goes_to_mgr_triage(self):
+        review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())
+        self.client.force_login(self.t1)
+        resp = self.client.post(reverse('ticket_detail', args=[review.pk]), {
+            'action': 'assign_admin', 't1_route': Ticket.T1_ROUTE_OWNER,
+            'decision_note': 'Owner will fix directly.',
+        })
+        self.assertRedirects(resp, reverse('ticket_detail', args=[review.pk]))
+        review.refresh_from_db()
+        self.assertEqual(review.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(review.t1_route, Ticket.T1_ROUTE_OWNER)
 
     def test_ticket_list_exposes_emergency_filter_and_sort(self):
         self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT, is_emergency=True)

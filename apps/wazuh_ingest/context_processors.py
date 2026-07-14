@@ -25,4 +25,11 @@ def pending_triage_count(request):
             status__in=Ticket.TIER2_QUEUE_STATUSES,
         ).count()
 
+    if user.is_superuser or (profile and profile.is_soc_manager):
+        # Everything waiting on the SOC Manager: the pre-containment review
+        # plus the emergency approval gate.
+        context['manager_queue_count'] = Ticket.objects.filter(
+            status__in=Ticket.MANAGER_QUEUE_STATUSES,
+        ).count()
+
     return context

@@ -112,20 +112,38 @@ def _ticket_post_data(**overrides):
     return data
 
 
+def _advance_helper_manager():
+    """A shared SOC Manager for driving the pre-containment forward step in
+    tests that don't otherwise need one. Get-or-create keeps it unique per DB."""
+    return _make_user('adv_helper_mgr', UserProfile.ROLE_SOC_MANAGER) \
+        if not User.objects.filter(username='adv_helper_mgr').exists() \
+        else User.objects.get(username='adv_helper_mgr')
+
+
 def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
     """
     Drive a ticket from its current status to target_status along the
-    Incident → assign-admin happy path. Tier 2 verifies the containment report;
-    the manager step fires automatically when the emergency flag requires it.
+    Incident → assign-admin happy path. The ticket first passes the SOC Manager
+    pre-containment review (PENDING_MGR_TRIAGE), then the admin contains it and
+    Tier 2 verifies; the final manager approval fires when the emergency flag
+    requires it.
     """
     if ticket.created_by_id is None:
         ticket.created_by = t1
     if ticket.classification != Ticket.CLASSIFICATION_INCIDENT:
         ticket.classification = Ticket.CLASSIFICATION_INCIDENT
-    ticket.save(update_fields=['created_by', 'classification'])
+    # The admin lane is the path this helper drives; remember it so the manager
+    # forward is legal.
+    ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+    ticket.save(update_fields=['created_by', 'classification', 't1_route'])
+
+    # A manager is always needed for the pre-containment forward; fall back to a
+    # shared helper manager when the caller didn't supply one.
+    forward_mgr = mgr or _advance_helper_manager()
 
     path = [
         Ticket.STATUS_NEW,
+        Ticket.STATUS_PENDING_MGR_TRIAGE,
         Ticket.STATUS_AWAITING_CONTAINMENT,
         Ticket.STATUS_CONTAINMENT_REPORTED,
     ]
@@ -137,7 +155,11 @@ def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
     i = path.index(ticket.status)
     j = path.index(target_status)
     for step in path[i + 1: j + 1]:
-        if step == Ticket.STATUS_CONTAINMENT_REPORTED:
+        if step == Ticket.STATUS_PENDING_MGR_TRIAGE:
+            ticket.transition_to(step, t1, 'route to SOC Manager review')
+        elif step == Ticket.STATUS_AWAITING_CONTAINMENT:
+            ticket.transition_to(step, forward_mgr, 'manager forwards to admin')
+        elif step == Ticket.STATUS_CONTAINMENT_REPORTED:
             ticket.containment_report = 'Contained.'
             ticket.transition_to(step, admin, 'containment note')
         elif step == Ticket.STATUS_PENDING_MANAGER:
@@ -145,8 +167,6 @@ def _advance_to(ticket, target_status, t1, admin=None, mgr=None, t2=None):
         elif step == Ticket.STATUS_APPROVED:
             actor = mgr if ticket.requires_manager_verification else t2
             ticket.transition_to(step, actor, 'close')
-        else:  # AWAITING_CONTAINMENT
-            ticket.transition_to(step, t1, 'assign admin')
 
 
 def _docx_text(content):
@@ -543,10 +563,33 @@ class WorkflowTransitionTest(TestCase):
 
     # ── Happy path ──────────────────────────────────────────────────────── #
 
-    def test_new_incident_to_awaiting_containment(self):
+    def test_new_incident_to_pending_mgr_triage(self):
         t = self._incident()
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign')
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route to manager')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_manager_forwards_to_admin_lane(self):
+        t = self._incident()
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.mgr, 'forward')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_manager_forwards_to_owner_lane(self):
+        t = self._incident()
+        t.t1_route = Ticket.T1_ROUTE_OWNER
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
+        t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.mgr, 'forward')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
+
+    def test_manager_cannot_forward_to_wrong_lane(self):
+        """t1_route=ADMIN forbids forwarding to the owner lane, and vice versa."""
+        t = self._incident()
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.mgr, 'wrong lane')
 
     def test_new_incident_to_escalated_t2_stamps_escalation(self):
         t = self._incident()
@@ -556,16 +599,25 @@ class WorkflowTransitionTest(TestCase):
         self.assertIsNotNone(t.escalated_to_t2_at)
         self.assertTrue(t.was_escalated_to_t2)
 
-    def test_new_event_to_closed_event(self):
+    def test_new_event_escalates_then_t2_closes_without_manager(self):
+        """Tier 1 can no longer close an Event directly — Tier 2 confirms it."""
         t = _make_ticket(created_by=self.t1, classification=Ticket.CLASSIFICATION_EVENT)
-        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t1, 'benign')
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'event → T2 confirm')
+        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirmed event')
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
+    def test_t1_cannot_close_event_directly(self):
+        t = _make_ticket(created_by=self.t1, classification=Ticket.CLASSIFICATION_EVENT)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t1, 'benign')
 
     def test_transition_stamps_status_changed_at(self):
         t = self._incident()
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
         before = t.status_changed_at
         self.assertIsNotNone(before)  # seeded on creation
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign')
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
         t.refresh_from_db()
         self.assertGreater(t.status_changed_at, before)
 
@@ -583,12 +635,13 @@ class WorkflowTransitionTest(TestCase):
         t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm incident')
         self.assertEqual(t.status, Ticket.STATUS_T1_REVIEW)
 
-    def test_t1_review_to_awaiting_containment(self):
+    def test_t1_review_to_pending_mgr_triage(self):
         t = self._incident()
         t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
         t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm')
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign admin')
-        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route to manager')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
     def test_full_happy_path_t2_closes_without_manager(self):
         t = self._incident(severity='High')
@@ -634,18 +687,31 @@ class WorkflowTransitionTest(TestCase):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'reopen')
 
     def test_event_cannot_take_incident_path(self):
-        """A ticket classified EVENT cannot be assigned to an admin."""
+        """A ticket classified EVENT cannot be routed into the manager review."""
         t = _make_ticket(
             created_by=self.t1, assigned_admin=self.admin,
-            classification=Ticket.CLASSIFICATION_EVENT,
+            classification=Ticket.CLASSIFICATION_EVENT, t1_route=Ticket.T1_ROUTE_ADMIN,
         )
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'mismatch')
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'mismatch')
 
-    def test_incident_cannot_be_closed_as_event(self):
+    def test_incident_cannot_be_closed_as_event_before_reclassify(self):
+        """The mid-containment Event-close edge requires classification == EVENT."""
         t = self._incident()
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t1, 'mismatch')
+            t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'still incident')
+
+    def test_t2_reclassifies_containment_as_event_closes_without_manager(self):
+        """Even an emergency ticket closes directly once T2 reclassifies to Event."""
+        t = self._incident()
+        t.is_emergency = True
+        t.save(update_fields=['is_emergency'])
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
+        # T2 decides it was benign after all: flip classification, then close.
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'reclassified as event')
+        self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
 
     def test_invalid_status_code_raises(self):
         t = self._incident()
@@ -676,28 +742,45 @@ class WorkflowPermissionTest(TestCase):
         opts.update(kwargs)
         return _make_ticket(**opts)
 
-    # NEW → AWAITING_CONTAINMENT  requires TIER1_CREATOR ───────────────────
+    # NEW → PENDING_MGR_TRIAGE  requires TIER1_CREATOR ─────────────────────
 
     def test_creator_t1_can_dispatch(self):
-        t = self._ticket_at(Ticket.STATUS_NEW)
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'ok')
-        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        t = self._ticket_at(Ticket.STATUS_NEW, t1_route=Ticket.T1_ROUTE_ADMIN)
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'ok')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
     def test_non_creator_t1_cannot_dispatch(self):
-        t = self._ticket_at(Ticket.STATUS_NEW)
+        t = self._ticket_at(Ticket.STATUS_NEW, t1_route=Ticket.T1_ROUTE_ADMIN)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.other_t1, 'denied')
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.other_t1, 'denied')
 
     def test_t2_cannot_dispatch(self):
-        t = self._ticket_at(Ticket.STATUS_NEW)
+        t = self._ticket_at(Ticket.STATUS_NEW, t1_route=Ticket.T1_ROUTE_ADMIN)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'denied')
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'denied')
 
     def test_manager_cannot_dispatch(self):
         """Managers are not Tier 1 and never open/route a fresh ticket."""
-        t = self._ticket_at(Ticket.STATUS_NEW)
+        t = self._ticket_at(Ticket.STATUS_NEW, t1_route=Ticket.T1_ROUTE_ADMIN)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.mgr, 'denied')
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.mgr, 'denied')
+
+    # PENDING_MGR_TRIAGE → lane  requires MANAGER ──────────────────────────
+
+    def test_manager_can_forward(self):
+        t = self._ticket_at(Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN)
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.mgr, 'forward')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_t1_cannot_forward_from_mgr_triage(self):
+        t = self._ticket_at(Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'denied')
+
+    def test_t2_cannot_forward_from_mgr_triage(self):
+        t = self._ticket_at(Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'denied')
 
     # ESCALATED_T2 → T1_REVIEW  requires TIER2 ─────────────────────────────
 
@@ -785,7 +868,8 @@ class T1ClassificationCreateTest(TestCase):
         cls.t2    = _make_t2('cc_t2')
         cls.admin = _make_user('cc_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
-    def test_event_creation_closes_ticket(self):
+    def test_event_creation_escalates_to_t2(self):
+        """Tier 1 Event no longer closes directly — it escalates to Tier 2."""
         self.client.login(username='cc_t1', password='testpass123')
         resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
             classification=Ticket.CLASSIFICATION_EVENT, t1_route='',
@@ -793,9 +877,9 @@ class T1ClassificationCreateTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         ticket = Ticket.objects.latest('id')
         self.assertEqual(ticket.classification, Ticket.CLASSIFICATION_EVENT)
-        self.assertEqual(ticket.status, Ticket.STATUS_CLOSED_EVENT)
+        self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
 
-    def test_incident_assign_admin_routes_to_containment(self):
+    def test_incident_assign_admin_routes_to_mgr_triage(self):
         self.client.login(username='cc_t1', password='testpass123')
         resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
             classification=Ticket.CLASSIFICATION_INCIDENT,
@@ -804,8 +888,20 @@ class T1ClassificationCreateTest(TestCase):
         ))
         self.assertEqual(resp.status_code, 302)
         ticket = Ticket.objects.latest('id')
-        self.assertEqual(ticket.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(ticket.t1_route, Ticket.T1_ROUTE_ADMIN)
         self.assertEqual(ticket.assigned_admin, self.admin)
+
+    def test_incident_direct_owner_routes_to_mgr_triage(self):
+        self.client.login(username='cc_t1', password='testpass123')
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=TicketForm.ROUTE_DIRECT_OWNER,
+        ))
+        self.assertEqual(resp.status_code, 302)
+        ticket = Ticket.objects.latest('id')
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(ticket.t1_route, Ticket.T1_ROUTE_OWNER)
 
     def test_incident_escalate_routes_to_t2(self):
         self.client.login(username='cc_t1', password='testpass123')
@@ -887,11 +983,12 @@ class Tier2EscalationTest(TestCase):
         self.assertEqual(resp.status_code, 302)  # redirected away, Tier 1 only
         self.assertFalse(Ticket.objects.filter(device_name='TEST-ENDPOINT-01').exists())
 
-    def test_t1_review_then_assign_admin(self):
+    def test_t1_review_then_route_to_mgr_triage(self):
         t = self._escalated()
         t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm')
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'assign admin')
-        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        t.t1_route = Ticket.T1_ROUTE_ADMIN
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'assign admin')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -992,7 +1089,10 @@ class DirectToOwnerPathTest(TestCase):
     # ── Model FSM: happy path (Low, non-emergency → Tier 2 review) ──────── #
     def test_full_owner_path_low_severity_closes_via_tier2(self):
         t = self._owner_case(status=Ticket.STATUS_NEW)
-        t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t1, 'phoned owner')
+        # Owner lane now passes the SOC Manager pre-containment review first.
+        t.t1_route = Ticket.T1_ROUTE_OWNER
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route to manager')
+        t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.mgr, 'manager forwards to owner')
         self.assertTrue(t.direct_owner_remediation)
         self.assertIsNotNone(t.owner_contacted_at)
 
@@ -1063,16 +1163,18 @@ class DirectToOwnerPathTest(TestCase):
         form = TicketForm(data=_owner_payload(severity='High'), user=self.t1)
         self.assertTrue(form.is_valid(), form.errors)
 
-    # ── Create-flow view: routes to AWAITING_OWNER, sends no admin email ── #
-    def test_create_view_routes_to_awaiting_owner_without_email(self):
+    # ── Create-flow view: routes to the manager review, sends no admin email ─ #
+    def test_create_view_routes_to_mgr_triage_without_email(self):
         self.client.login(username='do_t1', password='testpass123')
         mail.outbox = []
         resp = self.client.post(reverse('create_ticket'), _owner_payload(severity='Low'))
         self.assertEqual(resp.status_code, 302)
         t = Ticket.objects.latest('id')
-        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
-        self.assertTrue(t.direct_owner_remediation)
+        # The owner lane is remembered; the ticket waits for the SOC Manager.
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(t.t1_route, Ticket.T1_ROUTE_OWNER)
         self.assertIsNone(t.assigned_admin)
+        # No admin email (owner lane); test managers have no email either.
         self.assertEqual(len(mail.outbox), 0)
 
 
@@ -1285,6 +1387,7 @@ class NotificationEmailTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.t1  = _make_t1('ne_t1')
+        cls.mgr = _make_user('ne_mgr', UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('ne_admin', UserProfile.ROLE_SYSTEM_ADMIN)
         cls.admin.email = 'sysadmin@example.com'
         cls.admin.save()
@@ -1293,12 +1396,15 @@ class NotificationEmailTest(TestCase):
     def setUp(self):
         mail.outbox = []
 
-    def _routed_ticket(self):
+    def _routed_ticket(self, admin=None):
+        """A ticket driven to AWAITING_CONTAINMENT via the manager review."""
         t = _make_ticket(
-            assigned_admin=self.admin, created_by=self.t1,
+            assigned_admin=admin or self.admin, created_by=self.t1,
             classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=Ticket.T1_ROUTE_ADMIN,
         )
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'routing')
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
+        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.mgr, 'forward')
         return t
 
     def test_routing_sends_one_email_to_admin(self):
@@ -1327,11 +1433,7 @@ class NotificationEmailTest(TestCase):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_transition_succeeds_without_email(self):
-        t = _make_ticket(
-            assigned_admin=self.admin_no_email, created_by=self.t1,
-            classification=Ticket.CLASSIFICATION_INCIDENT,
-        )
-        t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t1, 'routing')
+        t = self._routed_ticket(admin=self.admin_no_email)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
 
@@ -1586,8 +1688,10 @@ class SuperuserAccessTest(TestCase):
         ticket = _make_ticket(
             assigned_admin=self.system_admin, severity='Critical',
             classification=Ticket.CLASSIFICATION_INCIDENT, is_emergency=True,
+            t1_route=Ticket.T1_ROUTE_ADMIN,
         )
-        ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.superuser, 'as t1')
+        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.superuser, 'as t1')
+        ticket.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.superuser, 'as manager forward')
         ticket.containment_report = 'Contained by superuser.'
         ticket.transition_to(Ticket.STATUS_CONTAINMENT_REPORTED, self.superuser, 'as admin')
         ticket.transition_to(Ticket.STATUS_PENDING_MANAGER, self.superuser, 'verify')
@@ -2064,10 +2168,12 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertEqual(members[0].bundle_ref, f'{project.project_code}-A')
         self.assertEqual(members[1].display_id, members[1].ticket_id)
 
-        # Each member routed to its own admin, awaiting containment, as Incident.
+        # Each member routed to its own admin, waiting in the SOC Manager
+        # pre-containment review, as Incident.
         self.assertEqual({m.assigned_admin for m in members}, {self.admin_a, self.admin_b})
         for m in members:
-            self.assertEqual(m.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+            self.assertEqual(m.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+            self.assertEqual(m.t1_route, Ticket.T1_ROUTE_ADMIN)
             self.assertEqual(m.classification, Ticket.CLASSIFICATION_INCIDENT)
             self.assertEqual(m.created_by, self.t1)
             # Shared incident facts copied onto every member.
@@ -2088,7 +2194,7 @@ class ProjectIncidentFanOutTest(TestCase):
         first, second = list(project.members)
         _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a, t2=self.t2)
         second.refresh_from_db()
-        self.assertEqual(second.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertEqual(second.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
         self.assertEqual(project.open_member_count, 1)
         self.assertFalse(project.all_closed)
 

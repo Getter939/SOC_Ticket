@@ -10,6 +10,46 @@ Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 
 ---
 
+## 0. 2026-07-14 update — SOC Manager pre-containment review
+
+Layered on top of the 2026-07-08 redesign below. Diagram source of truth:
+`docs/soc-ticket-flow.md`. Migration `incidents/0044` (additive: new `t1_route`
+field + `PENDING_MGR_TRIAGE` status choice + `MANAGER_TRIAGE_PENDING` template key).
+
+**New blocking state `PENDING_MGR_TRIAGE`.** Every Incident now passes through the
+SOC Manager *before* it reaches a handling lane. The manager flags Emergency
+(yes/no) and forwards to the lane Tier 1 already chose; they cannot divert it.
+A new `Ticket.t1_route` (`ADMIN`/`OWNER`) fixes the destination and is enforced
+by a deterministic guard in `can_transition_to`/`transition_to`. (Spawning a
+response team from this step — VA/PT/Forensic/RCA — is a deferred future phase;
+the UI shows a disabled "coming soon" placeholder.)
+
+**FSM delta** (vs. §2b below):
+- **Removed:** `NEW→{CLOSED_EVENT, AWAITING_CONTAINMENT, AWAITING_OWNER}`,
+  `T1_REVIEW→{AWAITING_CONTAINMENT, AWAITING_OWNER}`.
+- **Added:** `NEW→PENDING_MGR_TRIAGE` [TIER1_CREATOR], `T1_REVIEW→PENDING_MGR_TRIAGE`
+  [TIER1_CREATOR], `PENDING_MGR_TRIAGE→AWAITING_CONTAINMENT|AWAITING_OWNER`
+  [MANAGER, `t1_route`-guarded].
+- **Event path:** a Tier 1 "Event" no longer closes directly — it escalates
+  (`NEW→ESCALATED_T2`); `ESCALATED_T2→CLOSED_EVENT` closes it with **no** manager.
+- **Mid-containment reclassify (new):** `CONTAINMENT_REPORTED→CLOSED_EVENT` and
+  `PENDING_T2_REVIEW→CLOSED_EVENT` [TIER2] — Tier 2 flips classification→EVENT and
+  closes directly, even if the emergency flag is set.
+- **Unchanged:** both verification loops, `PENDING_T2_REVIEW`, `PENDING_MANAGER→APPROVED`,
+  and `requires_manager_verification == is_emergency` (no severity routing).
+
+**Notifications:** the admin/owner assignment email now fires when the manager
+forwards (not at Tier 1 routing time); a new `notify_manager_triage_pending`
+alerts SOC Managers when a ticket enters `PENDING_MGR_TRIAGE`.
+
+**Surfaces updated:** SOC Manager review panel + queue nav/badge
+(`MANAGER_QUEUE_STATUSES`), T1-review Admin/Owner route selector, Tier-2
+reclassify-to-Event control, create-flow copy, and the executive dashboard
+(IDENTIFICATION phase + a pre-containment backlog card). Report exporter and
+status badges are model-driven and needed no change.
+
+---
+
 ## 1. CURRENT implementation (before this change)
 
 ### 1a. Ticket states & transitions — `apps/incidents/models.py` (`Ticket`)
