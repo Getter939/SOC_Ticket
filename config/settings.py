@@ -230,7 +230,14 @@ CONTENT_SECURITY_POLICY_REPORT_ONLY = config(
 # Port guide: 587 = STARTTLS submission (EMAIL_USE_TLS=True)  ← default
 #             465 = SMTPS / implicit SSL  (EMAIL_USE_SSL=True, TLS=False)
 #             25  = plain SMTP relay — do NOT use with EMAIL_USE_TLS=True
-EMAIL_BACKEND     = 'django.core.mail.backends.smtp.EmailBackend'
+# Overridable so a UAT/demo deployment can route mail to the console without a
+# code change (gunicorn has no --settings hook the way runserver does):
+#   EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+# Default remains real SMTP, so production is unaffected.
+EMAIL_BACKEND     = config(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.smtp.EmailBackend',
+)
 EMAIL_HOST        = config('EMAIL_HOST',         default='')
 EMAIL_HOST_USER   = config('EMAIL_HOST_USER',    default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
