@@ -400,20 +400,60 @@ def dashboard(request):
 # Executive dashboard                                                     #
 # ====================================================================== #
 
+# Active statuses grouped by whose court the ball is in — the executive
+# summary's backbone. Membership follows Ticket.ALLOWED_TRANSITIONS: whoever
+# drives the next transition owns the state.
+#
+# INVARIANT: every non-terminal status appears exactly once. Add a status to
+# the FSM → add it here, or the executive verdict goes blind to it (which is
+# exactly the bug this replaced). Enforced by
+# ExecutiveSummaryCourtTest.test_court_groups_cover_every_active_status_exactly_once.
+#
+# AWAITING_OWNER sits under EXTERNAL because the executive question is "who
+# blocks closure?" (the owner, who must fix it) — even though Tier 1 drives the
+# transition out of it. The analyst heatmap on the monitoring dashboard groups
+# the same status the other way, under the analyst, because it asks a different
+# question: "what must this analyst chase?".
+_EXEC_COURT_GROUPS = {
+    'COURT_SOC': [
+        Ticket.STATUS_NEW,
+        Ticket.STATUS_T1_REVIEW,
+        Ticket.STATUS_OWNER_REMEDIATED,
+    ],
+    'COURT_MANAGER': [
+        Ticket.STATUS_PENDING_MGR_TRIAGE,
+        Ticket.STATUS_PENDING_MANAGER,
+    ],
+    'COURT_EXTERNAL': [
+        Ticket.STATUS_AWAITING_CONTAINMENT,
+        Ticket.STATUS_AWAITING_OWNER,
+    ],
+    'COURT_TIER2': [
+        Ticket.STATUS_ESCALATED_T2,
+        Ticket.STATUS_CONTAINMENT_REPORTED,
+        Ticket.STATUS_PENDING_T2_REVIEW,
+    ],
+}
+
+
 @login_required
 def executive_dashboard(request):
     """Executive dashboard — glanceable posture summary for management.
 
     Follows the approved wireframe: KPI cards (total High/Critical count
     with month-over-month delta, MTTR placeholder), a date-scoped
-    High/Critical closure progress bar, a four-criteria executive summary
+    High/Critical closure progress bar, a six-criteria executive summary
     with an overall GOOD / WAITING / WARNING verdict, the date-scoped
     pipeline chart, and a date-scoped filterable ticket detail table.
 
-    Pipeline bars and summary criterion rows deep-link back to this page
-    with ?f=<status slug | EMERGENCY> — a single filter, last click wins.
-    date_range scopes the charting/detail sections, while the executive
-    verdict stays a live current-posture summary.
+    The summary criteria are grouped by "whose court is the ball in" so every
+    active status is counted exactly once (see COURT_GROUPS below), plus two
+    cross-cutting warning rows (Emergency, OLA overdue).
+
+    Pipeline bars and summary criterion rows deep-link back to this page with
+    ?f=<court group | IR phase | status slug | EMERGENCY | OLA_OVERDUE> —
+    a single filter, last click wins. date_range scopes the charting/detail
+    sections, while the executive verdict stays a live current-posture summary.
     """
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and not (
@@ -498,30 +538,28 @@ def executive_dashboard(request):
     hc_open = hc_total - hc_closed
     hc_progress_pct = round(hc_closed / hc_total * 100) if hc_total else 0
 
-    # ── Executive summary — 4 criteria, priority Warning > Waiting > Good ─ #
-    crit_unassigned = active_qs.filter(
-        severity='Critical', status=Ticket.STATUS_NEW,
-        assigned_to__isnull=True,
-    ).count()
+    # ── Executive summary — 6 criteria, priority Warning > Waiting > Good ─ #
+    #
+    # Grouped by whose court the ball is in (_EXEC_COURT_GROUPS), so every
+    # ACTIVE status is counted exactly once and the verdict can never read GOOD
+    # while work is queued somewhere. The two warning rows are cross-cutting (an
+    # emergency or an overdue case may sit in any court), so a ticket can appear
+    # in one warning row AND one court row — that is intentional: the warnings
+    # answer "is anything on fire?", the court rows "who is holding it?".
+    COURT_GROUPS = _EXEC_COURT_GROUPS
+
     emergency_active = active_qs.filter(is_emergency=True).count()
-    pending_mgr_triage = active_qs.filter(
-        status=Ticket.STATUS_PENDING_MGR_TRIAGE).count()
-    awaiting_containment = active_qs.filter(
-        status=Ticket.STATUS_AWAITING_CONTAINMENT).count()
-    # verified_by is stamped when Tier 2 signs the containment off, so a null
-    # here means the report is still waiting on Tier 2's verification.
-    unverified_containment = active_qs.filter(
-        status=Ticket.STATUS_CONTAINMENT_REPORTED,
-        verified_by__isnull=True,
+    # Live contain-OLA breach (mirrors Ticket.is_ola_contain_breached). Medium/
+    # Low have no contain deadline, so they never count here.
+    ola_overdue = active_qs.filter(
+        ola_contain_deadline__lt=now,
     ).count()
+    court_counts = {
+        key: active_qs.filter(status__in=sts).count()
+        for key, sts in COURT_GROUPS.items()
+    }
 
     summary_criteria = [
-        {
-            'label': 'เคสอันตราย (Critical) ที่ยังไม่มีผู้รับผิดชอบ',
-            'count': crit_unassigned,
-            'level': 'warning' if crit_unassigned else 'good',
-            'filter': Ticket.STATUS_NEW,
-        },
         {
             'label': 'เคสฉุกเฉิน (Emergency) ที่ยังไม่ปิด',
             'count': emergency_active,
@@ -529,22 +567,34 @@ def executive_dashboard(request):
             'filter': 'EMERGENCY',
         },
         {
-            'label': 'เคสที่รอผู้จัดการ SOC ตรวจ (ก่อนมอบหมาย)',
-            'count': pending_mgr_triage,
-            'level': 'waiting' if pending_mgr_triage else 'good',
-            'filter': Ticket.STATUS_PENDING_MGR_TRIAGE,
+            'label': 'เคสที่เกินกำหนด OLA',
+            'count': ola_overdue,
+            'level': 'warning' if ola_overdue else 'good',
+            'filter': 'OLA_OVERDUE',
         },
         {
-            'label': 'เคสที่รอการจัดการจากผู้ดูแลระบบ',
-            'count': awaiting_containment,
-            'level': 'waiting' if awaiting_containment else 'good',
-            'filter': Ticket.STATUS_AWAITING_CONTAINMENT,
+            'label': 'เคสที่รอ SOC (Tier 1) ดำเนินการ',
+            'count': court_counts['COURT_SOC'],
+            'level': 'waiting' if court_counts['COURT_SOC'] else 'good',
+            'filter': 'COURT_SOC',
         },
         {
-            'label': 'การควบคุมที่รอ Tier 2 ตรวจสอบ',
-            'count': unverified_containment,
-            'level': 'waiting' if unverified_containment else 'good',
-            'filter': Ticket.STATUS_CONTAINMENT_REPORTED,
+            'label': 'เคสที่รอผู้จัดการ SOC',
+            'count': court_counts['COURT_MANAGER'],
+            'level': 'waiting' if court_counts['COURT_MANAGER'] else 'good',
+            'filter': 'COURT_MANAGER',
+        },
+        {
+            'label': 'เคสที่รอผู้ดูแลระบบ / เจ้าของระบบ',
+            'count': court_counts['COURT_EXTERNAL'],
+            'level': 'waiting' if court_counts['COURT_EXTERNAL'] else 'good',
+            'filter': 'COURT_EXTERNAL',
+        },
+        {
+            'label': 'เคสที่รอ Tier 2 ตรวจสอบ',
+            'count': court_counts['COURT_TIER2'],
+            'level': 'waiting' if court_counts['COURT_TIER2'] else 'good',
+            'filter': 'COURT_TIER2',
         },
     ]
     if any(c['level'] == 'warning' for c in summary_criteria):
@@ -567,10 +617,13 @@ def executive_dashboard(request):
                                                        Ticket.STATUS_CONTAINMENT_REPORTED,
                                                        Ticket.STATUS_AWAITING_OWNER,
                                                        Ticket.STATUS_OWNER_REMEDIATED]),
+        # Recovery = the verification stages (work done, being signed off).
         ('RECOVERY',       'Recovery',                [Ticket.STATUS_PENDING_MANAGER,
-                                                       Ticket.STATUS_PENDING_T2_REVIEW,
-                                                       Ticket.STATUS_APPROVED]),
-        ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_CLOSED_EVENT]),
+                                                       Ticket.STATUS_PENDING_T2_REVIEW]),
+        # Lessons Learned = both terminals. APPROVED lived under Recovery until
+        # 2026-07-16, which read as "still recovering" for a closed case.
+        ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_APPROVED,
+                                                       Ticket.STATUS_CLOSED_EVENT]),
     ]
     phase_order = [key for key, _, _ in IR_PHASES]
     phase_display = {key: label for key, label, _ in IR_PHASES}
@@ -617,9 +670,19 @@ def executive_dashboard(request):
     # ── Detail table — single ?f= filter, last click wins ───────────────── #
     f = request.GET.get('f', '')
     filter_label = ''
+    court_labels = {c['filter']: c['label'] for c in summary_criteria}
     if f == 'EMERGENCY':
         table_qs = range_active_qs.filter(is_emergency=True)
         filter_label = 'เคสฉุกเฉิน (Emergency)'
+    elif f == 'OLA_OVERDUE':
+        # Live breach — same rule as the summary criterion above.
+        table_qs = range_active_qs.filter(ola_contain_deadline__lt=now)
+        filter_label = court_labels.get(f, 'เคสที่เกินกำหนด OLA')
+    elif f in COURT_GROUPS:
+        # Summary rows span several statuses (grouped by whose court), so they
+        # filter on the whole group. Active-only: a court is about pending work.
+        table_qs = range_active_qs.filter(status__in=COURT_GROUPS[f])
+        filter_label = court_labels.get(f, f)
     elif f in phase_statuses:
         # Pipeline bars are SANS-IR phases, each covering one or more statuses.
         table_qs = range_tickets.filter(status__in=phase_statuses[f])

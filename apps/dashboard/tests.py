@@ -678,7 +678,8 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertEqual(today.context['hc_total'], 1)
         self.assertEqual(today.context['hc_open'], 1)
         self.assertEqual(today_pbs['matrix']['Critical']['PREPARATION'], 1)
-        self.assertEqual(today_pbs['matrix']['High']['RECOVERY'], 0)
+        # APPROVED is a terminal → Lessons Learned (not Recovery).
+        self.assertEqual(today_pbs['matrix']['High']['LESSONS'], 0)
         self.assertEqual(today_pbs['emergency_by_status']['PREPARATION'], 1)
         self.assertEqual(len(today.context['table_tickets']), 1)
 
@@ -686,7 +687,7 @@ class ExecutiveDashboardViewTest(TestCase):
         all_pbs = all_time.context['pipeline_by_severity']
 
         self.assertEqual(all_time.context['hc_total'], 2)
-        self.assertEqual(all_pbs['matrix']['High']['RECOVERY'], 1)
+        self.assertEqual(all_pbs['matrix']['High']['LESSONS'], 1)
 
     def test_time_range_control_and_chart_links_render(self):
         self._ticket()
@@ -714,3 +715,170 @@ class ExecutiveDashboardViewTest(TestCase):
             '?date_range=week&date_from=&date_to=&f=EMERGENCY&page=2#detail-table',
             html,
         )
+
+
+# ── Executive summary: grouped by whose court ────────────────────────────── #
+
+class ExecutiveSummaryCourtTest(TestCase):
+    """The summary verdict must see every active state, grouped by who holds
+    the ticket — it can never read GOOD while work is queued anywhere."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.executive = _make_user('exec_court', UserProfile.ROLE_EXECUTIVE)
+
+    def setUp(self):
+        self.client.force_login(self.executive)
+
+    def _get(self, **params):
+        return self.client.get(EXECUTIVE_URL, params)
+
+    def _criteria(self):
+        return {c['filter']: c for c in self._get().context['summary_criteria']}
+
+    # Every active status maps to exactly one court group.
+    def test_court_groups_cover_every_active_status_exactly_once(self):
+        from apps.dashboard.views import _EXEC_COURT_GROUPS
+
+        covered = [s for sts in _EXEC_COURT_GROUPS.values() for s in sts]
+        active = [
+            s for s, _ in Ticket.STATUS_CHOICES
+            if s not in Ticket.TERMINAL_STATUSES
+        ]
+        self.assertEqual(sorted(covered), sorted(set(covered)), 'a status is in two courts')
+        self.assertEqual(sorted(covered), sorted(active), 'court coverage != active states')
+
+    def test_no_active_work_reads_good(self):
+        self.assertEqual(self._get().context['overall_status'], 'GOOD')
+
+    def test_owner_lane_is_counted_and_flips_verdict_to_waiting(self):
+        """Regression: the owner lane used to be invisible to the verdict."""
+        _make_ticket(status=Ticket.STATUS_AWAITING_OWNER)
+        ctx = self._get().context
+        self.assertEqual(ctx['overall_status'], 'WAITING')
+        self.assertEqual(self._criteria()['COURT_EXTERNAL']['count'], 1)
+
+    def test_escalated_and_t1_review_are_counted(self):
+        """Regression: ESCALATED_T2 / T1_REVIEW used to be invisible too."""
+        _make_ticket(status=Ticket.STATUS_ESCALATED_T2)
+        _make_ticket(status=Ticket.STATUS_T1_REVIEW)
+        criteria = self._criteria()
+        self.assertEqual(criteria['COURT_TIER2']['count'], 1)   # ESCALATED_T2
+        self.assertEqual(criteria['COURT_SOC']['count'], 1)     # T1_REVIEW
+
+    def test_manager_court_counts_both_manager_stages(self):
+        _make_ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self.assertEqual(self._criteria()['COURT_MANAGER']['count'], 2)
+
+    def test_terminal_tickets_are_not_counted_in_any_court(self):
+        _make_ticket(status=Ticket.STATUS_APPROVED)
+        _make_ticket(status=Ticket.STATUS_CLOSED_EVENT)
+        criteria = self._criteria()
+        for key in ('COURT_SOC', 'COURT_MANAGER', 'COURT_EXTERNAL', 'COURT_TIER2'):
+            self.assertEqual(criteria[key]['count'], 0, key)
+        self.assertEqual(self._get().context['overall_status'], 'GOOD')
+
+    def test_ola_overdue_is_a_warning_criterion(self):
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT, ola_offset_hours=-5)
+        ctx = self._get().context
+        self.assertEqual(self._criteria()['OLA_OVERDUE']['count'], 1)
+        self.assertEqual(ctx['overall_status'], 'WARNING')
+
+    def test_ghost_critical_unassigned_criterion_is_gone(self):
+        labels = [c['label'] for c in self._get().context['summary_criteria']]
+        self.assertEqual(len(labels), 6)
+        self.assertNotIn('เคสอันตราย (Critical) ที่ยังไม่มีผู้รับผิดชอบ', labels)
+
+    # ── Court deep-link filters ──────────────────────────────────────────── #
+
+    def test_court_filter_scopes_detail_table_to_that_group(self):
+        _make_ticket(status=Ticket.STATUS_AWAITING_OWNER)
+        _make_ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+        external = self._get(f='COURT_EXTERNAL')
+        self.assertEqual(len(external.context['table_tickets']), 1)
+        self.assertEqual(
+            external.context['table_tickets'][0].status,
+            Ticket.STATUS_AWAITING_OWNER,
+        )
+        self.assertEqual(
+            external.context['filter_label'], 'เคสที่รอผู้ดูแลระบบ / เจ้าของระบบ',
+        )
+
+        manager = self._get(f='COURT_MANAGER')
+        self.assertEqual(len(manager.context['table_tickets']), 1)
+
+    def test_ola_overdue_filter_scopes_detail_table(self):
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT, ola_offset_hours=-5)
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT, ola_offset_hours=48)
+
+        resp = self._get(f='OLA_OVERDUE')
+        self.assertEqual(len(resp.context['table_tickets']), 1)
+
+
+# ── Executive detail table: whose court is the ball in ───────────────────── #
+
+class ExecutiveAccountableColumnTest(TestCase):
+    """The detail table must name whoever actually holds the ticket now, not
+    always the opening Tier 1 analyst."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.executive = _make_user('exec_acct', UserProfile.ROLE_EXECUTIVE)
+        cls.analyst = _make_user('acct_t1', UserProfile.ROLE_SOC_STAFF)
+        cls.admin = _make_user('acct_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def setUp(self):
+        self.client.force_login(self.executive)
+
+    def _row_html(self, status, **updates):
+        t = _make_ticket(status=status)
+        updates.setdefault('assigned_to', self.analyst)
+        Ticket.objects.filter(pk=t.pk).update(**updates)
+        return self.client.get(EXECUTIVE_URL).content.decode()
+
+    def test_manager_stages_show_manager_role_not_analyst(self):
+        for status in (Ticket.STATUS_PENDING_MGR_TRIAGE, Ticket.STATUS_PENDING_MANAGER):
+            with self.subTest(status=status):
+                Ticket.objects.all().delete()
+                html = self._row_html(status)
+                self.assertIn('ผู้จัดการ SOC', html)
+                self.assertNotIn(self.analyst.username, html)
+
+    def test_tier2_verification_stages_show_tier2_role(self):
+        for status in (
+            Ticket.STATUS_ESCALATED_T2,
+            Ticket.STATUS_CONTAINMENT_REPORTED,
+            Ticket.STATUS_PENDING_T2_REVIEW,
+        ):
+            with self.subTest(status=status):
+                Ticket.objects.all().delete()
+                html = self._row_html(status)
+                self.assertIn('Tier 2', html)
+                self.assertNotIn(self.analyst.username, html)
+
+    def test_owner_lane_shows_asset_owner(self):
+        Ticket.objects.all().delete()
+        html = self._row_html(
+            Ticket.STATUS_AWAITING_OWNER, asset_owner='ฝ่ายบุคคล',
+        )
+        self.assertIn('ฝ่ายบุคคล', html)
+        self.assertNotIn(self.analyst.username, html)
+
+    def test_owner_lane_without_asset_owner_falls_back_to_role(self):
+        Ticket.objects.all().delete()
+        html = self._row_html(Ticket.STATUS_OWNER_REMEDIATED, asset_owner='')
+        self.assertIn('เจ้าของระบบ', html)
+
+    def test_containment_still_shows_assigned_admin(self):
+        Ticket.objects.all().delete()
+        html = self._row_html(
+            Ticket.STATUS_AWAITING_CONTAINMENT, assigned_admin=self.admin,
+        )
+        self.assertIn(self.admin.username, html)
+
+    def test_analyst_shown_when_ball_is_in_tier1_court(self):
+        Ticket.objects.all().delete()
+        html = self._row_html(Ticket.STATUS_NEW)
+        self.assertIn(self.analyst.username, html)

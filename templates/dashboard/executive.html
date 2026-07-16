@@ -328,11 +328,23 @@
                             </td>
                             <td>{{ t.issue_description|truncatechars:70 }}</td>
                             <td>
-                                {# During containment the accountable person is the #}
-                                {# system admin, not the SOC analyst.               #}
+                                {# Whoever actually holds the ticket right now, per     #}
+                                {# Ticket.ALLOWED_TRANSITIONS — not always the opening  #}
+                                {# analyst. The SOC Manager and Tier 2 are pools (no    #}
+                                {# assigned-manager field), so those stages show the    #}
+                                {# role rather than a person.                           #}
                                 {% if t.status == 'AWAITING_CONTAINMENT' and t.assigned_admin %}
                                     {{ t.assigned_admin.get_full_name|default:t.assigned_admin.username }}
                                     <span class="text-muted" style="font-size:12px;">(ผู้ดูแลระบบ)</span>
+                                {% elif t.status == 'PENDING_MGR_TRIAGE' or t.status == 'PENDING_MANAGER' %}
+                                    ผู้จัดการ SOC
+                                    <span class="text-muted" style="font-size:12px;">(รอตรวจ)</span>
+                                {% elif t.status == 'ESCALATED_T2' or t.status == 'CONTAINMENT_REPORTED' or t.status == 'PENDING_T2_REVIEW' %}
+                                    Tier 2
+                                    <span class="text-muted" style="font-size:12px;">(รอตรวจ)</span>
+                                {% elif t.status == 'AWAITING_OWNER' or t.status == 'OWNER_REMEDIATED' %}
+                                    {{ t.asset_owner|default:"เจ้าของระบบ" }}
+                                    <span class="text-muted" style="font-size:12px;">(เจ้าของระบบ)</span>
                                 {% elif t.assigned_to %}
                                     {{ t.assigned_to.get_full_name|default:t.assigned_to.username }}
                                 {% else %}
