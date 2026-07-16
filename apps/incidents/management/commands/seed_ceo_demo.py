@@ -68,7 +68,7 @@ class Command(BaseCommand):
 
         ticket = Ticket(
             reference_id=REFERENCE_ID,
-            incident_name='Ransomware pre-encryption activity on finance file server',
+            incident_name='พบพฤติกรรมเตรียมเข้ารหัสไฟล์ (Ransomware) บนเซิร์ฟเวอร์ไฟล์ฝ่ายการเงิน',
             severity='Critical',
             ncsa_severity='CRITICAL',
             classification='INCIDENT',
@@ -76,40 +76,42 @@ class Command(BaseCommand):
             issue_type='SIEM',
             detailed_issue='Malicious Logic',
             incident_datetime=detected,
-            log_source='Wazuh / OpenSearch (rule 100213 — mass file rename)',
+            log_source='Wazuh / OpenSearch (rule 100213 — เปลี่ยนชื่อไฟล์จำนวนมาก)',
             device_name='NT-FS-FIN01',
             ip_address='10.0.188.41',
             mac_address='00:1B:44:11:3A:B7',
             asset_type='Server',
             operating_system='Windows Server 2019 Standard',
-            asset_owner='Finance Department — Shared Services',
+            asset_owner='ฝ่ายการเงิน — งานบริการร่วม',
             issue_description=(
-                'Wazuh raised a burst of mass file-rename events on the finance '
-                'file server NT-FS-FIN01 (10.0.188.41): 1,240 files renamed to '
-                'the extension .lockbit within 90 seconds, immediately after '
-                'vssadmin.exe was invoked to delete volume shadow copies. '
-                'Pattern matches pre-encryption staging behaviour rather than a '
-                'completed encryption run — containment before spread is the '
-                'priority.'
+                'Wazuh ตรวจพบเหตุการณ์เปลี่ยนชื่อไฟล์จำนวนมากบนเซิร์ฟเวอร์ไฟล์ของ'
+                'ฝ่ายการเงิน NT-FS-FIN01 (10.0.188.41) โดยมีการเปลี่ยนชื่อไฟล์ '
+                '1,240 ไฟล์ เป็นนามสกุล .lockbit ภายใน 90 วินาที ซึ่งเกิดขึ้นทันที'
+                'หลังจากมีการเรียกใช้ vssadmin.exe เพื่อลบ Volume Shadow Copy '
+                'ทั้งหมด\n\n'
+                'รูปแบบดังกล่าวตรงกับพฤติกรรมการเตรียมการก่อนเข้ารหัสไฟล์ '
+                '(pre-encryption staging) มากกว่าการเข้ารหัสที่ดำเนินการเสร็จสิ้น'
+                'แล้ว จึงต้องเร่งควบคุมสถานการณ์ก่อนที่จะแพร่กระจายไปยังเครื่องอื่น'
             ),
             spread_to_others=True,
             destination_ip='185.220.101.47',
             ioc_details=(
                 'SHA256 8f4e2a1c9b7d3e5f6a0c8b2d4e6f1a3c5b7d9e0f2a4c6b8d0e2f4a6c8b0d2e4f\n'
-                'C2 185.220.101.47:443 (TOR exit, first seen 2026-07-14)\n'
-                'vssadmin.exe delete shadows /all /quiet\n'
-                'Dropped: C:\\Users\\Public\\svc_update.exe'
+                'C2 185.220.101.47:443 (TOR exit node — พบครั้งแรก 14 ก.ค. 2569)\n'
+                'คำสั่งที่พบ: vssadmin.exe delete shadows /all /quiet\n'
+                'ไฟล์ที่ถูกวาง: C:\\Users\\Public\\svc_update.exe'
             ),
             mitre_phase='Impact,Defense Evasion',
             action_required=(
-                '1. Isolate NT-FS-FIN01 from the network (switch port shutdown).\n'
-                '2. Block 185.220.101.47 at the perimeter firewall.\n'
-                '3. Preserve memory + disk image before any reboot.\n'
-                '4. Confirm backup integrity for the FIN share before restore.'
+                '1. ตัดการเชื่อมต่อเครือข่ายของเครื่อง NT-FS-FIN01 '
+                '(shutdown พอร์ตบนสวิตช์)\n'
+                '2. บล็อกปลายทาง 185.220.101.47 ที่ไฟร์วอลล์ขอบเขตเครือข่าย\n'
+                '3. เก็บหลักฐาน memory และ disk image ก่อนรีบูตเครื่อง\n'
+                '4. ตรวจสอบความสมบูรณ์ของข้อมูลสำรองของ FIN share ก่อนกู้คืน'
             ),
             action_precautions=(
-                'Do NOT reboot or power off the host — volatile memory is needed '
-                'for the forensic timeline. Isolate at the switch instead.'
+                'ห้ามรีบูตหรือปิดเครื่องเด็ดขาด — ข้อมูลใน memory จำเป็นต่อการจัดทำ '
+                'forensic timeline ให้ใช้วิธีตัดการเชื่อมต่อที่สวิตช์แทน'
             ),
             is_emergency=True,
             status=Ticket.STATUS_NEW,

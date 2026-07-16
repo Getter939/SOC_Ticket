@@ -38,6 +38,12 @@ the UI shows a disabled "coming soon" placeholder.)
 - **Unchanged:** both verification loops, `PENDING_T2_REVIEW`, `PENDING_MANAGER→APPROVED`,
   and `requires_manager_verification == is_emergency` (no severity routing).
 
+**Emergency flag permission (tightened same day):** `can_set_emergency` is now
+**SOC Manager only** (superuser bypass). The 2026-07-08 rule in §2d — any role
+except an unescalated Tier 1 — is superseded. The manager rules Emergency
+yes/no at the pre-containment review before forwarding, and may still adjust
+the flag at any later lifecycle stage; no other role can touch it.
+
 **Notifications:** the admin/owner assignment email now fires when the manager
 forwards (not at Tier 1 routing time); a new `notify_manager_triage_pending`
 alerts SOC Managers when a ticket enters `PENDING_MGR_TRIAGE`.
@@ -177,14 +183,17 @@ cannot be bypassed from a view.
 
 ### 2d. Emergency flag
 
+> **Superseded 2026-07-14 (see §0):** the permission below is historical — the flag is
+> now SOC Manager only.
+
 - `Ticket.is_emergency` (Boolean, default False), mutable at **any** lifecycle stage
   (including terminal). Toggled via `Ticket.set_emergency(value, user, note)` which writes
   a `TicketLog` audit entry (who/when/old→new).
-- Permission (`Ticket.can_set_emergency(user)`): any role may set/clear it **except** a
-  Tier 1 analyst, who may only do so on a ticket that **was escalated to T2 at any point**.
+- ~~Permission (`Ticket.can_set_emergency(user)`): any role may set/clear it **except** a
+  Tier 1 analyst, who may only do so on a ticket that **was escalated to T2 at any point**.~~
 - "Escalated to T2 ever" = `escalated_to_t2_at` is non-null (`was_escalated_to_t2` property).
   `escalated_to_t2_at` is stamped the first time a ticket enters `ESCALATED_T2` and is never
-  cleared, so a ticket T2 returned to T1 still counts.
+  cleared. (No longer gates the emergency flag; kept as an audit/history record.)
 
 ### 2e. `requires_manager_verification` — emergency flag only
 

@@ -817,8 +817,10 @@ class Ticket(models.Model):
         null=True, blank=True, verbose_name='เวลาที่ส่งต่อ Tier 2 ครั้งแรก',
     )
 
-    # Emergency marker — mutable at ANY lifecycle stage (see set_emergency /
-    # can_set_emergency). Feeds requires_manager_verification.
+    # Emergency marker — decided by the SOC Manager at the pre-containment
+    # review (PENDING_MGR_TRIAGE) and adjustable by the manager at any later
+    # stage; no other role may set it (see set_emergency / can_set_emergency).
+    # Feeds requires_manager_verification.
     is_emergency = models.BooleanField(
         default=False, verbose_name='เหตุฉุกเฉิน (Emergency)',
     )
@@ -1411,18 +1413,16 @@ class Ticket(models.Model):
     def can_set_emergency(self, user):
         """Who may toggle ``is_emergency``.
 
-        Any authenticated role may set/clear it EXCEPT a Tier 1 analyst, who may
-        only do so on a ticket that was escalated to Tier 2 at some point
-        (``was_escalated_to_t2``). Superuser always may.
+        SOC Manager only (superuser always may). The canonical decision point
+        is the pre-containment review (PENDING_MGR_TRIAGE), where the manager
+        rules Emergency yes/no before forwarding to the handling lane — but the
+        manager may still correct or raise the flag at any later stage if the
+        situation changes. No other role may touch it.
         """
         if user.is_superuser:
             return True
         profile = getattr(user, 'profile', None)
-        if profile is None:
-            return False
-        if profile.is_tier1:
-            return self.was_escalated_to_t2
-        return True
+        return profile is not None and profile.is_soc_manager
 
     def set_emergency(self, value, user, note=''):
         """Set/clear the emergency flag with permission check + audit log.

@@ -391,7 +391,8 @@ class Command(BaseCommand):
         self.stdout.write(f'Status distribution: {dict(status_counts)}')
         self.stdout.write(f'Severity distribution: {dict(severity_counts)}')
         self.stdout.write(
-            'Kept default users: ' + ', '.join(sorted(self.KEEP_USERNAMES)))
+            'Kept default users: ' + ', '.join(sorted(self.KEEP_USERNAMES))
+            + ' (plus every superuser)')
         self.stdout.write(
             'New users: ' + ', '.join(username for username, *_ in self.MOCK_USERS))
 
@@ -403,7 +404,12 @@ class Command(BaseCommand):
         Ticket.objects.all().delete()
         WazuhAlert.objects.all().delete()
         IngestWatermark.objects.all().delete()
-        User.objects.exclude(username__in=self.KEEP_USERNAMES).delete()
+        # Superusers are never seed data: on a deployed box (UAT) the only
+        # superuser is often the operator's own account, and deleting it locks
+        # them out of /admin/ and the executive dashboard with no way back in
+        # short of a shell. KEEP_USERNAMES only lists the dev-box defaults.
+        User.objects.exclude(username__in=self.KEEP_USERNAMES).exclude(
+            is_superuser=True).delete()
 
     def _create_users(self):
         users = {}

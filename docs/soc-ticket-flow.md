@@ -7,6 +7,7 @@ Edit the Mermaid block below; each line is one node or one arrow.
 
 Key rules (redesigned 2026-07-14):
 - **Every Incident passes the SOC Manager pre-containment review** (`PENDING_MGR_TRIAGE`) before it reaches a handling lane. The manager flags Emergency (yes/no) and forwards to the lane Tier 1 already chose (`t1_route`) — they **cannot** divert the lane. Investigation/response-team dispatch from this step is a future phase.
+- **Only the SOC Manager may set or clear the Emergency flag** (superuser bypass). The decision is made at the pre-containment review; the manager may adjust it at any later stage. No other role can touch it.
 - **Tier 1 can no longer close an Event directly.** A Tier 1 "Event" verdict escalates to Tier 2 (`ESCALATED_T2`); Tier 2 confirms and closes it (`CLOSED_EVENT`) with **no** SOC Manager involvement.
 - **Tier 2 verifies every containment/remediation** — both the System Admin lane and the System Owner lane — before a ticket can close. Tier 2 may also **reclassify an in-flight case as an Event** and close it directly (no manager), even when the emergency flag is set.
 - **SOC Manager reviews emergency tickets only** at the closing gate (the `is_emergency` flag; severity alone never routes to the manager). Emergency tickets pass Tier 2 first, then the manager.

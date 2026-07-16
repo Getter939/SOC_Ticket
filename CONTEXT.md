@@ -111,7 +111,7 @@ An explicitly unclassified severity — the analyst cannot yet rank it. It is *n
 _Avoid_: treating Unknown as equivalent to Low
 
 **Emergency**:
-A manual flag, settable at any lifecycle stage, that forces a Ticket through SOC Manager verification regardless of Severity.
+A flag only the SOC Manager may set or clear — ruled at the Manager Triage Review before the Ticket reaches its handling lane, and adjustable by the manager at any later stage. Forces the Ticket through SOC Manager verification before close, regardless of Severity.
 _Avoid_: Urgent, priority flag, critical flag
 
 ## Detection detail

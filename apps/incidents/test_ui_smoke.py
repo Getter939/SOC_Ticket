@@ -187,17 +187,37 @@ class WorkflowUiContractTest(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
         self.assertEqual(ticket.device_name, 'EDITED-BY-T2')
 
-    def test_t1_emergency_is_disabled_before_and_enabled_after_escalation(self):
-        direct = self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
-        escalated = self.make_ticket(
+    def test_emergency_toggle_is_manager_only(self):
+        """Only the SOC Manager sees an enabled Emergency toggle; everyone else
+        gets the disabled card with the manager-only explanation."""
+        ticket = self.make_ticket(
             Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now(),
         )
+        reason = 'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถตั้ง/ยกเลิกสถานะฉุกเฉินได้'
         self.client.force_login(self.t1)
-        before = self.client.get(reverse('ticket_detail', args=[direct.pk]))
-        after = self.client.get(reverse('ticket_detail', args=[escalated.pk]))
-        reason = 'Tier 1 เปิดใช้ Emergency ได้หลังจาก Ticket เคยส่งต่อให้ Tier 2 แล้วเท่านั้น'
-        self.assertContains(before, reason)
-        self.assertNotContains(after, reason)
+        self.assertContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        )
+        self.client.force_login(self.t2)
+        self.assertContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        )
+        self.client.force_login(self.manager)
+        # Manager work queue only lists manager stages, but the manager can
+        # still open any ticket directly and gets the live toggle.
+        self.assertNotContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        )
+
+    def test_t2_cannot_toggle_emergency_via_post(self):
+        ticket = self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.client.force_login(self.t2)
+        self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
+            'action': 'toggle_emergency', 'emergency_value': '1',
+            'emergency_note': 'sneaky escalation',
+        })
+        ticket.refresh_from_db()
+        self.assertFalse(ticket.is_emergency)
 
     def test_t2_verification_actions_match_routing(self):
         review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())

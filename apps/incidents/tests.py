@@ -1205,38 +1205,42 @@ class EmergencyFlagTest(TestCase):
             status=Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
         )
 
-    # ── Tier 1 gating ───────────────────────────────────────────────────── #
+    # ── SOC Manager only — no other role may touch the flag ─────────────── #
 
-    def test_t1_cannot_set_emergency_on_direct_admin_ticket(self):
+    def test_t1_cannot_set_emergency(self):
         t = self._direct_admin_ticket()
         self.assertFalse(t.can_set_emergency(self.t1))
         with self.assertRaises(ValidationError):
             t.set_emergency(True, self.t1)
 
-    def test_t1_can_set_emergency_on_escalated_ticket(self):
+    def test_t1_cannot_set_emergency_even_on_escalated_ticket(self):
+        """The old escalation exception is gone — the manager decides, full stop."""
         t = self._escalated_ticket()
-        self.assertTrue(t.can_set_emergency(self.t1))
-        t.set_emergency(True, self.t1)
-        t.refresh_from_db()
-        self.assertTrue(t.is_emergency)
+        self.assertFalse(t.can_set_emergency(self.t1))
+        with self.assertRaises(ValidationError):
+            t.set_emergency(True, self.t1)
 
-    def test_t1_can_set_emergency_after_t2_returned_ticket(self):
-        """escalated_to_t2_at survives the return to T1, so the gate stays open."""
-        t = self._escalated_ticket()
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'returned')
-        self.assertTrue(t.can_set_emergency(self.t1))
-
-    # ── Other roles ungated ─────────────────────────────────────────────── #
-
-    def test_t2_can_set_emergency_on_any_ticket(self):
+    def test_t2_cannot_set_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertTrue(t.can_set_emergency(self.t2))
+        self.assertFalse(t.can_set_emergency(self.t2))
+        with self.assertRaises(ValidationError):
+            t.set_emergency(True, self.t2)
+
+    def test_system_admin_cannot_set_emergency(self):
+        t = self._direct_admin_ticket()
+        self.assertFalse(t.can_set_emergency(self.admin))
+        with self.assertRaises(ValidationError):
+            t.set_emergency(True, self.admin)
+
+    def test_owner_cannot_set_emergency(self):
+        self.assertFalse(self._direct_admin_ticket().can_set_emergency(self.owner))
 
     def test_manager_can_set_emergency(self):
-        self.assertTrue(self._direct_admin_ticket().can_set_emergency(self.mgr))
-
-    def test_system_admin_can_set_emergency(self):
-        self.assertTrue(self._direct_admin_ticket().can_set_emergency(self.admin))
+        t = self._direct_admin_ticket()
+        self.assertTrue(t.can_set_emergency(self.mgr))
+        t.set_emergency(True, self.mgr)
+        t.refresh_from_db()
+        self.assertTrue(t.is_emergency)
 
     def test_superuser_can_set_emergency(self):
         t = self._direct_admin_ticket()
@@ -1256,22 +1260,22 @@ class EmergencyFlagTest(TestCase):
     def test_setting_emergency_writes_audit_log(self):
         t = self._escalated_ticket()
         before = t.logs.count()
-        t.set_emergency(True, self.t1, 'urgent')
+        t.set_emergency(True, self.mgr, 'urgent')
         self.assertEqual(t.logs.count(), before + 1)
         log = t.logs.first()
-        self.assertEqual(log.author, self.t1)
+        self.assertEqual(log.author, self.mgr)
         self.assertIn('Emergency', log.note)
 
     def test_no_op_toggle_does_not_log(self):
         t = self._escalated_ticket()
         before = t.logs.count()
-        t.set_emergency(False, self.t1)  # already False
+        t.set_emergency(False, self.mgr)  # already False
         self.assertEqual(t.logs.count(), before)
 
     def test_clear_emergency_logs(self):
         t = self._escalated_ticket()
-        t.set_emergency(True, self.t2)
-        t.set_emergency(False, self.t2)
+        t.set_emergency(True, self.mgr)
+        t.set_emergency(False, self.mgr)
         t.refresh_from_db()
         self.assertFalse(t.is_emergency)
 
