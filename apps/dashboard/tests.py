@@ -337,6 +337,14 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('chartPipeline', html)
         self.assertIn('Pipeline', html)
 
+    def test_charts_render_interactive_controls(self):
+        """Charts support filtering, toggling, and retaining a selected trend point."""
+        _make_ticket(status=Ticket.STATUS_NEW)
+        html = self._get().content.decode()
+        self.assertIn('applyDashboardFilters', html)
+        self.assertIn('chart.toggleDataVisibility', html)
+        self.assertIn('dailyChartSelection', html)
+
     def test_pipeline_by_severity_structure_and_zero_fill(self):
         """pipeline_by_severity has statuses/severities/matrix; matrix is zero-filled."""
         # One ticket only touches a single (severity, status) cell — every other

@@ -83,7 +83,26 @@
         grid-template-columns: 14px minmax(0, 1fr) auto;
         align-items: start;
         gap: 0.5rem;
+        width: 100%;
+        padding: 0.25rem;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        font: inherit;
+        text-align: left;
         color: #495057;
+        cursor: pointer;
+    }
+    .threat-legend-item:hover,
+    .threat-legend-item:focus-visible {
+        background: #f1f3f5;
+        outline: none;
+    }
+    .threat-legend-item.is-muted { opacity: 0.45; }
+    .chart-hint {
+        margin: 0 0 0.5rem;
+        color: #6c757d;
+        font-size: 12px;
     }
     .threat-legend-swatch {
         width: 14px;
@@ -294,6 +313,7 @@
             <h6 class="panel-title mb-2">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะ Ticket ทั้งหมด
             </h6>
+            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a segment to filter the dashboard.</p>
             <div style="height:320px;">
                 <canvas id="chartPipeline" role="img"
                         aria-label="Pipeline chart showing ticket counts by workflow status and severity"></canvas>
@@ -366,9 +386,13 @@
             <div class="panel-title mb-2">
                 <i class="bi bi-graph-up me-1"></i>Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน
             </div>
+            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a point to keep its date and total visible.</p>
             <div style="height:200px;">
                 <canvas id="chartDaily" role="img" aria-label="ปริมาณคดีรายวัน"></canvas>
             </div>
+            <p id="dailyChartSelection" class="chart-hint mb-0" role="status">
+                Select a point to view its exact total.
+            </p>
             <table class="visually-hidden">
                 <caption>Daily case volume</caption>
                 <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
@@ -643,6 +667,15 @@ Chart.defaults.maintainAspectRatio = false;
 
 function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
 
+function applyDashboardFilters(filters) {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+        else params.delete(key);
+    });
+    window.location.search = params.toString();
+}
+
 // ── Threat type doughnut (top 5 + Others, capped in the view) ──
 {% if by_category_labels %}
 (function () {
@@ -651,7 +684,7 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
     const total = values.reduce((sum, value) => sum + value, 0);
     const colors = labels.map((_, i) => THREAT_COLORS[i % THREAT_COLORS.length]);
 
-    new Chart(document.getElementById('chartByCategory'), {
+    const chart = new Chart(document.getElementById('chartByCategory'), {
         type: 'doughnut',
         data: {
             labels,
@@ -666,6 +699,16 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
         options: {
             responsive: true,
             cutout: '58%',
+            onClick: (_, elements) => {
+                if (!elements.length) return;
+                const index = elements[0].index;
+                chart.toggleDataVisibility(index);
+                chart.update();
+                updateLegendItem(index);
+            },
+            onHover: (event, elements) => {
+                event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+            },
             plugins: {
                 legend: { display: false },
                 tooltip: {
@@ -682,11 +725,21 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
     });
 
     const legend = document.getElementById('threatTypesLegend');
+    const legendItems = [];
+    function updateLegendItem(index) {
+        const isVisible = chart.getDataVisibility(index);
+        const item = legendItems[index];
+        item.classList.toggle('is-muted', !isVisible);
+        item.setAttribute('aria-pressed', String(isVisible));
+    }
     labels.forEach((label, i) => {
         const value = values[i] || 0;
         const pct = total ? Math.round((value / total) * 100) : 0;
-        const item = document.createElement('div');
+        const item = document.createElement('button');
+        item.type = 'button';
         item.className = 'threat-legend-item';
+        item.setAttribute('aria-pressed', 'true');
+        item.title = 'Show or hide ' + label;
 
         const swatch = document.createElement('span');
         swatch.className = 'threat-legend-swatch';
@@ -702,6 +755,12 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
         valueEl.textContent = value.toLocaleString() + ' (' + pct + '%)';
 
         item.append(swatch, labelEl, valueEl);
+        item.addEventListener('click', () => {
+            chart.toggleDataVisibility(i);
+            chart.update();
+            updateLegendItem(i);
+        });
+        legendItems.push(item);
         legend.appendChild(item);
     });
 })();
@@ -754,6 +813,17 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
         data: { labels, datasets },
         options: {
             responsive: true,
+            onClick: (_, elements) => {
+                if (!elements.length) return;
+                const element = elements[0];
+                applyDashboardFilters({
+                    status: statuses[element.index][0],
+                    severity: severities[element.datasetIndex][0],
+                });
+            },
+            onHover: (event, elements) => {
+                event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+            },
             // Headroom so the above-bar total isn't clipped.
             scales: {
                 x: {
@@ -782,7 +852,10 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
                         title: items => items[0].label,
                         label: item => `${item.dataset.label}: ${item.parsed.y}`,
                         // Full column total (sum across severities) for that status.
-                        footer: items => 'Total: ' + totals[items[0].dataIndex],
+                        footer: items => [
+                            'Total: ' + totals[items[0].dataIndex],
+                            'Click to filter the dashboard',
+                        ],
                     }
                 }
             },
@@ -867,6 +940,7 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
     const labels = readJSON('daily-labels');
     const data   = readJSON('daily-data');
     const canvas = document.getElementById('chartDaily');
+    const selection = document.getElementById('dailyChartSelection');
     const grad = canvas.getContext('2d').createLinearGradient(0, 0, 0, 200);
     grad.addColorStop(0, 'rgba(13,110,253,0.30)');
     grad.addColorStop(1, 'rgba(13,110,253,0.02)');
@@ -877,10 +951,20 @@ function readJSON(id) { return JSON.parse(document.getElementById(id).textConten
             datasets: [{
                 label: 'จำนวนคดี', data: data,
                 borderColor: '#0d6efd', backgroundColor: grad,
-                fill: true, tension: 0.3, pointRadius: 4,
+                fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6,
             }]
         },
         options: {
+            interaction: { mode: 'index', intersect: false },
+            onClick: (_, elements) => {
+                if (!elements.length) return;
+                const index = elements[0].index;
+                selection.textContent = labels[index] + ': ' + data[index] + ' case' +
+                    (data[index] === 1 ? '' : 's');
+            },
+            onHover: (event, elements) => {
+                event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+            },
             plugins: {
                 legend: { display: false },
                 tooltip: {
