@@ -717,6 +717,101 @@ class ExecutiveDashboardViewTest(TestCase):
         )
 
 
+# ── Monitoring dashboard: analyst workload heatmap ───────────────────────── #
+
+class AnalystHeatmapTest(TestCase):
+    """The heatmap answers 'what must this analyst chase?' — so tickets parked
+    with the manager / system admin / Tier 2 must not count as their load."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('heat_soc', UserProfile.ROLE_SOC_STAFF)
+
+    def setUp(self):
+        self.client.force_login(self.soc)
+
+    def _analyst(self, username='heat_an'):
+        from django.contrib.auth.models import User
+        return User.objects.create_user(
+            username=username, password='pw', first_name='Ada', last_name='Lovelace')
+
+    def _assign(self, analyst, status):
+        t = _make_ticket(status=status)
+        Ticket.objects.filter(pk=t.pk).update(assigned_to=analyst)
+        return t
+
+    def _row(self):
+        return self.client.get(DASHBOARD_URL).context['assignee_heatmap'][0]
+
+    def test_own_and_blocked_cover_every_active_status_exactly_once(self):
+        from apps.dashboard.views import (
+            _ANALYST_OWN_STATUSES, _ANALYST_BLOCKED_STATUSES,
+        )
+        covered = _ANALYST_OWN_STATUSES + _ANALYST_BLOCKED_STATUSES
+        active = [
+            s for s, _ in Ticket.STATUS_CHOICES
+            if s not in Ticket.TERMINAL_STATUSES
+        ]
+        self.assertEqual(sorted(covered), sorted(set(covered)), 'status in both groups')
+        self.assertEqual(sorted(covered), sorted(active), 'coverage != active states')
+
+    def test_columns_are_own_court_only(self):
+        from apps.dashboard.views import _ANALYST_OWN_STATUSES
+        self._assign(self._analyst(), Ticket.STATUS_NEW)
+        ctx = self.client.get(DASHBOARD_URL).context
+        self.assertEqual(
+            [s for s, _ in ctx['assignee_heatmap_statuses']], _ANALYST_OWN_STATUSES,
+        )
+
+    def test_blocked_tickets_do_not_count_as_load(self):
+        """Regression: a ticket waiting on the SOC Manager is not analyst load."""
+        analyst = self._analyst()
+        self._assign(analyst, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self._assign(analyst, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+        row = self._row()
+        self.assertEqual(row['load'], 0)
+        self.assertEqual(row['blocked'], 2)
+        self.assertEqual(row['total'], 2)
+        self.assertEqual(row['cells'], [0, 0, 0, 0])  # no own-court work
+
+    def test_own_court_tickets_count_as_load(self):
+        analyst = self._analyst()
+        self._assign(analyst, Ticket.STATUS_NEW)
+        self._assign(analyst, Ticket.STATUS_AWAITING_OWNER)
+
+        row = self._row()
+        self.assertEqual(row['load'], 2)
+        self.assertEqual(row['blocked'], 0)
+        self.assertEqual(row['total'], 2)
+
+    def test_rows_sort_by_actionable_load_not_total(self):
+        """An analyst with 5 blocked tickets is less busy than one with 2 real."""
+        blocked_heavy = self._analyst('heat_blocked')
+        for _ in range(5):
+            self._assign(blocked_heavy, Ticket.STATUS_PENDING_MANAGER)
+        actually_busy = self._analyst('heat_busy')
+        for _ in range(2):
+            self._assign(actually_busy, Ticket.STATUS_T1_REVIEW)
+
+        rows = self.client.get(DASHBOARD_URL).context['assignee_heatmap']
+        self.assertEqual(rows[0]['name'], 'Ada Lovelace')  # both share a name
+        self.assertEqual(rows[0]['load'], 2)     # actionable queue wins
+        self.assertEqual(rows[1]['load'], 0)
+        self.assertEqual(rows[1]['blocked'], 5)
+
+    def test_terminal_tickets_excluded(self):
+        analyst = self._analyst()
+        self._assign(analyst, Ticket.STATUS_APPROVED)
+        self.assertEqual(self.client.get(DASHBOARD_URL).context['assignee_heatmap'], [])
+
+    def test_blocked_column_renders(self):
+        self._assign(self._analyst(), Ticket.STATUS_PENDING_MGR_TRIAGE)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn('รอคนอื่น', html)
+        self.assertIn('heat-blocked-col', html)
+
+
 # ── Executive summary: grouped by whose court ────────────────────────────── #
 
 class ExecutiveSummaryCourtTest(TestCase):

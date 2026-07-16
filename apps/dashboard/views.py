@@ -37,22 +37,39 @@ from apps.incidents.models import Ticket, TicketLog
 #      so "active_critical" filters severity == 'Critical'.              #
 #   e) Assignee       → Ticket.assigned_to (FK to auth.User).            #
 #                                                                        #
-# STEP 0 findings (Session 3):                                           #
-#   STATUS_CHOICES (order / slug → display):                            #
-#     NEW                  → แจ้งเหตุใหม่                                  #
-#     ESCALATED_T2         → ส่งต่อให้ Tier 2                             #
-#     T1_REVIEW            → รอ Tier 1 ทบทวน                             #
-#     AWAITING_CONTAINMENT → รอการจัดการจากผู้ดูแลระบบ                    #
-#     CONTAINMENT_REPORTED → รายงานการควบคุมแล้ว                          #
-#     PENDING_MANAGER      → รอผู้จัดการตรวจสอบ                           #
-#     APPROVED             → อนุมัติแล้ว        (terminal)                #
-#     CLOSED_EVENT         → ปิด (Event)        (terminal)               #
-#   Non-terminal = the first 6; terminal = {APPROVED, CLOSED_EVENT}.     #
-#   Threat type → Ticket.detailed_issue (DETAILED_ISSUE_CHOICES); source #
-#     channel → issue_type. (The Event/Incident axis is classification.)  #
-#   Containment deadline → Ticket.ola_contain_deadline (per-severity;     #
-#     null for Medium/Low = notification-only).                          #
+#   e) Statuses      → Ticket.STATUS_CHOICES is the single source of      #
+#      truth for both the slug set and the display order; this module     #
+#      never hardcodes the list. Terminal = Ticket.TERMINAL_STATUSES      #
+#      ({APPROVED, CLOSED_EVENT}); the other 10 are active. The current   #
+#      lifecycle is documented in docs/soc-ticket-flow.md.                #
+#   f) Threat type   → Ticket.detailed_issue (DETAILED_ISSUE_CHOICES);    #
+#      source channel → issue_type. (The Event/Incident axis is           #
+#      Ticket.classification.)                                            #
 # ====================================================================== #
+
+# Active statuses the OPENING ANALYST must personally act on, vs. those
+# parked with someone else. Drives the Analyst Workload heatmap, which asks
+# "what does this analyst have to chase?" — so AWAITING_OWNER counts as their
+# work (they chase the owner), even though the executive dashboard files the
+# same status under EXTERNAL because it asks a different question ("who blocks
+# closure?"). Both readings are correct; see _EXEC_COURT_GROUPS.
+#
+# INVARIANT: OWN + BLOCKED together cover every non-terminal status exactly
+# once — enforced by AnalystHeatmapTest.
+_ANALYST_OWN_STATUSES = [
+    Ticket.STATUS_NEW,
+    Ticket.STATUS_T1_REVIEW,
+    Ticket.STATUS_AWAITING_OWNER,
+    Ticket.STATUS_OWNER_REMEDIATED,
+]
+_ANALYST_BLOCKED_STATUSES = [
+    Ticket.STATUS_ESCALATED_T2,
+    Ticket.STATUS_PENDING_MGR_TRIAGE,
+    Ticket.STATUS_AWAITING_CONTAINMENT,
+    Ticket.STATUS_CONTAINMENT_REPORTED,
+    Ticket.STATUS_PENDING_T2_REVIEW,
+    Ticket.STATUS_PENDING_MANAGER,
+]
 
 @login_required
 def dashboard(request):
@@ -140,7 +157,7 @@ def dashboard(request):
         'mttr_n':              mttr_n,                 # count of resolved in last 30 days
     }
 
-    # ── Pipeline chart — all 7 statuses ──────────────────────────────────── #
+    # ── Pipeline chart — every status, in STATUS_CHOICES order ───────────── #
     status_map   = dict(Ticket.STATUS_CHOICES)
     status_order = [s for s, _ in Ticket.STATUS_CHOICES]
     # ── Pipeline by severity × status (stacked-bar source) ───────────────── #
@@ -252,10 +269,17 @@ def dashboard(request):
         resolved_at__gte=last_month_start, resolved_at__lt=this_month_start).count()
     closed_delta = closed_this_month - closed_last_month
 
-    # Assignee heatmap — ALL analysts, counts per non-terminal status.
-    assignee_heatmap_statuses = [
-        (s, status_map[s]) for s in status_order if s not in terminal
-    ]
+    # Assignee heatmap — ALL analysts. Columns are the statuses the analyst
+    # must personally act on (_ANALYST_OWN_STATUSES), plus ONE aggregated
+    # "blocked" column for everything parked with the manager / system admin /
+    # Tier 2. Before 2026-07-16 this showed all 10 active statuses as if they
+    # were the analyst's load, which inflated every row with work they cannot
+    # touch — the blocking manager review made that badly misleading.
+    #
+    # 'load' (own-court only) is what the rows sort by: it is the actual
+    # actionable queue. 'blocked' is shown for visibility but is somebody
+    # else's turn; 'total' remains every open ticket they opened.
+    assignee_heatmap_statuses = [(s, status_map[s]) for s in _ANALYST_OWN_STATUSES]
     heatmap_slugs = [s for s, _ in assignee_heatmap_statuses]
     heat = {}
     for r in (active_qs.filter(assigned_to__isnull=False)
@@ -267,10 +291,17 @@ def dashboard(request):
             name = (f"{r['assigned_to__first_name']} "
                     f"{r['assigned_to__last_name']}").strip() \
                 or r['assigned_to__username']
-            heat[uid] = {'name': name, 'counts': {}, 'total': 0}
+            heat[uid] = {'name': name, 'counts': {}, 'load': 0, 'blocked': 0, 'total': 0}
         heat[uid]['counts'][r['status']] = r['c']
+        if r['status'] in _ANALYST_BLOCKED_STATUSES:
+            heat[uid]['blocked'] += r['c']
+        else:
+            heat[uid]['load'] += r['c']
         heat[uid]['total'] += r['c']
-    assignee_heatmap = sorted(heat.values(), key=lambda x: x['total'], reverse=True)
+    # Busiest ACTIONABLE queue first — a row full of blocked tickets is not a
+    # workload problem, so 'load' (not 'total') sets the order.
+    assignee_heatmap = sorted(
+        heat.values(), key=lambda x: (x['load'], x['total']), reverse=True)
     # Template can't index a dict by a loop variable — pre-build status-ordered
     # cell lists aligned to assignee_heatmap_statuses.
     for a in assignee_heatmap:

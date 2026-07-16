@@ -52,6 +52,14 @@
     .heat-table td.name { text-align: left; white-space: nowrap; }
     .heat-table tr.heat-top td { font-weight: 700; }
     .heat-zero { color: #aaa; }
+    /* Blocked = parked with the manager / admin / Tier 2. Deliberately muted
+       and never heat-coloured, so it never competes with the analyst's own
+       actionable load to its left. */
+    .heat-table th.heat-blocked-col,
+    .heat-table td.heat-blocked-col {
+        background: #f8f9fa; color: #6c757d;
+        border-left: 2px solid #dee2e6;
+    }
 
     /* ── Detail table ── */
     .detail-table { font-size: 13px; }
@@ -230,8 +238,12 @@
     <div class="col-lg-7">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
-                <i class="bi bi-people me-1"></i>Analyst Workload — ผู้รับผิดชอบและสถานะ
+                <i class="bi bi-people me-1"></i>Analyst Workload — งานที่ต้องดำเนินการเอง
             </div>
+            <p class="chart-hint mb-2">
+                <i class="bi bi-info-circle me-1"></i>นับเฉพาะสถานะที่นักวิเคราะห์ต้องลงมือเอง —
+                เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 แยกไว้ในคอลัมน์ “รอคนอื่น”
+            </p>
             <div class="table-responsive">
                 <table class="heat-table">
                     <thead>
@@ -240,12 +252,13 @@
                             {% for slug, display in assignee_heatmap_statuses %}
                             <th>{{ display }}</th>
                             {% endfor %}
+                            <th class="heat-blocked-col">รอคนอื่น</th>
                             <th>Total</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in assignee_heatmap %}
-                        <tr class="{% if forloop.first %}heat-top{% endif %}">
+                        <tr class="{% if forloop.first and row.load %}heat-top{% endif %}">
                             <td class="name">{{ row.name }}</td>
                             {% for cell in row.cells %}
                             <td style="background:
@@ -256,11 +269,15 @@
                                 {% if cell == 0 %}<span class="heat-zero">—</span>{% else %}{{ cell|intcomma }}{% endif %}
                             </td>
                             {% endfor %}
+                            {# Blocked = somebody else's turn: greyed, never heat-coloured. #}
+                            <td class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">
+                                {% if row.blocked %}{{ row.blocked|intcomma }}{% else %}<span class="heat-zero">—</span>{% endif %}
+                            </td>
                             <td>{{ row.total|intcomma }}</td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td class="name text-muted" colspan="{{ assignee_heatmap_statuses|length|add:2 }}">
+                            <td class="name text-muted" colspan="{{ assignee_heatmap_statuses|length|add:3 }}">
                                 ไม่มีงานที่มอบหมาย (No assigned active cases)
                             </td>
                         </tr>
