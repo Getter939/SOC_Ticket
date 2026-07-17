@@ -83,6 +83,11 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD'),
         'HOST': config('DB_HOST'),
         'PORT': config('DB_PORT'),
+        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=0, cast=int),
+        'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': {
+            'sslmode': config('DB_SSLMODE', default='prefer'),
+        },
     }
 }
 
