@@ -175,14 +175,30 @@
     {% endif %}
 
     <section id="tasks" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย Investigation / Countermeasure</h2><div class="section-hint">งานคู่ขนาน ผู้รับผิดชอบ และผลลัพธ์ล่าสุด</div></div>
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย & คำขอทีมตอบสนอง</h2><div class="section-hint">งานคู่ขนาน (Investigation / Countermeasure) และคำขอ Forensic / Red Team</div></div>
       <div class="card-body">
         {% for subtask in subtasks %}
+        {% with is_resp=subtask.is_response_request %}
         <div class="subtask-row">
-          <div><div class="fw-bold small mb-1">{{ subtask.title }}</div><div class="small text-muted mb-1">{{ subtask.description }}</div>{% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}</div>
-          <div class="text-end"><span class="badge bg-secondary d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge bg-light text-dark border d-block mb-2">{{ subtask.get_status_display }}</span>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
+          <div>
+            <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}</div>
+            <div class="small text-muted mb-1">{{ subtask.description }}</div>
+            {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
+            {% for att in subtask.attachments.all %}<div class="small"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a></div>{% endfor %}
+          </div>
+          <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-2">{{ subtask.get_status_display }}</span>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
         </div>
-        {% empty %}<p class="text-muted small mb-0">ยังไม่มีงานย่อย</p>{% endfor %}
+        {% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
+        <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="row g-2 mb-3 px-1 py-2" style="background:#f6f8fb;border-radius:.5rem;">{% csrf_token %}
+          <div class="col-md-3">{{ subtask_update_form.status.label_tag }}
+            <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="col-md-5"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="1">{{ subtask.result_notes }}</textarea></div>
+          <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
+          <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-outline-primary w-100" type="submit"><i class="bi bi-save"></i></button></div>
+        </form>
+        {% endif %}
+        {% endwith %}
+        {% empty %}<p class="text-muted small mb-0">ยังไม่มีงานย่อยหรือคำขอ</p>{% endfor %}
         {% if can_create_subtask and not is_terminal %}<form method="post" action="{% url 'create_subtask' ticket.pk %}" class="row g-2 mt-3">{% csrf_token %}<div class="col-md-3">{{ subtask_form.subtask_type }}</div><div class="col-md-4">{{ subtask_form.title }}</div><div class="col-md-3">{{ subtask_form.assigned_to }}</div><div class="col-md-2"><button class="btn btn-secondary w-100" type="submit">เพิ่ม</button></div><div class="col-12">{{ subtask_form.description }}</div></form>{% endif %}
       </div>
     </section>
@@ -218,6 +234,23 @@
 
       <div class="card shadow-sm mb-3 {% if ticket.is_emergency %}emergency-card{% else %}border-0{% endif %}"><div class="card-header {% if ticket.is_emergency %}bg-danger text-white{% else %}bg-white{% endif %} fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Emergency</div><div class="card-body"><p class="small text-muted">สถานะฉุกเฉินตัดสินโดยผู้จัดการ SOC ที่ขั้นตรวจก่อนมอบหมาย และผู้จัดการปรับได้ทุกช่วงของ lifecycle — มีผลต่อการส่งให้ SOC Manager ตรวจก่อนปิดเคส</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="toggle_emergency"><input type="hidden" name="emergency_value" value="{% if ticket.is_emergency %}0{% else %}1{% endif %}"><label class="form-label small fw-bold">เหตุผล / หมายเหตุ</label><textarea name="emergency_note" class="form-control mb-2" rows="2" {% if not can_set_emergency %}disabled{% endif %}></textarea><button class="btn {% if ticket.is_emergency %}btn-outline-danger{% else %}btn-danger{% endif %} w-100" type="submit" {% if not can_set_emergency %}disabled{% endif %}>{% if ticket.is_emergency %}ยกเลิก Emergency{% else %}ตั้งเป็น Emergency{% endif %}</button></form>{% if not can_set_emergency %}<div class="alert alert-secondary small py-2 mt-2 mb-0">เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถตั้ง/ยกเลิกสถานะฉุกเฉินได้</div>{% endif %}</div></div>
 
+      {% if can_request_response %}
+      <div class="card shadow-sm mb-3" style="border:1px solid #b8d4ea;">
+        <div class="card-header text-white fw-bold" style="background:#2f6fb2;"><i class="bi bi-shield-shaded me-1"></i>ส่งทีมตอบสนอง (Response Team)</div>
+        <div class="card-body">
+          {% if ticket.has_open_response_requests %}<div class="alert alert-info small py-2"><i class="bi bi-hourglass-split me-1"></i>มีคำขอที่ยังไม่เสร็จ — Ticket จะปิด (อนุมัติ) ไม่ได้จนกว่าจะดำเนินการครบ</div>{% endif %}
+          <p class="small text-muted mb-2">มอบหมายงานคู่ขนาน: VA/PT · Infra Security → หัวหน้าทีม Red Team, Forensics/RCA → เจ้าหน้าที่ Forensic</p>
+          <form method="post" action="{% url 'create_response_request' ticket.pk %}" class="row g-2">{% csrf_token %}
+            <div class="col-12">{{ response_request_form.subtask_type }}</div>
+            <div class="col-12">{{ response_request_form.title }}</div>
+            <div class="col-12">{{ response_request_form.description }}</div>
+            <div class="col-12">{{ response_request_form.assigned_to }}</div>
+            <div class="col-12"><button class="btn btn-sm w-100 text-white" style="background:#2f6fb2;" type="submit"><i class="bi bi-send me-1"></i>ส่งคำขอทีมตอบสนอง</button></div>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+
       {% if is_terminal %}
       <div class="alert alert-light border text-center text-muted small">ไม่มี action เพิ่มเติมสำหรับ workflow นี้ แต่ยังเปลี่ยนสถานะ Emergency ได้ตามสิทธิ์</div>
       {% elif can_t2_review %}
@@ -245,7 +278,6 @@
           <textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
           <button class="btn btn-warning w-100" type="submit">{% if ticket.t1_route == T1_ROUTE_OWNER %}ส่งต่อให้เจ้าของระบบ{% else %}ส่งต่อให้ผู้ดูแลระบบ{% endif %}</button>
         </form>
-        <div class="alert alert-light border small mt-3 mb-0"><i class="bi bi-hourglass-split me-1"></i>การส่งทีมตอบสนอง (VA/PT · Forensic/RCA) จะเปิดใช้งานในเฟสถัดไป<button class="btn btn-sm btn-outline-secondary w-100 mt-2" type="button" disabled>ส่งทีมตอบสนอง (เร็ว ๆ นี้)</button></div>
       </div></div>
       {% elif can_submit_containment %}
       <div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">System Admin Investigation</h5></div><div class="card-body"><form method="post">{% csrf_token %}

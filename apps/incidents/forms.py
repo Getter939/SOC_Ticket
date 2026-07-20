@@ -534,7 +534,22 @@ class TriageForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
 
+# The two legacy subtask types SOC staff may spawn freely. Response-team
+# request types (VA/PT, InfraSec, Forensics) are excluded here — those are
+# spawned by the SOC Manager through ResponseRequestForm, which routes and
+# auto-assigns them to a response-team role.
+_LEGACY_SUBTASK_TYPE_CHOICES = [
+    (TicketSubtask.TYPE_INVESTIGATION, 'Investigation'),
+    (TicketSubtask.TYPE_COUNTERMEASURE, 'Countermeasure'),
+]
+
+
 class SubtaskForm(forms.ModelForm):
+    subtask_type = forms.ChoiceField(
+        choices=_LEGACY_SUBTASK_TYPE_CHOICES,
+        label='ประเภท',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
     assigned_to = forms.ModelChoiceField(
         queryset=User.objects.filter(is_active=True).order_by('first_name', 'username'),
         required=False,
@@ -547,7 +562,6 @@ class SubtaskForm(forms.ModelForm):
         model = TicketSubtask
         fields = ['subtask_type', 'title', 'description', 'assigned_to']
         widgets = {
-            'subtask_type': forms.Select(attrs={'class': 'form-select'}),
             'title': forms.TextInput(attrs={
                 'class': 'form-control',
                 'placeholder': 'เช่น ตรวจสอบ log การเข้าถึง / บล็อก IP ที่ปลายทาง Firewall',
@@ -555,6 +569,51 @@ class SubtaskForm(forms.ModelForm):
             'description': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'รายละเอียดงานที่ต้องดำเนินการ...',
+            }),
+        }
+
+
+class ResponseRequestForm(forms.ModelForm):
+    """SOC Manager spawn form for a response-team request (VA/PT, InfraSec,
+    Forensics). The type determines the receiving role; the assignee is
+    resolved in the view (auto-assign when a single role-holder exists, picker
+    when several, blocked when none)."""
+
+    RESPONSE_TYPE_CHOICES = [
+        (TicketSubtask.TYPE_VA_PT, 'VA / Pentest'),
+        (TicketSubtask.TYPE_INFRA_SEC, 'Infrastructure Security'),
+        (TicketSubtask.TYPE_FORENSIC_RCA, 'Forensics / RCA'),
+    ]
+
+    subtask_type = forms.ChoiceField(
+        choices=RESPONSE_TYPE_CHOICES,
+        label='ประเภทคำขอ',
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+    assigned_to = forms.ModelChoiceField(
+        queryset=User.objects.filter(
+            is_active=True,
+            profile__role__in=(
+                UserProfile.ROLE_FORENSIC, UserProfile.ROLE_REDTEAM_MANAGER,
+            ),
+        ).order_by('first_name', 'username'),
+        required=False,
+        label='ผู้รับผิดชอบ (เว้นว่างเพื่อมอบหมายอัตโนมัติ)',
+        empty_label='-- มอบหมายอัตโนมัติ --',
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+
+    class Meta:
+        model = TicketSubtask
+        fields = ['subtask_type', 'title', 'description', 'assigned_to']
+        widgets = {
+            'title': forms.TextInput(attrs={
+                'class': 'form-control form-control-sm',
+                'placeholder': 'เช่น เก็บ memory image / สแกนช่องโหว่ระบบที่ถูกโจมตี',
+            }),
+            'description': forms.Textarea(attrs={
+                'class': 'form-control form-control-sm', 'rows': 2,
+                'placeholder': 'ขอบเขตงานที่ต้องการให้ทีมตอบสนองดำเนินการ...',
             }),
         }
 

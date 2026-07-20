@@ -275,6 +275,15 @@
         {% endif %}
     </a>
     {% endif %}
+    {% if request.user.is_superuser or profile.is_soc_manager or profile.is_response_team %}
+    <a href="{% url 'response_request_queue' %}" data-label="งานตอบสนอง"
+       class="nav-link {% if request.resolver_match.url_name == 'response_request_queue' %}active{% endif %}">
+        <i class="bi bi-shield-shaded"></i> <span class="nav-label">งานตอบสนอง (Response)</span>
+        {% if response_request_queue_count %}
+        <span class="badge bg-info text-dark ms-auto">{{ response_request_queue_count }}</span>
+        {% endif %}
+    </a>
+    {% endif %}
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>

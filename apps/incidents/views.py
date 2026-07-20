@@ -17,12 +17,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from apps.accounts.models import UserProfile
 from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentForm,
-    ProjectIncidentTargetFormSet, SubtaskForm, SubtaskUpdateForm,
-    TicketForm, TicketReviewForm, TriageForm,
+    ProjectIncidentTargetFormSet, ResponseRequestForm, SubtaskForm,
+    SubtaskUpdateForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
     ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
@@ -33,6 +34,8 @@ from .notifications import (
     notify_containment_alert,
     notify_containment_submitted,
     notify_manager_triage_pending,
+    notify_response_request_created,
+    notify_response_request_completed,
     notify_system_owner_created,
     notify_system_owner_closed,
 )
@@ -800,6 +803,13 @@ def ticket_detail(request, pk):
         )
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
+    # SOC Manager may spawn a response-team request (Forensic / Red Team) at any
+    # active stage. Runs in parallel to containment; an open request blocks final
+    # approval (Ticket.has_open_response_requests).
+    can_request_response = (
+        not is_terminal
+        and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
+    )
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -1006,9 +1016,10 @@ def ticket_detail(request, pk):
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
 
-    subtasks = ticket.subtasks.all()
+    subtasks = ticket.subtasks.select_related('assigned_to').prefetch_related('attachments')
     subtask_form = SubtaskForm()
     subtask_update_form = SubtaskUpdateForm()
+    response_request_form = ResponseRequestForm()
     can_create_subtask = request.user.is_superuser or (profile and profile.is_soc)
 
     return render(request, 'incidents/ticket_detail.html', {
@@ -1032,6 +1043,9 @@ def ticket_detail(request, pk):
         'can_mgr_forward': can_mgr_forward,
         'mgr_forward_target': mgr_forward_target,
         'can_t2_reclassify': can_t2_reclassify,
+        'can_request_response': can_request_response,
+        'response_request_form': response_request_form,
+        'RESPONSE_TYPES': list(TicketSubtask.RESPONSE_TYPES),
         'T1_ROUTE_ADMIN': Ticket.T1_ROUTE_ADMIN,
         'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,
         'can_set_emergency': ticket.can_set_emergency(request.user),
@@ -1415,6 +1429,77 @@ def create_subtask(request, pk):
 
 
 @login_required
+@require_POST
+def create_response_request(request, pk):
+    """SOC Manager spawns a response-team request (VA/PT, InfraSec, Forensics).
+
+    The type fixes the receiving role; the assignee is resolved here:
+    auto-assigned when a single active role-holder exists, taken from the
+    picker when several do, and blocked when none exist.
+    """
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    is_manager = request.user.is_superuser or (profile is not None and profile.is_soc_manager)
+    if not is_manager:
+        messages.error(request, 'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถส่งคำขอทีมตอบสนองได้')
+        return redirect('ticket_detail', pk=pk)
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        messages.error(request, 'Ticket นี้ปิดแล้ว — ส่งคำขอทีมตอบสนองไม่ได้')
+        return redirect('ticket_detail', pk=pk)
+
+    form = ResponseRequestForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'ไม่สามารถส่งคำขอได้ — กรุณาตรวจสอบข้อมูล')
+        return redirect('ticket_detail', pk=pk)
+
+    subtask_type = form.cleaned_data['subtask_type']
+    chosen = form.cleaned_data.get('assigned_to')
+    eligible = TicketSubtask.eligible_assignees(subtask_type)
+    role_label = dict(UserProfile.ROLE_CHOICES).get(
+        TicketSubtask.role_for_type(subtask_type), '')
+
+    if not eligible.exists():
+        messages.error(
+            request,
+            f'ยังไม่มีบัญชีผู้ใช้ในบทบาท "{role_label}" — ไม่สามารถมอบหมายคำขอนี้ได้',
+        )
+        return redirect('ticket_detail', pk=pk)
+    if chosen is not None:
+        if not eligible.filter(pk=chosen.pk).exists():
+            messages.error(
+                request,
+                f'ผู้รับผิดชอบที่เลือกไม่ได้อยู่ในบทบาท "{role_label}"',
+            )
+            return redirect('ticket_detail', pk=pk)
+        assignee = chosen
+    elif eligible.count() == 1:
+        assignee = eligible.first()
+    else:
+        messages.error(
+            request,
+            f'มีผู้รับผิดชอบในบทบาท "{role_label}" มากกว่าหนึ่งคน — กรุณาเลือกผู้รับผิดชอบ',
+        )
+        return redirect('ticket_detail', pk=pk)
+
+    subtask = form.save(commit=False)
+    subtask.ticket = ticket
+    subtask.created_by = request.user
+    subtask.assigned_to = assignee
+    subtask.save()
+    if not notify_response_request_created(subtask):
+        messages.warning(
+            request,
+            'สร้างคำขอแล้ว แต่ส่งอีเมลแจ้งผู้รับผิดชอบไม่สำเร็จ',
+        )
+    messages.success(
+        request,
+        f'ส่งคำขอ "{subtask.get_subtask_type_display()}" ให้ '
+        f'{assignee.get_full_name() or assignee.username} เรียบร้อยแล้ว',
+    )
+    return redirect('ticket_detail', pk=pk)
+
+
+@login_required
 def update_subtask(request, subtask_id):
     subtask = get_object_or_404(TicketSubtask, pk=subtask_id)
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=subtask.ticket_id)
@@ -1430,13 +1515,77 @@ def update_subtask(request, subtask_id):
         return redirect('ticket_detail', pk=ticket.pk)
 
     if request.method == 'POST':
+        was_done = subtask.is_done
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
-            form.save()
+            subtask = form.save()
+
+            # Optional deliverable file (e.g. forensic report / scan output),
+            # linked to both the subtask and its ticket so it serves through the
+            # hardened download_attachment path.
+            upload = request.FILES.get('result_file')
+            if upload is not None:
+                try:
+                    validate_attachment(upload)
+                    TicketAttachment.objects.create(
+                        ticket=ticket, subtask=subtask, file=upload,
+                        original_name=upload.name, uploaded_by=request.user,
+                        description=request.POST.get('result_file_desc', '').strip(),
+                    )
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
+            # A response request reaching DONE for the first time pings the SOC
+            # managers so they can review the result and proceed to approval.
+            if (
+                subtask.is_response_request
+                and subtask.is_done
+                and not was_done
+            ):
+                notify_response_request_completed(subtask)
+
             messages.success(request, f'อัปเดตงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
         else:
             messages.error(request, 'ไม่สามารถอัปเดตงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
     return redirect('ticket_detail', pk=ticket.pk)
+
+
+@login_required
+def response_request_queue(request):
+    """'My Requests' — the response-team member's work queue of requests routed
+    to them. Forensic Analysts see Forensics/RCA; Red Team Managers see VA/PT and
+    InfraSec. SOC/superusers get an all-team overview."""
+    profile = getattr(request.user, 'profile', None)
+    is_response = profile is not None and profile.is_response_team
+    is_overview = request.user.is_superuser or (profile is not None and profile.is_soc)
+    if not (is_response or is_overview):
+        messages.error(request, 'หน้านี้สำหรับทีมตอบสนองเท่านั้น')
+        return redirect('ticket_list')
+
+    requests_qs = (
+        TicketSubtask.objects
+        .filter(subtask_type__in=TicketSubtask.RESPONSE_TYPES)
+        .select_related('ticket', 'assigned_to', 'created_by')
+        .order_by('status', '-created_at')
+    )
+    if is_response and not is_overview:
+        requests_qs = requests_qs.filter(assigned_to=request.user)
+
+    status_filter = request.GET.get('status', '').strip()
+    if status_filter in dict(TicketSubtask.STATUS_CHOICES):
+        requests_qs = requests_qs.filter(status=status_filter)
+    else:
+        status_filter = ''
+
+    open_count = sum(1 for s in requests_qs if not s.is_done)
+
+    return render(request, 'incidents/response_request_queue.html', {
+        'requests': requests_qs,
+        'status_filter': status_filter,
+        'status_choices': TicketSubtask.STATUS_CHOICES,
+        'open_count': open_count,
+        'is_overview': is_overview and not is_response,
+    })
 
 
 # ── Attachment views ─────────────────────────────────────────────────── #

@@ -1,7 +1,8 @@
 # Production stack: nginx -> gunicorn (the Dockerfile's default CMD) -> Django,
 # with PostgreSQL. Unlike docker-compose.yml (dev: runserver + live-reload
 # bind mount), this runs the built image as-is: no source bind mount, and only
-# nginx (port 80) is published to the host/LAN.
+# nginx (ports 80/443) is published to the host/LAN. TLS certificate paths are
+# required so production cannot accidentally start over clear-text HTTP.
 #
 # Usage: docker compose -f docker-compose.prod.yml up -d --build
 
@@ -29,6 +30,14 @@ services:
       - .env
     environment:
       DB_HOST: db
+      SESSION_COOKIE_SECURE: "True"
+      CSRF_COOKIE_SECURE: "True"
+      SECURE_SSL_REDIRECT: "True"
+      SECURE_HSTS_SECONDS: "31536000"
+      PASSWORD_RESET_USE_HTTPS: "True"
+      USE_PROXY_SSL_HEADER: "True"
+      TRUST_X_FORWARDED_FOR: "True"
+      OPENSEARCH_VERIFY_SSL: "True"
     volumes:
       - staticfiles:/app/staticfiles
       - media:/app/media
@@ -41,9 +50,12 @@ services:
     restart: always
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - staticfiles:/static:ro
+      - ${TLS_CERT_PATH:?Set TLS_CERT_PATH to the host full-chain PEM file}:/etc/nginx/certs/tls.crt:ro
+      - ${TLS_KEY_PATH:?Set TLS_KEY_PATH to the host private-key PEM file}:/etc/nginx/certs/tls.key:ro
     depends_on:
       - web
 
@@ -64,7 +76,7 @@ services:
       BACKUP_RETENTION_DAILY_DAYS: "${BACKUP_RETENTION_DAILY_DAYS:-30}"
       BACKUP_RETENTION_WEEKLY_DAYS: "${BACKUP_RETENTION_WEEKLY_DAYS:-84}"
       BACKUP_RETENTION_MONTHLY_DAYS: "${BACKUP_RETENTION_MONTHLY_DAYS:-365}"
-      BACKUP_ENCRYPTION: "${BACKUP_ENCRYPTION:-none}"
+      BACKUP_ENCRYPTION: "${BACKUP_ENCRYPTION:-openssl}"
       BACKUP_ENCRYPTION_PASSWORD: "${BACKUP_ENCRYPTION_PASSWORD:-}"
       BACKUP_ENCRYPTION_PASSWORD_FILE: "${BACKUP_ENCRYPTION_PASSWORD_FILE:-}"
       BACKUP_GPG_RECIPIENT: "${BACKUP_GPG_RECIPIENT:-}"

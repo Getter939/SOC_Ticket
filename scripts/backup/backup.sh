@@ -75,7 +75,7 @@ BACKUP_RETENTION_HOURLY_DAYS="$(safe_positive_integer "${BACKUP_RETENTION_HOURLY
 BACKUP_RETENTION_DAILY_DAYS="$(safe_positive_integer "${BACKUP_RETENTION_DAILY_DAYS:-30}" 30)"
 BACKUP_RETENTION_WEEKLY_DAYS="$(safe_positive_integer "${BACKUP_RETENTION_WEEKLY_DAYS:-84}" 84)"
 BACKUP_RETENTION_MONTHLY_DAYS="$(safe_positive_integer "${BACKUP_RETENTION_MONTHLY_DAYS:-365}" 365)"
-BACKUP_ENCRYPTION="${BACKUP_ENCRYPTION:-none}"
+BACKUP_ENCRYPTION="${BACKUP_ENCRYPTION:-openssl}"
 APP_VERSION="${APP_VERSION:-unknown}"
 
 case "$BACKUP_TIER" in
@@ -84,7 +84,11 @@ case "$BACKUP_TIER" in
 esac
 
 case "$BACKUP_ENCRYPTION" in
-  none|openssl|gpg) ;;
+  openssl|gpg) ;;
+  none)
+    [ "${BACKUP_ALLOW_UNENCRYPTED:-false}" = "true" ] || \
+      fail "unencrypted backups require BACKUP_ALLOW_UNENCRYPTED=true"
+    ;;
   *) fail "BACKUP_ENCRYPTION must be one of: none, openssl, gpg" ;;
 esac
 

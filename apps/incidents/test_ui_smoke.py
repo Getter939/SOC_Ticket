@@ -10,9 +10,13 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from django.core import mail
+
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
-from apps.incidents.tests import _make_user, _make_ticket
+from apps.incidents.tests import (
+    _make_user, _make_ticket, _make_forensic, _make_redteam_manager,
+)
 
 
 class UiSmokeTest(TestCase):
@@ -330,3 +334,134 @@ class WorkflowUiContractTest(TestCase):
         response = self.client.get(reverse('ticket_list'), {'emergency': '1', 'sort': 'emergency'})
         self.assertContains(response, 'Emergency only')
         self.assertContains(response, 'EMERGENCY')
+
+
+class ResponseTeamUiTest(TestCase):
+    """Session 2 UI: manager spawn, responder controls, queue page, nav."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1       = _make_user('rt_ui_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        cls.manager  = _make_user('rt_ui_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin    = _make_user('rt_ui_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.forensic = _make_forensic('rt_ui_forensic')
+        cls.forensic.email = 'f@example.com'
+        cls.forensic.save(update_fields=['email'])
+        cls.redteam  = _make_redteam_manager('rt_ui_redteam')
+
+    def _ticket(self, status=Ticket.STATUS_AWAITING_CONTAINMENT, **kwargs):
+        return _make_ticket(
+            status=status, created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT, severity='High', **kwargs,
+        )
+
+    # ── Manager spawn card ────────────────────────────────────────────── #
+
+    def test_manager_sees_response_spawn_card(self):
+        t = self._ticket()
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(resp, 'ส่งทีมตอบสนอง (Response Team)')
+        self.assertContains(resp, reverse('create_response_request', args=[t.pk]))
+
+    def test_non_manager_does_not_see_spawn_card(self):
+        t = self._ticket()
+        self.client.force_login(self.t1)
+        resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertNotContains(resp, 'ส่งทีมตอบสนอง (Response Team)')
+
+    def test_manager_spawn_auto_assigns_sole_role_holder(self):
+        t = self._ticket()
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('create_response_request', args=[t.pk]), {
+            'subtask_type': TicketSubtask.TYPE_FORENSIC_RCA,
+            'title': 'Collect memory image', 'description': 'full RAM dump',
+        })
+        self.assertRedirects(resp, reverse('ticket_detail', args=[t.pk]))
+        st = t.subtasks.get()
+        self.assertEqual(st.assigned_to, self.forensic)
+        self.assertEqual(st.created_by, self.manager)
+        # Responder got an email.
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['f@example.com'])
+
+    def test_spawn_blocked_when_no_role_holder(self):
+        # No Red Team Manager with a routed request exists? There IS one
+        # (self.redteam), so remove them to prove the guard.
+        self.redteam.is_active = False
+        self.redteam.save(update_fields=['is_active'])
+        t = self._ticket()
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('create_response_request', args=[t.pk]), {
+            'subtask_type': TicketSubtask.TYPE_VA_PT, 'title': 'Pentest',
+        }, follow=True)
+        self.assertEqual(t.subtasks.count(), 0)
+        self.assertContains(resp, 'ยังไม่มีบัญชีผู้ใช้ในบทบาท')
+
+    def test_non_manager_cannot_spawn_via_post(self):
+        t = self._ticket()
+        self.client.force_login(self.t1)
+        self.client.post(reverse('create_response_request', args=[t.pk]), {
+            'subtask_type': TicketSubtask.TYPE_FORENSIC_RCA, 'title': 'x',
+        })
+        self.assertEqual(t.subtasks.count(), 0)
+
+    # ── Responder controls ────────────────────────────────────────────── #
+
+    def test_assignee_sees_update_form_and_can_complete(self):
+        t = self._ticket()
+        st = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=self.forensic, created_by=self.manager,
+        )
+        self.client.force_login(self.forensic)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, reverse('update_subtask', args=[st.pk]))
+        # Mark DONE with result notes → managers notified.
+        mail.outbox = []
+        self.manager.email = 'm@example.com'
+        self.manager.save(update_fields=['email'])
+        resp = self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE,
+            'result_notes': 'Root cause: phishing.',
+        })
+        self.assertRedirects(resp, reverse('ticket_detail', args=[t.pk]))
+        st.refresh_from_db()
+        self.assertTrue(st.is_done)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['m@example.com'])
+
+    # ── My Requests queue ─────────────────────────────────────────────── #
+
+    def test_queue_shows_only_own_requests_for_forensic(self):
+        t = self._ticket()
+        mine = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='My RCA', assigned_to=self.forensic, created_by=self.manager,
+        )
+        theirs = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Their pentest', assigned_to=self.redteam, created_by=self.manager,
+        )
+        self.client.force_login(self.forensic)
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'My RCA')
+        self.assertNotContains(resp, 'Their pentest')
+
+    def test_queue_overview_for_soc_shows_all(self):
+        t = self._ticket()
+        TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Their pentest', assigned_to=self.redteam, created_by=self.manager,
+        )
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertContains(resp, 'Their pentest')
+        self.assertContains(resp, 'ภาพรวมทุกทีม')
+
+    def test_nav_shows_response_queue_for_forensic(self):
+        self.client.force_login(self.forensic)
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertContains(resp, 'งานตอบสนอง (Response)')
