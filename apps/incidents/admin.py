@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
-    NotificationTemplate, ProjectIncident, ThreatGuidance, Ticket, TicketLog,
-    TicketSubtask, TriageRecord,
+    NotificationTemplate, ProjectIncident, ThreatGuidance, Ticket,
+    TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
 )
 
 
@@ -93,6 +93,17 @@ class TicketSubtaskAdmin(admin.ModelAdmin):
     list_filter = ('subtask_type', 'status')
     search_fields = ('ticket__ticket_id', 'title', 'description')
     raw_id_fields = ('ticket', 'assigned_to', 'created_by')
+
+
+@admin.register(TicketAttachment)
+class TicketAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('original_name', 'ticket', 'subtask', 'uploaded_by', 'uploaded_at')
+    list_filter = ('uploaded_at',)
+    search_fields = ('original_name', 'ticket__ticket_id', 'description')
+    # subtask lets a forensic/VA report file be tied to the response request it
+    # was produced for; ticket stays authoritative for access control.
+    raw_id_fields = ('ticket', 'subtask', 'uploaded_by')
+    readonly_fields = ('uploaded_at',)
 
 
 @admin.register(NotificationTemplate)

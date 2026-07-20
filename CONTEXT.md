@@ -63,8 +63,12 @@ The Project Incident Reference plus a member suffix, identifying a Ticket's plac
 _Avoid_: Ticket Reference, Ticket ID
 
 **Subtask**:
-A work stream spawned off a single Ticket — either an Investigation or a Countermeasure — tracked independently of the parent Ticket's status.
+A work stream spawned off a single Ticket, tracked independently of the parent Ticket's status. Two kinds: the SOC-spawned **Investigation** / **Countermeasure**, and the manager-spawned **Response Request** (below).
 _Avoid_: Task, linked ticket
+
+**Response Request**:
+A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It runs in parallel to Containment and is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, the parent Incident cannot be approved (closed) — Event-close is exempt.
+_Avoid_: Investigation (that is the SOC-side subtask), escalation, ticket
 
 ## People and roles
 
@@ -91,6 +95,14 @@ _Avoid_: Owner (bare), stakeholder
 **Executive**:
 A read-only role that consumes the dashboard rollups, not individual Tickets.
 _Avoid_: Manager (reserved for SOC Manager)
+
+**Forensic Analyst**:
+A response-team role that receives Forensics / RCA Response Requests. Not a SOC member: sees only the Tickets that carry a Response Request assigned to them, and works from the "My Requests" queue.
+_Avoid_: Investigator, SOC analyst
+
+**Red Team Manager**:
+A response-team role that receives both VA / Pentest and Infrastructure Security Response Requests and works them directly. Not a SOC member: sees only the Tickets with a Response Request assigned to them.
+_Avoid_: Pentester, Red Team (bare — this is the receiving manager)
 
 ## Timing and priority
 

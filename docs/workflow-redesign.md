@@ -21,8 +21,8 @@ SOC Manager *before* it reaches a handling lane. The manager flags Emergency
 (yes/no) and forwards to the lane Tier 1 already chose; they cannot divert it.
 A new `Ticket.t1_route` (`ADMIN`/`OWNER`) fixes the destination and is enforced
 by a deterministic guard in `can_transition_to`/`transition_to`. (Spawning a
-response team from this step — VA/PT/Forensic/RCA — is a deferred future phase;
-the UI shows a disabled "coming soon" placeholder.)
+response team from this step — VA/PT/Forensic/RCA — was a deferred future phase
+at the time; it is now implemented, see §0.1.)
 
 **FSM delta** (vs. §2b below):
 - **Removed:** `NEW→{CLOSED_EVENT, AWAITING_CONTAINMENT, AWAITING_OWNER}`,
@@ -53,6 +53,45 @@ alerts SOC Managers when a ticket enters `PENDING_MGR_TRIAGE`.
 reclassify-to-Event control, create-flow copy, and the executive dashboard
 (IDENTIFICATION phase + a pre-containment backlog card). Report exporter and
 status badges are model-driven and needed no change.
+
+---
+
+## 0.1. 2026-07-20 update — Response teams (Forensic / Red Team)
+
+Realises the deferred response-team dispatch from §0. No FSM/state change —
+response work is modelled as specialised subtasks that run in parallel and gate
+only the closing step. Migrations `accounts/0006` (2 role choices) and
+`incidents/0045` (3 subtask-type choices + `TicketAttachment.subtask` FK + 2
+template keys) — all additive.
+
+**Two new roles** (`accounts.UserProfile`): `FORENSIC` (Forensic Analyst) and
+`REDTEAM_MANAGER` (Red Team Manager). Neither is a SOC member (`is_soc` is
+false); each sees only Tickets carrying a Response Request assigned to them
+(`TicketQuerySet.visible_to`).
+
+**Response Request = `TicketSubtask`** with three new types: `VA_PT` and
+`INFRA_SEC` route to the Red Team Manager, `FORENSIC_RCA` to the Forensic
+Analyst (`TicketSubtask.RESPONSE_ROUTING`). The SOC Manager spawns them at any
+active stage; assignment auto-resolves to the sole role-holder, offers a picker
+when several exist, and is blocked when none exist. The optional deliverable
+file attaches via the new `TicketAttachment.subtask` FK (served through the
+existing hardened `download_attachment` path).
+
+**Approval gate:** `Ticket.has_open_response_requests` blocks **every** edge into
+`APPROVED` (manager approval *and* the Tier 2 direct-close paths) while any
+response request is not `DONE`; `CLOSED_EVENT` is exempt. The guard lives in
+`can_transition_to`/`transition_to`, so the closing action disappears from the
+UI until the request completes rather than erroring on submit.
+
+**Notifications:** `notify_response_request_created` (assigned responder) and
+`notify_response_request_completed` (SOC managers, on `DONE`).
+
+**Surfaces updated:** manager spawn card + open-request warning on the ticket
+detail, responder update panel (status / notes / file) in the subtask section,
+"My Requests" queue (`/incidents/response-requests/`) + nav badge, restricted
+legacy subtask form (Investigation / Countermeasure only), a cross-cutting
+"รอทีมตอบสนอง" row on the executive summary (with `?f=RESPONSE_PENDING`
+drill-down), admin registration for `TicketAttachment`, and seed/test accounts.
 
 ---
 

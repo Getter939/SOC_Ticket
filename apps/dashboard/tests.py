@@ -882,8 +882,43 @@ class ExecutiveSummaryCourtTest(TestCase):
 
     def test_ghost_critical_unassigned_criterion_is_gone(self):
         labels = [c['label'] for c in self._get().context['summary_criteria']]
-        self.assertEqual(len(labels), 6)
+        # 6 court/warning rows + 1 cross-cutting response-team row (see below).
+        self.assertEqual(len(labels), 7)
         self.assertNotIn('เคสอันตราย (Critical) ที่ยังไม่มีผู้รับผิดชอบ', labels)
+
+    def test_response_pending_is_a_cross_cutting_criterion(self):
+        from apps.incidents.models import TicketSubtask
+        # An Incident at PENDING_MANAGER with an open forensic request: counted in
+        # the manager court AND the response-team overlay row (intentional).
+        t = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', status=TicketSubtask.STATUS_IN_PROGRESS,
+        )
+        criteria = self._criteria()
+        self.assertEqual(criteria['RESPONSE_PENDING']['count'], 1)
+        self.assertEqual(criteria['COURT_MANAGER']['count'], 1)
+
+    def test_done_response_request_does_not_count(self):
+        from apps.incidents.models import TicketSubtask
+        t = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='pentest', status=TicketSubtask.STATUS_DONE,
+        )
+        self.assertEqual(self._criteria()['RESPONSE_PENDING']['count'], 0)
+
+    def test_response_pending_filter_scopes_detail_table(self):
+        from apps.incidents.models import TicketSubtask
+        blocked = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        TicketSubtask.objects.create(
+            ticket=blocked, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', status=TicketSubtask.STATUS_OPEN,
+        )
+        _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)  # no request
+        resp = self._get(f='RESPONSE_PENDING')
+        self.assertEqual(len(resp.context['table_tickets']), 1)
+        self.assertEqual(resp.context['table_tickets'][0].pk, blocked.pk)
 
     # ── Court deep-link filters ──────────────────────────────────────────── #
 

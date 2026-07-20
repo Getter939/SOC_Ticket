@@ -6,7 +6,8 @@ Edit the Mermaid block below; each line is one node or one arrow.
 **Role colors** — 🔵 Tier 1 · 🟣 Tier 2 · 🟠 System Admin · 🔴 SOC Manager · 🟢 Closed
 
 Key rules (redesigned 2026-07-14):
-- **Every Incident passes the SOC Manager pre-containment review** (`PENDING_MGR_TRIAGE`) before it reaches a handling lane. The manager flags Emergency (yes/no) and forwards to the lane Tier 1 already chose (`t1_route`) — they **cannot** divert the lane. Investigation/response-team dispatch from this step is a future phase.
+- **Every Incident passes the SOC Manager pre-containment review** (`PENDING_MGR_TRIAGE`) before it reaches a handling lane. The manager flags Emergency (yes/no) and forwards to the lane Tier 1 already chose (`t1_route`) — they **cannot** divert the lane.
+- **Response-team requests run in parallel.** At any active stage the SOC Manager may spawn a Response Request (a specialised `TicketSubtask`): VA / Pentest and Infrastructure Security route to the **Red Team Manager**; Forensics / RCA routes to the **Forensic Analyst**. Each is auto-assigned to the sole holder of the target role (picker when several exist). **While any Response Request is not `DONE`, no path may move the Incident to `APPROVED`** — the closing action is withheld until the response work finishes. Event-close (`CLOSED_EVENT`) is exempt: a reclassified false alarm still closes and any open request simply outlives it.
 - **Only the SOC Manager may set or clear the Emergency flag** (superuser bypass). The decision is made at the pre-containment review; the manager may adjust it at any later stage. No other role can touch it.
 - **Tier 1 can no longer close an Event directly.** A Tier 1 "Event" verdict escalates to Tier 2 (`ESCALATED_T2`); Tier 2 confirms and closes it (`CLOSED_EVENT`) with **no** SOC Manager involvement.
 - **Tier 2 verifies every containment/remediation** — both the System Admin lane and the System Owner lane — before a ticket can close. Tier 2 may also **reclassify an in-flight case as an Event** and close it directly (no manager), even when the emergency flag is set.
@@ -94,6 +95,8 @@ flowchart TD
 **`t1_route` routing:** Tier 1 records the chosen lane (`ADMIN` / `OWNER`) when it sends an Incident to `PENDING_MGR_TRIAGE`. The SOC Manager forward is deterministically guarded so it can only reach the lane matching `t1_route` — the manager reviews and flags Emergency but cannot swap Admin ↔ Owner.
 
 **Manager routing at the closing gate:** `requires_manager_verification` = `is_emergency` only. Severity (even Critical) never routes to the manager by itself. An Event never reaches the manager, even when the emergency flag is set (the mid-containment reclassify closes directly).
+
+**Response-team gate:** every edge into `APPROVED` is blocked while `Ticket.has_open_response_requests` is true (any VA/PT, InfraSec, or Forensics `TicketSubtask` not yet `DONE`). This covers the SOC Manager approval *and* the Tier 2 direct-close paths, so a non-emergency Incident with pending forensics cannot slip closed. `CLOSED_EVENT` is deliberately exempt. In the UI the closing action is withheld (not just rejected on submit) until the request completes. Response-team members (Forensic Analyst / Red Team Manager) see only the Tickets carrying a request assigned to them, worked from the **Response Requests** queue (`/incidents/response-requests/`).
 
 **Sign-offs:** `verified_by` = the Tier 2 analyst who confirmed containment/remediation (stamped leaving CONTAINMENT_REPORTED or PENDING_T2_REVIEW forward to APPROVED/PENDING_MANAGER). `approved_by` = whoever closed the case (Tier 2 or SOC Manager).
 

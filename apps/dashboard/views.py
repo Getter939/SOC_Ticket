@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from apps.incidents import ola as ola_buckets
-from apps.incidents.models import Ticket, TicketLog
+from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 
 # ====================================================================== #
 # Data-model facts this view relies on (verified against                 #
@@ -585,6 +585,16 @@ def executive_dashboard(request):
     ola_overdue = active_qs.filter(
         ola_contain_deadline__lt=now,
     ).count()
+    # Cross-cutting (like Emergency / OLA): active cases with an outstanding
+    # response-team request (Forensic / Red Team). These block final approval
+    # (Ticket.has_open_response_requests) but may sit in any court, so this is an
+    # overlay row, not a court group. Mirrors the ORM form of that property.
+    response_pending = active_qs.filter(
+        subtasks__subtask_type__in=TicketSubtask.RESPONSE_TYPES,
+        subtasks__status__in=(
+            TicketSubtask.STATUS_OPEN, TicketSubtask.STATUS_IN_PROGRESS,
+        ),
+    ).distinct().count()
     court_counts = {
         key: active_qs.filter(status__in=sts).count()
         for key, sts in COURT_GROUPS.items()
@@ -626,6 +636,12 @@ def executive_dashboard(request):
             'count': court_counts['COURT_TIER2'],
             'level': 'waiting' if court_counts['COURT_TIER2'] else 'good',
             'filter': 'COURT_TIER2',
+        },
+        {
+            'label': 'เคสที่รอทีมตอบสนอง (Forensic / Red Team)',
+            'count': response_pending,
+            'level': 'waiting' if response_pending else 'good',
+            'filter': 'RESPONSE_PENDING',
         },
     ]
     if any(c['level'] == 'warning' for c in summary_criteria):
@@ -709,6 +725,15 @@ def executive_dashboard(request):
         # Live breach — same rule as the summary criterion above.
         table_qs = range_active_qs.filter(ola_contain_deadline__lt=now)
         filter_label = court_labels.get(f, 'เคสที่เกินกำหนด OLA')
+    elif f == 'RESPONSE_PENDING':
+        # Cross-cutting — active cases with an open response-team request.
+        table_qs = range_active_qs.filter(
+            subtasks__subtask_type__in=TicketSubtask.RESPONSE_TYPES,
+            subtasks__status__in=(
+                TicketSubtask.STATUS_OPEN, TicketSubtask.STATUS_IN_PROGRESS,
+            ),
+        ).distinct()
+        filter_label = court_labels.get(f, 'เคสที่รอทีมตอบสนอง')
     elif f in COURT_GROUPS:
         # Summary rows span several statuses (grouped by whose court), so they
         # filter on the whole group. Active-only: a court is about pending work.

@@ -21,6 +21,22 @@ live).
 5. Send each teammate `http://<server-ip>/login/` — they log in with the
    username/password from step 4 and work tickets per their role
 
+## Security prerequisites
+
+Before starting the production stack, configure these values in `.env`:
+
+- `TLS_CERT_PATH` and `TLS_KEY_PATH`: absolute host paths to the PEM full-chain
+  certificate and private key. The production stack refuses to start without
+  them so it cannot accidentally serve authenticated traffic over HTTP.
+- `OPENSEARCH_CA_HOST_PATH`: the host path to the trusted CA PEM for a
+  private/self-signed OpenSearch cluster. The compose file mounts it at the
+  `OPENSEARCH_CA_BUNDLE` container path; certificate verification stays enabled.
+- `BACKUP_ENCRYPTION=openssl` with a password file, or `BACKUP_ENCRYPTION=gpg`
+  with a recipient. Unencrypted backups require an explicit local-test opt-in.
+
+Open both TCP ports 80 and 443 in the host firewall. Port 80 only redirects to
+HTTPS; users should access the service at `https://<server-name>/login/`.
+
 ## 1. First-time setup
 
 1. Make sure `.env` exists and is filled in (copy from `.env.example` if
@@ -67,10 +83,11 @@ hostname -I
 Add the result to `ALLOWED_HOSTS` in `.env` (comma-separated, no spaces),
 then restart the stack (step 6) for the change to take effect.
 
-## 5. Open port 80 on UFW
+## 5. Open ports 80 and 443 on UFW
 
 ```bash
 sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw status
 ```
 

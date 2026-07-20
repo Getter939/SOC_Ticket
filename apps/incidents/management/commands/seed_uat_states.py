@@ -126,6 +126,10 @@ class Command(BaseCommand):
                  first="Nattapong", last="Admin",   dept="IT",    phone="0810000004"),
             dict(key="OWNER",   username="uat_sysowner", role="SYSTEM_OWNER", tier="",
                  first="Waraporn",  last="Owner",   dept="BU",    phone="0810000005"),
+            dict(key="FORENSIC", username="uat_forensic", role="FORENSIC", tier="",
+                 first="Anucha",    last="Forensic", dept="Forensics", phone="0810000006"),
+            dict(key="REDTEAM", username="uat_redteam", role="REDTEAM_MANAGER", tier="",
+                 first="Kittipong", last="RedTeam",  dept="RedTeam", phone="0810000007"),
         ]
         result = {}
         for c in configs:
