@@ -50,9 +50,13 @@ from apps.accounts.models import UserProfile
 from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
 from apps.incidents.models import (
     ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
-    TriageRecord, bundle_suffix_for_index,
+    TicketSubtask, TriageRecord, bundle_suffix_for_index,
 )
-from apps.incidents.notifications import notify_containment_required
+from apps.incidents.notifications import (
+    notify_containment_required,
+    notify_response_request_created,
+    notify_response_request_completed,
+)
 from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
     build_ticket_report_context, build_ticket_report_sections,
@@ -80,6 +84,14 @@ def _make_t1(username='t1', **kwargs):
 
 def _make_t2(username='t2', **kwargs):
     return _make_user(username, UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2, **kwargs)
+
+
+def _make_forensic(username='forensic', **kwargs):
+    return _make_user(username, UserProfile.ROLE_FORENSIC, **kwargs)
+
+
+def _make_redteam_manager(username='redteam', **kwargs):
+    return _make_user(username, UserProfile.ROLE_REDTEAM_MANAGER, **kwargs)
 
 
 def _make_ticket(**kwargs):
@@ -204,11 +216,24 @@ class TicketVisibilityQuerysetTest(TestCase):
         cls.soc_manager = _make_user('soc_manager', UserProfile.ROLE_SOC_MANAGER)
         cls.admin_a     = _make_user('admin_a',     UserProfile.ROLE_SYSTEM_ADMIN)
         cls.admin_b     = _make_user('admin_b',     UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.forensic    = _make_forensic('vis_forensic')
+        cls.redteam     = _make_redteam_manager('vis_redteam')
         cls.no_profile  = User.objects.create_user(username='noprofile', password='testpass123')
 
         cls.ticket_a = _make_ticket(assigned_admin=cls.admin_a)
         cls.ticket_b = _make_ticket(assigned_admin=cls.admin_b)
         cls.ticket_unassigned = _make_ticket()
+
+        # A forensic request on ticket_a makes it (and only it) visible to the
+        # forensic analyst; a VA/PT request on ticket_b to the red-team manager.
+        TicketSubtask.objects.create(
+            ticket=cls.ticket_a, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=cls.forensic,
+        )
+        TicketSubtask.objects.create(
+            ticket=cls.ticket_b, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=cls.redteam,
+        )
 
     def test_soc_staff_sees_all_tickets(self):
         self.assertEqual(Ticket.objects.visible_to(self.soc_staff).count(), 3)
@@ -226,6 +251,22 @@ class TicketVisibilityQuerysetTest(TestCase):
 
     def test_no_profile_sees_no_tickets(self):
         self.assertEqual(Ticket.objects.visible_to(self.no_profile).count(), 0)
+
+    def test_forensic_sees_only_ticket_with_their_request(self):
+        qs = Ticket.objects.visible_to(self.forensic)
+        self.assertEqual(list(qs), [self.ticket_a])
+
+    def test_redteam_manager_sees_only_ticket_with_their_request(self):
+        qs = Ticket.objects.visible_to(self.redteam)
+        self.assertEqual(list(qs), [self.ticket_b])
+
+    def test_response_team_visibility_is_not_duplicated(self):
+        # A second request assigned to the same responder must not double-count.
+        TicketSubtask.objects.create(
+            ticket=self.ticket_a, subtask_type=TicketSubtask.TYPE_INFRA_SEC,
+            title='Harden', assigned_to=self.forensic,
+        )
+        self.assertEqual(Ticket.objects.visible_to(self.forensic).count(), 1)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -2564,3 +2605,205 @@ class ContainmentChecklistTest(TestCase):
         self.assertEqual(items, [])
         self.assertEqual(trailing, 'ดำเนินการตามความเหมาะสม')
         self.assertIsNone(__import__('apps.incidents.reports', fromlist=['_containment_checklist_row'])._containment_checklist_row(t))
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# Response-team requests (Forensic / Red Team) — model + routing + gating       #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ResponseRequestRoutingTest(TestCase):
+    """Type → role routing and eligible-assignee resolution."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.forensic = _make_forensic('rt_forensic')
+        cls.redteam  = _make_redteam_manager('rt_redteam')
+
+    def test_va_pt_and_infra_sec_route_to_redteam_manager(self):
+        self.assertEqual(
+            TicketSubtask.role_for_type(TicketSubtask.TYPE_VA_PT),
+            UserProfile.ROLE_REDTEAM_MANAGER,
+        )
+        self.assertEqual(
+            TicketSubtask.role_for_type(TicketSubtask.TYPE_INFRA_SEC),
+            UserProfile.ROLE_REDTEAM_MANAGER,
+        )
+
+    def test_forensic_rca_routes_to_forensic(self):
+        self.assertEqual(
+            TicketSubtask.role_for_type(TicketSubtask.TYPE_FORENSIC_RCA),
+            UserProfile.ROLE_FORENSIC,
+        )
+
+    def test_legacy_types_have_no_route(self):
+        self.assertIsNone(TicketSubtask.role_for_type(TicketSubtask.TYPE_INVESTIGATION))
+        self.assertIsNone(TicketSubtask.role_for_type(TicketSubtask.TYPE_COUNTERMEASURE))
+
+    def test_eligible_assignees_filters_by_role(self):
+        self.assertEqual(
+            list(TicketSubtask.eligible_assignees(TicketSubtask.TYPE_FORENSIC_RCA)),
+            [self.forensic],
+        )
+        self.assertEqual(
+            list(TicketSubtask.eligible_assignees(TicketSubtask.TYPE_INFRA_SEC)),
+            [self.redteam],
+        )
+
+    def test_eligible_assignees_excludes_inactive(self):
+        self.forensic.is_active = False
+        self.forensic.save(update_fields=['is_active'])
+        self.assertEqual(
+            list(TicketSubtask.eligible_assignees(TicketSubtask.TYPE_FORENSIC_RCA)), [],
+        )
+
+    def test_eligible_assignees_empty_for_legacy_type(self):
+        self.assertEqual(
+            list(TicketSubtask.eligible_assignees(TicketSubtask.TYPE_INVESTIGATION)), [],
+        )
+
+    def test_is_response_request_flag(self):
+        t = _make_ticket()
+        resp = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='x',
+        )
+        legacy = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_INVESTIGATION, title='y',
+        )
+        self.assertTrue(resp.is_response_request)
+        self.assertFalse(legacy.is_response_request)
+
+    def test_role_props(self):
+        self.assertTrue(self.forensic.profile.is_forensic)
+        self.assertTrue(self.forensic.profile.is_response_team)
+        self.assertFalse(self.forensic.profile.is_soc)
+        self.assertTrue(self.redteam.profile.is_redteam_manager)
+        self.assertTrue(self.redteam.profile.is_response_team)
+        self.assertFalse(self.redteam.profile.is_soc)
+
+
+class ResponseRequestApprovalGateTest(TestCase):
+    """An open response request blocks every path into APPROVED, but not the
+    Event-close path."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1    = _make_t1('rg_t1')
+        cls.t2    = _make_t2('rg_t2')
+        cls.admin = _make_user('rg_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.mgr   = _make_user('rg_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.forensic = _make_forensic('rg_forensic')
+
+    def _incident(self, **kwargs):
+        kwargs.setdefault('assigned_admin', self.admin)
+        return _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT, **kwargs
+        )
+
+    def _open_request(self, ticket, status=TicketSubtask.STATUS_OPEN):
+        return TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=self.forensic, status=status,
+        )
+
+    def test_has_open_response_requests_property(self):
+        t = self._incident()
+        self.assertFalse(t.has_open_response_requests)
+        st = self._open_request(t)
+        self.assertTrue(t.has_open_response_requests)
+        st.status = TicketSubtask.STATUS_DONE
+        st.save(update_fields=['status'])
+        self.assertFalse(t.has_open_response_requests)
+
+    def test_legacy_subtask_does_not_block(self):
+        t = self._incident()
+        TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_INVESTIGATION, title='dig',
+            status=TicketSubtask.STATUS_OPEN,
+        )
+        self.assertFalse(t.has_open_response_requests)
+
+    def test_open_request_blocks_manager_approval(self):
+        t = self._incident(is_emergency=True)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
+        self._open_request(t)
+        t.refresh_from_db()
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_APPROVED))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'close')
+
+    def test_open_request_blocks_tier2_direct_close(self):
+        # Non-emergency incident closes via Tier 2 (CONTAINMENT_REPORTED→APPROVED)
+        # — the gate must catch this path too, not just manager approval.
+        t = self._incident()
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
+        self._open_request(t)
+        t.refresh_from_db()
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_APPROVED))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'close')
+
+    def test_done_request_allows_approval(self):
+        t = self._incident(is_emergency=True)
+        _advance_to(t, Ticket.STATUS_PENDING_MANAGER, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
+        self._open_request(t, status=TicketSubtask.STATUS_DONE)
+        t.refresh_from_db()
+        t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'close')
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+
+    def test_open_request_does_not_block_event_close(self):
+        # Reclassify-to-Event mid-containment still closes; the open forensic
+        # request simply outlives the closed ticket.
+        t = self._incident()
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin,
+                    mgr=self.mgr, t2=self.t2)
+        self._open_request(t)
+        t.refresh_from_db()
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.save(update_fields=['classification'])
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'reclassified as event')
+        self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
+
+class ResponseRequestNotificationTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('rn_t1')
+        cls.mgr = _make_user('rn_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.mgr.email = 'mgr@example.com'
+        cls.mgr.save(update_fields=['email'])
+        cls.forensic = _make_forensic('rn_forensic')
+        cls.forensic.email = 'forensic@example.com'
+        cls.forensic.save(update_fields=['email'])
+        cls.ticket = _make_ticket(created_by=cls.t1)
+
+    def setUp(self):
+        mail.outbox = []
+
+    def _request(self, assigned_to, **kwargs):
+        return TicketSubtask.objects.create(
+            ticket=self.ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Collect memory image', assigned_to=assigned_to,
+            created_by=self.mgr, **kwargs
+        )
+
+    def test_created_emails_assigned_responder(self):
+        st = self._request(self.forensic)
+        self.assertTrue(notify_response_request_created(st))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['forensic@example.com'])
+        self.assertIn(self.ticket.ticket_id, mail.outbox[0].subject)
+
+    def test_created_skips_when_no_assignee(self):
+        st = self._request(None)
+        self.assertFalse(notify_response_request_created(st))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_completed_emails_managers(self):
+        st = self._request(self.forensic, status=TicketSubtask.STATUS_DONE,
+                           result_notes='Root cause: phishing.')
+        self.assertTrue(notify_response_request_completed(st))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['mgr@example.com'])

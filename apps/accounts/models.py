@@ -3,18 +3,25 @@ from django.contrib.auth.models import User
 
 
 class UserProfile(models.Model):
-    ROLE_SOC_STAFF    = 'SOC_STAFF'
-    ROLE_SOC_MANAGER  = 'SOC_MANAGER'
-    ROLE_SYSTEM_ADMIN = 'SYSTEM_ADMIN'
-    ROLE_SYSTEM_OWNER = 'SYSTEM_OWNER'
-    ROLE_EXECUTIVE    = 'EXECUTIVE'
+    ROLE_SOC_STAFF       = 'SOC_STAFF'
+    ROLE_SOC_MANAGER     = 'SOC_MANAGER'
+    ROLE_SYSTEM_ADMIN    = 'SYSTEM_ADMIN'
+    ROLE_SYSTEM_OWNER    = 'SYSTEM_OWNER'
+    ROLE_EXECUTIVE       = 'EXECUTIVE'
+    # Response-team roles — receive specialised subtasks spawned by the SOC
+    # Manager. They are NOT SOC members (is_soc is False): each works only the
+    # tickets that carry a response request assigned to them.
+    ROLE_FORENSIC        = 'FORENSIC'
+    ROLE_REDTEAM_MANAGER = 'REDTEAM_MANAGER'
 
     ROLE_CHOICES = [
-        (ROLE_SOC_STAFF,    'SOC Staff'),
-        (ROLE_SOC_MANAGER,  'SOC Manager'),
-        (ROLE_SYSTEM_ADMIN, 'System Admin'),
-        (ROLE_SYSTEM_OWNER, 'System Owner'),
-        (ROLE_EXECUTIVE,    'Executive'),
+        (ROLE_SOC_STAFF,       'SOC Staff'),
+        (ROLE_SOC_MANAGER,     'SOC Manager'),
+        (ROLE_SYSTEM_ADMIN,    'System Admin'),
+        (ROLE_SYSTEM_OWNER,    'System Owner'),
+        (ROLE_EXECUTIVE,       'Executive'),
+        (ROLE_FORENSIC,        'Forensic Analyst'),
+        (ROLE_REDTEAM_MANAGER, 'Red Team Manager'),
     ]
 
     TIER_T1 = 'T1'
@@ -55,6 +62,21 @@ class UserProfile(models.Model):
     @property
     def is_executive(self):
         return self.role == self.ROLE_EXECUTIVE
+
+    @property
+    def is_forensic(self):
+        """Forensic Analyst — receives FORENSIC_RCA response requests."""
+        return self.role == self.ROLE_FORENSIC
+
+    @property
+    def is_redteam_manager(self):
+        """Red Team Manager — receives VA_PT and INFRA_SEC response requests."""
+        return self.role == self.ROLE_REDTEAM_MANAGER
+
+    @property
+    def is_response_team(self):
+        """True for either response-team role (Forensic / Red Team Manager)."""
+        return self.role in (self.ROLE_FORENSIC, self.ROLE_REDTEAM_MANAGER)
 
     @property
     def is_soc(self):

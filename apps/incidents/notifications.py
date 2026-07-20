@@ -300,6 +300,132 @@ def notify_manager_triage_pending(ticket):
 
 
 # ──────────────────────────────────────────────────────────────────────── #
+# Response-team notifications (Forensic / Red Team)                         #
+# ──────────────────────────────────────────────────────────────────────── #
+
+def notify_response_request_created(subtask):
+    """
+    Email the assigned response-team member (Forensic Analyst / Red Team
+    Manager) that a new request has been routed to them. No assignee or no
+    email → skip.
+    """
+    responder = subtask.assigned_to
+    if not responder or not responder.email:
+        logger.warning(
+            'notify_response_request_created: subtask %s — no assignee or no email.',
+            subtask.pk,
+        )
+        return False
+
+    ticket = subtask.ticket
+    ticket_url = _ticket_url(ticket)
+    summary = ticket.issue_description[:100]
+    if len(ticket.issue_description) > 100:
+        summary += '…'
+
+    requester = subtask.created_by
+    requested_by = (requester.get_full_name() or requester.username) if requester else '-'
+
+    default_subject = '[{ticket_id}] คำขอทีมตอบสนองใหม่ — {request_type}'
+    default_body = (
+        'มีคำขอทีมตอบสนองใหม่ถูกมอบหมายให้ท่านสำหรับ Ticket {ticket_id}.\n'
+        '\n'
+        '  Ticket ID  : {ticket_id}\n'
+        '  ประเภทคำขอ : {request_type}\n'
+        '  หัวข้อ      : {title}\n'
+        '  สรุปเหตุการณ์: {summary}\n'
+        '  ผู้ร้องขอ   : {requested_by}\n'
+        '\n'
+        'รายละเอียด:\n'
+        '{description}\n'
+        '\n'
+        'เปิดดู Ticket ได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
+        '  {ticket_url}\n'
+        '\n'
+        'กรุณาอย่าตอบกลับอีเมลนี้'
+    )
+
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': ticket_url,
+        'request_type': subtask.get_subtask_type_display(),
+        'title': subtask.title,
+        'description': subtask.description or '-',
+        'summary': summary,
+        'requested_by': requested_by,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_RESPONSE_REQUEST_CREATED, context,
+        default_subject, default_body,
+    )
+    return _send(subject, body, responder.email, ticket.ticket_id)
+
+
+def notify_response_request_completed(subtask):
+    """
+    Email SOC Managers that a response-team request has been marked DONE, so
+    they can review the result and proceed to approval. No manager with an
+    email → skip.
+    """
+    from apps.accounts.models import UserProfile
+
+    recipients = list(
+        User.objects.filter(
+            is_active=True,
+            profile__role=UserProfile.ROLE_SOC_MANAGER,
+        )
+        .exclude(email='')
+        .values_list('email', flat=True)
+    )
+    if not recipients:
+        logger.warning(
+            'notify_response_request_completed: subtask %s — no SOC Manager with email.',
+            subtask.pk,
+        )
+        return False
+
+    ticket = subtask.ticket
+    ticket_url = _ticket_url(ticket)
+
+    responder = subtask.assigned_to
+    completed_by = (responder.get_full_name() or responder.username) if responder else '-'
+
+    default_subject = '[{ticket_id}] คำขอทีมตอบสนองเสร็จสิ้น — {request_type}'
+    default_body = (
+        'คำขอทีมตอบสนองสำหรับ Ticket {ticket_id} ได้ดำเนินการเสร็จสิ้นแล้ว.\n'
+        '\n'
+        '  Ticket ID  : {ticket_id}\n'
+        '  ประเภทคำขอ : {request_type}\n'
+        '  หัวข้อ      : {title}\n'
+        '  ผู้ดำเนินการ: {completed_by}\n'
+        '\n'
+        'ผลการดำเนินการ:\n'
+        '{result_notes}\n'
+        '\n'
+        'เปิดดู Ticket ได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
+        '  {ticket_url}\n'
+        '\n'
+        'กรุณาอย่าตอบกลับอีเมลนี้'
+    )
+
+    context = {
+        'ticket_id': ticket.ticket_id,
+        'ticket_url': ticket_url,
+        'request_type': subtask.get_subtask_type_display(),
+        'title': subtask.title,
+        'result_notes': subtask.result_notes or '-',
+        'completed_by': completed_by,
+    }
+
+    subject, body = _render(
+        NotificationTemplate.KEY_RESPONSE_REQUEST_COMPLETED, context,
+        default_subject, default_body,
+    )
+    return _send(subject, body, recipients, ticket.ticket_id)
+
+
+# ──────────────────────────────────────────────────────────────────────── #
 # System Owner notifications                                               #
 # ──────────────────────────────────────────────────────────────────────── #
 

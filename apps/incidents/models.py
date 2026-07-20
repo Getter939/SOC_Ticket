@@ -41,9 +41,11 @@ class TicketQuerySet(models.QuerySet):
         Return the subset of tickets the given user is allowed to see.
 
         Rules (single authoritative place — never bypass this):
-          - SOC staff / SOC manager  → all tickets
-          - System admin             → only tickets where assigned_admin == user
-          - No profile / unknown role→ empty queryset (safest default)
+          - SOC staff / SOC manager   → all tickets
+          - System admin              → only tickets where assigned_admin == user
+          - Forensic / Red Team Mgr   → only tickets with a response request
+                                        assigned to them
+          - No profile / unknown role → empty queryset (safest default)
         """
         if user.is_superuser:
             return self
@@ -56,6 +58,10 @@ class TicketQuerySet(models.QuerySet):
             return self.filter(assigned_admin=user)
         if profile.is_system_owner:
             return self.filter(system_owner=user)
+        # Response-team members see a ticket only while they hold a subtask on
+        # it. distinct() guards against duplicates when several are assigned.
+        if profile.is_response_team:
+            return self.filter(subtasks__assigned_to=user).distinct()
         return self.none()
 
 
@@ -1197,6 +1203,23 @@ class Ticket(models.Model):
     # State machine                                                       #
     # ------------------------------------------------------------------ #
 
+    @property
+    def has_open_response_requests(self):
+        """True if any response-team request (VA/PT, InfraSec, Forensics) on this
+        ticket is not yet DONE.
+
+        Gates final approval: an Incident cannot be APPROVED while response work
+        is outstanding (see can_transition_to / transition_to). Event-close
+        (CLOSED_EVENT) is deliberately NOT gated — a reclassified false alarm
+        closes and any open requests simply outlive it.
+        """
+        return (
+            self.subtasks
+            .filter(subtask_type__in=TicketSubtask.RESPONSE_TYPES)
+            .exclude(status=TicketSubtask.STATUS_DONE)
+            .exists()
+        )
+
     def can_transition_to(self, new_status):
         """Return True if new_status is a legal next state for this ticket,
         honoring the Event/Incident classification gate and the manager-routing
@@ -1204,6 +1227,10 @@ class Ticket(models.Model):
         """
         edge = (self.status, new_status)
         if new_status not in self.ALLOWED_TRANSITIONS.get(self.status, []):
+            return False
+        # Response-team gate: any path into APPROVED is blocked while a response
+        # request is still open. CLOSED_EVENT is intentionally exempt.
+        if new_status == self.STATUS_APPROVED and self.has_open_response_requests:
             return False
         if edge in self.EVENT_CLOSE_TRANSITIONS and not self.is_event:
             return False
@@ -1319,6 +1346,17 @@ class Ticket(models.Model):
                 and not self.requires_manager_verification):
             raise ValidationError(
                 'Ticket นี้ไม่จำเป็นต้องส่งให้ผู้จัดการ — Tier 2 ปิดได้ทันที'
+            )
+
+        # 5c. Response-team gate: no path may close an Incident (→ APPROVED)
+        # while a response request (Forensic / Red Team) is still open. This
+        # covers the manager approval AND the Tier-2 direct-close paths, so a
+        # non-emergency incident with pending forensics cannot slip closed.
+        # CLOSED_EVENT is exempt (a reclassified false alarm still closes).
+        if new_status == self.STATUS_APPROVED and self.has_open_response_requests:
+            raise ValidationError(
+                'ยังมีคำขอทีมตอบสนอง (Forensic / Red Team) ที่ยังไม่เสร็จสิ้น — '
+                'ต้องดำเนินการให้ครบก่อนจึงจะปิด Ticket (อนุมัติ) ได้'
             )
 
         # ── 6. Check permission ───────────────────────────────────────── #
@@ -1608,11 +1646,24 @@ class TicketSubtask(models.Model):
 
     TYPE_INVESTIGATION = 'INVESTIGATION'
     TYPE_COUNTERMEASURE = 'COUNTERMEASURE'
+    # Response-team request types — spawned by the SOC Manager and routed by
+    # type to a response-team role (see RESPONSE_ROUTING). Unlike the two legacy
+    # types above, an open request of these types blocks the parent Incident
+    # from being APPROVED (see Ticket.has_open_response_requests).
+    TYPE_VA_PT = 'VA_PT'
+    TYPE_INFRA_SEC = 'INFRA_SEC'
+    TYPE_FORENSIC_RCA = 'FORENSIC_RCA'
 
     TYPE_CHOICES = [
         (TYPE_INVESTIGATION, 'Investigation'),
         (TYPE_COUNTERMEASURE, 'Countermeasure'),
+        (TYPE_VA_PT, 'VA / Pentest'),
+        (TYPE_INFRA_SEC, 'Infrastructure Security'),
+        (TYPE_FORENSIC_RCA, 'Forensics / RCA'),
     ]
+
+    # Request types that route to a response team and gate final approval.
+    RESPONSE_TYPES = frozenset({TYPE_VA_PT, TYPE_INFRA_SEC, TYPE_FORENSIC_RCA})
 
     STATUS_OPEN = 'OPEN'
     STATUS_IN_PROGRESS = 'IN_PROGRESS'
@@ -1658,6 +1709,45 @@ class TicketSubtask(models.Model):
     def is_done(self):
         return self.status == self.STATUS_DONE
 
+    @property
+    def is_response_request(self):
+        """True for a response-team request (VA/PT, InfraSec, Forensics)."""
+        return self.subtask_type in self.RESPONSE_TYPES
+
+    @classmethod
+    def response_routing(cls):
+        """Map each response-request type → the role that receives it.
+
+        Lazily imports UserProfile so the routing always references the
+        canonical role constants (no drift) without a circular import at
+        module load. VA/PT and InfraSec both go to the Red Team Manager;
+        Forensics/RCA goes to the Forensic Analyst.
+        """
+        from apps.accounts.models import UserProfile
+        return {
+            cls.TYPE_VA_PT:        UserProfile.ROLE_REDTEAM_MANAGER,
+            cls.TYPE_INFRA_SEC:    UserProfile.ROLE_REDTEAM_MANAGER,
+            cls.TYPE_FORENSIC_RCA: UserProfile.ROLE_FORENSIC,
+        }
+
+    @classmethod
+    def role_for_type(cls, subtask_type):
+        """The response-team role that owns ``subtask_type``, or None."""
+        return cls.response_routing().get(subtask_type)
+
+    @classmethod
+    def eligible_assignees(cls, subtask_type):
+        """Active users who may be auto-assigned a request of ``subtask_type``.
+
+        Returns an empty queryset for the non-response (legacy) types. The
+        spawn flow auto-assigns when exactly one exists, offers a picker when
+        several do, and blocks the spawn when none exist.
+        """
+        role = cls.role_for_type(subtask_type)
+        if not role:
+            return User.objects.none()
+        return User.objects.filter(is_active=True, profile__role=role)
+
 
 # ======================================================================= #
 # Notification templates                                                   #
@@ -1678,6 +1768,8 @@ class NotificationTemplate(models.Model):
     KEY_MANAGER_TRIAGE_PENDING = 'MANAGER_TRIAGE_PENDING'
     KEY_OWNER_CREATED = 'OWNER_CREATED'
     KEY_OWNER_CLOSED = 'OWNER_CLOSED'
+    KEY_RESPONSE_REQUEST_CREATED = 'RESPONSE_REQUEST_CREATED'
+    KEY_RESPONSE_REQUEST_COMPLETED = 'RESPONSE_REQUEST_COMPLETED'
 
     KEY_CHOICES = [
         (KEY_CONTAINMENT_REQUIRED, 'แจ้งผู้ดูแลระบบ — ต้องดำเนินการควบคุม (Containment required)'),
@@ -1685,6 +1777,8 @@ class NotificationTemplate(models.Model):
         (KEY_MANAGER_TRIAGE_PENDING, 'แจ้งผู้จัดการ SOC — มี Incident รอตรวจก่อนมอบหมาย'),
         (KEY_OWNER_CREATED, 'แจ้งเจ้าของระบบ — เปิด Ticket ใหม่'),
         (KEY_OWNER_CLOSED, 'แจ้งเจ้าของระบบ — ปิด Ticket แล้ว'),
+        (KEY_RESPONSE_REQUEST_CREATED, 'แจ้งทีมตอบสนอง — มีคำขอใหม่ (Forensic / Red Team)'),
+        (KEY_RESPONSE_REQUEST_COMPLETED, 'แจ้งผู้จัดการ SOC — คำขอทีมตอบสนองเสร็จสิ้น'),
     ]
 
     # Placeholders available to each template key, shown to admins as a hint.
@@ -1706,6 +1800,14 @@ class NotificationTemplate(models.Model):
         KEY_OWNER_CLOSED: [
             'ticket_id', 'ticket_url', 'owner_name', 'department', 'department_suffix',
             'issue_type', 'device_name', 'outcome',
+        ],
+        KEY_RESPONSE_REQUEST_CREATED: [
+            'ticket_id', 'ticket_url', 'request_type', 'title', 'description',
+            'summary', 'requested_by',
+        ],
+        KEY_RESPONSE_REQUEST_COMPLETED: [
+            'ticket_id', 'ticket_url', 'request_type', 'title', 'result_notes',
+            'completed_by',
         ],
     }
 
@@ -1837,6 +1939,14 @@ class TicketAttachment(models.Model):
     """File attached to a ticket — evidence, reports, screenshots, etc."""
 
     ticket       = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='attachments')
+    # Optional link to the response-team request this file is a deliverable for
+    # (e.g. a forensics report or VA scan output). NULL for ordinary ticket-level
+    # evidence. Served through the same hardened download_attachment path; the
+    # ticket FK stays authoritative for visibility, so a NULL subtask is fine.
+    subtask      = models.ForeignKey(
+        'TicketSubtask', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='attachments', verbose_name='งานย่อยที่เกี่ยวข้อง',
+    )
     file         = models.FileField(upload_to=attachment_upload_path)
     original_name = models.CharField(max_length=255)
     description  = models.CharField(max_length=255, blank=True, default='')

@@ -60,5 +60,8 @@ desktop.ini
 .claude/settings.json
 /.claude
 *.md
+# Root documentation relocated to docs/ remains versioned.
+!docs/deployment.md
+!docs/workflow-redesign.md
 .claude/skills/03-exploit-development/scripts/payload_generator.py
 .claude/skills/03-exploit-development/SKILL.md
