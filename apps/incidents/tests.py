@@ -47,7 +47,9 @@ from docx import Document
 from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
-from apps.incidents.forms import AttachmentForm, TicketForm, TriageForm
+from apps.incidents.forms import (
+    AttachmentForm, ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
+)
 from apps.incidents.models import (
     ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
     TicketSubtask, TriageRecord, bundle_suffix_for_index,
@@ -267,6 +269,19 @@ class TicketVisibilityQuerysetTest(TestCase):
             title='Harden', assigned_to=self.forensic,
         )
         self.assertEqual(Ticket.objects.visible_to(self.forensic).count(), 1)
+
+    def test_response_team_legacy_subtask_does_not_expose_ticket(self):
+        # Response-only access: being handed an ordinary Investigation subtask on
+        # an unrelated ticket must NOT expose that ticket. Regression for the
+        # over-broad visible_to filter (was: any assigned subtask).
+        TicketSubtask.objects.create(
+            ticket=self.ticket_unassigned,
+            subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Dig into logs', assigned_to=self.forensic,
+        )
+        visible = Ticket.objects.visible_to(self.forensic)
+        self.assertNotIn(self.ticket_unassigned, visible)
+        self.assertEqual(list(visible), [self.ticket_a])  # only the response one
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -2628,6 +2643,21 @@ class ResponseRequestRoutingTest(TestCase):
             TicketSubtask.role_for_type(TicketSubtask.TYPE_INFRA_SEC),
             UserProfile.ROLE_REDTEAM_MANAGER,
         )
+
+    def test_legacy_subtask_form_excludes_response_team_users(self):
+        # Response-team accounts must not be assignable to legacy subtasks — that
+        # is the UI vector that would breach response-only visibility.
+        soc = _make_t1('rt_form_soc')
+        assignable = list(SubtaskForm().fields['assigned_to'].queryset)
+        self.assertIn(soc, assignable)
+        self.assertNotIn(self.forensic, assignable)
+        self.assertNotIn(self.redteam, assignable)
+
+    def test_response_request_form_choices_derive_from_model(self):
+        # DRY: form response-type choices must exactly mirror the model's
+        # RESPONSE_TYPES (single source of truth), not a hand-maintained copy.
+        form_codes = {code for code, _ in ResponseRequestForm.RESPONSE_TYPE_CHOICES}
+        self.assertEqual(form_codes, set(TicketSubtask.RESPONSE_TYPES))
 
     def test_forensic_rca_routes_to_forensic(self):
         self.assertEqual(

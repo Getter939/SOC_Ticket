@@ -544,6 +544,13 @@ _LEGACY_SUBTASK_TYPE_CHOICES = [
 ]
 
 
+# Response-team accounts must never receive an ordinary Investigation /
+# Countermeasure subtask: doing so would expose the whole ticket to them via
+# TicketQuerySet.visible_to. Exclude them from the legacy assignee picker so the
+# response-only access model cannot be breached through the UI.
+_RESPONSE_TEAM_ROLES = (UserProfile.ROLE_FORENSIC, UserProfile.ROLE_REDTEAM_MANAGER)
+
+
 class SubtaskForm(forms.ModelForm):
     subtask_type = forms.ChoiceField(
         choices=_LEGACY_SUBTASK_TYPE_CHOICES,
@@ -551,7 +558,9 @@ class SubtaskForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-select'}),
     )
     assigned_to = forms.ModelChoiceField(
-        queryset=User.objects.filter(is_active=True).order_by('first_name', 'username'),
+        queryset=User.objects.filter(is_active=True)
+        .exclude(profile__role__in=_RESPONSE_TEAM_ROLES)
+        .order_by('first_name', 'username'),
         required=False,
         label='ผู้รับผิดชอบ',
         empty_label='-- ยังไม่ระบุ --',
@@ -579,16 +588,22 @@ class ResponseRequestForm(forms.ModelForm):
     resolved in the view (auto-assign when a single role-holder exists, picker
     when several, blocked when none)."""
 
+    # Derived from the model's single source of truth so a future response-type
+    # change (add/rename/reorder) needs editing only TicketSubtask.TYPE_CHOICES.
     RESPONSE_TYPE_CHOICES = [
-        (TicketSubtask.TYPE_VA_PT, 'VA / Pentest'),
-        (TicketSubtask.TYPE_INFRA_SEC, 'Infrastructure Security'),
-        (TicketSubtask.TYPE_FORENSIC_RCA, 'Forensics / RCA'),
+        (code, label) for code, label in TicketSubtask.TYPE_CHOICES
+        if code in TicketSubtask.RESPONSE_TYPES
     ]
 
     subtask_type = forms.ChoiceField(
         choices=RESPONSE_TYPE_CHOICES,
         label='ประเภทคำขอ',
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+        # Stable id so the detail-page script can filter the assignee list by the
+        # chosen type (the two forms on the page would otherwise collide on the
+        # Django-default id_subtask_type).
+        widget=forms.Select(attrs={
+            'class': 'form-select form-select-sm', 'id': 'resp-type-select',
+        }),
     )
     assigned_to = forms.ModelChoiceField(
         queryset=User.objects.filter(
@@ -600,7 +615,9 @@ class ResponseRequestForm(forms.ModelForm):
         required=False,
         label='ผู้รับผิดชอบ (เว้นว่างเพื่อมอบหมายอัตโนมัติ)',
         empty_label='-- มอบหมายอัตโนมัติ --',
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+        widget=forms.Select(attrs={
+            'class': 'form-select form-select-sm', 'id': 'resp-assignee-select',
+        }),
     )
 
     class Meta:

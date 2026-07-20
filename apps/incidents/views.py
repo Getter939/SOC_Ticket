@@ -1022,6 +1022,22 @@ def ticket_detail(request, pk):
     response_request_form = ResponseRequestForm()
     can_create_subtask = request.user.is_superuser or (profile and profile.is_soc)
 
+    # Data for the spawn card's client-side assignee filter (view still validates
+    # the choice authoritatively). Only computed when the card is shown.
+    response_routing = {}
+    response_member_roles = {}
+    if can_request_response:
+        response_routing = TicketSubtask.response_routing()
+        response_member_roles = {
+            str(pk): role
+            for pk, role in User.objects.filter(
+                is_active=True,
+                profile__role__in=(
+                    UserProfile.ROLE_FORENSIC, UserProfile.ROLE_REDTEAM_MANAGER,
+                ),
+            ).values_list('pk', 'profile__role')
+        }
+
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         'logs': logs,
@@ -1045,6 +1061,8 @@ def ticket_detail(request, pk):
         'can_t2_reclassify': can_t2_reclassify,
         'can_request_response': can_request_response,
         'response_request_form': response_request_form,
+        'response_routing': response_routing,
+        'response_member_roles': response_member_roles,
         'RESPONSE_TYPES': list(TicketSubtask.RESPONSE_TYPES),
         'T1_ROUTE_ADMIN': Ticket.T1_ROUTE_ADMIN,
         'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,

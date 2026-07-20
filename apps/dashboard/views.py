@@ -638,7 +638,7 @@ def executive_dashboard(request):
             'filter': 'COURT_TIER2',
         },
         {
-            'label': 'เคสที่รอทีมตอบสนอง (Forensic / Red Team)',
+            'label': 'เคสที่รอทีมตอบสนอง (Forensic Analyst / Red Team Manager)',
             'count': response_pending,
             'level': 'waiting' if response_pending else 'good',
             'filter': 'RESPONSE_PENDING',

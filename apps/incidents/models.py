@@ -41,11 +41,11 @@ class TicketQuerySet(models.QuerySet):
         Return the subset of tickets the given user is allowed to see.
 
         Rules (single authoritative place — never bypass this):
-          - SOC staff / SOC manager   → all tickets
-          - System admin              → only tickets where assigned_admin == user
-          - Forensic / Red Team Mgr   → only tickets with a response request
-                                        assigned to them
-          - No profile / unknown role → empty queryset (safest default)
+          - SOC staff / SOC manager       → all tickets
+          - System admin                  → only tickets where assigned_admin == user
+          - Forensic Analyst / Red Team   → only tickets carrying a RESPONSE
+            Manager                         request assigned to them
+          - No profile / unknown role     → empty queryset (safest default)
         """
         if user.is_superuser:
             return self
@@ -58,10 +58,15 @@ class TicketQuerySet(models.QuerySet):
             return self.filter(assigned_admin=user)
         if profile.is_system_owner:
             return self.filter(system_owner=user)
-        # Response-team members see a ticket only while they hold a subtask on
-        # it. distinct() guards against duplicates when several are assigned.
+        # Response-team members get response-only access: a ticket is visible
+        # solely because it carries a RESPONSE-type request assigned to them —
+        # never because they were handed an ordinary Investigation/Countermeasure
+        # subtask. distinct() guards against duplicates when several are assigned.
         if profile.is_response_team:
-            return self.filter(subtasks__assigned_to=user).distinct()
+            return self.filter(
+                subtasks__assigned_to=user,
+                subtasks__subtask_type__in=TicketSubtask.RESPONSE_TYPES,
+            ).distinct()
         return self.none()
 
 
@@ -1349,14 +1354,14 @@ class Ticket(models.Model):
             )
 
         # 5c. Response-team gate: no path may close an Incident (→ APPROVED)
-        # while a response request (Forensic / Red Team) is still open. This
-        # covers the manager approval AND the Tier-2 direct-close paths, so a
-        # non-emergency incident with pending forensics cannot slip closed.
-        # CLOSED_EVENT is exempt (a reclassified false alarm still closes).
+        # while a response request (Forensic Analyst / Red Team Manager) is still
+        # open. This covers the manager approval AND the Tier-2 direct-close
+        # paths, so a non-emergency incident with pending forensics cannot slip
+        # closed. CLOSED_EVENT is exempt (a reclassified false alarm still closes).
         if new_status == self.STATUS_APPROVED and self.has_open_response_requests:
             raise ValidationError(
-                'ยังมีคำขอทีมตอบสนอง (Forensic / Red Team) ที่ยังไม่เสร็จสิ้น — '
-                'ต้องดำเนินการให้ครบก่อนจึงจะปิด Ticket (อนุมัติ) ได้'
+                'ยังมีคำขอทีมตอบสนอง (Forensic Analyst / Red Team Manager) '
+                'ที่ยังไม่เสร็จสิ้น — ต้องดำเนินการให้ครบก่อนจึงจะปิด Ticket (อนุมัติ) ได้'
             )
 
         # ── 6. Check permission ───────────────────────────────────────── #
@@ -1777,7 +1782,7 @@ class NotificationTemplate(models.Model):
         (KEY_MANAGER_TRIAGE_PENDING, 'แจ้งผู้จัดการ SOC — มี Incident รอตรวจก่อนมอบหมาย'),
         (KEY_OWNER_CREATED, 'แจ้งเจ้าของระบบ — เปิด Ticket ใหม่'),
         (KEY_OWNER_CLOSED, 'แจ้งเจ้าของระบบ — ปิด Ticket แล้ว'),
-        (KEY_RESPONSE_REQUEST_CREATED, 'แจ้งทีมตอบสนอง — มีคำขอใหม่ (Forensic / Red Team)'),
+        (KEY_RESPONSE_REQUEST_CREATED, 'แจ้งทีมตอบสนอง — มีคำขอใหม่ (Forensic Analyst / Red Team Manager)'),
         (KEY_RESPONSE_REQUEST_COMPLETED, 'แจ้งผู้จัดการ SOC — คำขอทีมตอบสนองเสร็จสิ้น'),
     ]
 

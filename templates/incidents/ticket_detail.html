@@ -175,7 +175,7 @@
     {% endif %}
 
     <section id="tasks" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย & คำขอทีมตอบสนอง</h2><div class="section-hint">งานคู่ขนาน (Investigation / Countermeasure) และคำขอ Forensic / Red Team</div></div>
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย & คำขอทีมตอบสนอง</h2><div class="section-hint">งานคู่ขนาน (Investigation / Countermeasure) และคำขอทีมตอบสนอง (Forensic Analyst / Red Team Manager)</div></div>
       <div class="card-body">
         {% for subtask in subtasks %}
         {% with is_resp=subtask.is_response_request %}
@@ -239,7 +239,7 @@
         <div class="card-header text-white fw-bold" style="background:#2f6fb2;"><i class="bi bi-shield-shaded me-1"></i>ส่งทีมตอบสนอง (Response Team)</div>
         <div class="card-body">
           {% if ticket.has_open_response_requests %}<div class="alert alert-info small py-2"><i class="bi bi-hourglass-split me-1"></i>มีคำขอที่ยังไม่เสร็จ — Ticket จะปิด (อนุมัติ) ไม่ได้จนกว่าจะดำเนินการครบ</div>{% endif %}
-          <p class="small text-muted mb-2">มอบหมายงานคู่ขนาน: VA/PT · Infra Security → หัวหน้าทีม Red Team, Forensics/RCA → เจ้าหน้าที่ Forensic</p>
+          <p class="small text-muted mb-2">มอบหมายงานคู่ขนาน: VA/PT · Infra Security → Red Team Manager, Forensics/RCA → Forensic Analyst</p>
           <form method="post" action="{% url 'create_response_request' ticket.pk %}" class="row g-2">{% csrf_token %}
             <div class="col-12">{{ response_request_form.subtask_type }}</div>
             <div class="col-12">{{ response_request_form.title }}</div>
@@ -247,6 +247,27 @@
             <div class="col-12">{{ response_request_form.assigned_to }}</div>
             <div class="col-12"><button class="btn btn-sm w-100 text-white" style="background:#2f6fb2;" type="submit"><i class="bi bi-send me-1"></i>ส่งคำขอทีมตอบสนอง</button></div>
           </form>
+          {{ response_routing|json_script:"resp-routing-data" }}
+          {{ response_member_roles|json_script:"resp-member-roles-data" }}
+          <script nonce="{{ request.csp_nonce }}">(function(){
+            var typeSel=document.getElementById('resp-type-select');
+            var asgSel=document.getElementById('resp-assignee-select');
+            if(!typeSel||!asgSel)return;
+            var routing=JSON.parse(document.getElementById('resp-routing-data').textContent);
+            var roles=JSON.parse(document.getElementById('resp-member-roles-data').textContent);
+            function sync(){
+              var wantRole=routing[typeSel.value];
+              Array.prototype.forEach.call(asgSel.options,function(opt){
+                if(opt.value===''){opt.hidden=false;opt.disabled=false;return;}
+                var ok=roles[opt.value]===wantRole;
+                opt.hidden=!ok;opt.disabled=!ok;
+              });
+              var cur=asgSel.selectedOptions[0];
+              if(cur&&cur.hidden){asgSel.value='';}
+            }
+            typeSel.addEventListener('change',sync);
+            sync();
+          })();</script>
         </div>
       </div>
       {% endif %}

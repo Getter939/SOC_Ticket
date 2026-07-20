@@ -370,6 +370,20 @@ class ResponseTeamUiTest(TestCase):
         resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
         self.assertNotContains(resp, 'ส่งทีมตอบสนอง (Response Team)')
 
+    def test_spawn_card_emits_assignee_filter_data(self):
+        # The client-side per-type assignee filter needs the routing map, each
+        # member's role, and the two stable select ids.
+        t = self._ticket()
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(resp, 'resp-type-select')
+        self.assertContains(resp, 'resp-assignee-select')
+        self.assertContains(resp, 'resp-routing-data')
+        self.assertContains(resp, 'resp-member-roles-data')
+        # The routing map must carry the real type→role pairs.
+        self.assertContains(resp, TicketSubtask.TYPE_FORENSIC_RCA)
+        self.assertContains(resp, UserProfile.ROLE_REDTEAM_MANAGER)
+
     def test_manager_spawn_auto_assigns_sole_role_holder(self):
         t = self._ticket()
         self.client.force_login(self.manager)
