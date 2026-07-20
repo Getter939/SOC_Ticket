@@ -67,6 +67,29 @@ class UiSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, f'#{self.ticket.ticket_id}')  # ticket is NEW
 
+    def test_manager_queue_is_distinct_from_active_incidents(self):
+        manager_ticket = _make_ticket(
+            ticket_id='UI-MANAGER-QUEUE',
+            created_by=self.soc_staff,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_PENDING_MGR_TRIAGE,
+        )
+        self.client.force_login(self.soc_manager)
+
+        queue = self.client.get(reverse('manager_queue'))
+        active = self.client.get(reverse('ticket_list'))
+
+        self.assertEqual(queue.status_code, 200)
+        self.assertContains(queue, manager_ticket.ticket_id)
+        self.assertNotContains(queue, self.ticket.ticket_id)
+        self.assertContains(active, manager_ticket.ticket_id)
+        self.assertContains(active, self.ticket.ticket_id)
+
+    def test_manager_queue_denies_non_managers(self):
+        self.client.force_login(self.soc_staff)
+        response = self.client.get(reverse('manager_queue'))
+        self.assertEqual(response.status_code, 403)
+
     def test_ticket_detail_renders_for_soc(self):
         self.client.force_login(self.soc_staff)
         resp = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
@@ -256,7 +279,7 @@ class WorkflowUiContractTest(TestCase):
         )
         other = self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
         self.client.force_login(self.manager)
-        listing = self.client.get(reverse('ticket_list'))
+        listing = self.client.get(reverse('manager_queue'))
         self.assertContains(listing, pending.ticket_id)
         self.assertContains(listing, triage.ticket_id)   # pre-containment review queue
         self.assertNotContains(listing, other.ticket_id)  # not the manager's work

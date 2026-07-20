@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q
@@ -283,9 +283,38 @@ def _consume_source_triage(triage, *, classification, ticket=None,
 @login_required
 def ticket_list(request):
     visible = Ticket.objects.visible_to(request.user)
+    return _render_ticket_list(
+        request,
+        visible,
+        page_title='Active Incidents',
+        heading='Active incidents',
+        description='Monitor every open case you are permitted to view.',
+    )
+
+
+@login_required
+def manager_queue(request):
+    """Action-required queue for SOC Manager review and approval steps only."""
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and profile and profile.is_soc_manager:
-        visible = visible.filter(status__in=Ticket.MANAGER_QUEUE_STATUSES)
+    if not request.user.is_superuser and (profile is None or not profile.is_soc_manager):
+        raise PermissionDenied('SOC Manager access is required for this queue.')
+
+    visible = Ticket.objects.visible_to(request.user).filter(
+        status__in=Ticket.MANAGER_QUEUE_STATUSES,
+    )
+    return _render_ticket_list(
+        request,
+        visible,
+        page_title='Manager Reviews',
+        heading='Manager reviews',
+        description='Cases waiting for your routing decision or emergency approval.',
+        is_manager_queue=True,
+    )
+
+
+def _render_ticket_list(request, visible, *, page_title, heading, description,
+                        is_manager_queue=False):
+    """Render a filtered, non-terminal ticket list with shared list controls."""
     tickets_qs = visible.exclude(
         status__in=list(Ticket.TERMINAL_STATUSES)
     ).select_related('assigned_admin', 'created_by')
@@ -309,6 +338,11 @@ def ticket_list(request):
         (code, label) for code, label in Ticket.STATUS_CHOICES
         if code not in Ticket.TERMINAL_STATUSES
     ]
+    if is_manager_queue:
+        active_status_choices = [
+            (code, label) for code, label in active_status_choices
+            if code in Ticket.MANAGER_QUEUE_STATUSES
+        ]
     if status_filter in dict(active_status_choices):
         tickets_qs = tickets_qs.filter(status=status_filter)
     else:
@@ -354,6 +388,10 @@ def ticket_list(request):
     ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
 
     return render(request, 'incidents/ticket_list.html', {
+        'page_title': page_title,
+        'heading': heading,
+        'description': description,
+        'is_manager_queue': is_manager_queue,
         'tickets': page_obj,
         'page_obj': page_obj,
         'result_count': paginator.count,

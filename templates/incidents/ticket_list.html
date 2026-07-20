@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Active Incidents — SOC Support System{% endblock %}
+{% block title %}{{ page_title|default:"Active Incidents" }} — SOC Support System{% endblock %}
 
 {% block content %}
 <style>
@@ -30,8 +30,11 @@
     .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h4 class="mb-0 fw-bold">รายการแจ้งเหตุที่รอดำเนินการ</h4>
-    <span class="text-muted small">{{ result_count }} เคส</span>
+    <div>
+        <h4 class="mb-0 fw-bold">{{ heading|default:"Active incidents" }}</h4>
+        {% if description %}<p class="text-muted small mb-0">{{ description }}</p>{% endif %}
+    </div>
+    <span class="text-muted small">{{ result_count }} cases</span>
 </div>
 
 {% if ola_breach_count %}

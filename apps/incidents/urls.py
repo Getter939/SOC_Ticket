@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     # Tickets
     path('', views.ticket_list, name='ticket_list'),
+    path('manager-queue/', views.manager_queue, name='manager_queue'),
     path('new/', views.create_ticket, name='create_ticket'),
     # Project Incident (Case Bundling) — one incident → many linked tickets
     path('project-incident/new/', views.create_project_incident, name='create_project_incident'),

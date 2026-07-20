@@ -243,8 +243,8 @@
 
     {% endif %}
     {% if request.user.is_superuser or not profile.is_system_owner %}
-    <div class="nav-section-label">Incidents</div>
     {% if request.user.is_superuser or profile.is_tier1 %}
+    <div class="nav-section-label">Intake</div>
     <a href="{% url 'triage_queue' %}" data-label="Wazuh Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
         <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Triage</span>
@@ -256,7 +256,18 @@
        class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,claim_manual_triage,release_manual_triage' %}active{% endif %}">
         <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
+    <a href="{% url 'create_ticket' %}" data-label="Open New Case"
+       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
+        <i class="bi bi-plus-square"></i> <span class="nav-label">Open New Case</span>
+    </a>
+    <a href="{% url 'create_project_incident' %}" data-label="Project Incident"
+       class="nav-link {% if request.resolver_match.url_name == 'create_project_incident' or request.resolver_match.url_name == 'project_incident_detail' %}active{% endif %}">
+        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident</span>
+    </a>
     {% endif %}
+
+    {% if request.user.is_superuser or profile.is_tier2 or profile.is_soc_manager or profile.is_response_team %}
+    <div class="nav-section-label">Work queues</div>
     {% if request.user.is_superuser or profile.is_tier2 %}
     <a href="{% url 'escalation_queue' %}" data-label="Tier 2 Queue"
        class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
@@ -267,9 +278,9 @@
     </a>
     {% endif %}
     {% if request.user.is_superuser or profile.is_soc_manager %}
-    <a href="{% url 'ticket_list' %}" data-label="SOC Manager Queue"
-       class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail' %}active{% endif %}">
-        <i class="bi bi-person-badge-fill"></i> <span class="nav-label">SOC Manager Queue</span>
+    <a href="{% url 'manager_queue' %}" data-label="Manager Reviews"
+       class="nav-link {% if request.resolver_match.url_name == 'manager_queue' %}active{% endif %}">
+        <i class="bi bi-person-badge-fill"></i> <span class="nav-label">Manager Reviews</span>
         {% if manager_queue_count %}
         <span class="badge bg-warning text-dark ms-auto">{{ manager_queue_count }}</span>
         {% endif %}
@@ -284,27 +295,20 @@
         {% endif %}
     </a>
     {% endif %}
+    {% endif %}
+
+    <div class="nav-section-label">Cases</div>
     <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
         <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
     </a>
-    {% if request.user.is_superuser or profile.is_tier1 %}
-    <a href="{% url 'create_ticket' %}" data-label="เปิดเคสใหม่"
-       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
-        <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
-    </a>
-    <a href="{% url 'create_project_incident' %}" data-label="Project Incident"
-       class="nav-link {% if request.resolver_match.url_name == 'create_project_incident' or request.resolver_match.url_name == 'project_incident_detail' %}active{% endif %}">
-        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident</span>
-    </a>
-    {% endif %}
-    <a href="{% url 'ticket_history' %}" data-label="ประวัติ Ticket"
+    <a href="{% url 'ticket_history' %}" data-label="Ticket History"
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
-        <i class="bi bi-archive-fill"></i> <span class="nav-label">ประวัติ Ticket</span>
+        <i class="bi bi-archive-fill"></i> <span class="nav-label">Ticket History</span>
     </a>
-    <a href="{% url 'global_search' %}" data-label="ค้นหา IOC"
+    <a href="{% url 'global_search' %}" data-label="IOC Search"
        class="nav-link {% if request.resolver_match.url_name == 'global_search' %}active{% endif %}">
-        <i class="bi bi-search"></i> <span class="nav-label">ค้นหา IOC</span>
+        <i class="bi bi-search"></i> <span class="nav-label">IOC Search</span>
     </a>
     {% endif %}
 
