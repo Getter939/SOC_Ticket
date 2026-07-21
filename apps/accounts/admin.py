@@ -6,7 +6,8 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
 
-from .models import UserProfile
+from .models import PasswordChangeAudit, UserProfile
+from .password_audit import password_audit_context
 from .passwords import send_password_reset_email
 
 
@@ -64,7 +65,8 @@ class UserAdmin(BaseUserAdmin):
     add_form = MyUserCreationForm
     inlines = (UserProfileInline,)
     actions = [send_welcome_email_action, send_password_reset_link]
-    list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff')
+    list_display = ('username', 'email', 'first_name', 'last_name', 'role', 'tier', 'is_staff')
+    list_select_related = ('profile',)
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
@@ -72,9 +74,29 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
 
+    @admin.display(description='Role', ordering='profile__role')
+    def role(self, obj):
+        """Show the profile's human-readable role in the user changelist."""
+        try:
+            return obj.profile.get_role_display()
+        except UserProfile.DoesNotExist:
+            return '—'
+
+    @admin.display(description='Tier', ordering='profile__tier')
+    def tier(self, obj):
+        """Show the profile's human-readable tier in the user changelist."""
+        try:
+            return obj.profile.get_tier_display() or '—'
+        except UserProfile.DoesNotExist:
+            return '—'
+
     def save_model(self, request, obj, form, change):
         is_new_user = not change and obj.pk is None
-        super().save_model(request, obj, form, change)
+        with password_audit_context(
+            source=PasswordChangeAudit.SOURCE_ADMIN,
+            actor=request.user,
+        ):
+            super().save_model(request, obj, form, change)
 
         if is_new_user and obj.email:
             try:
@@ -85,6 +107,34 @@ class UserAdmin(BaseUserAdmin):
                     request,
                     'User saved, but the first-password link could not be sent.',
                 )
+
+    def user_change_password(self, request, id, form_url=''):
+        with password_audit_context(
+            source=PasswordChangeAudit.SOURCE_ADMIN,
+            actor=request.user,
+        ):
+            return super().user_change_password(request, id, form_url)
+
+
+@admin.register(PasswordChangeAudit)
+class PasswordChangeAuditAdmin(admin.ModelAdmin):
+    """Expose credential history without ever exposing credential material."""
+
+    list_display = ('created_at', 'user', 'source', 'actor')
+    list_filter = ('source', 'created_at')
+    search_fields = ('user__username', 'actor__username')
+    list_select_related = ('user', 'actor')
+    ordering = ('-created_at',)
+    readonly_fields = ('user', 'actor', 'source', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 admin.site.unregister(User)

@@ -6,6 +6,8 @@ from django.contrib.auth.forms import PasswordResetForm
 from django.http import HttpResponseRedirect
 from django.urls import reverse_lazy
 
+from .models import PasswordChangeAudit
+from .password_audit import password_audit_context
 from .passwords import (
     password_reset_request_allowed,
     send_password_changed_notification,
@@ -50,7 +52,10 @@ class AccountPasswordResetConfirmView(auth_views.PasswordResetConfirmView):
     success_url = reverse_lazy('password_reset_complete')
 
     def form_valid(self, form):
-        response = super().form_valid(form)
+        with password_audit_context(
+            source=PasswordChangeAudit.SOURCE_SELF_SERVICE_RESET,
+        ):
+            response = super().form_valid(form)
         send_password_changed_notification(user=form.user)
         return response
 
@@ -60,7 +65,11 @@ class AccountPasswordChangeView(auth_views.PasswordChangeView):
     success_url = reverse_lazy('password_change_done')
 
     def form_valid(self, form):
-        response = super().form_valid(form)
+        with password_audit_context(
+            source=PasswordChangeAudit.SOURCE_SELF_SERVICE_CHANGE,
+            actor=self.request.user,
+        ):
+            response = super().form_valid(form)
         send_password_changed_notification(user=self.request.user)
         messages.success(self.request, 'Your password has been changed.')
         return response

@@ -26,7 +26,7 @@ INSTALLED_APPS = [
     'axes',   # login brute-force protection / account lockout
     # Project apps
     'apps.incidents',
-    'apps.accounts',
+    'apps.accounts.apps.AccountsConfig',
     'apps.dashboard',
     'apps.wazuh_ingest',
 ]

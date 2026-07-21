@@ -26,6 +26,8 @@ from django.core import mail
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
+from .models import PasswordChangeAudit
+
 
 class AntiFramingHeaderTest(TestCase):
     """CWE-1021: every page must carry anti-framing headers centrally."""
@@ -177,6 +179,11 @@ class PasswordManagementSecurityTest(TestCase):
         self.assertEqual(
             self.client.session['_auth_user_hash'], self.user.get_session_auth_hash()
         )
+        audit = PasswordChangeAudit.objects.get(
+            user=self.user,
+            source=PasswordChangeAudit.SOURCE_SELF_SERVICE_CHANGE,
+        )
+        self.assertEqual(audit.actor, self.user)
 
     def test_password_change_enforces_minimum_length(self):
         self.client.force_login(self.user)
@@ -211,6 +218,11 @@ class PasswordManagementSecurityTest(TestCase):
         reset_path = self._complete_reset()
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password('NewPassword!456'))
+        audit = PasswordChangeAudit.objects.get(
+            user=self.user,
+            source=PasswordChangeAudit.SOURCE_SELF_SERVICE_RESET,
+        )
+        self.assertIsNone(audit.actor)
 
         # Auth-hash rotation forces every pre-existing session to reauthenticate.
         response = other_session.get(reverse('home'))
@@ -239,3 +251,41 @@ class PasswordManagementSecurityTest(TestCase):
             self.assertRedirects(response, reverse('password_reset_done'))
 
         self.assertEqual(len(mail.outbox), 3)
+
+
+class PasswordChangeAuditTest(TestCase):
+    """Every supported password-update route records non-sensitive attribution."""
+
+    def test_direct_password_save_is_recorded_as_system_change(self):
+        user = User.objects.create_user('audit_system_user', password='OldPassword!123')
+        PasswordChangeAudit.objects.filter(user=user).delete()
+
+        user.set_password('NewPassword!456')
+        user.save(update_fields=['password'])
+
+        audit = PasswordChangeAudit.objects.get(user=user)
+        self.assertEqual(audit.source, PasswordChangeAudit.SOURCE_SYSTEM)
+        self.assertIsNone(audit.actor)
+
+    def test_admin_password_change_records_the_admin_actor(self):
+        admin_user = User.objects.create_superuser(
+            'audit_admin', 'audit-admin@example.test', 'AdminPassword!123',
+        )
+        target = User.objects.create_user(
+            'audit_target', 'audit-target@example.test', 'OldPassword!123',
+        )
+        PasswordChangeAudit.objects.filter(user=target).delete()
+        self.client.force_login(admin_user)
+
+        response = self.client.post(
+            reverse('admin:auth_user_password_change', args=(target.pk,)),
+            {
+                'password1': 'NewPassword!456',
+                'password2': 'NewPassword!456',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        audit = PasswordChangeAudit.objects.get(user=target)
+        self.assertEqual(audit.source, PasswordChangeAudit.SOURCE_ADMIN)
+        self.assertEqual(audit.actor, admin_user)

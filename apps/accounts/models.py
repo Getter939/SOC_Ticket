@@ -120,3 +120,40 @@ class PasswordResetRateLimit(models.Model):
                 name='accounts_password_reset_rate_limit_key',
             ),
         ]
+
+
+class PasswordChangeAudit(models.Model):
+    """Immutable audit metadata for password updates; passwords are never stored."""
+
+    SOURCE_SELF_SERVICE_CHANGE = 'SELF_SERVICE_CHANGE'
+    SOURCE_SELF_SERVICE_RESET = 'SELF_SERVICE_RESET'
+    SOURCE_ADMIN = 'ADMIN'
+    SOURCE_SYSTEM = 'SYSTEM'
+    SOURCE_CHOICES = [
+        (SOURCE_SELF_SERVICE_CHANGE, 'Self-service change'),
+        (SOURCE_SELF_SERVICE_RESET, 'Password-reset link'),
+        (SOURCE_ADMIN, 'Django admin'),
+        (SOURCE_SYSTEM, 'System / management command'),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_change_audits',
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='password_change_actions',
+    )
+    source = models.CharField(max_length=24, choices=SOURCE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        indexes = [models.Index(fields=('user', 'created_at'))]
+
+    def __str__(self):
+        return f'Password change for {self.user.username} at {self.created_at:%Y-%m-%d %H:%M:%S}'
