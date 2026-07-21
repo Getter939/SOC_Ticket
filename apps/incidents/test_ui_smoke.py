@@ -501,4 +501,4 @@ class ResponseTeamUiTest(TestCase):
     def test_nav_shows_response_queue_for_forensic(self):
         self.client.force_login(self.forensic)
         resp = self.client.get(reverse('response_request_queue'))
-        self.assertContains(resp, 'งานตอบสนอง (Response)')
+        self.assertContains(resp, 'Response Requests')

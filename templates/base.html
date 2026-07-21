@@ -224,21 +224,21 @@
     {% with profile=request.user.profile %}
 
     {% if request.user.is_superuser or profile.is_soc %}
-    <div class="nav-section-label">หลัก</div>
-    <a href="{% url 'home' %}" data-label="Dashboard"
+    <div class="nav-section-label">Overview</div>
+    <a href="{% url 'home' %}" data-label="SOC Dashboard"
        class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
-        <i class="bi bi-speedometer2"></i> <span class="nav-label">Dashboard</span>
+        <i class="bi bi-speedometer2"></i> <span class="nav-label">SOC Dashboard</span>
     </a>
     {% endif %}
     {% if request.user.is_superuser or profile.is_executive %}
-    <a href="{% url 'executive_dashboard' %}" data-label="แดชบอร์ดผู้บริหาร"
+    <a href="{% url 'executive_dashboard' %}" data-label="Executive Dashboard"
        class="nav-link {% if request.resolver_match.url_name == 'executive_dashboard' %}active{% endif %}">
-        <i class="bi bi-briefcase-fill"></i> <span class="nav-label">แดชบอร์ดผู้บริหาร</span>
+        <i class="bi bi-briefcase-fill"></i> <span class="nav-label">Executive Dashboard</span>
     </a>
     {% endif %}
 
     {% if request.user.is_superuser or profile.is_system_owner %}
-    <div class="nav-section-label">ระบบของฉัน</div>
+    <div class="nav-section-label">My Systems</div>
     <a href="{% url 'system_owner_dashboard' %}" data-label="My Tickets"
        class="nav-link {% if request.resolver_match.url_name == 'system_owner_dashboard' %}active{% endif %}">
         <i class="bi bi-building"></i> <span class="nav-label">My Tickets</span>
@@ -247,10 +247,10 @@
     {% endif %}
     {% if request.user.is_superuser or not profile.is_system_owner %}
     {% if request.user.is_superuser or profile.is_tier1 %}
-    <div class="nav-section-label">Intake</div>
-    <a href="{% url 'triage_queue' %}" data-label="Wazuh Triage"
+    <div class="nav-section-label">Intake &amp; Triage</div>
+    <a href="{% url 'triage_queue' %}" data-label="Wazuh Alert Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
-        <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Triage</span>
+        <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Alert Triage</span>
         {% if pending_triage_count %}
         <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
         {% endif %}
@@ -259,18 +259,18 @@
        class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,claim_manual_triage,release_manual_triage' %}active{% endif %}">
         <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
-    <a href="{% url 'create_ticket' %}" data-label="Open New Case"
+    <a href="{% url 'create_ticket' %}" data-label="Open New Ticket"
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
-        <i class="bi bi-plus-square"></i> <span class="nav-label">Open New Case</span>
+        <i class="bi bi-plus-square"></i> <span class="nav-label">Open New Ticket</span>
     </a>
-    <a href="{% url 'create_project_incident' %}" data-label="Project Incident"
+    <a href="{% url 'create_project_incident' %}" data-label="Project Incident (Multi-System)"
        class="nav-link {% if request.resolver_match.url_name == 'create_project_incident' or request.resolver_match.url_name == 'project_incident_detail' %}active{% endif %}">
-        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident</span>
+        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident (Multi-System)</span>
     </a>
     {% endif %}
 
     {% if request.user.is_superuser or profile.is_tier2 or profile.is_soc_manager or profile.is_response_team %}
-    <div class="nav-section-label">Work queues</div>
+    <div class="nav-section-label">Work Queues</div>
     {% if request.user.is_superuser or profile.is_tier2 %}
     <a href="{% url 'escalation_queue' %}" data-label="Tier 2 Queue"
        class="nav-link {% if request.resolver_match.url_name == 'escalation_queue' %}active{% endif %}">
@@ -281,18 +281,18 @@
     </a>
     {% endif %}
     {% if request.user.is_superuser or profile.is_soc_manager %}
-    <a href="{% url 'manager_queue' %}" data-label="Manager Reviews"
+    <a href="{% url 'manager_queue' %}" data-label="Manager Review"
        class="nav-link {% if request.resolver_match.url_name == 'manager_queue' %}active{% endif %}">
-        <i class="bi bi-person-badge-fill"></i> <span class="nav-label">Manager Reviews</span>
+        <i class="bi bi-person-badge-fill"></i> <span class="nav-label">Manager Review</span>
         {% if manager_queue_count %}
         <span class="badge bg-warning text-dark ms-auto">{{ manager_queue_count }}</span>
         {% endif %}
     </a>
     {% endif %}
     {% if request.user.is_superuser or profile.is_soc_manager or profile.is_response_team %}
-    <a href="{% url 'response_request_queue' %}" data-label="งานตอบสนอง"
+    <a href="{% url 'response_request_queue' %}" data-label="Response Requests"
        class="nav-link {% if request.resolver_match.url_name == 'response_request_queue' %}active{% endif %}">
-        <i class="bi bi-shield-shaded"></i> <span class="nav-label">งานตอบสนอง (Response)</span>
+        <i class="bi bi-shield-shaded"></i> <span class="nav-label">Response Requests</span>
         {% if response_request_queue_count %}
         <span class="badge bg-info text-dark ms-auto">{{ response_request_queue_count }}</span>
         {% endif %}
@@ -300,10 +300,10 @@
     {% endif %}
     {% endif %}
 
-    <div class="nav-section-label">Cases</div>
-    <a href="{% url 'ticket_list' %}" data-label="Active Incidents"
+    <div class="nav-section-label">Tickets</div>
+    <a href="{% url 'ticket_list' %}" data-label="Active Tickets"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
-        <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Incidents</span>
+        <i class="bi bi-shield-exclamation"></i> <span class="nav-label">Active Tickets</span>
     </a>
     <a href="{% url 'ticket_history' %}" data-label="Ticket History"
        class="nav-link {% if request.resolver_match.url_name == 'ticket_history' %}active{% endif %}">
@@ -318,7 +318,7 @@
     {% endwith %}
 
     {% if request.user.is_superuser or profile.is_soc_manager %}
-    <div class="nav-section-label">ระบบ</div>
+    <div class="nav-section-label">System Settings</div>
     <a href="/admin/" data-label="Admin Panel" class="nav-link">
         <i class="bi bi-gear-fill"></i> <span class="nav-label">Admin Panel</span>
     </a>

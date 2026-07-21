@@ -97,7 +97,7 @@ class DashboardAccessTest(TestCase):
         self.client.force_login(self.sys_admin)
         response = self.client.get(reverse('ticket_list'))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-label="Dashboard"')
+        self.assertNotContains(response, 'data-label="SOC Dashboard"')
 
     def test_response_team_is_redirected_to_their_queue(self):
         """Response-only access: Forensic / Red Team must not see org-wide
@@ -122,7 +122,7 @@ class DashboardAccessTest(TestCase):
         self.client.force_login(forensic)
         response = self.client.get(reverse('response_request_queue'))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-label="Dashboard"')
+        self.assertNotContains(response, 'data-label="SOC Dashboard"')
 
     def test_unauthenticated_user_redirected_to_login(self):
         response = self.client.get(DASHBOARD_URL)
@@ -603,11 +603,11 @@ class ExecutiveDashboardViewTest(TestCase):
 
     def test_sidebar_link_visible_only_to_executive_or_superuser(self):
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertIn('แดชบอร์ดผู้บริหาร', html)
+        self.assertIn('Executive Dashboard', html)
 
         self.client.force_login(self.soc)
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertNotIn('แดชบอร์ดผู้บริหาร', html)
+        self.assertNotIn('Executive Dashboard', html)
 
     def _ticket(
         self,

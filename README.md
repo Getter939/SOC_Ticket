@@ -2,6 +2,10 @@
 
 Django-based SOC (Security Operations Centre) ticketing and case-management app.
 
+**New here?** Read [CONTEXT.md](CONTEXT.md) for the domain vocabulary, then
+[docs/handover/HANDOVER.md](docs/handover/HANDOVER.md) for the full technical tour (state
+machine, roles, OLA policy, deployment, known gotchas).
+
 ## Setup
 
 ### 1. Create and activate a virtual environment
@@ -113,10 +117,24 @@ To populate the database with synthetic ticket data for dashboard testing:
 python manage.py seed_data
 ```
 
-This creates 100 tickets spread over the last 30 days, covering all 8 ticket
-statuses, both `INCIDENT` and `EVENT` classifications, and all severity levels.
-Five seed users are created automatically (T1 analyst, T2 analyst, SOC manager,
-system admin, system owner), each with a matching `UserProfile`.
+This creates 100 tickets spread over the last 30 days in a random weighted mix,
+covering both `INCIDENT` and `EVENT` classifications and all severity levels.
+
+> **Note:** `seed_data` predates the four newer states (`PENDING_MGR_TRIAGE`,
+> `AWAITING_OWNER`, `OWNER_REMEDIATED`, `PENDING_T2_REVIEW`) and does not
+> produce them. Use `seed_uat_states` below to get all 12 states.
+
+Seven seed users are created automatically, each with a matching `UserProfile`:
+
+| Username | Role |
+|---|---|
+| `seed_t1` | SOC Staff, Tier 1 |
+| `seed_t2` | SOC Staff, Tier 2 |
+| `seed_manager` | SOC Manager |
+| `seed_sysadmin` | System Admin |
+| `seed_sysowner` | System Owner |
+| `seed_forensic` | Forensic Analyst |
+| `seed_redteam` | Red Team Manager |
 
 **Options**
 
@@ -140,3 +158,13 @@ python manage.py seed_data --flush --tickets 0
 
 All seeded rows are tagged with the `seed_` username prefix, so seed data can
 always be identified or removed cleanly without affecting real data.
+
+### Other seed commands
+
+| Command | What it builds |
+|---------|----------------|
+| `seed_uat_states` | One ticket parked in **each of the 12** lifecycle states — the fastest way to see every screen without walking the whole workflow. Deterministic, tagged with a `uat_` prefix so `--flush` removes exactly its own rows. `--per-state N` for more per state |
+| `seed_response_demo` | Tickets with open and completed Response Requests, for the response-team queues and the approval gate |
+| `seed_dashboard_mockup` | Demo/screenshot dataset for the main dashboard |
+| `seed_ola_demo_buckets` | Dataset shaped to fill every OLA-pressure bucket |
+| `seed_ceo_demo` | Executive-dashboard demo dataset |

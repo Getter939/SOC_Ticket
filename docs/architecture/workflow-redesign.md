@@ -13,7 +13,7 @@ Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 ## 0. 2026-07-14 update — SOC Manager pre-containment review
 
 Layered on top of the 2026-07-08 redesign below. Diagram source of truth:
-`docs/soc-ticket-flow.md`. Migration `incidents/0044` (additive: new `t1_route`
+`soc-ticket-flow.md`. Migration `incidents/0044` (additive: new `t1_route`
 field + `PENDING_MGR_TRIAGE` status choice + `MANAGER_TRIAGE_PENDING` template key).
 
 **New blocking state `PENDING_MGR_TRIAGE`.** Every Incident now passes through the
@@ -88,7 +88,7 @@ UI until the request completes rather than erroring on submit.
 
 **Surfaces updated:** manager spawn card + open-request warning on the ticket
 detail, responder update panel (status / notes / file) in the subtask section,
-"My Requests" queue (`/incidents/response-requests/`) + nav badge, restricted
+"Response Requests" queue (`/incidents/response-requests/`) + nav badge, restricted
 legacy subtask form (Investigation / Countermeasure only), a cross-cutting
 "รอทีมตอบสนอง" row on the executive summary (with `?f=RESPONSE_PENDING`
 drill-down), admin registration for `TicketAttachment`, and seed/test accounts.

@@ -16,13 +16,41 @@
         margin: -0.25rem 0 1rem;
         border-bottom: 1px solid #e3e6ea;
     }
+    .dash-filterbar .filter-layout {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+    }
     .dash-filterbar .btn-group .btn { font-size: 13px; }
-    .dash-filterbar select.form-select-sm { font-size: 13px; min-width: 150px; }
+    .dash-filterbar .filter-form {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0;
+    }
+    .dash-filterbar .filter-field {
+        display: flex;
+        flex: 0 1 auto;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 0;
+        white-space: nowrap;
+    }
+    .dash-filterbar select.form-select-sm { font-size: 13px; min-width: 120px; }
     .mini-label { font-size: 13px; }
-    /* Below ~sm the 150px floor pushes the Severity select off-screen; let the
-       selects share the row and shrink instead. */
+    /* Keep the time buttons and both filter controls on one row when the
+       desktop content area has room for them. */
+    @media (min-width: 992px) {
+        .dash-filterbar .filter-layout { flex-wrap: nowrap; }
+    }
+    /* On phones, Status and Severity still share one line and their selects
+       shrink evenly instead of pushing one control to the next line. */
     @media (max-width: 575.98px) {
-        .dash-filterbar select.form-select-sm { min-width: 0; flex: 1 1 7rem; }
+        .dash-filterbar .filter-form { width: 100%; gap: 0.5rem; }
+        .dash-filterbar .filter-field { flex: 1 1 0; }
+        .dash-filterbar select.form-select-sm { min-width: 0; width: 100%; }
     }
 
     /* ── Flat bordered stat cards (border-only, top accent, no shadow) ── */
@@ -147,7 +175,7 @@
 
 <!-- ── Sticky filter bar ───────────────────────────────────────────────────── -->
 <div class="dash-filterbar">
-    <div class="d-flex flex-wrap align-items-center gap-3">
+    <div class="filter-layout">
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
             {% with q_status=filters.status q_sev=filters.severity %}
             <a href="?date_range=today{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
@@ -161,22 +189,26 @@
             {% endwith %}
         </div>
 
-        <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-0">
+        <form method="get" class="filter-form">
             <input type="hidden" name="date_range" value="{{ filters.date_range }}">
-            <label class="mini-label text-muted mb-0" for="dash-filter-status">Status</label>
-            <select name="status" id="dash-filter-status" class="form-select form-select-sm js-autosubmit">
-                <option value="">All</option>
-                {% for code, label in status_choices %}
-                <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-            </select>
-            <label class="mini-label text-muted mb-0" for="dash-filter-severity">Severity</label>
-            <select name="severity" id="dash-filter-severity" class="form-select form-select-sm js-autosubmit">
-                <option value="">All</option>
-                {% for code, label in severity_choices %}
-                <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-            </select>
+            <div class="filter-field">
+                <label class="mini-label text-muted mb-0" for="dash-filter-status">Status</label>
+                <select name="status" id="dash-filter-status" class="form-select form-select-sm js-autosubmit">
+                    <option value="">All</option>
+                    {% for code, label in status_choices %}
+                    <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-field">
+                <label class="mini-label text-muted mb-0" for="dash-filter-severity">Severity</label>
+                <select name="severity" id="dash-filter-severity" class="form-select form-select-sm js-autosubmit">
+                    <option value="">All</option>
+                    {% for code, label in severity_choices %}
+                    <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <noscript><button type="submit" class="btn btn-sm btn-primary">Filter</button></noscript>
         </form>
     </div>
@@ -309,9 +341,6 @@
                 <div id="threatTypesLegend" class="threat-legend"
                      aria-label="Threat type legend"></div>
             </div>
-            {# Wrapped in a div: .visually-hidden's width:1px is only a *minimum*
-               on a table, so a bare table still lays out at full content width
-               and stretches the document (and the fixed topbar) on mobile. #}
             <div class="visually-hidden">
             <table>
                 <caption>Tickets by threat type</caption>

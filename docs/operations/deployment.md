@@ -121,8 +121,10 @@ from step 3.
 3. On the same page, fill in the **User profile** section:
    - **Department** / **Phone** — free text
    - **Role** — determines what the user can see/do (see table below)
-   - **Tier** — `T1`/`T2`, SOC Staff only; a seniority label with no
-     permission effect
+   - **Tier** — `T1`/`T2`, SOC Staff only. **Tier gates permissions**, it is
+     not just a seniority label: only Tier 1 opens tickets and drives the
+     Tier-1 side of the lifecycle; Tier 2 handles escalations and verification
+     and can never create tickets or assign admins.
 4. Click **Save**. If `EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD` are set in
    `.env`, the user is automatically emailed their username and password.
 
@@ -130,10 +132,13 @@ from step 3.
 
 | Role | What they can do |
 |---|---|
-| **SOC Staff** | Create and work all tickets |
-| **SOC Manager** | Same as SOC Staff, plus approve verified tickets (VERIFIED → APPROVED) |
+| **SOC Staff — Tier 1** | Opens tickets (Wazuh alert, manual triage, or direct), sets classification, picks the handling route, tracks the Direct-to-Owner lane |
+| **SOC Staff — Tier 2** | Works escalations and both verification queues (`CONTAINMENT_REPORTED`, `PENDING_T2_REVIEW`); closes non-emergency tickets |
+| **SOC Manager** | Runs the pre-containment review (`PENDING_MGR_TRIAGE`) — the only role that may set the Emergency flag — forwards to the handling lane, spawns Response Requests, and approves emergency tickets (`PENDING_MANAGER → APPROVED`) |
 | **System Admin** | Only sees tickets where they're the *assigned admin*; submits containment reports |
 | **System Owner** | Notified when a ticket opens/closes for a system they own; has a dedicated "My Tickets" view (`/incidents/my-tickets/`) for those tickets |
+| **Forensic Analyst** | Response-team role; sees only tickets carrying a Forensics/RCA Response Request assigned to them, worked from the "Response Requests" queue |
+| **Red Team Manager** | Response-team role; receives VA/Pentest and Infrastructure Security Response Requests |
 
 ### Resending credentials / password resets
 
