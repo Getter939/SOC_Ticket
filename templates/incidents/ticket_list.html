@@ -141,7 +141,7 @@
                     </td>
                     <td>
                         <div class="fw-semibold small">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
-                        <div class="text-muted" style="font-size:0.75rem;">{{ ticket.device_name }} → {{ ticket.ip_address }}</div>
+                        <div class="text-muted" style="font-size:0.75rem;">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → {{ ticket.ip_address }}{% endif %}</div>
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
                     <td>

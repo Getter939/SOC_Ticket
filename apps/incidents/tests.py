@@ -2837,3 +2837,139 @@ class ResponseRequestNotificationTest(TestCase):
         self.assertTrue(notify_response_request_completed(st))
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ['mgr@example.com'])
+
+
+# ── Template/markup regression tests (2026-07 UX audit) ──────────────────── #
+
+class TemplateMarkupRegressionTest(TestCase):
+    """
+    Guards template-level fixes from the 2026-07 visual audit that are easy to
+    silently reintroduce when editing markup.
+    """
+
+    @staticmethod
+    def _source(template_name):
+        from django.template.loader import get_template
+        return get_template(template_name).template.source
+
+    def test_t1_route_script_carries_csp_nonce(self):
+        """
+        Every inline <script> needs the nonce — script-src has no
+        'unsafe-inline', so a bare tag is silently dropped and the Tier-1
+        route toggle stops hiding the System Admin picker.
+        """
+        source = self._source('incidents/ticket_detail.html')
+        bare = re.findall(r'<script(?![^>]*\bnonce=)[^>]*>', source)
+        self.assertEqual(bare, [], f'inline script(s) without a CSP nonce: {bare}')
+
+    def test_status_badge_can_suppress_duplicate_emergency_flag(self):
+        """The detail hero renders its own light EMERGENCY badge."""
+        partial = self._source('incidents/_status_badge.html')
+        self.assertIn('not hide_emergency', partial)
+        detail = self._source('incidents/ticket_detail.html')
+        self.assertIn('hide_emergency=True', detail)
+
+    def test_history_truncation_uses_inner_block(self):
+        """
+        text-truncate needs a block box: on a <td> under auto table layout the
+        max-width is ignored and the full description renders.
+        """
+        source = self._source('incidents/ticket_history.html')
+        self.assertNotIn('<td class="text-truncate"', source)
+        self.assertIn('<div class="text-truncate"', source)
+
+    def test_page_titles_use_em_dash_separator(self):
+        templates = [
+            'incidents/ticket_detail.html', 'incidents/triage_list.html',
+            'incidents/triage_form.html', 'wazuh_ingest/triage_queue.html',
+            'wazuh_ingest/escalation_queue.html', 'dashboard/dashboard.html',
+        ]
+        for name in templates:
+            with self.subTest(template=name):
+                title = re.search(
+                    r'{% block title %}(.*?){% endblock %}', self._source(name))
+                self.assertIsNotNone(title)
+                self.assertNotIn(' - ', title.group(1))
+                self.assertIn(' — ', title.group(1))
+
+    def test_ticket_form_labels_are_associated(self):
+        """
+        Every .form-label either points at a control (for=) or is a group
+        heading wired up with aria-labelledby — no orphan labels.
+        """
+        source = self._source('incidents/ticket_form.html')
+        orphans = re.findall(
+            r'<label class="form-label[^"]*"(?![^>]*\bfor=)[^>]*>', source)
+        self.assertEqual(orphans, [], f'labels without for=: {orphans}')
+
+    def test_ticket_form_radio_groups_are_labelled(self):
+        source = self._source('incidents/ticket_form.html')
+        for group_id in ['severity-group', 'ncsa-severity-group',
+                         'spread-group', 'asset-type-group']:
+            with self.subTest(group=group_id):
+                self.assertIn(f'aria-labelledby="{group_id}-label"', source)
+                self.assertIn(f'id="{group_id}-label"', source)
+
+
+class LoginRedirectsAuthenticatedUserTest(TestCase):
+    """
+    An authenticated visitor hitting /login/ used to get the login form
+    rendered inside the full app shell (sidebar, nav badges, user pill).
+    """
+
+    def test_authenticated_user_is_redirected_away_from_login(self):
+        user = User.objects.create_user(username='already_in', password='pw')
+        UserProfile.objects.create(user=user, role=UserProfile.ROLE_SOC_STAFF,
+                                   tier=UserProfile.TIER_T1)
+        self.client.force_login(user)
+        resp = self.client.get(reverse('login'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_anonymous_user_still_gets_the_form(self):
+        resp = self.client.get(reverse('login'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="username"')
+
+
+class T1RouteToggleCspTest(TestCase):
+    """
+    The Tier-1 route toggle is an inline <script>. script-src has no
+    'unsafe-inline', so without a nonce the browser drops it and the System
+    Admin picker stays visible and required even on the Direct-to-Owner route.
+    """
+
+    def setUp(self):
+        self.t1 = _make_t1('t1_route_user')
+        self.ticket = _make_ticket(
+            status=Ticket.STATUS_T1_REVIEW,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            created_by=self.t1,
+        )
+        self.client.force_login(self.t1)
+
+    def test_route_toggle_script_nonce_matches_csp_header(self):
+        resp = self.client.get(
+            reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+
+        # The panel carrying the toggle must actually be on the page.
+        self.assertIn('id="t1-route-form"', html)
+
+        script = re.search(
+            r'<script([^>]*)>\(function\(\)\{var f=document\.getElementById\('
+            r"'t1-route-form'\)", html)
+        self.assertIsNotNone(script, 'route-toggle script not found')
+
+        nonce = re.search(r'nonce="([^"]+)"', script.group(1))
+        self.assertIsNotNone(nonce, 'route-toggle script has no nonce')
+
+        csp = resp.headers.get('Content-Security-Policy', '')
+        self.assertIn(f"'nonce-{nonce.group(1)}'", csp)
+
+    def test_no_inline_script_on_the_page_is_missing_a_nonce(self):
+        resp = self.client.get(
+            reverse('ticket_detail', args=[self.ticket.pk]))
+        html = resp.content.decode()
+        bare = re.findall(r'<script(?![^>]*\bnonce=)(?![^>]*\bsrc=)[^>]*>', html)
+        self.assertEqual(bare, [], f'inline script(s) without a nonce: {bare}')

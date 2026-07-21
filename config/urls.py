@@ -13,7 +13,11 @@ urlpatterns = [
     path('incidents/', include('apps.incidents.urls')),
     path('accounts/', include('apps.accounts.urls')),
     path('wazuh/', include('apps.wazuh_ingest.urls')),
-    path('login/', auth_views.LoginView.as_view(), name='login'),
+    # redirect_authenticated_user: without it an already-signed-in visitor gets
+    # the login form rendered inside the full app shell (sidebar, nav badges,
+    # user pill), which reads as a broken/logged-out state.
+    path('login/', auth_views.LoginView.as_view(redirect_authenticated_user=True),
+         name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('password-reset/', account_views.ThrottledPasswordResetView.as_view(),
          name='password_reset'),

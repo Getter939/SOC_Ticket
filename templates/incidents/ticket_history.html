@@ -130,11 +130,18 @@
                             {% endif %}
                         </td>
                         <td>{{ ticket.device_name }}</td>
-                        <td class="text-truncate" style="max-width: 150px;">{{ ticket.issue_description }}</td>
+                        {# text-truncate needs a block box — on a <td> under auto
+                           table layout max-width is ignored and the full text
+                           renders, so the clamp lives on an inner div. #}
+                        <td>
+                            <div class="text-truncate" style="max-width: 150px;"
+                                 title="{{ ticket.issue_description }}">{{ ticket.issue_description }}</div>
+                        </td>
                         <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
-                        <td class="text-truncate" style="max-width: 150px;">
+                        <td>
                             {% with last_log=ticket.logs.first %}
-                                {% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}
+                            <div class="text-truncate" style="max-width: 150px;"
+                                 {% if last_log %}title="{{ last_log.note }}"{% endif %}>{% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}</div>
                             {% endwith %}
                         </td>
                         <td>{{ ticket.created_at|date:"d/m/Y" }}</td>

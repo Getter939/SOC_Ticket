@@ -83,7 +83,11 @@ DATABASES = {
         'PASSWORD': config('DB_PASSWORD'),
         'HOST': config('DB_HOST'),
         'PORT': config('DB_PORT'),
-        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=0, cast=int),
+        # Reuse the small, fixed Gunicorn worker pool's PostgreSQL connections.
+        # This avoids reconnect/authentication overhead on every request. Set
+        # DB_CONN_MAX_AGE=0 only for environments that require short-lived
+        # connections or manage them through an external pool.
+        'CONN_MAX_AGE': config('DB_CONN_MAX_AGE', default=300, cast=int),
         'CONN_HEALTH_CHECKS': True,
         'OPTIONS': {
             'sslmode': config('DB_SSLMODE', default='prefer'),

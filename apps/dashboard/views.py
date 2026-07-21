@@ -71,6 +71,23 @@ _ANALYST_BLOCKED_STATUSES = [
     Ticket.STATUS_PENDING_MANAGER,
 ]
 
+
+def humanize_minutes(total_minutes):
+    """
+    Render a minute count as a compact duration ('3d 2h', '2h 15m', '45m').
+
+    Magnitude only — the sign is the caller's to interpret, since an overdue
+    deadline reads as "overdue by 3d 2h" rather than a negative number.
+    """
+    minutes = abs(int(total_minutes))
+    days, rem = divmod(minutes, 1440)
+    hours, mins = divmod(rem, 60)
+    if days:
+        return f'{days}d {hours}h' if hours else f'{days}d'
+    if hours:
+        return f'{hours}h {mins}m' if mins else f'{hours}h'
+    return f'{mins}m'
+
 @login_required
 def dashboard(request):
     # System Owners see their own portal, not the SOC dashboard
@@ -81,6 +98,13 @@ def dashboard(request):
     if not request.user.is_superuser and profile and profile.is_system_admin:
         from django.shortcuts import redirect
         return redirect('ticket_list')
+    # Response teams (Forensic Analyst / Red Team Manager) work single requests
+    # under a response-only access model — org-wide aggregates (active counts,
+    # per-analyst workload, MTTR) are outside their need-to-know. Send them to
+    # their own queue, mirroring the System Admin rule above.
+    if not request.user.is_superuser and profile and profile.is_response_team:
+        from django.shortcuts import redirect
+        return redirect('response_request_queue')
 
     today = timezone.now()
     now   = today
@@ -252,10 +276,13 @@ def dashboard(request):
         .first()
     )
     if crit_soonest:
+        _minutes_remaining = round(
+            (crit_soonest['ola_contain_deadline'] - now).total_seconds() / 60)
         critical_soonest_deadline = {
             'ticket_id': crit_soonest['ticket_id'],
-            'minutes_remaining': round(
-                (crit_soonest['ola_contain_deadline'] - now).total_seconds() / 60),
+            'minutes_remaining': _minutes_remaining,
+            'overdue': _minutes_remaining < 0,
+            'label': humanize_minutes(_minutes_remaining),
         }
     else:
         critical_soonest_deadline = None

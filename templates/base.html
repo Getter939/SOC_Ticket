@@ -79,6 +79,9 @@
             transition: opacity var(--sidebar-transition);
         }
         #sidebar .nav-link {
+            /* Containing block for the collapsed-rail badge, which positions
+               itself against the link's icon rather than the sidebar. */
+            position: relative;
             color: var(--sidebar-text);
             padding: 0.6rem 1.25rem;
             border-radius: 0;

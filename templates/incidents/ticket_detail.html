@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Ticket #{{ ticket.ticket_id }} - SOC Support System{% endblock %}
+{% block title %}Ticket #{{ ticket.ticket_id }} — SOC Support System{% endblock %}
 {% block content %}
 <style>
   .ticket-hero { border-radius:1rem; padding:1.4rem 1.5rem; background:linear-gradient(135deg,#14213d,#234a7d); color:#fff; box-shadow:0 .5rem 1.5rem rgba(20,33,61,.16); }
@@ -7,6 +7,8 @@
   .ticket-kicker { font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; opacity:.75; }
   .ticket-title { font-size:clamp(1.25rem,2.3vw,1.8rem); line-height:1.25; }
   .ticket-hero .hero-summary { max-width:820px; color:rgba(255,255,255,.82); font-size:.88rem; }
+  /* Bootstrap's .text-muted is a dark grey — unreadable on the hero gradient. */
+  .ticket-hero .hero-subtle { color:rgba(255,255,255,.78); font-size:.88rem; }
   .snapshot-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
   .snapshot-card { background:#fff; border:1px solid #e6e9ef; border-radius:.8rem; padding:.9rem 1rem; min-height:86px; box-shadow:0 .15rem .65rem rgba(20,33,61,.05); }
   .snapshot-label { color:#6c757d; font-size:.7rem; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.3rem; }
@@ -56,10 +58,10 @@
     <div>
       <div class="ticket-kicker mb-1">Incident workspace · Ticket #{{ ticket.ticket_id }}</div>
       <h1 class="ticket-title fw-bold mb-2">{{ ticket.device_name }}</h1>
-      {% if ticket.incident_name %}<div class="text-muted mb-2"><i class="bi bi-tag me-1"></i>{{ ticket.incident_name }}</div>{% endif %}
+      {% if ticket.incident_name %}<div class="hero-subtle mb-2"><i class="bi bi-tag me-1"></i>{{ ticket.incident_name }}</div>{% endif %}
       <div class="d-flex flex-wrap gap-2 mb-2">
         {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
-        {% include 'incidents/_status_badge.html' with ticket=ticket %}
+        {% include 'incidents/_status_badge.html' with ticket=ticket hide_emergency=True %}
         {% if ticket.classification %}<span class="badge {% if ticket.is_event %}bg-secondary{% else %}bg-danger{% endif %}">{{ ticket.get_classification_display }}</span>{% endif %}
         {% if ticket.is_emergency %}<span class="badge bg-light text-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>EMERGENCY</span>{% endif %}
       </div>
@@ -133,7 +135,7 @@
           </div>
           <div class="col-md-6">
             <dl class="detail-grid mb-3">
-              <dt>IP Address</dt><dd class="font-monospace">{{ ticket.ip_address }}</dd>
+              <dt>IP Address</dt><dd class="font-monospace">{{ ticket.ip_address|default:"-" }}</dd>
               <dt>Destination</dt><dd class="font-monospace">{{ ticket.destination_ip|default:"-" }}</dd>
               <dt>MAC Address</dt><dd class="font-monospace">{{ ticket.mac_address|default:"-" }}</dd>
             </dl>
@@ -289,7 +291,7 @@
           <button class="btn btn-primary w-100" type="submit">Route to SOC Manager review</button>
         </form>
       </div></div>
-      <script>(function(){var f=document.getElementById('t1-route-form');if(!f)return;var b=document.getElementById('t1-admin-block');var s=b.querySelector('select');function sync(){var admin=f.querySelector('input[name=t1_route]:checked').value==='{{ T1_ROUTE_ADMIN }}';b.style.display=admin?'':'none';if(s)s.required=admin;}f.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
+      <script nonce="{{ request.csp_nonce }}">(function(){var f=document.getElementById('t1-route-form');if(!f)return;var b=document.getElementById('t1-admin-block');var s=b.querySelector('select');function sync(){var admin=f.querySelector('input[name=t1_route]:checked').value==='{{ T1_ROUTE_ADMIN }}';b.style.display=admin?'':'none';if(s)s.required=admin;}f.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
       {% elif can_mgr_forward %}
       <div class="card shadow-sm border-warning"><div class="card-header text-dark" style="background:#d4a017;"><h5 class="mb-0"><i class="bi bi-person-badge-fill me-1"></i>SOC Manager Review</h5><small>ตรวจก่อนมอบหมาย — ตั้งสถานะฉุกเฉินและส่งต่อ</small></div><div class="card-body">
         <dl class="row small mb-3"><dt class="col-5">เส้นทาง (Tier 1 เลือก)</dt><dd class="col-7">{% if ticket.t1_route == T1_ROUTE_OWNER %}เจ้าของระบบแก้ไขเอง{% else %}ผู้ดูแลระบบ{% if ticket.assigned_admin %} — {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% endif %}{% endif %}</dd></dl>

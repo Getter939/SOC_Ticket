@@ -5,6 +5,8 @@ canonical status→color map shared by the dashboards, this badge, and the Tier-
 queue, so a status renders the same color on every page. Red (#dc3545) is
 reserved for severity/emergency/OLA-breach signals and is never a status color.
 Usage: {% include 'incidents/_status_badge.html' with ticket=ticket %}
+Pass hide_emergency=True where the caller renders its own emergency flag (e.g.
+the ticket-detail hero, whose red gradient needs a light badge instead).
 {% endcomment %}
 <span class="badge rounded-pill" style="{{ ticket.status_pill_css }}">{{ ticket.get_status_display }}</span>
-{% if ticket.is_emergency %}<span class="badge rounded-pill bg-danger ms-1">EMERGENCY</span>{% endif %}
+{% if ticket.is_emergency and not hide_emergency %}<span class="badge rounded-pill bg-danger ms-1">EMERGENCY</span>{% endif %}

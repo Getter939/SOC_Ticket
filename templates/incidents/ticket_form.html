@@ -105,7 +105,7 @@
       <div class="row g-3">
 
         <div class="col-12">
-          <label class="form-label fw-semibold">{{ form.wazuh_alert.label }}</label>
+          <label class="form-label fw-semibold" for="id_wazuh_alert">{{ form.wazuh_alert.label }}</label>
           <select name="wazuh_alert" id="id_wazuh_alert" class="form-select">
             <option value="">{{ form.fields.wazuh_alert.empty_label }}</option>
             {% for alert in form.fields.wazuh_alert.queryset %}
@@ -124,14 +124,14 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold">ชื่อเหตุการณ์ <small class="text-muted">(Incident/Event Name)</small></label>
+          <label class="form-label fw-semibold" for="{{ form.incident_name.id_for_label }}">ชื่อเหตุการณ์ <small class="text-muted">(Incident/Event Name)</small></label>
           {{ form.incident_name }}
           <div class="field-hint">ชื่อสั้น ๆ ของเหตุการณ์สำหรับใช้ในรายงานและรายการ (ไม่บังคับ)</div>
           {% if form.incident_name.errors %}<div class="text-danger small">{{ form.incident_name.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.incident_datetime.id_for_label }}">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
           <div class="input-group">
             {{ form.incident_datetime }}
             <button type="button" class="btn btn-outline-secondary" id="dt-now" title="ตั้งเป็นเวลาปัจจุบัน">ตอนนี้</button>
@@ -140,22 +140,24 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Reference ID</label>
+          <label class="form-label fw-semibold" for="{{ form.reference_id.id_for_label }}">Reference ID</label>
           {{ form.reference_id }}
           <div class="field-hint">รหัสอ้างอิงจากแหล่ง Log ต้นทาง เพื่อให้สามารถสืบค้นกลับไปยัง Log ได้</div>
           {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.log_source.id_for_label }}">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
           {{ form.log_source }}
           <div class="field-hint">ชื่อแหล่ง Log ที่ตรวจพบเหตุการณ์ เช่น Palo Alto Firewall, Windows Security Event Log</div>
           {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ระดับความรุนแรง <span class="required-star">*</span></label>
-          <div class="severity-group" id="severity-group">
+          {# Radio-set heading: a <label for> can only point at one control, so
+             the set is a labelled group instead. #}
+          <div class="form-label fw-semibold" id="severity-group-label">ระดับความรุนแรง <span class="required-star">*</span></div>
+          <div class="severity-group" id="severity-group" role="group" aria-labelledby="severity-group-label">
             {% for radio in form.severity %}
               {{ radio.tag }}
               <label for="{{ radio.id_for_label }}"
@@ -168,8 +170,8 @@
         </div>
 
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small> <span class="required-star">*</span></label>
-          <div class="severity-group" id="ncsa-severity-group">
+          <div class="form-label fw-semibold" id="ncsa-severity-group-label">ระดับความรุนแรงตาม สกมช. <small class="text-muted">(NCSA)</small> <span class="required-star">*</span></div>
+          <div class="severity-group" id="ncsa-severity-group" role="group" aria-labelledby="ncsa-severity-group-label">
             {% for radio in form.ncsa_severity %}
               {{ radio.tag }}
               <label for="{{ radio.id_for_label }}"
@@ -182,23 +184,23 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">แหล่งที่มา (Source)</label>
+          <label class="form-label fw-semibold" for="{{ form.issue_type.id_for_label }}">แหล่งที่มา (Source)</label>
           {{ form.issue_type }}
           {% if form.issue_type.errors %}<div class="text-danger small">{{ form.issue_type.errors }}</div>{% endif %}
         </div>
         <div class="col-md-4">
-          <label class="form-label fw-semibold">ประเภทภัยคุกคาม (Detailed)</label>
+          <label class="form-label fw-semibold" for="{{ form.detailed_issue.id_for_label }}">ประเภทภัยคุกคาม (Detailed)</label>
           {{ form.detailed_issue }}
           {% if form.detailed_issue.errors %}<div class="text-danger small">{{ form.detailed_issue.errors }}</div>{% endif %}
         </div>
         <div class="col-md-4">
-          <label class="form-label fw-semibold">เรื่องที่แจ้ง</label>
+          <label class="form-label fw-semibold" for="{{ form.detailed_issue2.id_for_label }}">เรื่องที่แจ้ง</label>
           {{ form.detailed_issue2 }}
           {% if form.detailed_issue2.errors %}<div class="text-danger small">{{ form.detailed_issue2.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold">สรุปรายละเอียดเหตุการณ์ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.issue_description.id_for_label }}">สรุปรายละเอียดเหตุการณ์ <span class="required-star">*</span></label>
           {{ form.issue_description }}
           <div class="field-hint">ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น</div>
           {% if form.issue_description.errors %}<div class="text-danger small">{{ form.issue_description.errors }}</div>{% endif %}
@@ -213,39 +215,39 @@
       <div class="row g-3">
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">ระบบ / บริการ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.device_name.id_for_label }}">ระบบ / บริการ <span class="required-star">*</span></label>
           {{ form.device_name }}
           {% if form.device_name.errors %}<div class="text-danger small">{{ form.device_name.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">IP Address <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.ip_address.id_for_label }}">IP Address <span class="required-star">*</span></label>
           {{ form.ip_address }}
           {% if form.ip_address.errors %}<div class="text-danger small">{{ form.ip_address.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">ระบบปฏิบัติการ <small class="text-muted">(OS)</small></label>
+          <label class="form-label fw-semibold" for="{{ form.operating_system.id_for_label }}">ระบบปฏิบัติการ <small class="text-muted">(OS)</small></label>
           {{ form.operating_system }}
           {% if form.operating_system.errors %}<div class="text-danger small">{{ form.operating_system.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">MAC Address</label>
+          <label class="form-label fw-semibold" for="{{ form.mac_address.id_for_label }}">MAC Address</label>
           {{ form.mac_address }}
           {% if form.mac_address.errors %}<div class="text-danger small">{{ form.mac_address.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold">หน่วยงานเจ้าของทรัพย์สิน</label>
+          <label class="form-label fw-semibold" for="{{ form.asset_owner.id_for_label }}">หน่วยงานเจ้าของทรัพย์สิน</label>
           {{ form.asset_owner }}
           <div class="field-hint">หน่วยงาน/แผนกเจ้าของทรัพย์สิน (พิมพ์ได้อิสระ)</div>
           {% if form.asset_owner.errors %}<div class="text-danger small">{{ form.asset_owner.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold d-block">มีการกระจายไปยังจุดอื่น</label>
-          <div class="spread-group" id="spread-group">
+          <div class="form-label fw-semibold d-block" id="spread-group-label">มีการกระจายไปยังจุดอื่น</div>
+          <div class="spread-group" id="spread-group" role="group" aria-labelledby="spread-group-label">
             {% for radio in form.spread_to_others %}
               {{ radio.tag }}
               <label for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
@@ -255,8 +257,8 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold d-block">ประเภทของทรัพย์สิน</label>
-          <div class="asset-type-group" id="asset-type-group">
+          <div class="form-label fw-semibold d-block" id="asset-type-group-label">ประเภทของทรัพย์สิน</div>
+          <div class="asset-type-group" id="asset-type-group" role="group" aria-labelledby="asset-type-group-label">
             {% for radio in form.asset_type %}
               {% if radio.data.value %}
                 {{ radio.tag }}
@@ -268,15 +270,15 @@
         </div>
 
         <div class="col-md-5">
-          <label class="form-label fw-semibold">IP Address ปลายทางที่น่าสงสัย</label>
+          <label class="form-label fw-semibold" for="{{ form.destination_ip.id_for_label }}">IP Address ปลายทางที่น่าสงสัย</label>
           {{ form.destination_ip }}
           <div class="field-hint">รองรับรูปแบบ defanged เช่น 79[.]124[.]59[.]146</div>
           {% if form.destination_ip.errors %}<div class="text-danger small">{{ form.destination_ip.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold">Phase การโจมตีตาม MITRE ATT&CK</label>
-          <div class="mitre-grid">
+          <div class="form-label fw-semibold" id="mitre-group-label">Phase การโจมตีตาม MITRE ATT&CK</div>
+          <div class="mitre-grid" role="group" aria-labelledby="mitre-group-label">
             {% for cb in form.mitre_phase %}
               <div class="mitre-option">{{ cb.tag }}<label for="{{ cb.id_for_label }}">{{ cb.choice_label }}</label></div>
             {% endfor %}
@@ -286,14 +288,14 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
+          <label class="form-label fw-semibold" for="{{ form.ioc_details.id_for_label }}">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
           {{ form.ioc_details }}
           {% if form.ioc_details.errors %}<div class="text-danger small">{{ form.ioc_details.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold">แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)</label>
-          <input type="file" name="evidence_files" class="form-control" multiple
+          <label class="form-label fw-semibold" for="id_evidence_files">แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)</label>
+          <input type="file" name="evidence_files" id="id_evidence_files" class="form-control" multiple
                  accept="image/*,.pdf,.txt,.log,.csv,.doc,.docx,.xls,.xlsx,.zip">
           <div class="field-hint">สามารถแนบได้หลายไฟล์ เช่น ภาพหน้าจอ, log, หรือเอกสารประกอบ</div>
         </div>
@@ -312,23 +314,23 @@
           <span id="insert-guidance-hint" class="text-muted small"></span>
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">สิ่งที่ต้องดำเนินการ</label>
+          <label class="form-label fw-semibold" for="{{ form.action_required.id_for_label }}">สิ่งที่ต้องดำเนินการ</label>
           {{ form.action_required }}
           {% if form.action_required.errors %}<div class="text-danger small">{{ form.action_required.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">ข้อควรระวังในการดำเนินการ</label>
+          <label class="form-label fw-semibold" for="{{ form.action_precautions.id_for_label }}">ข้อควรระวังในการดำเนินการ</label>
           {{ form.action_precautions }}
           {% if form.action_precautions.errors %}<div class="text-danger small">{{ form.action_precautions.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">เรื่องที่ดำเนินการแล้ว <small class="text-muted">(Report)</small></label>
+          <label class="form-label fw-semibold" for="{{ form.actions_taken_summary.id_for_label }}">เรื่องที่ดำเนินการแล้ว <small class="text-muted">(Report)</small></label>
           {{ form.actions_taken_summary }}
           <div class="field-hint">ถ้อยคำสรุปสำหรับรายงาน DOCX แยกจาก timeline และ log ภายในระบบ</div>
           {% if form.actions_taken_summary.errors %}<div class="text-danger small">{{ form.actions_taken_summary.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">การดำเนินการลำดับถัดไป <small class="text-muted">(Report)</small></label>
+          <label class="form-label fw-semibold" for="{{ form.next_steps_summary.id_for_label }}">การดำเนินการลำดับถัดไป <small class="text-muted">(Report)</small></label>
           {{ form.next_steps_summary }}
           <div class="field-hint">ถ้อยคำสรุปขั้นตอนถัดไปสำหรับรายงาน DOCX</div>
           {% if form.next_steps_summary.errors %}<div class="text-danger small">{{ form.next_steps_summary.errors }}</div>{% endif %}
@@ -354,11 +356,11 @@
       </div>
 
       <div id="incident-panel" class="conditional-panel mt-3">
-        <label class="form-label fw-bold">เลือกเส้นทาง Incident <span class="text-danger">*</span></label>
+        <div class="form-label fw-bold" id="t1-route-group-label">เลือกเส้นทาง Incident <span class="text-danger">*</span></div>
         {% if form.t1_route.errors %}<div class="text-danger small">{{ form.t1_route.errors }}</div>{% endif %}
-        <div class="row g-2">{% for radio in form.t1_route %}<div class="col-md-6" data-route="{{ radio.data.value }}"><label class="decision-option d-block" for="{{ radio.id_for_label }}">{{ radio.tag }} <strong class="ms-1">{{ radio.choice_label }}</strong></label></div>{% endfor %}</div>
+        <div class="row g-2" role="group" aria-labelledby="t1-route-group-label">{% for radio in form.t1_route %}<div class="col-md-6" data-route="{{ radio.data.value }}"><label class="decision-option d-block" for="{{ radio.id_for_label }}">{{ radio.tag }} <strong class="ms-1">{{ radio.choice_label }}</strong></label></div>{% endfor %}</div>
         <div id="admin-panel" class="conditional-panel mt-3">
-          <label class="form-label fw-semibold">ผู้ดูแลระบบที่รับผิดชอบ (System Admin) <span class="text-danger">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.assigned_admin.id_for_label }}">ผู้ดูแลระบบที่รับผิดชอบ (System Admin) <span class="text-danger">*</span></label>
           {{ form.assigned_admin }}
           {% if form.assigned_admin.errors %}<div class="text-danger small">{{ form.assigned_admin.errors }}</div>{% endif %}
         </div>

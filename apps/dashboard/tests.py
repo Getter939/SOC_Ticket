@@ -99,6 +99,31 @@ class DashboardAccessTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'data-label="Dashboard"')
 
+    def test_response_team_is_redirected_to_their_queue(self):
+        """Response-only access: Forensic / Red Team must not see org-wide
+        aggregates (active counts, per-analyst workload, MTTR). Landing on '/'
+        after login must bounce them to their own request queue."""
+        for username, role in (
+            ('forensic_ac', UserProfile.ROLE_FORENSIC),
+            ('redteam_ac', UserProfile.ROLE_REDTEAM_MANAGER),
+        ):
+            with self.subTest(role=role):
+                user = _make_user(username, role)
+                self.client.force_login(user)
+                response = self.client.get(DASHBOARD_URL)
+                self.assertEqual(response.status_code, 302)
+                self.assertRedirects(
+                    response, reverse('response_request_queue'),
+                    fetch_redirect_response=False,
+                )
+
+    def test_response_team_sidebar_hides_dashboard_link(self):
+        forensic = _make_user('forensic_nav', UserProfile.ROLE_FORENSIC)
+        self.client.force_login(forensic)
+        response = self.client.get(reverse('response_request_queue'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'data-label="Dashboard"')
+
     def test_unauthenticated_user_redirected_to_login(self):
         response = self.client.get(DASHBOARD_URL)
         self.assertEqual(response.status_code, 302)
@@ -256,7 +281,10 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Total Active Cases', html)
         self.assertIn('Critical Severity', html)
         self.assertIn('Closed This Month', html)
-        self.assertIn('Mean Time to Resolve (MTTR)', html)
+        # The headline figure on this card is stats.mttr_median, so the label
+        # says Median; the mean is carried in the sub-line below it.
+        self.assertIn('Median Time to Resolve (MTTR)', html)
+        self.assertIn('Avg', html)
         # Header timestamp + filter bar still present
         self.assertIn('ข้อมูล ณ เวลา:', html)
         self.assertIn('date_range=today', html)
@@ -449,8 +477,27 @@ class DashboardManagementViewTest(TestCase):
         Ticket.objects.filter(pk=t.pk).update(severity='Critical')
         d = self._get().context['critical_soonest_deadline']
         self.assertIsNotNone(d)
-        self.assertEqual(set(d), {'ticket_id', 'minutes_remaining'})
+        self.assertEqual(
+            set(d), {'ticket_id', 'minutes_remaining', 'overdue', 'label'})
         self.assertGreater(d['minutes_remaining'], 0)
+        self.assertFalse(d['overdue'])
+
+    def test_critical_soonest_deadline_overdue_reads_as_elapsed(self):
+        """
+        An overdue deadline must not render as a negative countdown
+        ("Soonest: -136,223m left"): the card flags it as overdue and the
+        label carries the magnitude only.
+        """
+        t = _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-25)
+        Ticket.objects.filter(pk=t.pk).update(severity='Critical')
+        resp = self._get()
+        d = resp.context['critical_soonest_deadline']
+        self.assertLess(d['minutes_remaining'], 0)
+        self.assertTrue(d['overdue'])
+        self.assertNotIn('-', d['label'])
+        body = resp.content.decode()
+        self.assertIn('overdue by', body)
+        self.assertNotIn('m left', body)
 
     def test_critical_soonest_deadline_none_without_critical(self):
         _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
@@ -1012,3 +1059,46 @@ class ExecutiveAccountableColumnTest(TestCase):
         Ticket.objects.all().delete()
         html = self._row_html(Ticket.STATUS_NEW)
         self.assertIn(self.analyst.username, html)
+
+
+# ── UX/visual regression tests (2026-07 audit) ───────────────────────────── #
+
+class HumanizeMinutesTest(TestCase):
+    """humanize_minutes renders magnitudes, never signed raw minutes."""
+
+    def test_formats_by_magnitude(self):
+        from apps.dashboard.views import humanize_minutes
+        cases = [
+            (0, '0m'), (45, '45m'), (60, '1h'), (135, '2h 15m'),
+            (1440, '1d'), (1560, '1d 2h'),
+        ]
+        for minutes, expected in cases:
+            with self.subTest(minutes=minutes):
+                self.assertEqual(humanize_minutes(minutes), expected)
+
+    def test_negative_renders_same_as_positive(self):
+        """The sign is the caller's to interpret ('overdue by 2h 15m')."""
+        from apps.dashboard.views import humanize_minutes
+        self.assertEqual(humanize_minutes(-135), humanize_minutes(135))
+
+
+class ChartAccessibilityTableMarkupTest(TestCase):
+    """
+    The chart data-tables must be wrapped in a div.
+
+    .visually-hidden sets width:1px, but on a <table> that is only a *minimum*
+    — a bare visually-hidden table still lays out at full content width and
+    stretches the document (and the fixed topbar) on mobile.
+    """
+
+    def _assert_no_bare_hidden_table(self, template_name):
+        from django.template.loader import get_template
+        source = get_template(template_name).template.source
+        self.assertNotIn('<table class="visually-hidden"', source)
+        self.assertIn('<div class="visually-hidden">', source)
+
+    def test_dashboard_hidden_tables_are_wrapped(self):
+        self._assert_no_bare_hidden_table('dashboard/dashboard.html')
+
+    def test_executive_hidden_tables_are_wrapped(self):
+        self._assert_no_bare_hidden_table('dashboard/executive.html')

@@ -19,6 +19,11 @@
     .dash-filterbar .btn-group .btn { font-size: 13px; }
     .dash-filterbar select.form-select-sm { font-size: 13px; min-width: 150px; }
     .mini-label { font-size: 13px; }
+    /* Below ~sm the 150px floor pushes the Severity select off-screen; let the
+       selects share the row and shrink instead. */
+    @media (max-width: 575.98px) {
+        .dash-filterbar select.form-select-sm { min-width: 0; flex: 1 1 7rem; }
+    }
 
     /* ── Flat bordered stat cards (border-only, top accent, no shadow) ── */
     .stat-card {
@@ -156,17 +161,17 @@
             {% endwith %}
         </div>
 
-        <form method="get" class="d-flex align-items-center gap-2 mb-0">
+        <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-0">
             <input type="hidden" name="date_range" value="{{ filters.date_range }}">
-            <label class="mini-label text-muted mb-0">Status</label>
-            <select name="status" class="form-select form-select-sm js-autosubmit">
+            <label class="mini-label text-muted mb-0" for="dash-filter-status">Status</label>
+            <select name="status" id="dash-filter-status" class="form-select form-select-sm js-autosubmit">
                 <option value="">All</option>
                 {% for code, label in status_choices %}
                 <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
-            <label class="mini-label text-muted mb-0">Severity</label>
-            <select name="severity" class="form-select form-select-sm js-autosubmit">
+            <label class="mini-label text-muted mb-0" for="dash-filter-severity">Severity</label>
+            <select name="severity" id="dash-filter-severity" class="form-select form-select-sm js-autosubmit">
                 <option value="">All</option>
                 {% for code, label in severity_choices %}
                 <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
@@ -194,10 +199,10 @@
             <div class="stat-value text-danger">{{ active_critical|intcomma }}</div>
             <div class="stat-label">Critical Severity</div>
             {% if critical_soonest_deadline %}
-            {% with m=critical_soonest_deadline.minutes_remaining %}
+            {% with d=critical_soonest_deadline %}
             <div class="stat-sub fw-bold
-                {% if m < 60 %}text-danger{% elif m < 240 %}text-warning{% else %}text-success{% endif %}">
-                Soonest: {{ m|intcomma }}m left
+                {% if d.overdue or d.minutes_remaining < 60 %}text-danger{% elif d.minutes_remaining < 240 %}text-warning{% else %}text-success{% endif %}">
+                {% if d.overdue %}Soonest: overdue by {{ d.label }}{% else %}Soonest: {{ d.label }} left{% endif %}
             </div>
             {% endwith %}
             {% endif %}
@@ -223,7 +228,8 @@
     <div class="col">
         <div class="stat-card b-orange">
             <div class="stat-value text-warning">{{ stats.mttr_median|default:"—" }} hrs</div>
-            <div class="stat-label">Mean Time to Resolve (MTTR)</div>
+            {# The headline figure is the median; the mean is in the sub-line. #}
+            <div class="stat-label">Median Time to Resolve (MTTR)</div>
             <div class="stat-sub text-muted">
                 Avg {{ stats.mttr_mean|default:"—" }} hrs · n={{ stats.mttr_n|default:0 }} · last 30d
             </div>
@@ -303,7 +309,11 @@
                 <div id="threatTypesLegend" class="threat-legend"
                      aria-label="Threat type legend"></div>
             </div>
-            <table class="visually-hidden">
+            {# Wrapped in a div: .visually-hidden's width:1px is only a *minimum*
+               on a table, so a bare table still lays out at full content width
+               and stretches the document (and the fixed topbar) on mobile. #}
+            <div class="visually-hidden">
+            <table>
                 <caption>Tickets by threat type</caption>
                 <thead><tr><th>ประเภทเหตุการณ์</th><th>จำนวน</th></tr></thead>
                 <tbody>
@@ -312,6 +322,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
                 <span style="font-size:13px;">No data</span>
@@ -335,7 +346,8 @@
                 <canvas id="chartPipeline" role="img"
                         aria-label="Pipeline chart showing ticket counts by workflow status and severity"></canvas>
             </div>
-            <table class="visually-hidden">
+            <div class="visually-hidden">
+            <table>
                 <caption>Ticket counts by workflow status and severity</caption>
                 <thead>
                     <tr>
@@ -356,6 +368,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 
@@ -378,7 +391,8 @@
                 <i class="bi bi-info-circle me-1"></i>นับจากทั้งทีม — รายการที่เปิดจะแสดงเฉพาะคิวที่รอผู้จัดการตรวจสอบ
             </div>
             {% endif %}
-            <table class="visually-hidden">
+            <div class="visually-hidden">
+            <table>
                 <caption>Active tickets by time to OLA deadline</caption>
                 <thead><tr><th>สถานะ OLA</th><th>จำนวน</th></tr></thead>
                 <tbody>
@@ -387,6 +401,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
                 <span style="font-size:13px;">No active cases</span>
@@ -410,7 +425,8 @@
             <p id="dailyChartSelection" class="chart-hint mb-0" role="status">
                 Select a point to view its exact total.
             </p>
-            <table class="visually-hidden">
+            <div class="visually-hidden">
+            <table>
                 <caption>Daily case volume</caption>
                 <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
                 <tbody>
@@ -419,6 +435,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </div>
