@@ -7,9 +7,14 @@ UAT tester (or a dashboard) never faces an empty queue. Unlike ``seed_data``
 12 statuses — including the four newer ones the volume seeder predates:
 PENDING_MGR_TRIAGE, AWAITING_OWNER, OWNER_REMEDIATED, PENDING_T2_REVIEW.
 
-Every row is tagged with the 'uat_' username prefix and an 'UAT-STATE' marker
-in issue_description, so --flush removes exactly what this command created and
+Tickets are attributed to the REAL accounts holding each role (discovered via
+apps.incidents.management.seed_actors) — this command never creates, modifies
+or deletes a user. Every row carries the 'UAT-STATE' marker in
+issue_description, so --flush removes exactly what this command created and
 nothing a live tester makes during the session.
+
+The owner-lane states (AWAITING_OWNER / OWNER_REMEDIATED) still seed when no
+System Owner role is assigned; they simply carry a null system_owner.
 
 Usage:
     python manage.py seed_uat_states                 # 1 ticket per state (12)
@@ -21,14 +26,12 @@ Usage:
 import random
 from datetime import timedelta
 
-from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.incidents.management import seed_actors
 from apps.incidents.models import Ticket, TicketLog
-from apps.accounts.models import UserProfile
 
-UAT_PREFIX = "uat_"
 MARKER = "[UAT-STATE]"  # appended to issue_description so --flush is precise
 
 S = Ticket  # shorthand for status/route/classification constants
@@ -83,19 +86,22 @@ class Command(BaseCommand):
         per_state = options["per_state"]
 
         if options["flush"]:
-            deleted, _ = Ticket.objects.filter(
-                created_by__username__startswith=UAT_PREFIX,
+            _, per_model = Ticket.objects.filter(
                 issue_description__contains=MARKER,
             ).delete()
             self.stdout.write(self.style.WARNING(
-                f"Flushed {deleted} UAT-STATE ticket(s) and their logs."
+                f"Flushed {per_model.get('incidents.Ticket', 0)} UAT-STATE "
+                "ticket(s) (logs cascade). No user accounts were touched."
             ))
 
         if per_state <= 0:
             return
 
-        users = self._ensure_users()
-        self.stdout.write("UAT seed users ready: " + ", ".join(users.keys()))
+        users = seed_actors.resolve()
+        seed_actors.require(users, "T1", "T2", "MANAGER", "ADMIN")
+        self.stdout.write("Attributing to existing accounts (discovered by role):")
+        self.stdout.write(seed_actors.summary(
+            users, ["T1", "T2", "MANAGER", "ADMIN", "OWNER"]))
 
         now = timezone.now()
         created = 0
@@ -114,49 +120,18 @@ class Command(BaseCommand):
             f"({per_state} per state)."
         ))
 
-    def _ensure_users(self):
-        configs = [
-            dict(key="T1",      username="uat_t1",       role="SOC_STAFF",    tier="T1",
-                 first="Kawin",     last="T1",      dept="SOC",   phone="0810000001"),
-            dict(key="T2",      username="uat_t2",       role="SOC_STAFF",    tier="T2",
-                 first="Pimchan",   last="T2",      dept="SOC",   phone="0810000002"),
-            dict(key="MANAGER", username="uat_manager",  role="SOC_MANAGER",  tier="",
-                 first="Somchai",   last="Manager", dept="SOC",   phone="0810000003"),
-            dict(key="ADMIN",   username="uat_sysadmin", role="SYSTEM_ADMIN", tier="",
-                 first="Nattapong", last="Admin",   dept="IT",    phone="0810000004"),
-            dict(key="OWNER",   username="uat_sysowner", role="SYSTEM_OWNER", tier="",
-                 first="Waraporn",  last="Owner",   dept="BU",    phone="0810000005"),
-            dict(key="FORENSIC", username="uat_forensic", role="FORENSIC", tier="",
-                 first="Anucha",    last="Forensic", dept="Forensics", phone="0810000006"),
-            dict(key="REDTEAM", username="uat_redteam", role="REDTEAM_MANAGER", tier="",
-                 first="Kittipong", last="RedTeam",  dept="RedTeam", phone="0810000007"),
-        ]
-        result = {}
-        for c in configs:
-            user, was_created = User.objects.get_or_create(
-                username=c["username"],
-                defaults=dict(
-                    first_name=c["first"], last_name=c["last"],
-                    email=f"{c['username']}@uat.local", is_active=True,
-                ),
-            )
-            if was_created:
-                user.set_unusable_password()
-                user.save()
-            UserProfile.objects.get_or_create(
-                user=user,
-                defaults=dict(role=c["role"], tier=c["tier"],
-                              department=c["dept"], phone=c["phone"]),
-            )
-            result[c["key"]] = user
-        return result
-
     def _create_ticket(self, users, recipe, now):
         (status, classification, route, want_admin, want_owner,
          t2_signed, mgr_approved, emergency) = recipe
 
-        t1, t2 = users["T1"], users["T2"]
-        manager, admin, owner = users["MANAGER"], users["ADMIN"], users["OWNER"]
+        # Pick a different real person per ticket so the audit trail and the
+        # analyst workload heatmap spread across the team.
+        t1, t2 = random.choice(users["T1"]), random.choice(users["T2"])
+        manager = random.choice(users["MANAGER"])
+        admin = random.choice(users["ADMIN"])
+        # Optional: stays None when nobody holds the System Owner role, so the
+        # owner-lane states still seed (with a null owner) rather than break.
+        owner = random.choice(users["OWNER"]) if users["OWNER"] else None
 
         # Backdate so OLA buckets and "time in state" are realistic.
         inc_time = now - timedelta(hours=random.uniform(2, 72))

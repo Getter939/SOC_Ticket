@@ -384,11 +384,16 @@ Needs a reachable PostgreSQL 16 (`DB_*` in `.env`). App at
 **Test data:**
 
 - `python manage.py seed_data` — 100 tickets / 30 days in a random weighted
-  mix, all severities, plus **seven** role users (`seed_t1`, `seed_t2`,
-  `seed_manager`, `seed_sysadmin`, `seed_sysowner`, `seed_forensic`,
-  `seed_redteam`). Rows carry the `seed_` username prefix so they can be wiped
+  mix, all severities. Rows carry the `[SEED-DATA]` marker so they can be wiped
   cleanly (`--flush`). **It predates the four newer states and does not
   generate them** — use `seed_uat_states` for those.
+
+> **No seeder creates, modifies or deletes a user account.** Every one resolves
+> its actors by role through `apps.incidents.management.seed_actors` and
+> attributes tickets to the real people holding those roles; a missing role is
+> a hard error, never a fabricated account. `python manage.py seed_all`
+> regenerates every dataset and purges the legacy synthetic logins (`uat_*`,
+> `seed_*`, mockup names), removing their tickets first so nothing is orphaned.
 - `python manage.py seed_uat_states` — deterministic: one ticket parked in
   **each of the 12** states, so every screen and button can be exercised
   without walking the whole workflow. Tagged with a `uat_` prefix (not `seed_`)

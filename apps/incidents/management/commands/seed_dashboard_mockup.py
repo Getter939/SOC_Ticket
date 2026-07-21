@@ -1,12 +1,11 @@
 from collections import Counter
 from datetime import datetime, time, timedelta
 
-from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.accounts.models import UserProfile
+from apps.incidents.management import seed_actors
 from apps.incidents.models import (
     Ticket,
     TicketAttachment,
@@ -14,34 +13,13 @@ from apps.incidents.models import (
     TicketSubtask,
     TriageRecord,
 )
-from apps.wazuh_ingest.models import IngestWatermark, WazuhAlert
+from apps.wazuh_ingest.models import WazuhAlert
 
 
 class Command(BaseCommand):
     help = 'Reset and seed a realistic 30-day dashboard mockup dataset.'
 
-    KEEP_USERNAMES = {
-        'superadmin', 'admin1', 'admin2', 'analyst1', 'analyst2', 'manager1',
-    }
-    PASSWORD_DEFAULT = 'Mockup@12345'
     REFERENCE_PREFIX = 'MOCK-SOC-'
-
-    MOCK_USERS = [
-        ('surapong', 'Surapong', '', 'surapong.manager@soc.local',
-         UserProfile.ROLE_SOC_MANAGER, '', 'SOC Management', '0800002101'),
-        ('kamjad', 'Kamjad', '', 'kamjad.t2@soc.local',
-         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Tier 2', '0800002201'),
-        ('pongpanit', 'Pongpanit', '', 'pongpanit.t2@soc.local',
-         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2, 'SOC Tier 2', '0800002202'),
-        ('supatach', 'Supatach', '', 'supatach.t1@soc.local',
-         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Tier 1', '0800002301'),
-        ('poy', 'Poy', '', 'poy.t1@soc.local',
-         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Tier 1', '0800002302'),
-        ('natt', 'Natt', '', 'natt.t1@soc.local',
-         UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1, 'SOC Tier 1', '0800002303'),
-        ('santi', 'Santi', '', 'santi.admin@soc.local',
-         UserProfile.ROLE_SYSTEM_ADMIN, '', 'Infrastructure Operations', '0800002401'),
-    ]
 
     ACTIVE_STATUS_PLAN = (
         [Ticket.STATUS_NEW] * 2
@@ -318,28 +296,27 @@ class Command(BaseCommand):
         parser.add_argument(
             '--reset',
             action='store_true',
-            help='Delete old tickets/operational data and non-default users before seeding.',
+            help='Delete this command\'s previous mockup rows before seeding.',
         )
         parser.add_argument(
             '--apply',
             action='store_true',
             help='Persist the reset and mockup seed. Without this, only print the plan.',
         )
-        parser.add_argument(
-            '--password',
-            default=self.PASSWORD_DEFAULT,
-            help=f'Password assigned to new mockup users (default: {self.PASSWORD_DEFAULT}).',
-        )
 
     def handle(self, *args, **options):
         self.now = timezone.now().replace(second=0, microsecond=0)
         self.tz = timezone.get_current_timezone()
         self.ticket_sequences = {}
-        self.user_password = options['password']
         plan = self._build_plan()
 
+        # Resolve the real role-holders up front so a dry run also reports who
+        # the data would be attributed to (and fails early on a missing role).
+        users = seed_actors.resolve()
+        seed_actors.require(users, 'T1', 'T2', 'MANAGER', 'ADMIN')
+
         if not options['apply']:
-            self._print_plan(plan, mode='DRY RUN')
+            self._print_plan(plan, users, mode='DRY RUN')
             self.stdout.write('No database changes written. Re-run with --reset --apply to persist.')
             return
         if not options['reset']:
@@ -347,7 +324,6 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             self._clear_existing_data()
-            users = self._create_users()
             tickets = []
             alerts = []
             triage_records = []
@@ -359,25 +335,24 @@ class Command(BaseCommand):
                 if triage:
                     triage_records.append(triage)
 
-        self._print_plan(plan, mode='APPLY')
+        self._print_plan(plan, users, mode='APPLY')
         self.stdout.write(self.style.SUCCESS('Dashboard mockup dataset is ready.'))
         self.stdout.write(
             str({
                 'tickets': len(tickets),
                 'active': sum(t.status not in Ticket.TERMINAL_STATUSES for t in tickets),
                 'closed': sum(t.status in Ticket.TERMINAL_STATUSES for t in tickets),
-                'users_created': len(self.MOCK_USERS),
+                'users_created': 0,
                 'wazuh_alerts': len(alerts),
                 'manual_triage_records': len(triage_records),
             })
         )
-        self.stdout.write(f'Demo password: {self.user_password}')
-        self.stdout.write('SOC Manager login: surapong')
-        self.stdout.write('Tier 2 logins: kamjad, pongpanit')
-        self.stdout.write('Tier 1 logins: supatach, poy, natt')
-        self.stdout.write('System Admin login: santi')
+        self.stdout.write(
+            'No user accounts were created or modified - testers sign in with '
+            'their own credentials.'
+        )
 
-    def _print_plan(self, plan, mode):
+    def _print_plan(self, plan, users, mode):
         status_counts = Counter(spec['status'] for spec in plan)
         severity_counts = Counter(spec['severity'] for spec in plan)
         daily_counts = Counter(spec['opened'].date() for spec in plan)
@@ -390,55 +365,35 @@ class Command(BaseCommand):
             f'Daily range: {min(daily_counts.values())}-{max(daily_counts.values())}')
         self.stdout.write(f'Status distribution: {dict(status_counts)}')
         self.stdout.write(f'Severity distribution: {dict(severity_counts)}')
-        self.stdout.write(
-            'Kept default users: ' + ', '.join(sorted(self.KEEP_USERNAMES))
-            + ' (plus every superuser)')
-        self.stdout.write(
-            'New users: ' + ', '.join(username for username, *_ in self.MOCK_USERS))
+        self.stdout.write('Attributing to existing accounts (discovered by role):')
+        self.stdout.write(seed_actors.summary(users, ['T1', 'T2', 'MANAGER', 'ADMIN']))
 
     def _clear_existing_data(self):
-        TicketAttachment.objects.all().delete()
-        TicketSubtask.objects.all().delete()
-        TicketLog.objects.all().delete()
-        TriageRecord.objects.all().delete()
-        Ticket.objects.all().delete()
-        WazuhAlert.objects.all().delete()
-        IngestWatermark.objects.all().delete()
-        # Superusers are never seed data: on a deployed box (UAT) the only
-        # superuser is often the operator's own account, and deleting it locks
-        # them out of /admin/ and the executive dashboard with no way back in
-        # short of a shell. KEEP_USERNAMES only lists the dev-box defaults.
-        User.objects.exclude(username__in=self.KEEP_USERNAMES).exclude(
-            is_superuser=True).delete()
+        """Remove only the rows THIS command created.
 
-    def _create_users(self):
-        users = {}
-        for username, first, last, email, role, tier, department, phone in self.MOCK_USERS:
-            user, _ = User.objects.update_or_create(
-                username=username,
-                defaults={
-                    'first_name': first,
-                    'last_name': last,
-                    'email': email,
-                    'is_active': True,
-                    'is_staff': role in (UserProfile.ROLE_SOC_MANAGER, UserProfile.ROLE_SYSTEM_ADMIN),
-                    'is_superuser': False,
-                },
-            )
-            user.set_password(self.user_password)
-            user.save(update_fields=['password'])
-            UserProfile.objects.update_or_create(
-                user=user,
-                defaults={
-                    'role': role,
-                    'tier': tier,
-                    'department': department,
-                    'phone': phone,
-                    'note': 'Dashboard mockup account',
-                },
-            )
-            users[username] = user
-        return users
+        It used to delete every ticket and then every non-superuser account —
+        which on a shared box (UAT runs entirely on real staff logins) wiped
+        real users and real tester data. Scope is now the MOCK-SOC- reference
+        prefix, and user accounts are never touched by any seeder.
+        """
+        mine = Ticket.objects.filter(
+            reference_id__startswith=self.REFERENCE_PREFIX)
+        # Alerts carry no prefix of their own, so reach them through the tickets
+        # that own them before those rows disappear (wazuh_alert is SET_NULL, so
+        # deleting tickets first would strand them).
+        alert_ids = list(
+            mine.exclude(wazuh_alert__isnull=True)
+            .values_list('wazuh_alert_id', flat=True)
+        )
+        TicketAttachment.objects.filter(ticket__in=mine).delete()
+        TicketSubtask.objects.filter(ticket__in=mine).delete()
+        TicketLog.objects.filter(ticket__in=mine).delete()
+        TriageRecord.objects.filter(
+            source_reference__startswith=self.REFERENCE_PREFIX).delete()
+        mine.delete()
+        WazuhAlert.objects.filter(pk__in=alert_ids).delete()
+        # IngestWatermark is global ingest state, not this command's row — the
+        # old version wiped it, which reset unrelated Wazuh ingestion.
 
     def _build_plan(self):
         today = timezone.localtime(self.now).date()
@@ -513,10 +468,10 @@ class Command(BaseCommand):
         severity = spec['severity']
         status = spec['status']
         classification = spec['classification']
-        t1 = self._pick_user(users, ['supatach', 'poy', 'natt'], spec['index'])
-        t2 = self._pick_user(users, ['kamjad', 'pongpanit'], spec['index'])
-        manager = users['surapong']
-        admin = users['santi']
+        t1 = self._pick_user(users, 'T1', spec['index'])
+        t2 = self._pick_user(users, 'T2', spec['index'])
+        manager = seed_actors.first(users, 'MANAGER')
+        admin = seed_actors.first(users, 'ADMIN')
         current_owner = self._current_owner(status, t1, t2)
         incident_time = opened - self._triage_delay(severity, spec['index'])
         terminal_time = self._terminal_time(opened, severity, status, spec['index'])
@@ -588,8 +543,10 @@ class Command(BaseCommand):
         return ticket, alert, triage
 
     @staticmethod
-    def _pick_user(users, usernames, index):
-        return users[usernames[index % len(usernames)]]
+    def _pick_user(users, key, index):
+        """Round-robin a real role-holder so authorship spreads across the team."""
+        pool = users[key]
+        return pool[index % len(pool)]
 
     @staticmethod
     def _current_owner(status, t1, t2):

@@ -10,12 +10,23 @@ from django.utils import timezone
 
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketLog, TriageRecord
+from apps.incidents.tests import _make_user, _make_t1, _make_t2
 from apps.wazuh_ingest.models import WazuhAlert
 
 
 class DashboardMockupSeedTest(TestCase):
-    keep_users = ['superadmin', 'admin1', 'admin2', 'analyst1', 'analyst2', 'manager1']
-    mock_users = ['surapong', 'kamjad', 'pongpanit', 'supatach', 'poy', 'natt', 'santi']
+    """The mockup seeder used to invent its own accounts and, on --reset, delete
+    every non-superuser user plus every ticket. It now attributes tickets to the
+    real role-holders and only removes its own MOCK-SOC- rows."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # Real role-holders the seeder will discover.
+        cls.t1a = _make_t1('mock_t1a')
+        cls.t1b = _make_t1('mock_t1b')
+        cls.t2 = _make_t2('mock_t2')
+        cls.manager = _make_user('mock_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('mock_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
     def _call(self, *args):
         output = StringIO()
@@ -23,44 +34,56 @@ class DashboardMockupSeedTest(TestCase):
         return output.getvalue()
 
     def _seed(self):
-        for username in self.keep_users:
-            User.objects.create_user(username=username, password='keep')
-        User.objects.create_user(username='old_demo_user', password='delete-me')
-        return self._call('--reset', '--apply', '--password', 'MockPass123!')
+        return self._call('--reset', '--apply')
 
     def test_dry_run_does_not_mutate_database(self):
-        User.objects.create_user(username='old_demo_user', password='delete-me')
+        bystander = User.objects.create_user(username='bystander', password='keep')
         output = self._call()
 
         self.assertIn('DRY RUN', output)
         self.assertIn('No database changes written', output)
         self.assertEqual(Ticket.objects.count(), 0)
-        self.assertTrue(User.objects.filter(username='old_demo_user').exists())
+        self.assertTrue(User.objects.filter(pk=bystander.pk).exists())
 
     def test_apply_requires_reset(self):
         with self.assertRaises(CommandError):
             self._call('--apply')
 
-    def test_reset_keeps_default_users_and_creates_requested_roles(self):
+    def test_creates_no_accounts_and_deletes_none(self):
+        """Regression: --reset used to wipe every non-superuser account."""
+        bystander = User.objects.create_user(username='bystander', password='keep')
+        before = {u.pk: u.password for u in User.objects.all()}
+
         output = self._seed()
 
         self.assertIn('Dashboard mockup dataset is ready', output)
-        self.assertFalse(User.objects.filter(username='old_demo_user').exists())
-        for username in self.keep_users + self.mock_users:
-            self.assertTrue(User.objects.filter(username=username).exists(), username)
+        self.assertTrue(User.objects.filter(pk=bystander.pk).exists())
+        self.assertEqual({u.pk: u.password for u in User.objects.all()}, before)
 
-        self.assertEqual(
-            User.objects.get(username='surapong').profile.role,
-            UserProfile.ROLE_SOC_MANAGER,
+    def test_tickets_are_attributed_to_real_role_holders(self):
+        self._seed()
+        authors = set(Ticket.objects.values_list('created_by__username', flat=True))
+        self.assertTrue(authors <= {self.t1a.username, self.t1b.username,
+                                    self.t2.username})
+        self.assertTrue(
+            Ticket.objects.filter(assigned_admin=self.admin).exists()
         )
-        self.assertEqual(User.objects.get(username='kamjad').profile.tier, UserProfile.TIER_T2)
-        self.assertEqual(User.objects.get(username='pongpanit').profile.tier, UserProfile.TIER_T2)
-        for username in ['supatach', 'poy', 'natt']:
-            self.assertEqual(User.objects.get(username=username).profile.tier, UserProfile.TIER_T1)
-        self.assertEqual(
-            User.objects.get(username='santi').profile.role,
-            UserProfile.ROLE_SYSTEM_ADMIN,
+
+    def test_reset_leaves_foreign_tickets_alone(self):
+        """Only MOCK-SOC- rows are removed — a tester's ticket must survive."""
+        # Explicit id so it does not consume the auto sequence the seeder uses.
+        keeper = Ticket.objects.create(
+            ticket_id='REAL-KEEPER-1',
+            device_name='REAL-HOST', ip_address='10.0.0.9',
+            issue_description='A real tester ticket', created_by=self.t1a,
         )
+        self._seed()
+        self.assertTrue(Ticket.objects.filter(pk=keeper.pk).exists())
+
+    def test_refuses_without_role_holders(self):
+        User.objects.filter(pk=self.manager.pk).update(is_active=False)
+        with self.assertRaises(CommandError):
+            self._seed()
 
     def test_ticket_volume_daily_pattern_and_active_distribution(self):
         self._seed()

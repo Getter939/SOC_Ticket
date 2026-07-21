@@ -24,11 +24,11 @@ history reads as a case worked over hours rather than in one instant.
 
 from datetime import timedelta
 
-from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from apps.incidents.management import seed_actors
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 
 REFERENCE_ACTIVE = 'DEMO-CEO-001'
@@ -45,15 +45,6 @@ class Command(BaseCommand):
         )
 
     # ── helpers ──────────────────────────────────────────────────────── #
-
-    def _pick(self, role_desc, **filters):
-        user = User.objects.filter(**filters).order_by('username').first()
-        if not user:
-            raise CommandError(
-                f'No {role_desc} user found ({filters}). '
-                f'Create one before seeding the demo.'
-            )
-        return user
 
     @staticmethod
     def _retime_logs(ticket, base, offsets):
@@ -83,10 +74,14 @@ class Command(BaseCommand):
             existing.delete()
             self.stdout.write('Existing demo tickets removed; rebuilding.')
 
-        t1 = self._pick('Tier 1 SOC', profile__role='SOC_STAFF', profile__tier='T1')
-        t2 = self._pick('Tier 2 SOC', profile__role='SOC_STAFF', profile__tier='T2')
-        manager = self._pick('SOC manager', profile__role='SOC_MANAGER')
-        admin = self._pick('system admin', profile__role='SYSTEM_ADMIN')
+        # Shared role discovery — same lookup, error text and fallbacks as every
+        # other seeder (apps.incidents.management.seed_actors).
+        actors = seed_actors.resolve()
+        seed_actors.require(actors, 'T1', 'T2', 'MANAGER', 'ADMIN')
+        t1 = seed_actors.first(actors, 'T1')
+        t2 = seed_actors.first(actors, 'T2')
+        manager = seed_actors.first(actors, 'MANAGER')
+        admin = seed_actors.first(actors, 'ADMIN')
 
         active = self._build_active_case(t1, t2, manager, admin)
         closed = self._build_closed_case(t1, t2, manager, admin)

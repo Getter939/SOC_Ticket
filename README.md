@@ -124,17 +124,24 @@ covering both `INCIDENT` and `EVENT` classifications and all severity levels.
 > `AWAITING_OWNER`, `OWNER_REMEDIATED`, `PENDING_T2_REVIEW`) and does not
 > produce them. Use `seed_uat_states` below to get all 12 states.
 
-Seven seed users are created automatically, each with a matching `UserProfile`:
+**No seed user is created.** Every seeder discovers the actors by role
+(`apps.incidents.management.seed_actors`) and attributes its tickets to the real
+accounts holding each role — it never creates, modifies or deletes a user, and
+never touches a password. Assign the roles in Django admin first; a seeder that
+cannot find a required role stops and names it rather than inventing an account.
 
-| Username | Role |
-|---|---|
-| `seed_t1` | SOC Staff, Tier 1 |
-| `seed_t2` | SOC Staff, Tier 2 |
-| `seed_manager` | SOC Manager |
-| `seed_sysadmin` | System Admin |
-| `seed_sysowner` | System Owner |
-| `seed_forensic` | Forensic Analyst |
-| `seed_redteam` | Red Team Manager |
+The roles a seeder looks for are SOC Staff (Tier 1 and Tier 2), SOC Manager,
+System Admin, and — where relevant — System Owner, Forensic Analyst and Red Team
+Manager. Optional ones degrade gracefully: with no System Owner assigned, the
+owner-lane tickets still seed with an empty owner.
+
+To regenerate everything at once and remove the legacy synthetic logins
+(`uat_*`, `seed_*`, mockup names) that older versions created:
+
+```bash
+python manage.py seed_all --dry-run   # preview accounts + plan
+python manage.py seed_all             # purge legacy + reseed all datasets
+```
 
 **Options**
 

@@ -2,8 +2,13 @@
 apps/incidents/management/commands/seed_data.py
 
 Populates the database with synthetic SOC ticket data for dashboard testing.
-Safe to run multiple times (idempotent). All seeded rows are tagged with the
-'seed_' username prefix so --flush can cleanly remove them.
+Safe to run multiple times (idempotent).
+
+Tickets are attributed to the REAL accounts holding each role (discovered via
+apps.incidents.management.seed_actors) — this command never creates, modifies
+or deletes a user. Its rows carry the '[SEED-DATA]' marker in
+issue_description, so --flush removes exactly what it made and nothing a live
+tester created.
 
 Usage:
     python manage.py seed_data                      # 100 tickets, 30 days
@@ -15,14 +20,13 @@ Usage:
 import random
 from datetime import timedelta
 
-from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.incidents.management import seed_actors
 from apps.incidents.models import Ticket, TicketLog
-from apps.accounts.models import UserProfile
 
-SEED_PREFIX = "seed_"
+MARKER = "[SEED-DATA]"
 
 STATUS_POOL = [
     "NEW", "ESCALATED_T2", "T1_REVIEW", "AWAITING_CONTAINMENT",
@@ -88,12 +92,14 @@ class Command(BaseCommand):
         n_days    = options["days"]
 
         if options["flush"]:
-            deleted, _ = Ticket.objects.filter(
-                created_by__username__startswith=SEED_PREFIX
+            # Rows are identified by their content marker, not by a synthetic
+            # username prefix — this command no longer owns any accounts.
+            _, per_model = Ticket.objects.filter(
+                issue_description__contains=MARKER,
             ).delete()
-            User.objects.filter(username__startswith=SEED_PREFIX).delete()
             self.stdout.write(self.style.WARNING(
-                f"Flushed {deleted} seed ticket(s) and their logs/users."
+                f"Flushed {per_model.get('incidents.Ticket', 0)} seed ticket(s) "
+                "(logs cascade). No user accounts were touched."
             ))
 
         if n_tickets == 0:
@@ -102,8 +108,11 @@ class Command(BaseCommand):
         now      = timezone.now()
         start_dt = now - timedelta(days=n_days)
 
-        users = self._ensure_users()
-        self.stdout.write("Seed users ready: " + ", ".join(users.keys()))
+        users = seed_actors.resolve()
+        seed_actors.require(users, "T1", "T2", "MANAGER", "ADMIN")
+        self.stdout.write("Attributing to existing accounts (discovered by role):")
+        self.stdout.write(seed_actors.summary(
+            users, ["T1", "T2", "MANAGER", "ADMIN", "OWNER"]))
 
         created = 0
         for i in range(n_tickets):
@@ -117,51 +126,15 @@ class Command(BaseCommand):
             f"Seeded {created}/{n_tickets} tickets across the last {n_days} day(s)."
         ))
 
-    def _ensure_users(self):
-        configs = [
-            dict(key="SOC_STAFF_T1",  username="seed_t1",       role="SOC_STAFF",    tier="T1",
-                 first="Kawin",     last="Analyst",  dept="SOC Network",       phone="0800000001"),
-            dict(key="SOC_STAFF_T2",  username="seed_t2",       role="SOC_STAFF",    tier="T2",
-                 first="Pimchan",   last="Analyst",  dept="SOC Network",       phone="0800000002"),
-            dict(key="SOC_MANAGER",   username="seed_manager",  role="SOC_MANAGER",  tier="",
-                 first="Somchai",   last="Manager",  dept="SOC Management",    phone="0800000003"),
-            dict(key="SYSTEM_ADMIN",  username="seed_sysadmin", role="SYSTEM_ADMIN", tier="",
-                 first="Nattapong", last="Admin",    dept="IT Infrastructure", phone="0800000004"),
-            dict(key="SYSTEM_OWNER",  username="seed_sysowner", role="SYSTEM_OWNER", tier="",
-                 first="Waraporn",  last="Owner",    dept="Business Unit",     phone="0800000005"),
-            dict(key="FORENSIC",      username="seed_forensic", role="FORENSIC",    tier="",
-                 first="Anucha",    last="Forensic", dept="Digital Forensics", phone="0800000006"),
-            dict(key="REDTEAM",       username="seed_redteam",  role="REDTEAM_MANAGER", tier="",
-                 first="Kittipong", last="RedTeam",  dept="Offensive Security", phone="0800000007"),
-        ]
-        result = {}
-        for c in configs:
-            user, was_created = User.objects.get_or_create(
-                username=c["username"],
-                defaults=dict(
-                    first_name=c["first"], last_name=c["last"],
-                    email=f"{c['username']}@nt.seed.local", is_active=True,
-                ),
-            )
-            if was_created:
-                user.set_unusable_password()
-                user.save()
-            UserProfile.objects.get_or_create(
-                user=user,
-                defaults=dict(
-                    role=c["role"], tier=c["tier"],
-                    department=c["dept"], phone=c["phone"],
-                ),
-            )
-            result[c["key"]] = user
-        return result
-
     def _create_ticket(self, users, start_dt, now):
-        t1      = users["SOC_STAFF_T1"]
-        t2      = users["SOC_STAFF_T2"]
-        manager = users["SOC_MANAGER"]
-        admin   = users["SYSTEM_ADMIN"]
-        owner   = users["SYSTEM_OWNER"]
+        # Pick a different real person each time so the workload heatmap and
+        # audit trail spread across the team instead of naming one analyst.
+        t1      = random.choice(users["T1"])
+        t2      = random.choice(users["T2"])
+        manager = random.choice(users["MANAGER"])
+        admin   = random.choice(users["ADMIN"])
+        # System Owner is optional — None when nobody holds the role.
+        owner   = random.choice(users["OWNER"]) if users["OWNER"] else None
 
         status = random.choices(STATUS_POOL, weights=STATUS_WEIGHTS, k=1)[0]
 
@@ -246,7 +219,7 @@ class Command(BaseCommand):
             is_emergency       = is_emergency,
             ip_address         = rand_ip(),
             device_name        = device,
-            issue_description  = description,
+            issue_description  = f"{description} {MARKER}",
             issue_type         = issue_type,
             detailed_issue     = detailed_issue,
             detailed_issue2    = detailed_issue2,
