@@ -3,7 +3,7 @@
 Django-based SOC (Security Operations Centre) ticketing and case-management app.
 
 **New here?** Read [CONTEXT.md](CONTEXT.md) for the domain vocabulary, then
-[docs/handover/HANDOVER.md](docs/handover/HANDOVER.md) for the full technical tour (state
+[docs/handover/engineering-handover.md](docs/handover/engineering-handover.md) for the full technical tour (state
 machine, roles, OLA policy, deployment, known gotchas).
 
 ## Setup

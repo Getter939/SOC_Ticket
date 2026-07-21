@@ -1,7 +1,13 @@
-# SOC Ticket Workflow — by responsible role
+# Ticket Lifecycle States
 
-Source of truth: `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS`.
-Edit the Mermaid block below; each line is one node or one arrow.
+> **Audience:** developers and SOC leads · **Status:** Current · **Last updated:** 2026-07-21
+> **Source of truth:** `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS`
+
+The complete 12-state ticket lifecycle as a diagram plus a transition reference,
+organised by which role may perform each move. When the state machine changes in
+code, update the Mermaid block below — each line is one node or one arrow.
+
+---
 
 **Role colors** — 🔵 Tier 1 · 🟣 Tier 2 · 🟠 System Admin · 🔴 SOC Manager · 🟢 Closed
 
@@ -103,3 +109,11 @@ flowchart TD
 **SOC Manager Queue** (ticket list, manager-scoped) shows both manager stages: PENDING_MGR_TRIAGE (pre-containment review) and PENDING_MANAGER (emergency approval).
 
 **Tier 2 Queue** (`/wazuh/escalation_queue/`) shows all three Tier 2 stages: ESCALATED_T2, CONTAINMENT_REPORTED, PENDING_T2_REVIEW.
+
+---
+
+## Related documents
+
+- [workflow-change-log.md](workflow-change-log.md) — *why* the state machine has this shape
+- [../handover/engineering-handover.md](../handover/engineering-handover.md) §3.1 — the same lifecycle in prose, with the gotchas
+- [../adr/0003-manager-verification-gate-in-model.md](../adr/0003-manager-verification-gate-in-model.md) — why the manager gate lives in the model

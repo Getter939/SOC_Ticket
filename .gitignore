@@ -60,8 +60,14 @@ desktop.ini
 .claude/settings.json
 /.claude
 *.md
-# Root documentation relocated to docs/ remains versioned.
-!docs/deployment.md
-!docs/workflow-redesign.md
+# Documentation that stays versioned. NOTE: `*.md` above is a blanket ignore,
+# so any NEW .md file is silently untracked unless un-ignored here. Paths below
+# were updated 2026-07-21 when docs/ was reorganised into category subfolders.
+!docs/README.md
+!docs/operations/production-deployment.md
+!docs/architecture/workflow-change-log.md
+# Deliberately NOT un-ignored: docs/uat/uat-*.md and
+# docs/operations/grafana-wazuh-wall.md contain a shared UAT password and
+# internal host details. Keep them local unless those are scrubbed first.
 .claude/skills/03-exploit-development/scripts/payload_generator.py
 .claude/skills/03-exploit-development/SKILL.md

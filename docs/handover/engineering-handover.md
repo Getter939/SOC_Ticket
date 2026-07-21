@@ -1,11 +1,14 @@
-# SOC Ticketing System — Handover Document
+# Engineering Handover — SOC Ticketing System
 
-_Last updated: 2026-07-21 (repo at commit `3967bfb`, "21/7 Codebase Audit")_
-_ฉบับภาษาไทย: [HANDOVER.th.md](HANDOVER.th.md)_
+> **Audience:** the developer taking over this codebase · **Status:** Current
+> **Reflects:** repo at commit `3967bfb` ("21/7 Codebase Audit")
+> **Thai version:** [engineering-handover.th.md](engineering-handover.th.md)
 
 This document is the entry point for anyone taking over this project. It covers
 what the system is, how it works, where the important code lives, how to run
 and deploy it, and the things that are **not** obvious from reading the code.
+
+---
 
 Companion documents (read in this order):
 
@@ -13,12 +16,12 @@ Companion documents (read in this order):
 |---|---|
 | [README.md](../../README.md) | Local dev setup, test-data seeding, offline Wazuh fixtures |
 | [CONTEXT.md](../../CONTEXT.md) | **The glossary** — what every domain term means (Incident vs Event, OLA, Response Request…). Read this first if the vocabulary is unfamiliar |
-| [workflow-redesign.md](../architecture/workflow-redesign.md) | Full rationale for the ticket workflow redesign and its later amendments |
-| [soc-ticket-flow.md](../architecture/soc-ticket-flow.md) | The current end-to-end flow, per role |
-| [deployment.md](../operations/deployment.md) | Production deployment (Docker, nginx, gunicorn) |
+| [workflow-change-log.md](../architecture/workflow-change-log.md) | Full rationale for the ticket workflow redesign and its later amendments |
+| [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) | The current end-to-end flow, per role |
+| [production-deployment.md](../operations/production-deployment.md) | Production deployment (Docker, nginx, gunicorn) |
 | [adr/](../adr/) | Architecture decision records (case bundling, OLA clock origin, manager gate) |
-| `../user-guides/SOC_Ticketing_System_Feature_Guide.docx` | End-user feature guide (screenshots, per-role walkthroughs) |
-| [user-guide-th.md](../user-guides/user-guide-th.md) | Thai end-user guide |
+| `../user-guides/feature-guide.docx` | End-user feature guide (screenshots, per-role walkthroughs) |
+| [end-user-guide.th.md](../user-guides/end-user-guide.th.md) | Thai end-user guide |
 | Notion: "SOC Ticketing System — Technical Documentation" | Full technical reference |
 
 ---
@@ -55,7 +58,7 @@ deadline tracking — plus a KPI dashboard.
 - **Tier carries permission weight** (since the 2026-06-19 redesign) — T1/T2
   on SOC staff is not just a seniority label. Only Tier 1 creates tickets and
   drives the T1 side of the workflow; Tier 2 only handles escalated tickets
-  and can never assign admins or create tickets. See architecture/workflow-redesign.md for
+  and can never assign admins or create tickets. See architecture/workflow-change-log.md for
   the full reasoning.
 - **OLA breach semantics differ by deadline** — the *triage* breach is a fixed
   historical fact ("was the ticket raised in time?"), while the *contain*
@@ -348,7 +351,7 @@ templates/              Django templates (base.html + per-app dirs)
 2. `apps/incidents/models.py` — the `Ticket` model top to bottom: statuses,
    `ALLOWED_TRANSITIONS`, `TRANSITION_PERMISSIONS`, `transition_to`,
    `OLA_TARGETS`, `save()`.
-3. [workflow-redesign.md](../architecture/workflow-redesign.md) — why the state machine is
+3. [workflow-change-log.md](../architecture/workflow-change-log.md) — why the state machine is
    shaped this way, including the manager-triage and response-team amendments.
 4. `apps/incidents/views.py` — `ticket_detail` and the transition-posting
    views; then `apps/wazuh_ingest/views.py` for the alert-to-ticket path.
@@ -401,7 +404,7 @@ Needs a reachable PostgreSQL 16 (`DB_*` in `.env`). App at
 
 Production: `docker compose -f docker-compose.prod.yml up -d --build`
 (nginx → gunicorn → Django + PostgreSQL). The `web` container runs
-`migrate` + `collectstatic` on every start. Full runbook in operations/deployment.md
+`migrate` + `collectstatic` on every start. Full runbook in operations/production-deployment.md
 (UFW, superuser creation, team accounts, logs).
 
 - `docker-compose.yml` (no suffix) is **local dev only** (runserver +
@@ -420,13 +423,17 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 
    | Old path | Current path |
    |---|---|
-   | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-redesign.md` |
-   | `DEPLOY.md` | `docs/operations/deployment.md` |
-   | `docs/HANDOVER.md` | `docs/handover/HANDOVER.md` |
-   | `docs/soc-ticket-flow.md` | `docs/architecture/soc-ticket-flow.md` |
-   | `docs/user-guide-th.md`, `docs/ceo-brief-th.md` | `docs/user-guides/` |
-   | `docs/UAT_*.md` | `docs/uat/` |
-   | `docs/*.svg` | `docs/diagrams/` |
+   | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-change-log.md` |
+   | `DEPLOY.md` | `docs/operations/production-deployment.md` |
+   | `docs/HANDOVER.md` / `.th.md` | `docs/handover/engineering-handover.md` / `.th.md` |
+   | `docs/soc-ticket-flow.md` | `docs/architecture/ticket-lifecycle-states.md` |
+   | `docs/user-guide-th.md` | `docs/user-guides/end-user-guide.th.md` |
+   | `docs/ceo-brief-th.md` | `docs/user-guides/executive-brief.th.md` |
+   | `docs/GRAFANA_DASHBOARD.md` | `docs/operations/grafana-wazuh-wall.md` |
+   | `docs/UAT_DATA_PREP.md` | `docs/uat/uat-environment-setup.md` |
+   | `docs/UAT_TEST_SCRIPT.md` | `docs/uat/uat-test-scenarios.md` |
+   | `docs/UAT_FEEDBACK_LOG.md` | `docs/uat/uat-feedback-log.md` |
+   | `docs/*.svg` | `docs/diagrams/` (renamed to kebab-case) |
 
    `docs/adr/` and `docs/agents/` did **not** move — those paths are hardcoded
    in the agent skills under `.agents/skills/` and in the root `AGENTS.md`.
@@ -486,7 +493,7 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 - **Day 1** — read [CONTEXT.md](../../CONTEXT.md) for the vocabulary, then run it
   locally (§5), `seed_data` + `seed_uat_states`, and log in as each of the
   seven role accounts and click around.
-- **Day 2** — read `Ticket` in `models.py` + architecture/workflow-redesign.md; trace one
+- **Day 2** — read `Ticket` in `models.py` + architecture/workflow-change-log.md; trace one
   incident from Wazuh fixture alert → triage → **manager pre-containment
   review** → containment → Tier 2 verification → approval, as the appropriate
   user at each step. Then repeat down the Direct-to-Owner lane.
@@ -494,5 +501,5 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
   workflow rules as executable spec.
 - **Day 4** — review the dashboard views + `ola.py`; understand the OLA
   buckets and `status_changed_at`.
-- **Day 5** — review operations/deployment.md against the real production host with the
+- **Day 5** — review operations/production-deployment.md against the real production host with the
   outgoing maintainer; confirm secrets, backups, and the ingest schedule.

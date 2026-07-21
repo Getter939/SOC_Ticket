@@ -1,11 +1,14 @@
-# ระบบ SOC Ticketing — เอกสารส่งมอบงาน (Handover Document)
+# เอกสารส่งมอบงานด้านวิศวกรรม — ระบบ SOC Ticketing
 
-_อัปเดตล่าสุด: 2026-07-21 (repo ที่ commit `3967bfb`, "21/7 Codebase Audit")_
-_English version: [HANDOVER.md](HANDOVER.md)_
+> **ผู้อ่าน:** developer ที่จะรับช่วงดูแลโค้ดเบสนี้ · **สถานะ:** เป็นปัจจุบัน
+> **อ้างอิงจาก:** repo ที่ commit `3967bfb` ("21/7 Codebase Audit")
+> **ฉบับภาษาอังกฤษ:** [engineering-handover.md](engineering-handover.md)
 
 เอกสารนี้เป็นจุดเริ่มต้นสำหรับผู้ที่จะรับช่วงดูแลโปรเจกต์นี้ต่อ ครอบคลุมว่าระบบนี้คืออะไร
 ทำงานอย่างไร โค้ดส่วนสำคัญอยู่ที่ไหน วิธีรันและ deploy รวมถึงสิ่งที่**ไม่สามารถ**
 เข้าใจได้จากการอ่านโค้ดเพียงอย่างเดียว
+
+---
 
 เอกสารประกอบ (แนะนำให้อ่านตามลำดับนี้):
 
@@ -13,12 +16,12 @@ _English version: [HANDOVER.md](HANDOVER.md)_
 |---|---|
 | [README.md](../../README.md) | การติดตั้งสำหรับ dev บนเครื่อง, การ seed ข้อมูลทดสอบ, Wazuh fixture แบบ offline |
 | [CONTEXT.md](../../CONTEXT.md) | **อภิธานศัพท์** — ความหมายของทุกคำในระบบ (Incident vs Event, OLA, Response Request…) หากยังไม่คุ้นคำศัพท์ ให้อ่านไฟล์นี้ก่อน |
-| [workflow-redesign.md](../architecture/workflow-redesign.md) | เหตุผลทั้งหมดของการออกแบบ workflow ตั๋วใหม่ รวมถึงการแก้ไขเพิ่มเติมภายหลัง |
-| [soc-ticket-flow.md](../architecture/soc-ticket-flow.md) | ภาพรวม flow ปัจจุบันตั้งแต่ต้นจนจบ แยกตาม role |
-| [deployment.md](../operations/deployment.md) | การ deploy production (Docker, nginx, gunicorn) |
+| [workflow-change-log.md](../architecture/workflow-change-log.md) | เหตุผลทั้งหมดของการออกแบบ workflow ตั๋วใหม่ รวมถึงการแก้ไขเพิ่มเติมภายหลัง |
+| [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) | ภาพรวม flow ปัจจุบันตั้งแต่ต้นจนจบ แยกตาม role |
+| [production-deployment.md](../operations/production-deployment.md) | การ deploy production (Docker, nginx, gunicorn) |
 | [adr/](../adr/) | บันทึกการตัดสินใจเชิงสถาปัตยกรรม (case bundling, จุดเริ่มนาฬิกา OLA, manager gate) |
-| `../user-guides/SOC_Ticketing_System_Feature_Guide.docx` | คู่มือฟีเจอร์สำหรับผู้ใช้งาน (ภาพหน้าจอ, วิธีใช้งานแยกตาม role) |
-| [user-guide-th.md](../user-guides/user-guide-th.md) | คู่มือผู้ใช้งานฉบับภาษาไทย |
+| `../user-guides/feature-guide.docx` | คู่มือฟีเจอร์สำหรับผู้ใช้งาน (ภาพหน้าจอ, วิธีใช้งานแยกตาม role) |
+| [end-user-guide.th.md](../user-guides/end-user-guide.th.md) | คู่มือผู้ใช้งานฉบับภาษาไทย |
 | Notion: "SOC Ticketing System — Technical Documentation" | เอกสารอ้างอิงทางเทคนิคฉบับเต็ม |
 
 ---
@@ -50,7 +53,7 @@ Agreement) — พร้อม dashboard แสดง KPI
 - **Tier มีผลต่อสิทธิ์การใช้งาน** (ตั้งแต่การออกแบบใหม่ 2026-06-19) — T1/T2
   ของ SOC staff ไม่ใช่แค่ป้ายบอกอาวุโส เฉพาะ Tier 1 เท่านั้นที่สร้างตั๋วและดำเนินงาน
   ฝั่ง T1 ของ workflow ส่วน Tier 2 จัดการเฉพาะตั๋วที่ถูก escalate และไม่มีสิทธิ์
-  มอบหมาย admin หรือสร้างตั๋วเด็ดขาด ดูเหตุผลทั้งหมดใน architecture/workflow-redesign.md
+  มอบหมาย admin หรือสร้างตั๋วเด็ดขาด ดูเหตุผลทั้งหมดใน architecture/workflow-change-log.md
 - **ความหมายของการ breach OLA ต่างกันตามชนิด deadline** — การ breach ฝั่ง
   *triage* เป็นข้อเท็จจริงในอดีตที่ตายตัว ("เปิดตั๋วทันเวลาหรือไม่") ส่วนการ breach
   ฝั่ง *contain* เป็นการนับถอยหลังแบบ real-time ของตั๋วที่ยัง active อยู่ ดู §4
@@ -336,7 +339,7 @@ templates/              Django template (base.html + โฟลเดอร์แ
 2. `apps/incidents/models.py` — อ่าน model `Ticket` จากบนลงล่าง: สถานะต่าง ๆ,
    `ALLOWED_TRANSITIONS`, `TRANSITION_PERMISSIONS`, `transition_to`,
    `OLA_TARGETS`, `save()`
-3. `architecture/workflow-redesign.md` — ทำไม state machine ถึงมีรูปร่างแบบนี้ รวมถึง
+3. `architecture/workflow-change-log.md` — ทำไม state machine ถึงมีรูปร่างแบบนี้ รวมถึง
    การปรับเรื่อง manager triage และทีมตอบสนอง
 4. `apps/incidents/views.py` — `ticket_detail` และ view ที่ POST ทรานซิชัน
    จากนั้น `apps/wazuh_ingest/views.py` สำหรับเส้นทาง alert-สู่-ตั๋ว
@@ -389,7 +392,7 @@ python manage.py runserver 0.0.0.0:8088
 
 Production: `docker compose -f docker-compose.prod.yml up -d --build`
 (nginx → gunicorn → Django + PostgreSQL) container `web` รัน `migrate` +
-`collectstatic` อัตโนมัติทุกครั้งที่ start ดูขั้นตอนเต็มใน operations/deployment.md
+`collectstatic` อัตโนมัติทุกครั้งที่ start ดูขั้นตอนเต็มใน operations/production-deployment.md
 (UFW, การสร้าง superuser, บัญชีทีม, การดู log)
 
 - `docker-compose.yml` (ไม่มี suffix) ใช้สำหรับ **dev บนเครื่องเท่านั้น**
@@ -404,17 +407,21 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 1. **เอกสารถูกย้าย 2 ครั้ง — path เดิมใน commit และ Notion ล้าสมัยแล้ว**
    ครั้งแรก `WORKFLOW_REDESIGN.md` และ `DEPLOY.md` ย้ายจาก root เข้า `docs/`
    จากนั้นเมื่อ 2026-07-21 ไฟล์ทั้งหมดใน `docs/` ถูกจัดเข้าโฟลเดอร์ตามหมวดหมู่
-   ตำแหน่งปัจจุบัน:
+   **พร้อมเปลี่ยนชื่อไฟล์เป็น kebab-case** ตำแหน่งปัจจุบัน:
 
    | path เดิม | path ปัจจุบัน |
    |---|---|
-   | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-redesign.md` |
-   | `DEPLOY.md` | `docs/operations/deployment.md` |
-   | `docs/HANDOVER.md` | `docs/handover/HANDOVER.md` |
-   | `docs/soc-ticket-flow.md` | `docs/architecture/soc-ticket-flow.md` |
-   | `docs/user-guide-th.md`, `docs/ceo-brief-th.md` | `docs/user-guides/` |
-   | `docs/UAT_*.md` | `docs/uat/` |
-   | `docs/*.svg` | `docs/diagrams/` |
+   | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-change-log.md` |
+   | `DEPLOY.md` | `docs/operations/production-deployment.md` |
+   | `docs/HANDOVER.md` / `.th.md` | `docs/handover/engineering-handover.md` / `.th.md` |
+   | `docs/soc-ticket-flow.md` | `docs/architecture/ticket-lifecycle-states.md` |
+   | `docs/user-guide-th.md` | `docs/user-guides/end-user-guide.th.md` |
+   | `docs/ceo-brief-th.md` | `docs/user-guides/executive-brief.th.md` |
+   | `docs/GRAFANA_DASHBOARD.md` | `docs/operations/grafana-wazuh-wall.md` |
+   | `docs/UAT_DATA_PREP.md` | `docs/uat/uat-environment-setup.md` |
+   | `docs/UAT_TEST_SCRIPT.md` | `docs/uat/uat-test-scenarios.md` |
+   | `docs/UAT_FEEDBACK_LOG.md` | `docs/uat/uat-feedback-log.md` |
+   | `docs/*.svg` | `docs/diagrams/` (เปลี่ยนเป็น kebab-case) |
 
    `docs/adr/` และ `docs/agents/` **ไม่ได้ย้าย** เพราะ path ทั้งสองถูกอ้างอิงตายตัว
    ใน agent skills ที่ `.agents/skills/` และใน `AGENTS.md` ที่ root
@@ -476,7 +483,7 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 - **วันที่ 1** — อ่าน [CONTEXT.md](../../CONTEXT.md) เพื่อจับคำศัพท์ก่อน จากนั้น
   รันบนเครื่องตัวเอง (§5), `seed_data` + `seed_uat_states`, แล้วล็อกอินด้วยบัญชี
   ทดสอบทั้ง **7 role** แล้วลองคลิกสำรวจ
-- **วันที่ 2** — อ่าน `Ticket` ใน `models.py` + architecture/workflow-redesign.md;
+- **วันที่ 2** — อ่าน `Ticket` ใน `models.py` + architecture/workflow-change-log.md;
   ไล่ incident หนึ่งเคสตั้งแต่ Wazuh fixture alert → triage →
   **จุดตรวจของ manager ก่อน containment** → containment → การตรวจรับของ Tier 2 →
   อนุมัติ โดยสวมบทบาทผู้ใช้ที่ถูกต้องในแต่ละขั้น จากนั้นทำซ้ำอีกรอบด้วย lane
@@ -485,5 +492,5 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
   เพื่อดูกติกา workflow ในรูปแบบสเปกที่รันได้
 - **วันที่ 4** — ทบทวน view ของ dashboard + `ola.py`; ทำความเข้าใจกลุ่ม OLA
   และ `status_changed_at`
-- **วันที่ 5** — ตรวจ operations/deployment.md เทียบกับเครื่อง production จริงร่วมกับ
+- **วันที่ 5** — ตรวจ operations/production-deployment.md เทียบกับเครื่อง production จริงร่วมกับ
   ผู้ดูแลคนเดิม; ยืนยันเรื่อง secret, backup และตารางเวลาการ ingest

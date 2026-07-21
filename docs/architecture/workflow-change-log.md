@@ -1,8 +1,11 @@
-# SOC Ticket Workflow Redesign — Handoff
+# Workflow Change Log
 
-Concise map of the **current** implementation and the **target** workflow. This is the
-backend-change handoff; the UI prompt picks up from the "UI surfaces still to update"
-list at the bottom.
+> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-07-21
+> **Current-state reference:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md)
+
+A dated record of every workflow redesign and amendment, newest first, with the
+reasoning behind each. Read this to understand *why* the state machine has its
+current shape; read `ticket-lifecycle-states.md` for *what* that shape is today.
 
 Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 (SIEM alert triage + escalation queue), `apps/accounts` (roles/tiers),
@@ -13,7 +16,7 @@ Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 ## 0. 2026-07-14 update — SOC Manager pre-containment review
 
 Layered on top of the 2026-07-08 redesign below. Diagram source of truth:
-`soc-ticket-flow.md`. Migration `incidents/0044` (additive: new `t1_route`
+`ticket-lifecycle-states.md`. Migration `incidents/0044` (additive: new `t1_route`
 field + `PENDING_MGR_TRIAGE` status choice + `MANAGER_TRIAGE_PENDING` template key).
 
 **New blocking state `PENDING_MGR_TRIAGE`.** Every Incident now passes through the
@@ -304,3 +307,10 @@ the emergency flag and must be reworked by the UI prompt:
    be relabelled Event/Incident and the new states.
 8. Nav badge counts (`apps/wazuh_ingest/context_processors.py`) still count alert-level
    escalations; add a ticket-escalation badge if the T2 ticket queue is built.
+
+---
+
+## Related documents
+
+- [ticket-lifecycle-states.md](ticket-lifecycle-states.md) — the current state machine, as it stands today
+- [../adr/](../adr/) — decision records for the choices referenced above

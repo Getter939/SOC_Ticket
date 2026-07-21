@@ -41,7 +41,7 @@ from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 #      truth for both the slug set and the display order; this module     #
 #      never hardcodes the list. Terminal = Ticket.TERMINAL_STATUSES      #
 #      ({APPROVED, CLOSED_EVENT}); the other 10 are active. The current   #
-#      lifecycle is documented in docs/architecture/soc-ticket-flow.md.                #
+#      lifecycle is documented in docs/architecture/ticket-lifecycle-states.md.                #
 #   f) Threat type   → Ticket.detailed_issue (DETAILED_ISSUE_CHOICES);    #
 #      source channel → issue_type. (The Event/Incident axis is           #
 #      Ticket.classification.)                                            #

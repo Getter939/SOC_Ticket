@@ -1,4 +1,7 @@
-# Deployment Guide — SOC Ticket (Production)
+# Production Deployment
+
+> **Audience:** whoever deploys and operates the app · **Status:** Current · **Last updated:** 2026-07-21
+> **For local dev setup instead, see:** [../../README.md](../../README.md)
 
 Production stack: **nginx → gunicorn → Django**, with **PostgreSQL**, run via
 `docker-compose.prod.yml`. The dev-only `docker-compose.yml` (runserver +
@@ -8,6 +11,8 @@ actual deployment.
 Commands below assume a Linux host with Docker and the Docker Compose plugin
 installed, run from the project root (where `.env` and the compose files
 live).
+
+---
 
 ## Quick start — end to end
 
@@ -155,3 +160,11 @@ docker compose -f docker-compose.prod.yml logs -f web
 docker compose -f docker-compose.prod.yml logs -f nginx
 docker compose -f docker-compose.prod.yml logs -f db
 ```
+
+---
+
+## Related documents
+
+- [../../README.md](../../README.md) — local development setup
+- [grafana-wazuh-wall.md](grafana-wazuh-wall.md) — the separate Grafana wall-board
+- [../handover/engineering-handover.md](../handover/engineering-handover.md) §6–§8 — deployment context, known issues, security posture
