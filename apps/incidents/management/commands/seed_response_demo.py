@@ -1,32 +1,38 @@
 """
 apps/incidents/management/commands/seed_response_demo.py
 
-Seeds dummy Response-Team data so a Forensic Analyst (and Red Team Manager) has a
-populated "My Requests" queue to test on the UAT VM: tickets carrying response
-requests (Forensics / RCA, VA / Pentest, Infrastructure Security) in a mix of
-statuses — fresh, in-progress, completed-with-report, and one that demonstrates
-the approval gate (an open request holding an emergency ticket out of closure).
+Seeds dummy Response-Team data so the Forensic Analyst (and Red Team Manager, if
+one exists) has a populated "My Requests" queue to exercise during UAT: tickets
+carrying response requests in a mix of statuses — fresh, in-progress,
+completed-with-report, and one that demonstrates the approval gate (an open
+request holding an emergency ticket out of closure).
 
-Login accounts: this command gives ``uat_forensic`` and ``uat_redteam`` a REAL
-(usable) password so testers can actually log in — unlike ``seed_uat_states``,
-which creates them for attribution only. Default password ``Uat#2026`` (UAT
-convention); override with --password.
+IT NEVER CREATES OR MODIFIES USER ACCOUNTS. The actors are discovered from the
+real database by ROLE, so the command attributes data to whoever actually holds
+each role on this environment. In particular it never touches passwords — the
+UAT VM runs on real staff accounts.
+
+Prerequisite: the roles must already be assigned in Django admin. If a required
+role has no active user the command stops and names it, rather than inventing an
+account. Red-team scenarios are skipped (with a notice) when no Red Team Manager
+exists; assign that role and re-run to include them.
 
 Every ticket is tagged ``[RESPONSE-DEMO]`` in issue_description so --flush removes
 exactly what this command created and nothing a live tester makes.
 
 Usage:
-    python manage.py seed_response_demo                  # ensure accounts + seed
-    python manage.py seed_response_demo --flush          # wipe demo rows, re-seed
-    python manage.py seed_response_demo --password S3cret # set login password
-    python manage.py seed_response_demo --flush --no-seed # wipe only
+    python manage.py seed_response_demo --dry-run   # show which accounts it would use
+    python manage.py seed_response_demo             # seed
+    python manage.py seed_response_demo --flush     # wipe demo rows, re-seed
+    python manage.py seed_response_demo --flush --no-seed   # wipe only
 """
 
 from datetime import timedelta
+from itertools import cycle
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
@@ -36,33 +42,10 @@ MARKER = "[RESPONSE-DEMO]"  # appended to issue_description so --flush is precis
 S = Ticket
 ST = TicketSubtask
 
-# Attribution / login accounts this command ensures. The two response-team roles
-# get a usable password (they must log in); the SOC-side authors are attribution
-# only (unusable password — testers use their own named accounts).
-_LOGIN_USERS = [
-    dict(username="uat_forensic", role=UserProfile.ROLE_FORENSIC,
-         first="Anucha", last="Forensic", dept="Digital Forensics", phone="0810000006"),
-    dict(username="uat_redteam", role=UserProfile.ROLE_REDTEAM_MANAGER,
-         first="Kittipong", last="RedTeam", dept="Offensive Security", phone="0810000007"),
-]
-_AUTHOR_USERS = [
-    dict(key="T1", username="uat_t1", role=UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
-         first="Kawin", last="T1", dept="SOC", phone="0810000001"),
-    dict(key="MANAGER", username="uat_manager", role=UserProfile.ROLE_SOC_MANAGER, tier="",
-         first="Somchai", last="Manager", dept="SOC", phone="0810000003"),
-    dict(key="ADMIN", username="uat_sysadmin", role=UserProfile.ROLE_SYSTEM_ADMIN, tier="",
-         first="Nattapong", last="Admin", dept="IT", phone="0810000004"),
-    dict(key="T2", username="uat_t2", role=UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2,
-         first="Pimchan", last="T2", dept="SOC", phone="0810000002"),
-]
-
-# Each scenario: parent-ticket status + the response request riding on it. The
-# ticket fields are pinned so the stage is internally consistent (an admin lane
-# has an assigned admin; a CONTAINMENT_REPORTED ticket has a report; the gate
-# demo is emergency + Tier-2-verified so it truly sits at PENDING_MANAGER).
-#   who:        'FORENSIC' or 'REDTEAM'
-#   req_type:   TicketSubtask type
-#   req_status: subtask status
+# Each scenario: parent-ticket status + the response request riding on it. Ticket
+# fields are pinned so the stage is internally consistent (an admin lane has an
+# assigned admin; a CONTAINMENT_REPORTED ticket has a report; the gate demo is
+# emergency + Tier-2-verified so it genuinely sits at PENDING_MANAGER).
 SCENARIOS = [
     dict(who="FORENSIC", req_type=ST.TYPE_FORENSIC_RCA, req_status=ST.STATUS_OPEN,
          status=S.STATUS_AWAITING_CONTAINMENT, emergency=False,
@@ -84,7 +67,7 @@ SCENARIOS = [
          device="DC-PRIMARY", severity="Critical",
          desc="Phishing compromise of an executive mailbox (emergency).",
          req_title="RCA ด่วน: การเข้าถึงบัญชีผู้บริหาร",
-         req_desc="Emergency — ต้องได้ root cause ก่อนปิดเคส (gate demo).",
+         req_desc="Emergency — ต้องได้ root cause ก่อนปิดเคส (approval-gate demo).",
          req_notes="", report=False),
     dict(who="FORENSIC", req_type=ST.TYPE_FORENSIC_RCA, req_status=ST.STATUS_DONE,
          status=S.STATUS_CONTAINMENT_REPORTED, emergency=False,
@@ -95,6 +78,7 @@ SCENARIOS = [
          req_notes="Root cause: มาโครใน .xlsm ที่เปิดจากอีเมล → dropper. "
                    "ไม่มี lateral movement. แนบรายงานฉบับเต็มแล้ว.",
          report=True),
+    # Red-team scenarios are seeded only when a Red Team Manager exists.
     dict(who="REDTEAM", req_type=ST.TYPE_VA_PT, req_status=ST.STATUS_OPEN,
          status=S.STATUS_AWAITING_CONTAINMENT, emergency=False,
          device="VPN-GW-01", severity="High",
@@ -114,17 +98,37 @@ SCENARIOS = [
 
 
 class Command(BaseCommand):
-    help = "Seed dummy Response-Team (Forensic / Red Team) data for UAT."
+    help = ("Seed dummy Response-Team (Forensic / Red Team) data for UAT, "
+            "attributed to the real accounts holding each role.")
 
     def add_arguments(self, parser):
-        parser.add_argument("--password", default="Uat#2026",
-                            help="Login password for uat_forensic / uat_redteam (default: Uat#2026)")
         parser.add_argument("--flush", action="store_true",
                             help="Delete previous RESPONSE-DEMO rows before seeding")
         parser.add_argument("--no-seed", action="store_true",
                             help="With --flush: wipe only, do not re-seed")
+        parser.add_argument("--dry-run", action="store_true",
+                            help="Show which accounts would be used, write nothing")
 
     def handle(self, *args, **options):
+        actors = self._resolve_actors()
+
+        if options["dry_run"]:
+            self._report_actors(actors)
+            runnable = [sc for sc in SCENARIOS if self._responders(sc, actors)]
+            self.stdout.write("\nWould seed:")
+            for sc in runnable:
+                self.stdout.write(
+                    f"  [{sc['req_status']:<11}] {sc['req_type']:<13} on a "
+                    f"{sc['status']} ticket"
+                )
+            skipped = len(SCENARIOS) - len(runnable)
+            if skipped:
+                self.stdout.write(self.style.WARNING(
+                    f"  ({skipped} red-team scenario(s) skipped - no Red Team Manager)"
+                ))
+            self.stdout.write(self.style.SUCCESS("\nDry run - nothing written."))
+            return
+
         if options["flush"]:
             _, per_model = Ticket.objects.filter(
                 issue_description__contains=MARKER,
@@ -137,87 +141,105 @@ class Command(BaseCommand):
             if options["no_seed"]:
                 return
 
-        password = options["password"]
-        users = self._ensure_users(password)
-        now = timezone.now()
+        self._report_actors(actors)
 
-        created = 0
+        now = timezone.now()
+        # Spread ticket authorship across the real Tier-1 analysts so the audit
+        # trail and workload heatmap don't all point at one person.
+        creators = cycle(actors["T1"])
+        created = skipped = 0
         for sc in SCENARIOS:
+            responders = self._responders(sc, actors)
+            if not responders:
+                skipped += 1
+                continue
             try:
-                self._create_scenario(sc, users, now)
+                self._create_scenario(sc, actors, responders[0], next(creators), now)
                 created += 1
             except Exception as exc:  # keep going; report the offender
                 self.stderr.write(self.style.ERROR(f"  {sc['req_title']} failed: {exc}"))
 
-        forensic_open = sum(
-            1 for sc in SCENARIOS
-            if sc["who"] == "FORENSIC" and sc["req_status"] != ST.STATUS_DONE
-        )
-        forensic_done = sum(1 for sc in SCENARIOS if sc["who"] == "FORENSIC") - forensic_open
-        # Console output stays ASCII-only: UAT VM consoles vary (cp874/cp1252)
-        # and choke on Thai or arrows. The Thai lives in the DB (UTF-8), not here.
         self.stdout.write(self.style.SUCCESS(
-            f"Seeded {created} response-team demo ticket(s)."
+            f"\nSeeded {created} response-team demo ticket(s)."
         ))
+        if skipped:
+            self.stdout.write(self.style.WARNING(
+                f"Skipped {skipped} red-team scenario(s): no active user holds the "
+                "Red Team Manager role. Assign it in admin and re-run to add them."
+            ))
         self.stdout.write(
-            f"  Forensic Analyst queue : {forensic_open} open + {forensic_done} done"
+            "\nThe Forensic Analyst can now sign in with their OWN existing "
+            "credentials\n(no passwords were created or changed) and will land on "
+            "the Response queue."
         )
-        self.stdout.write(self.style.SUCCESS(
-            "\nLogin (UAT):\n"
-            f"  Forensic Analyst : username uat_forensic / password {password}\n"
-            f"  Red Team Manager : username uat_redteam  / password {password}\n"
-            "Then open the 'Response' item in the sidebar to see the queue."
-        ))
 
-    # ── users ────────────────────────────────────────────────────────────── #
+    # ── actors ───────────────────────────────────────────────────────────── #
 
-    def _ensure_users(self, password):
-        result = {}
-        # Response-team logins get a usable password.
-        for c in _LOGIN_USERS:
-            user, _ = User.objects.get_or_create(
-                username=c["username"],
-                defaults=dict(first_name=c["first"], last_name=c["last"],
-                              email=f"{c['username']}@uat.local", is_active=True),
+    def _responders(self, scenario, actors):
+        """Users eligible to receive this scenario's request (may be empty)."""
+        return actors["FORENSIC"] if scenario["who"] == "FORENSIC" else actors["REDTEAM"]
+
+    def _resolve_actors(self):
+        """Find the real accounts by role. Never creates anything."""
+        def by_role(role, tier=None):
+            qs = User.objects.filter(is_active=True, profile__role=role)
+            if tier is not None:
+                qs = qs.filter(profile__tier=tier)
+            return list(qs.select_related("profile").order_by("username"))
+
+        forensic = by_role(UserProfile.ROLE_FORENSIC)
+        redteam = by_role(UserProfile.ROLE_REDTEAM_MANAGER)
+        managers = by_role(UserProfile.ROLE_SOC_MANAGER)
+        admins = by_role(UserProfile.ROLE_SYSTEM_ADMIN)
+        staff = by_role(UserProfile.ROLE_SOC_STAFF)
+        # Prefer the correct tier; fall back to any SOC staff so a environment
+        # without a tier split still seeds rather than failing.
+        t1 = by_role(UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1) or staff
+        t2 = by_role(UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T2) or staff
+
+        missing = []
+        if not forensic:
+            missing.append("Forensic Analyst (role FORENSIC)")
+        if not managers:
+            missing.append("SOC Manager (role SOC_MANAGER)")
+        if not admins:
+            missing.append("System Admin (role SYSTEM_ADMIN)")
+        if not staff:
+            missing.append("SOC Staff (role SOC_STAFF)")
+        if missing:
+            raise CommandError(
+                "Cannot seed - no active user holds these role(s):\n  - "
+                + "\n  - ".join(missing)
+                + "\n\nAssign them in Django admin (Accounts > User profiles), "
+                  "then re-run.\nThis command never creates accounts."
             )
-            user.email = user.email or f"{c['username']}@uat.local"
-            user.set_password(password)
-            user.save()
-            UserProfile.objects.update_or_create(
-                user=user,
-                defaults=dict(role=c["role"], tier="",
-                              department=c["dept"], phone=c["phone"]),
-            )
-            result[c["role"]] = user
-        # SOC-side authors — attribution only, unusable password.
-        for c in _AUTHOR_USERS:
-            user, was_created = User.objects.get_or_create(
-                username=c["username"],
-                defaults=dict(first_name=c["first"], last_name=c["last"],
-                              email=f"{c['username']}@uat.local", is_active=True),
-            )
-            if was_created:
-                user.set_unusable_password()
-                user.save()
-            UserProfile.objects.get_or_create(
-                user=user,
-                defaults=dict(role=c["role"], tier=c["tier"],
-                              department=c["dept"], phone=c["phone"]),
-            )
-            result[c["key"]] = user
-        return result
+
+        return dict(FORENSIC=forensic, REDTEAM=redteam,
+                    MANAGER=managers, ADMIN=admins, T1=t1, T2=t2)
+
+    def _report_actors(self, actors):
+        """Print the chosen accounts by username only (no names/emails)."""
+        def names(users):
+            return ", ".join(u.username for u in users) if users else "(none)"
+
+        self.stdout.write("Using these existing accounts (discovered by role):")
+        self.stdout.write(f"  Forensic Analyst : {names(actors['FORENSIC'])}")
+        self.stdout.write(f"  Red Team Manager : {names(actors['REDTEAM'])}")
+        self.stdout.write(f"  SOC Manager      : {names(actors['MANAGER'][:1])}")
+        self.stdout.write(f"  System Admin     : {names(actors['ADMIN'][:1])}")
+        self.stdout.write(f"  Tier 1 (authors) : {names(actors['T1'])}")
+        self.stdout.write(f"  Tier 2 (verify)  : {names(actors['T2'][:1])}")
 
     # ── data ─────────────────────────────────────────────────────────────── #
 
-    def _create_scenario(self, sc, users, now):
-        t1, t2 = users["T1"], users["T2"]
-        admin = users["ADMIN"]
-        responder = (users[UserProfile.ROLE_FORENSIC] if sc["who"] == "FORENSIC"
-                     else users[UserProfile.ROLE_REDTEAM_MANAGER])
+    def _create_scenario(self, sc, actors, responder, creator, now):
+        t2 = actors["T2"][0]
+        admin = actors["ADMIN"][0]
+        manager = actors["MANAGER"][0]
 
         inc_time = now - timedelta(hours=8)
         contained = sc["status"] in (S.STATUS_CONTAINMENT_REPORTED, S.STATUS_PENDING_MANAGER)
-        verified = sc["status"] == S.STATUS_PENDING_MANAGER  # Tier-2 signed off already
+        verified = sc["status"] == S.STATUS_PENDING_MANAGER  # Tier 2 already signed off
 
         ticket = Ticket.objects.create(
             status            = sc["status"],
@@ -229,8 +251,8 @@ class Command(BaseCommand):
             device_name       = sc["device"],
             issue_description = f'{sc["desc"]} {MARKER} {sc["status"]}',
             issue_type        = "SIEM",
-            created_by        = t1,
-            assigned_to       = t1,
+            created_by        = creator,
+            assigned_to       = creator,
             assigned_admin    = admin,
             containment_report= "ดำเนินการกักกันเบื้องต้นแล้ว (demo)." if contained else "",
             verified_by       = t2 if verified else None,
@@ -241,7 +263,7 @@ class Command(BaseCommand):
         Ticket.objects.filter(pk=ticket.pk).update(created_at=inc_time)
 
         TicketLog.objects.create(
-            ticket=ticket, author=t1,
+            ticket=ticket, author=creator,
             note=f"RESPONSE-DEMO: placed directly in {sc['status']}",
             status_at_time=sc["status"],
         )
@@ -253,7 +275,7 @@ class Command(BaseCommand):
             description=sc["req_desc"],
             status=sc["req_status"],
             assigned_to=responder,
-            created_by=users["MANAGER"],
+            created_by=manager,
             result_notes=sc["req_notes"],
         )
 
