@@ -124,6 +124,7 @@ class UiSmokeTest(TestCase):
         self.client.force_login(self.soc_staff)
         resp = self.client.get(reverse('ticket_history'))
         self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'text-truncate needs a block box')
 
     # ── edit_log permission rules ─────────────────────────────────────── #
 

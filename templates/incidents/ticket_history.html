@@ -130,9 +130,11 @@
                             {% endif %}
                         </td>
                         <td>{{ ticket.device_name }}</td>
-                        {# text-truncate needs a block box — on a <td> under auto
-                           table layout max-width is ignored and the full text
-                           renders, so the clamp lives on an inner div. #}
+                        {% comment %}
+                        text-truncate needs a block box — on a <td> under auto
+                        table layout max-width is ignored and the full text
+                        renders, so the clamp lives on an inner div.
+                        {% endcomment %}
                         <td>
                             <div class="text-truncate" style="max-width: 150px;"
                                  title="{{ ticket.issue_description }}">{{ ticket.issue_description }}</div>
