@@ -26,7 +26,7 @@ from apps.reporting.models import AggDetectionDaily, SnapshotQueueDaily
 
 logger = logging.getLogger(__name__)
 
-MATERIALIZED_VIEWS = ['mart.agg_ticket_daily']
+MATERIALIZED_VIEWS = ['mart.agg_ticket_daily', 'mart.agg_alert_daily']
 
 
 class Command(BaseCommand):

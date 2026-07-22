@@ -17,7 +17,8 @@ from apps.incidents.models import Ticket
 from apps.wazuh_ingest.models import WazuhAlert
 from apps.reporting import detection, snapshot
 from apps.reporting.models import (
-    AggDetectionDaily, AggTicketDaily, FactTicket, SnapshotQueueDaily,
+    AggAlertDaily, AggDetectionDaily, AggTicketDaily, DimSeverityMap,
+    FactAlert, FactTicket, SnapshotQueueDaily,
 )
 
 UTC = py_tz.utc
@@ -298,3 +299,100 @@ class DetectionCaptureTests(TestCase):
         self.assertIn('Detection capture failed', out.getvalue())
         self.assertEqual(AggDetectionDaily.objects.count(), 0)
         self.assertTrue(SnapshotQueueDaily.objects.exists())
+
+
+# ── Phase 3 ────────────────────────────────────────────────────────────── #
+
+def _make_alert(rule_level=12, **fields):
+    ts = fields.pop('timestamp', datetime(2026, 6, 20, 2, 0, tzinfo=UTC))
+    return WazuhAlert.objects.create(
+        opensearch_id=fields.pop('opensearch_id', f'os-{WazuhAlert.objects.count()}'),
+        timestamp=ts, rule_level=rule_level, **fields)
+
+
+class SeverityMapSeedTests(TestCase):
+    def test_wazuh_bands_seeded(self):
+        bands = {(m.min_value, m.max_value): m.canonical_band
+                 for m in DimSeverityMap.objects.filter(source_system='WAZUH')}
+        self.assertEqual(bands[(14, 999)], 'Critical')
+        self.assertEqual(bands[(12, 13)], 'High')
+        self.assertEqual(bands[(7, 11)], 'Medium')
+        self.assertEqual(bands[(0, 6)], 'Low')
+
+
+class FactAlertBandingTests(TestCase):
+    def test_rule_level_maps_to_canonical_band(self):
+        for level, expected in [(15, 'Critical'), (13, 'High'), (10, 'Medium'), (3, 'Low')]:
+            a = _make_alert(rule_level=level)
+            self.assertEqual(FactAlert.objects.get(pk=a.pk).severity_band, expected,
+                             f'rule_level={level}')
+
+    def test_unmapped_level_falls_back_to_unknown(self):
+        # Remove the map → nothing matches → Unknown (never silently Low).
+        DimSeverityMap.objects.all().delete()
+        a = _make_alert(rule_level=12)
+        self.assertEqual(FactAlert.objects.get(pk=a.pk).severity_band, 'Unknown')
+
+    def test_native_rule_level_preserved(self):
+        a = _make_alert(rule_level=13)
+        self.assertEqual(FactAlert.objects.get(pk=a.pk).rule_level, 13)
+
+
+class FactAlertFunnelTests(TestCase):
+    def test_triage_status_flags(self):
+        cases = {
+            WazuhAlert.TRIAGE_TRUE_POSITIVE: 'is_true_positive',
+            WazuhAlert.TRIAGE_FALSE_POSITIVE: 'is_false_positive',
+            WazuhAlert.TRIAGE_ESCALATED: 'is_escalated',
+        }
+        for status, flag in cases.items():
+            a = _make_alert(triage_status=status)
+            fact = FactAlert.objects.get(pk=a.pk)
+            self.assertTrue(getattr(fact, flag))
+            self.assertTrue(fact.is_triaged)
+
+    def test_pending_is_not_triaged(self):
+        a = _make_alert(triage_status=WazuhAlert.TRIAGE_PENDING)
+        self.assertFalse(FactAlert.objects.get(pk=a.pk).is_triaged)
+
+    def test_became_ticket(self):
+        linked = _make_alert(opensearch_id='os-linked')
+        Ticket.objects.create(device_name='d', issue_description='i', wazuh_alert=linked)
+        unlinked = _make_alert(opensearch_id='os-unlinked')
+        self.assertTrue(FactAlert.objects.get(pk=linked.pk).became_ticket)
+        self.assertFalse(FactAlert.objects.get(pk=unlinked.pk).became_ticket)
+
+    def test_triage_ola(self):
+        ts = datetime(2026, 6, 20, 0, 0, tzinfo=UTC)
+        within = _make_alert(opensearch_id='os-in', timestamp=ts,
+                             triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE,
+                             triaged_at=ts + timedelta(hours=3))
+        breach = _make_alert(opensearch_id='os-br', timestamp=ts,
+                             triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE,
+                             triaged_at=ts + timedelta(hours=5))
+        pending = _make_alert(opensearch_id='os-pd', timestamp=ts)
+        self.assertTrue(FactAlert.objects.get(pk=within.pk).triage_ola_met)
+        self.assertFalse(FactAlert.objects.get(pk=breach.pk).triage_ola_met)
+        self.assertTrue(FactAlert.objects.get(pk=breach.pk).triage_ola_applicable)
+        self.assertFalse(FactAlert.objects.get(pk=pending.pk).triage_ola_applicable)
+
+
+class AggAlertDailyTests(TestCase):
+    def test_funnel_counts(self):
+        ts = datetime(2026, 6, 20, 2, 0, tzinfo=UTC)   # → 2026-06-20 local
+        _make_alert(opensearch_id='a1', rule_level=13, timestamp=ts,
+                    triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE, triaged_at=ts + timedelta(hours=1))
+        _make_alert(opensearch_id='a2', rule_level=13, timestamp=ts,
+                    triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE, triaged_at=ts + timedelta(hours=2))
+        _make_alert(opensearch_id='a3', rule_level=13, timestamp=ts)   # High, pending
+
+        call_command('refresh_reporting', '--no-concurrently',
+                     '--skip-snapshot', '--skip-detection')
+
+        row = AggAlertDaily.objects.get(day='2026-06-20', severity_band='High')
+        self.assertEqual(row.ingested_count, 3)
+        self.assertEqual(row.triaged_count, 2)
+        self.assertEqual(row.true_positive_count, 1)
+        self.assertEqual(row.false_positive_count, 1)
+        self.assertEqual(row.triage_ola_applicable, 2)
+        self.assertEqual(row.triage_ola_met, 2)

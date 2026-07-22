@@ -136,3 +136,101 @@ class AggDetectionDaily(models.Model):
             models.UniqueConstraint(fields=['day', 'rule_level'],
                                     name='uq_detection_grain'),
         ]
+
+
+# ── Phase 3 ─────────────────────────────────────────────────────────────── #
+
+# Canonical severity bands — the app's own vocabulary (Ticket.SEVERITY_CHOICES).
+CANONICAL_BANDS = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
+
+
+class DimSeverityMap(models.Model):
+    """Admin-editable normalization of each source's native severity score to a
+    canonical band. MANAGED. Mapping lives as DATA (not code) so onboarding a new
+    SIEM is an INSERT, not a deploy — the same pattern as ThreatGuidance /
+    NotificationTemplate.
+
+    A row says: for ``source_system``, a native score in [min_value, max_value]
+    maps to ``canonical_band``. ``fact_alert`` joins this to band Wazuh alerts;
+    unmapped scores fall back to 'Unknown' (never silently 'Low'). Native scores
+    are always preserved on the fact rows."""
+
+    SOURCE_WAZUH = 'WAZUH'
+    SOURCE_TRENDMICRO = 'TRENDMICRO'
+    SOURCE_CHOICES = [
+        (SOURCE_WAZUH, 'Wazuh (rule.level)'),
+        (SOURCE_TRENDMICRO, 'TrendMicro (alert_score)'),
+    ]
+    BAND_CHOICES = [(b, b) for b in CANONICAL_BANDS if b != 'Unknown']
+
+    source_system = models.CharField(max_length=32, choices=SOURCE_CHOICES)
+    min_value = models.IntegerField(help_text='Inclusive lower bound of the native score.')
+    max_value = models.IntegerField(help_text='Inclusive upper bound of the native score.')
+    canonical_band = models.CharField(max_length=10, choices=BAND_CHOICES)
+
+    class Meta:
+        db_table = 'mart"."dim_severity_map'
+        verbose_name = 'Severity mapping'
+        verbose_name_plural = 'Severity mappings'
+        ordering = ['source_system', '-min_value']
+        constraints = [
+            models.UniqueConstraint(fields=['source_system', 'min_value', 'max_value'],
+                                    name='uq_sevmap_range'),
+        ]
+
+    def __str__(self):
+        return f'{self.source_system} {self.min_value}-{self.max_value} → {self.canonical_band}'
+
+
+class FactAlert(models.Model):
+    """One row per ingested Wazuh alert — the triage-funnel base. Backed by
+    ``mart.fact_alert`` (a plain view). ``severity_band`` is the canonical band
+    from ``dim_severity_map``; ``rule_level`` (the native score) is preserved."""
+
+    id = models.BigIntegerField(primary_key=True)
+    opensearch_id = models.CharField(max_length=64)
+    rule_level = models.PositiveSmallIntegerField()
+    severity_band = models.CharField(max_length=10)
+    triage_status = models.CharField(max_length=16)
+
+    is_triaged = models.BooleanField()
+    is_true_positive = models.BooleanField()
+    is_false_positive = models.BooleanField()
+    is_escalated = models.BooleanField()
+    became_ticket = models.BooleanField()
+
+    triage_duration = models.DurationField(null=True)
+    triage_ola_applicable = models.BooleanField()
+    triage_ola_met = models.BooleanField()
+    alert_date_local = models.DateField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'mart"."fact_alert'
+        verbose_name = 'Alert fact'
+        verbose_name_plural = 'Alert facts'
+
+
+class AggAlertDaily(models.Model):
+    """Daily alert-triage funnel, grain = (local alert date × severity_band).
+    Backed by the ``mart.agg_alert_daily`` materialized view; refresh with
+    ``manage.py refresh_reporting``."""
+
+    pk = models.CompositePrimaryKey('day', 'severity_band')
+    day = models.DateField()
+    severity_band = models.CharField(max_length=10)
+
+    ingested_count = models.BigIntegerField()
+    triaged_count = models.BigIntegerField()
+    true_positive_count = models.BigIntegerField()
+    false_positive_count = models.BigIntegerField()
+    escalated_count = models.BigIntegerField()
+    became_ticket_count = models.BigIntegerField()
+    triage_ola_applicable = models.BigIntegerField()
+    triage_ola_met = models.BigIntegerField()
+
+    class Meta:
+        managed = False
+        db_table = 'mart"."agg_alert_daily'
+        verbose_name = 'Alert daily aggregate'
+        verbose_name_plural = 'Alert daily aggregates'
