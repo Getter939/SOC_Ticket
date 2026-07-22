@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     'apps.accounts.apps.AccountsConfig',
     'apps.dashboard',
     'apps.wazuh_ingest',
+    'apps.reporting',
 ]
 
 MIDDLEWARE = [
