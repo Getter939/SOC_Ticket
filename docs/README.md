@@ -12,6 +12,7 @@ you are.
 | New to the domain vocabulary | [../CONTEXT.md](../CONTEXT.md) — the glossary |
 | Setting up a dev environment | [../README.md](../README.md) |
 | Deploying to production | [operations/production-deployment.md](operations/production-deployment.md) |
+| Operating the reporting / analytics layer | [operations/reporting-layer-operations.md](operations/reporting-layer-operations.md) |
 | A SOC analyst / manager using the app | [user-guides/end-user-guide.th.md](user-guides/end-user-guide.th.md) |
 | Running a UAT session | [uat/uat-environment-setup.md](uat/uat-environment-setup.md) |
 | An executive wanting the summary | [user-guides/executive-brief.th.md](user-guides/executive-brief.th.md) |
@@ -35,6 +36,9 @@ reading the source.
 |---|---|
 | [ticket-lifecycle-states.md](architecture/ticket-lifecycle-states.md) | The current 12-state lifecycle as a mermaid diagram + transition table, organised by responsible role |
 | [workflow-change-log.md](architecture/workflow-change-log.md) | Rationale for the workflow redesign and each later amendment (manager triage, response teams) |
+| [reporting-layer-design.md](architecture/reporting-layer-design.md) | Reporting layer (Layer ③ `mart` schema) design spec — grains, canonical metric definitions, severity normalization, derived-vs-snapshot, phased rollout |
+| [reporting-layer-build.md](architecture/reporting-layer-build.md) | As-built record of the reporting layer (Phases 1–3): objects, migrations, privilege model, decisions |
+| [data-infrastructure.md](architecture/data-infrastructure.md) | The whole data picture — every store, the flows between them, the four-layer model, and how backup fits (with a mermaid diagram) |
 
 ## adr/ — Architecture decision records 📌
 
@@ -52,6 +56,9 @@ area they cover — they record *why*, which the code cannot.
 | File | Contents |
 |---|---|
 | [production-deployment.md](operations/production-deployment.md) | Docker/nginx/gunicorn runbook, account creation, roles, logs |
+| [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Running & deploying the reporting layer: the `refresh_reporting` command, scheduling, the **production-readiness checklist**, verification, rollback, troubleshooting |
+| [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4 cutover) |
+| [backup-and-restore.md](operations/backup-and-restore.md) | What the backup covers, the restore procedure (incl. the roles/grants-not-in-the-dump gap), retention, and off-site DR |
 | grafana-wazuh-wall.md 🚫 | The "Wazuh SOC Wall" big-screen board. Reads **directly** from the Wazuh Indexer (OpenSearch), not from this app's PostgreSQL |
 
 ## user-guides/ — For people using the app

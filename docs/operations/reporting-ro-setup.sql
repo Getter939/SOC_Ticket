@@ -15,7 +15,7 @@
 --
 -- Usage:
 --   psql -h localhost -U postgres -d ticketdata \
---        -v pw="'CHANGE_ME_STRONG_PASSWORD'" -f docs/reporting_ro_setup.sql
+--        -v pw="'CHANGE_ME_STRONG_PASSWORD'" -f docs/operations/reporting-ro-setup.sql
 -- ----------------------------------------------------------------------------
 
 -- 1. The login role (idempotent).
