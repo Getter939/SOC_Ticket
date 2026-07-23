@@ -35,7 +35,6 @@ urlpatterns = [
     path('triage/<int:triage_id>/claim/', views.claim_manual_triage, name='claim_manual_triage'),
     path('triage/<int:triage_id>/release/', views.release_manual_triage, name='release_manual_triage'),
     path('triage/<int:triage_id>/dismiss/', views.dismiss_manual_triage, name='dismiss_manual_triage'),
-    path('triage/<int:triage_id>/respond/', views.respond_escalation, name='respond_escalation'),
     # System Owner
     path('my-tickets/', views.system_owner_dashboard, name='system_owner_dashboard'),
 ]

@@ -130,14 +130,20 @@ class NotificationTemplateAdmin(admin.ModelAdmin):
 class TriageRecordAdmin(admin.ModelAdmin):
     list_display = (
         'pk', 'source', 'source_reference', 'analyst', 'decision',
-        'source_ip', 'escalated_to', 't2_decision', 'created_at',
+        'source_ip', 'resolved_by', 'resolved_at', 'created_at',
     )
-    list_filter = ('source', 'decision', 't2_decision')
+    list_filter = ('source', 'decision')
     search_fields = (
         'source_reference', 'alert_description', 'source_ip', 'analyst__username',
     )
-    readonly_fields = ('created_at', 't2_decided_at')
-    raw_id_fields = ('analyst', 'escalated_to', 'ticket', 'project_incident')
+    # The escalation fields belong to a workflow that no longer exists (see
+    # TriageRecord's docstring). Read-only rather than removed: legacy rows stay
+    # readable, but nobody can put a record into a state the app cannot process.
+    readonly_fields = (
+        'created_at', 'resolved_by', 'resolved_at',
+        'escalated_to', 't2_decision', 't2_notes', 't2_decided_at',
+    )
+    raw_id_fields = ('analyst', 'ticket', 'project_incident')
 
 
 @admin.register(ThreatGuidance)

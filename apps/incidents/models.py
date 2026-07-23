@@ -1687,12 +1687,30 @@ class TicketLog(models.Model):
 
 class TriageRecord(models.Model):
     """
-    Logs a T1/T2 triage decision BEFORE a ticket is created.
+    A report that arrived through a NON-SIEM channel (phone, email, TI, user
+    report, external org), logged before anyone decides whether it deserves a
+    ticket. SIEM alerts have their own queue — see wazuh_ingest.WazuhAlert.
 
-    Three outcomes:
-      FP         — False Positive, case closed, no ticket.
-      TP         — True Positive, ticket created (linked via .ticket FK).
-      ESCALATED  — T1 was unsure; case handed to T2 for final judgment.
+    Why the record exists at all: a Ticket consumes an id and starts its OLA
+    clocks the moment it is saved, so turning every phone call straight into a
+    ticket would pollute ticket numbering, the OLA figures and the reporting
+    mart with junk. This is the buffer in front of that, plus the claim
+    discipline that stops two analysts working the same report across a shift.
+
+    Lifecycle (Tier 1 only, surfaced in My Queue):
+      logged → claimed → either
+        • converted   — becomes a Ticket or a ProjectIncident bundle, decision
+                        stamped TP (Incident) or FP (Event), linked via the
+                        ``ticket`` / ``project_incident`` FKs; or
+        • dismissed   — junk, decision stamped FP with NO ticket; or
+        • released    — handed back to the queue with a reason.
+      Either disposal stamps ``resolved_by`` / ``resolved_at``.
+
+    RETIRED (do not build on these): ``DECISION_ESCALATED`` and the four
+    ``escalated_to`` / ``t2_*`` fields belonged to a pre-ticket Tier 2
+    escalation step that no longer exists — the Event/Incident and escalation
+    decisions now live on the Ticket. Nothing writes them any more; they are
+    kept, read-only in the admin, so legacy rows stay readable and searchable.
     """
 
     DECISION_FP        = 'FP'
@@ -1803,13 +1821,13 @@ class TriageRecord(models.Model):
         return f'Triage #{self.pk} by {analyst_name} — {self.decision}'
 
     @property
-    def is_pending_t2(self):
-        """True if waiting for T2 to respond to an escalation."""
-        return self.decision == self.DECISION_ESCALATED and not self.t2_decision
-
-    @property
     def final_decision(self):
-        """Resolved decision: T2's if escalated, else T1's."""
+        """Resolved decision: T2's if escalated, else T1's.
+
+        Only legacy rows can be ESCALATED (see the class docstring), but this
+        stays live: _can_create_ticket_from_triage still uses it so an old
+        escalated record can be converted rather than stranded.
+        """
         if self.decision == self.DECISION_ESCALATED:
             return self.t2_decision or 'PENDING'
         return self.decision

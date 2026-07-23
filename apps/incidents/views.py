@@ -1954,9 +1954,3 @@ def system_owner_dashboard(request):
         'emergency_filter': emergency_filter,
         'sort': sort,
     })
-
-
-@login_required
-def respond_escalation(request, triage_id):
-    messages.info(request, 'Manual Triage no longer escalates before ticket creation.')
-    return redirect('escalation_queue')
