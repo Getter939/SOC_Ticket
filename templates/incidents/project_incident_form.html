@@ -48,6 +48,8 @@
     <span class="text-muted" style="font-size:.8rem;">เหตุการณ์เดียวที่กระทบหลายระบบ — สร้าง Ticket แยกตามระบบ (Case Bundling)</span>
   </div>
 
+  {% include 'incidents/_case_mode_switch.html' %}
+
   {% if source_alert %}
   <div class="alert alert-info d-flex align-items-center gap-2 mb-3">
     <i class="bi bi-shield-fill-exclamation"></i>

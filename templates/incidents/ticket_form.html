@@ -82,6 +82,8 @@
     <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
   </div>
 
+  {% include 'incidents/_case_mode_switch.html' %}
+
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
     {{ threat_guidance|json_script:"threat-guidance-data" }}

@@ -1821,6 +1821,54 @@ class TriageWorkflowIntegrityTest(TestCase):
         # 1 unclaimed report + 1 own ticket; the peer-claimed report excluded.
         self.assertEqual(response.context['my_queue_count'], 2)
 
+    def test_case_mode_switch_offers_both_scopes_from_either_form(self):
+        """The two creation forms share one menu entry, so each must expose the
+        switch to the other scope."""
+        self.client.force_login(self.t1)
+        for url_name, mode in (
+            ('create_ticket', 'single'), ('create_project_incident', 'multi'),
+        ):
+            with self.subTest(form=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context['case_mode'], mode)
+                self.assertContains(response, reverse('create_ticket'))
+                self.assertContains(response, reverse('create_project_incident'))
+
+    def test_switching_scope_keeps_the_originating_triage_record(self):
+        """Switching single ↔ multi must not orphan the case from its source,
+        or the new ticket would come back unlinked to the intake record."""
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Multi-host beaconing reported.', notes='n',
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('create_ticket'), {'triage_id': triage.pk})
+        self.assertIn(f'triage_id={triage.pk}', response.context['case_switch_qs'])
+
+        response = self.client.get(
+            reverse('create_project_incident'), {'triage_id': triage.pk})
+        self.assertIn(f'triage_id={triage.pk}', response.context['case_switch_qs'])
+
+    def test_switching_scope_keeps_the_originating_wazuh_alert(self):
+        alert = WazuhAlert.objects.create(
+            opensearch_id='case-switch-alert', timestamp=timezone.now(),
+            rule_level=12, rule_description='Lateral movement detected',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('create_ticket'), {'wazuh_alert': alert.pk})
+        self.assertIn(f'wazuh_alert={alert.pk}', response.context['case_switch_qs'])
+
+    def test_case_switch_query_string_is_empty_for_a_blank_form(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'))
+        self.assertEqual(response.context['case_switch_qs'], '')
+
     def _claimed_report(self, claimer):
         return TriageRecord.objects.create(
             source=TriageRecord.SOURCE_PHONE, analyst=self.t1,

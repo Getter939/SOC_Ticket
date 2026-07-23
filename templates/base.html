@@ -262,13 +262,11 @@
         <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
         {% endif %}
     </a>
-    <a href="{% url 'create_ticket' %}" data-label="Open New Ticket"
-       class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">
-        <i class="bi bi-plus-square"></i> <span class="nav-label">Open New Ticket</span>
-    </a>
-    <a href="{% url 'create_project_incident' %}" data-label="Project Incident (Multi-System)"
-       class="nav-link {% if request.resolver_match.url_name == 'create_project_incident' or request.resolver_match.url_name == 'project_incident_detail' %}active{% endif %}">
-        <i class="bi bi-diagram-3"></i> <span class="nav-label">Project Incident (Multi-System)</span>
+    {# One entry for both scopes — single vs multi-system is chosen inside the
+       form (incidents/_case_mode_switch.html), not by picking a menu item. #}
+    <a href="{% url 'create_ticket' %}" data-label="Open New Case"
+       class="nav-link {% if request.resolver_match.url_name in 'create_ticket,create_project_incident,project_incident_detail' %}active{% endif %}">
+        <i class="bi bi-plus-square"></i> <span class="nav-label">เปิดเคสใหม่</span>
     </a>
     {% endif %}
 

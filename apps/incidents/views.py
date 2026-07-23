@@ -1,6 +1,7 @@
 import calendar
 import ipaddress
 import logging
+from urllib.parse import urlencode
 
 import requests
 from django.contrib import messages
@@ -100,6 +101,19 @@ def _valid_soc_status_choices(ticket, user):
             result.append((next_status, status_map.get(next_status, next_status)))
 
     return result
+
+
+def _case_switch_qs(triage_id=None, alert_id=None):
+    """Query string carrying the case's origin across the single ↔ multi switch.
+
+    The two creation forms are one menu entry with a mode toggle, so switching
+    must not lose the manual-triage record or Wazuh alert the analyst started
+    from — otherwise the new case would come back unlinked.
+    """
+    params = {k: v for k, v in (
+        ('triage_id', triage_id), ('wazuh_alert', alert_id),
+    ) if v}
+    return urlencode(params)
 
 
 def _transition_actions(ticket, user):
@@ -587,6 +601,9 @@ def create_ticket(request):
     return render(request, 'incidents/ticket_form.html', {
         'form': form,
         'triage_id': triage_id or '',
+        'case_mode': 'single',
+        'case_switch_qs': _case_switch_qs(
+            triage_id, request.GET.get('wazuh_alert')),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'threat_guidance': threat_guidance,
         'guidance_note': GUIDANCE_COORDINATION_NOTE,
@@ -789,6 +806,11 @@ def create_project_incident(request):
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'source_alert': source_alert,
         'source_triage': source_triage,
+        'case_mode': 'multi',
+        'case_switch_qs': _case_switch_qs(
+            source_triage.pk if source_triage else None,
+            source_alert.pk if source_alert else None,
+        ),
     })
 
 
