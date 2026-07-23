@@ -3146,6 +3146,30 @@ class TemplateMarkupRegressionTest(TestCase):
         from django.template.loader import get_template
         return get_template(template_name).template.source
 
+    def test_no_template_comment_spans_multiple_lines(self):
+        """Django strips {# #} line-by-line, so a comment whose closing #} is on
+        a later line is not a comment at all — it renders to the page as literal
+        text (and any markup inside it is parsed by the browser). Multi-line
+        notes must use {% comment %}...{% endcomment %}.
+        """
+        import pathlib
+        from django.conf import settings
+
+        offenders = []
+        root = pathlib.Path(settings.BASE_DIR) / 'templates'
+        for path in sorted(root.rglob('*.html')):
+            for lineno, line in enumerate(
+                path.read_text(encoding='utf-8').splitlines(), start=1
+            ):
+                idx = line.find('{#')
+                while idx != -1:
+                    if '#}' not in line[idx + 2:]:
+                        offenders.append(f'{path.relative_to(root)}:{lineno}')
+                        break
+                    idx = line.find('{#', line.find('#}', idx) + 2)
+
+        self.assertEqual(offenders, [], f'unterminated {{# #}} comments: {offenders}')
+
     def test_t1_route_script_carries_csp_nonce(self):
         """
         Every inline <script> needs the nonce — script-src has no

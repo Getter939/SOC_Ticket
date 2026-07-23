@@ -1,10 +1,12 @@
-{# Shared OLA pill — one look across every queue (Wazuh Triage, Tier 2 Queue,
-   Manager Review, Active Tickets). `ola` is the `ola_badge` property on Ticket
-   or WazuhAlert; both build it through apps/incidents/ola.py so the colours and
-   thresholds match the list sorting and the dashboard chart.
+{% comment %}
+Shared OLA pill — one look across every queue (Wazuh Triage, Tier 2 Queue,
+Manager Review, Active Tickets). `ola` is the `ola_badge` property on Ticket
+or WazuhAlert; both build it through apps/incidents/ola.py so the colours and
+thresholds match the list sorting and the dashboard chart.
 
-   None means there is nothing to show: no deadline (Medium/Low are
-   notification-only) or the work is already finished. #}
+None means there is nothing to show: no deadline (Medium/Low are
+notification-only) or the work is already finished.
+{% endcomment %}
 {% if ola %}
 <span class="badge" style="background-color:{{ ola.bg }};color:{{ ola.fg }};"
       title="กำหนด {{ ola.deadline|date:'d/m/Y H:i' }}">

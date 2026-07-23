@@ -163,8 +163,10 @@
         </div>
 
         <div class="col-md-6">
-          {# Radio-set heading: a <label for> can only point at one control, so
-             the set is a labelled group instead. #}
+          {% comment %}
+          Radio-set heading: a <label for> can only point at one control, so
+          the set is a labelled group instead.
+          {% endcomment %}
           <div class="form-label fw-semibold" id="severity-group-label">ระดับความรุนแรง <span class="required-star">*</span></div>
           <div class="severity-group" id="severity-group" role="group" aria-labelledby="severity-group-label">
             {% for radio in form.severity %}

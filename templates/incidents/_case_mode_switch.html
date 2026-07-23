@@ -1,9 +1,11 @@
-{# Single ↔ multi-system switch for the two creation forms.
-   They share one "เปิดเคสใหม่" menu entry, so the scope choice lives here at
-   the top of the form instead of costing a second sidebar item.
+{% comment %}
+Single ↔ multi-system switch for the two creation forms.
+They share one "เปิดเคสใหม่" menu entry, so the scope choice lives here at
+the top of the form instead of costing a second sidebar item.
 
-   `case_mode` is 'single' or 'multi'; `case_switch_qs` carries the originating
-   triage record / Wazuh alert across the switch so the new case stays linked. #}
+`case_mode` is 'single' or 'multi'; `case_switch_qs` carries the originating
+triage record / Wazuh alert across the switch so the new case stays linked.
+{% endcomment %}
 <div class="btn-group btn-group-sm mb-3" role="group" aria-label="ขอบเขตของเคส">
   <a class="btn {% if case_mode == 'single' %}btn-dark{% else %}btn-outline-dark{% endif %}"
      href="{% url 'create_ticket' %}{% if case_switch_qs %}?{{ case_switch_qs }}{% endif %}"
