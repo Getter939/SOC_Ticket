@@ -9,6 +9,13 @@ from .models import (
 )
 
 
+class UserChoiceField(forms.ModelChoiceField):
+    """Render users by their real name while retaining their primary-key value."""
+
+    def label_from_instance(self, user):
+        return user.get_full_name() or user.username
+
+
 class _DetailedIssueCascade:
     """Shared cascade behaviour for forms exposing detailed_issue/detailed_issue2.
 
@@ -164,7 +171,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-select', 'id': 'id_wazuh_alert'}),
     )
 
-    assigned_admin = forms.ModelChoiceField(
+    assigned_admin = UserChoiceField(
         queryset=User.objects.filter(
             profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
             is_active=True,
@@ -405,7 +412,7 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     one.
     """
 
-    assigned_admin = forms.ModelChoiceField(
+    assigned_admin = UserChoiceField(
         queryset=User.objects.filter(
             profile__role=UserProfile.ROLE_SYSTEM_ADMIN, is_active=True,
         ).order_by('first_name', 'username'),
@@ -495,6 +502,8 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 
 
 class AdminAssignmentForm(forms.ModelForm):
+    assigned_admin = UserChoiceField(queryset=User.objects.none())
+
     class Meta:
         model = Ticket
         fields = ['assigned_admin']
@@ -567,7 +576,7 @@ class SubtaskForm(forms.ModelForm):
         label='ประเภท',
         widget=forms.Select(attrs={'class': 'form-select'}),
     )
-    assigned_to = forms.ModelChoiceField(
+    assigned_to = UserChoiceField(
         queryset=User.objects.filter(is_active=True)
         .exclude(profile__role__in=_RESPONSE_TEAM_ROLES)
         .order_by('first_name', 'username'),
@@ -615,7 +624,7 @@ class ResponseRequestForm(forms.ModelForm):
             'class': 'form-select form-select-sm', 'id': 'resp-type-select',
         }),
     )
-    assigned_to = forms.ModelChoiceField(
+    assigned_to = UserChoiceField(
         queryset=User.objects.filter(
             is_active=True,
             profile__role__in=(

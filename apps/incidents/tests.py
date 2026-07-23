@@ -49,7 +49,8 @@ from pypdf import PdfReader
 from apps.accounts.models import UserProfile
 from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
-    AttachmentForm, ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
+    AdminAssignmentForm, AttachmentForm, ProjectIncidentTargetForm,
+    ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
 )
 from apps.incidents.models import (
     ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
@@ -2743,6 +2744,27 @@ class ContainmentChecklistTest(TestCase):
 # ──────────────────────────────────────────────────────────────────────────── #
 # Response-team requests (Forensic / Red Team) — model + routing + gating       #
 # ──────────────────────────────────────────────────────────────────────────── #
+
+class UserDropdownLabelTest(TestCase):
+    """User-selection dropdowns show a person's name, not their login name."""
+
+    def test_all_user_dropdowns_prefer_full_name_with_username_fallback(self):
+        named_user = User.objects.create_user(
+            username='named-login', first_name='Ada', last_name='Lovelace',
+        )
+        unnamed_user = User.objects.create_user(username='login-only')
+        fields = [
+            TicketForm().fields['assigned_admin'],
+            ProjectIncidentTargetForm().fields['assigned_admin'],
+            AdminAssignmentForm().fields['assigned_admin'],
+            SubtaskForm().fields['assigned_to'],
+            ResponseRequestForm().fields['assigned_to'],
+        ]
+
+        for field in fields:
+            self.assertEqual(field.label_from_instance(named_user), 'Ada Lovelace')
+            self.assertEqual(field.label_from_instance(unnamed_user), 'login-only')
+
 
 class ResponseRequestRoutingTest(TestCase):
     """Type → role routing and eligible-assignee resolution."""

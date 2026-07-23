@@ -58,7 +58,8 @@ area they cover — they record *why*, which the code cannot.
 | [production-deployment.md](operations/production-deployment.md) | Docker/nginx/gunicorn runbook, account creation, roles, logs |
 | [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Running & deploying the reporting layer: the `refresh_reporting` command, scheduling, the **production-readiness checklist**, verification, rollback, troubleshooting |
 | [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4 cutover) |
-| [backup-and-restore.md](operations/backup-and-restore.md) | What the backup covers, the restore procedure (incl. the roles/grants-not-in-the-dump gap), retention, and off-site DR |
+| [backup-and-restore.md](operations/backup-and-restore.md) | What the backup covers, the restore procedure (incl. the roles/grants-not-in-the-dump gap), retention, and the 3-2-1 storage strategy |
+| [backup-storage-decision-brief.md](operations/backup-storage-decision-brief.md) | One-page brief for the CISO / data-governance / compliance decision on backup storage location & retention |
 | grafana-wazuh-wall.md 🚫 | The "Wazuh SOC Wall" big-screen board. Reads **directly** from the Wazuh Indexer (OpenSearch), not from this app's PostgreSQL |
 
 ## user-guides/ — For people using the app
