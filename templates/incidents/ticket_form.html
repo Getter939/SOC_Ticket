@@ -379,7 +379,7 @@
       <button type="submit" id="create-submit" class="btn btn-danger px-4 fw-semibold">
         <i class="bi bi-save me-1"></i><span>บันทึก Ticket</span>
       </button>
-      <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+      <a href="{% url 'ticket_list' %}" id="cancel-btn" class="btn btn-light border px-4">ยกเลิก</a>
     </div>
 
   </form>
@@ -487,6 +487,18 @@ updateDecisionPanels();
   form.addEventListener('change', saveDraft);
 
   form.addEventListener('submit', () => {
+    localStorage.removeItem(DRAFT_KEY);
+  });
+
+  // 'ยกเลิก' discards the draft as well — otherwise an abandoned form would be
+  // restored the next time the analyst opens a new ticket. Confirm first, since
+  // a stray click would otherwise throw away everything they typed.
+  document.getElementById('cancel-btn')?.addEventListener('click', function (e) {
+    if (!localStorage.getItem(DRAFT_KEY)) return;
+    if (!confirm('ยกเลิกและล้างข้อมูลที่กรอกไว้ทั้งหมดใช่หรือไม่?')) {
+      e.preventDefault();
+      return;
+    }
     localStorage.removeItem(DRAFT_KEY);
   });
 })();
