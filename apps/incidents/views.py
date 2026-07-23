@@ -1420,6 +1420,55 @@ def release_manual_triage(request, triage_id):
     return redirect('triage_list')
 
 
+@login_required
+def dismiss_manual_triage(request, triage_id):
+    """Close a manual-intake report as junk — no ticket.
+
+    The disposal path the queue lacked: previously the claimer's only options
+    were convert-to-ticket or release-back, so a prank call either became a
+    full Event ticket (with a Tier 2 confirm) or sat in the queue forever.
+
+    Stamps the existing decision=FP with a required reason (appended to the
+    record's notes for the audit trail). A dismissed record leaves the queue
+    via the history filter, and _can_create_ticket_from_triage already rejects
+    FP-without-ticket records, so it cannot be converted afterwards.
+    """
+    profile = getattr(request.user, 'profile', None)
+    if request.method != 'POST' or (
+        not request.user.is_superuser and (profile is None or not profile.is_tier1)
+    ):
+        return redirect('triage_list')
+
+    reason = request.POST.get('dismiss_reason', '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการปิดรายการโดยไม่เปิดเคส')
+        return redirect('triage_list')
+
+    # Claimer-only, like release — dismissal is a triage decision, so it
+    # belongs to whoever holds the item. Superuser may clear any pending row.
+    dismissable = TriageRecord.objects.filter(
+        pk=triage_id, decision='', ticket__isnull=True, claimed_by=request.user,
+    )
+    if request.user.is_superuser:
+        dismissable = TriageRecord.objects.filter(
+            pk=triage_id, decision='', ticket__isnull=True,
+        )
+    triage = dismissable.first()
+    if triage is None:
+        messages.error(request, 'รายการนี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
+        return redirect('triage_list')
+
+    triage.decision = TriageRecord.DECISION_FP
+    note = f'ปิดโดยไม่เปิดเคส ({request.user.username}): {reason}'
+    triage.notes = f'{triage.notes}\n{note}' if triage.notes else note
+    triage.claimed_by = None
+    triage.claimed_at = None
+    triage.save(update_fields=['decision', 'notes', 'claimed_by', 'claimed_at'])
+
+    messages.success(request, 'ปิดรายการโดยไม่เปิดเคสแล้ว')
+    return redirect('triage_list')
+
+
 # ── Full-text search across tickets and triage records ─────────────────── #
 
 @login_required

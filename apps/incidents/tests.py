@@ -61,6 +61,7 @@ from apps.incidents.notifications import (
     notify_response_request_created,
     notify_response_request_completed,
 )
+from apps.incidents.views import _can_create_ticket_from_triage
 from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
     build_ticket_report_context, build_ticket_report_sections,
@@ -1819,6 +1820,50 @@ class TriageWorkflowIntegrityTest(TestCase):
         response = self.client.get(reverse('my_queue'))
         # 1 unclaimed report + 1 own ticket; the peer-claimed report excluded.
         self.assertEqual(response.context['my_queue_count'], 2)
+
+    def _claimed_report(self, claimer):
+        return TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Prank call, nothing security-relevant.',
+            notes='Initial intake.', claimed_by=claimer, claimed_at=timezone.now(),
+        )
+
+    def test_dismiss_requires_a_reason(self):
+        triage = self._claimed_report(self.t1)
+        self.client.force_login(self.t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[triage.pk]), {
+            'dismiss_reason': '   ',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.decision, '')
+        self.assertEqual(triage.claimed_by, self.t1)
+
+    def test_dismiss_closes_the_report_without_a_ticket(self):
+        triage = self._claimed_report(self.t1)
+        self.client.force_login(self.t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[triage.pk]), {
+            'dismiss_reason': 'แจ้งผิด ไม่เกี่ยวกับความปลอดภัย',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.decision, TriageRecord.DECISION_FP)
+        self.assertIsNone(triage.ticket)
+        self.assertIsNone(triage.claimed_by)
+        self.assertIn('แจ้งผิด ไม่เกี่ยวกับความปลอดภัย', triage.notes)
+        # Left the queue, entered history, and can no longer become a ticket.
+        response = self.client.get(reverse('my_queue'))
+        self.assertNotIn(triage, response.context['manual_queue'])
+        self.assertIn(triage, list(response.context['manual_history']))
+        self.assertFalse(_can_create_ticket_from_triage(triage, self.t1))
+
+    def test_only_the_claimer_may_dismiss(self):
+        triage = self._claimed_report(self.t1)
+        self.client.force_login(self.other_t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[triage.pk]), {
+            'dismiss_reason': 'not mine to close',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.decision, '')
+        self.assertEqual(triage.claimed_by, self.t1)
 
     def test_invalid_ticket_form_keeps_wazuh_alert_in_progress(self):
         alert = WazuhAlert.objects.create(
