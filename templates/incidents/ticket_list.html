@@ -133,7 +133,12 @@
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr class="{% if ticket.is_emergency %}is-emergency{% elif ticket.is_ola_breached %}is-breach{% endif %}">
+                {# is_ola_contain_breached, not is_ola_breached: the latter is the
+                   historical "was it raised in time" fact, so a ticket could be
+                   tinted red for a months-old raise delay while one about to blow
+                   its containment deadline looked fine. The banner above and the
+                   OLA sort/filter both measure the live contain deadline. #}
+                <tr class="{% if ticket.is_emergency %}is-emergency{% elif ticket.is_ola_contain_breached %}is-breach{% endif %}">
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
                         {% if ticket.is_emergency %}
