@@ -1886,6 +1886,49 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(triage.decision, '')
         self.assertEqual(triage.claimed_by, self.t1)
 
+    def test_dismiss_records_who_disposed_of_the_report(self):
+        """The claim is cleared on dismissal, so resolved_by is the only durable
+        record of who threw the report away."""
+        triage = self._claimed_report(self.t1)
+        self.client.force_login(self.t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[triage.pk]), {
+            'dismiss_reason': 'spam',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.resolved_by, self.t1)
+        self.assertIsNotNone(triage.resolved_at)
+        self.assertIsNone(triage.claimed_by)
+
+    def test_conversion_records_who_handled_the_report(self):
+        triage = self._claimed_report(self.t1)
+        self.client.force_login(self.t1)
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            triage_id=triage.pk,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=TicketForm.ROUTE_ESCALATE_T2,
+        ))
+        triage.refresh_from_db()
+        self.assertIsNotNone(triage.ticket)
+        self.assertEqual(triage.resolved_by, self.t1)
+        self.assertIsNotNone(triage.resolved_at)
+
+    def test_my_queue_history_is_scoped_to_the_current_analyst(self):
+        mine = self._claimed_report(self.t1)
+        theirs = self._claimed_report(self.other_t1)
+
+        self.client.force_login(self.t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[mine.pk]), {
+            'dismiss_reason': 'mine',
+        })
+        self.client.force_login(self.other_t1)
+        self.client.post(reverse('dismiss_manual_triage', args=[theirs.pk]), {
+            'dismiss_reason': 'theirs',
+        })
+
+        self.client.force_login(self.t1)
+        history = self.client.get(reverse('my_queue')).context['manual_history']
+        self.assertEqual([t.pk for t in history], [mine.pk])
+
     def test_dismiss_closes_the_report_without_a_ticket(self):
         triage = self._claimed_report(self.t1)
         self.client.force_login(self.t1)

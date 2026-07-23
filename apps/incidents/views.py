@@ -276,11 +276,12 @@ def _consume_source_alert(alert, user, *, classification, link_ticket,
         link_ticket.save(update_fields=['alert_conversion_duration'])
 
 
-def _consume_source_triage(triage, *, classification, ticket=None,
+def _consume_source_triage(triage, *, classification, user, ticket=None,
                            project_incident=None):
     """Mark a claimed manual-triage record handled once it has become a ticket
     (or a case bundle): record the Event/Incident decision, link it to whatever
-    it spawned, and release the claim so it leaves the manual queue.
+    it spawned, stamp who handled it, and release the claim so it leaves the
+    manual queue.
 
     Shared by both create flows. ``triage`` must already be locked
     (select_for_update) and re-validated by the caller.
@@ -290,9 +291,15 @@ def _consume_source_triage(triage, *, classification, ticket=None,
         if classification == Ticket.CLASSIFICATION_EVENT
         else TriageRecord.DECISION_TP
     )
+    # Stamped before the claim is cleared — this is the only durable record of
+    # who disposed of the report.
+    triage.resolved_by = user
+    triage.resolved_at = timezone.now()
     triage.claimed_by = None
     triage.claimed_at = None
-    update_fields = ['decision', 'claimed_by', 'claimed_at']
+    update_fields = [
+        'decision', 'resolved_by', 'resolved_at', 'claimed_by', 'claimed_at',
+    ]
     if ticket is not None:
         triage.ticket = ticket
         update_fields.insert(0, 'ticket')
@@ -516,6 +523,7 @@ def create_ticket(request):
                         _consume_source_triage(
                             locked_triage,
                             classification=ticket.classification,
+                            user=request.user,
                             ticket=ticket,
                         )
 
@@ -744,6 +752,7 @@ def create_project_incident(request):
                         _consume_source_triage(
                             locked_triage,
                             classification=Ticket.CLASSIFICATION_INCIDENT,
+                            user=request.user,
                             project_incident=project,
                         )
             except ValidationError as exc:
@@ -1350,9 +1359,13 @@ def triage_list(request):
     queue = TriageRecord.objects.filter(decision='', ticket__isnull=True).select_related(
         'analyst', 'claimed_by',
     ).order_by('-created_at')
-    history = TriageRecord.objects.exclude(decision='').select_related(
-        'analyst', 'ticket',
-    ).order_by('-created_at')[:50]
+    # Scoped to this analyst: on a page called "my queue" a global log of every
+    # analyst's records is not actionable, and IOC Search already covers the
+    # full history with real filtering. What this needs to show is a trail of
+    # what YOU just did — above all a dismissal, which leaves no ticket behind.
+    history = TriageRecord.objects.filter(
+        resolved_by=request.user,
+    ).select_related('ticket').order_by('-resolved_at')[:10]
 
     # Own-court tickets, most urgent contain-OLA first (no deadline = notify-
     # only Medium/Low → below everything actually on a clock).
@@ -1481,11 +1494,16 @@ def dismiss_manual_triage(request, triage_id):
         return redirect('triage_list')
 
     triage.decision = TriageRecord.DECISION_FP
-    note = f'ปิดโดยไม่เปิดเคส ({request.user.username}): {reason}'
+    note = f'ปิดโดยไม่เปิดเคส: {reason}'
     triage.notes = f'{triage.notes}\n{note}' if triage.notes else note
+    triage.resolved_by = request.user
+    triage.resolved_at = timezone.now()
     triage.claimed_by = None
     triage.claimed_at = None
-    triage.save(update_fields=['decision', 'notes', 'claimed_by', 'claimed_at'])
+    triage.save(update_fields=[
+        'decision', 'notes', 'resolved_by', 'resolved_at',
+        'claimed_by', 'claimed_at',
+    ])
 
     messages.success(request, 'ปิดรายการโดยไม่เปิดเคสแล้ว')
     return redirect('triage_list')

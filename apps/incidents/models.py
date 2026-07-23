@@ -1755,6 +1755,18 @@ class TriageRecord(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True)
     release_reason = models.TextField(blank=True, default='', verbose_name='เหตุผลที่คืนคิว')
 
+    # Who disposed of this record, and when. Set on BOTH outcomes — converted
+    # to a ticket/bundle, or dismissed as junk — because ``claimed_by`` is
+    # cleared at that same moment. Without this the handler is unrecoverable:
+    # a conversion could be traced through ticket.created_by, but a dismissal
+    # left nothing but a free-text line in ``notes``, so a report could be
+    # thrown away with no accountable owner.
+    resolved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='resolved_manual_triages', verbose_name='ผู้ดำเนินการ',
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
     # ── T2 escalation fields ───────────────────────────────────────── #
     escalated_to = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
