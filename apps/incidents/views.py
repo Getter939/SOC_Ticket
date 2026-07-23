@@ -71,6 +71,39 @@ def _user_can_drive(ticket, user, perm):
     return False
 
 
+def _can_upload_ticket_attachment(ticket, user):
+    """Whether user currently owns this ticket's attachment action.
+
+    Seeing a ticket is deliberately broader than acting on it. Attachments
+    therefore follow the same "whose court is it?" rule as the workflow, and
+    are never accepted after a ticket has reached a terminal state.
+    """
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        return False
+    if user.is_superuser:
+        return True
+
+    profile = getattr(user, 'profile', None)
+    if profile is None:
+        return False
+
+    if ticket.status in (
+        Ticket.STATUS_NEW,
+        Ticket.STATUS_T1_REVIEW,
+        Ticket.STATUS_OWNER_REMEDIATED,
+    ):
+        return profile.is_tier1 and ticket.created_by_id == user.pk
+    if ticket.status in Ticket.TIER2_QUEUE_STATUSES:
+        return profile.is_tier2 and not ticket.t2_claim_blocks(user)
+    if ticket.status in Ticket.MANAGER_QUEUE_STATUSES:
+        return profile.is_soc_manager
+    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
+        return profile.is_system_admin and ticket.assigned_admin_id == user.pk
+    if ticket.status == Ticket.STATUS_AWAITING_OWNER:
+        return profile.is_system_owner and ticket.system_owner_id == user.pk
+    return False
+
+
 def _valid_soc_status_choices(ticket, user):
     """Status options to offer this user in the detail-page dropdown, honoring
     the state machine, the Event/Incident + manager-routing gates, and the
@@ -846,6 +879,7 @@ def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     profile = getattr(request.user, 'profile', None)
     is_terminal = ticket.status in Ticket.TERMINAL_STATUSES
+    can_upload_attachment = _can_upload_ticket_attachment(ticket, request.user)
 
     can_submit_containment = (
         not is_terminal
@@ -1140,6 +1174,7 @@ def ticket_detail(request, pk):
         'attachment_form': attachment_form,
         'profile': profile,
         'is_terminal': is_terminal,
+        'can_upload_attachment': can_upload_attachment,
         'can_submit_containment': can_submit_containment,
         'checklist_items': checklist_items,
         'checklist_trailing': checklist_trailing,
@@ -1709,6 +1744,9 @@ def update_subtask(request, subtask_id):
         or (profile and profile.is_soc)
         or subtask.assigned_to_id == request.user.pk
     )
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        messages.error(request, 'This ticket is closed; no further files or subtask updates can be added.')
+        return redirect('ticket_detail', pk=ticket.pk)
     if not can_update:
         messages.error(request, 'คุณไม่มีสิทธิ์อัปเดตงานย่อยนี้')
         return redirect('ticket_detail', pk=ticket.pk)
@@ -1792,6 +1830,9 @@ def response_request_queue(request):
 @login_required
 def upload_attachment(request, pk):
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    if not _can_upload_ticket_attachment(ticket, request.user):
+        messages.error(request, 'You cannot upload attachments while this ticket is in its current status.')
+        return redirect('ticket_detail', pk=pk)
     if request.method == 'POST':
         form = AttachmentForm(request.POST, request.FILES)
         if form.is_valid():
@@ -1818,8 +1859,15 @@ def delete_attachment(request, attachment_id):
         or att.uploaded_by == request.user
     )
     if request.method == 'POST' and can_delete:
-        att.file.delete(save=False)
-        att.delete()
+        att.deleted_by = request.user
+        att.deleted_at = timezone.now()
+        att.save(update_fields=('deleted_by', 'deleted_at'))
+        TicketLog.objects.create(
+            ticket=ticket,
+            note=f'Attachment removed: {att.original_name}',
+            status_at_time=ticket.status,
+            author=request.user,
+        )
         messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว')
     return redirect('ticket_detail', pk=ticket.pk)
 

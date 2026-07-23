@@ -2166,6 +2166,151 @@ class AttachmentUploadTypeTest(TestCase):
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_attachment_test_media_'))
+class AttachmentWorkflowPermissionTest(TestCase):
+    """Ticket-level uploads belong to the role currently handling the ticket."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.creator = _make_t1('attachment_creator')
+        cls.other_t1 = _make_t1('attachment_other_t1')
+        cls.t2 = _make_t2('attachment_t2')
+        cls.admin = _make_user('attachment_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.owner = _make_user('attachment_owner', UserProfile.ROLE_SYSTEM_OWNER)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def _ticket(self, status=Ticket.STATUS_NEW, **kwargs):
+        return _make_ticket(
+            status=status, created_by=self.creator, assigned_admin=self.admin,
+            system_owner=self.owner, **kwargs,
+        )
+
+    def _upload(self, user, ticket):
+        self.client.force_login(user)
+        return self.client.post(
+            reverse('upload_attachment', args=[ticket.pk]),
+            data={
+                'file': SimpleUploadedFile('evidence.log', b'deny 192.0.2.1'),
+                'description': 'Investigation notes',
+            },
+        )
+
+    def test_creator_can_upload_while_ticket_is_in_tier1_care(self):
+        ticket = self._ticket()
+        response = self._upload(self.creator, ticket)
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        attachment = TicketAttachment.objects.get(ticket=ticket)
+        self.assertEqual(attachment.uploaded_by, self.creator)
+        self.assertEqual(attachment.description, 'Investigation notes')
+
+    def test_visible_but_non_responsible_user_cannot_upload(self):
+        ticket = self._ticket()
+        self._upload(self.other_t1, ticket)
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
+
+    def test_assigned_admin_can_upload_during_containment(self):
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        self._upload(self.admin, ticket)
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, uploaded_by=self.admin).exists())
+
+    def test_system_owner_can_upload_while_owner_is_handling_ticket(self):
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_OWNER)
+        self._upload(self.owner, ticket)
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, uploaded_by=self.owner).exists())
+
+    def test_tier2_can_upload_during_tier2_review(self):
+        ticket = self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        self._upload(self.t2, ticket)
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, uploaded_by=self.t2).exists())
+
+    def test_closed_ticket_rejects_upload_server_side(self):
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        self._upload(self.creator, ticket)
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
+
+    def test_closed_ticket_rejects_subtask_result_upload_server_side(self):
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket,
+            subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Collect logs',
+            assigned_to=self.creator,
+        )
+        self.client.force_login(self.creator)
+        self.client.post(
+            reverse('update_subtask', args=[subtask.pk]),
+            data={
+                'status': TicketSubtask.STATUS_DONE,
+                'result_notes': 'Complete',
+                'result_file': SimpleUploadedFile('result.log', b'complete'),
+            },
+        )
+        subtask.refresh_from_db()
+        self.assertEqual(subtask.status, TicketSubtask.STATUS_OPEN)
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
+
+    def test_delete_retains_attachment_and_records_ticket_audit(self):
+        ticket = self._ticket()
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket,
+            file=SimpleUploadedFile('retain.log', b'retain this evidence'),
+            original_name='retain.log',
+            uploaded_by=self.creator,
+        )
+        file_name = attachment.file.name
+        self.client.force_login(self.creator)
+        response = self.client.post(reverse('delete_attachment', args=[attachment.pk]))
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        self.assertFalse(TicketAttachment.objects.filter(pk=attachment.pk).exists())
+
+        retained = TicketAttachment.all_objects.get(pk=attachment.pk)
+        self.assertEqual(retained.deleted_by, self.creator)
+        self.assertIsNotNone(retained.deleted_at)
+        self.assertTrue(retained.file.storage.exists(file_name))
+        self.assertTrue(TicketLog.objects.filter(
+            ticket=ticket,
+            author=self.creator,
+            note='Attachment removed: retain.log',
+        ).exists())
+
+    def test_soft_deleted_attachment_cannot_be_downloaded(self):
+        ticket = self._ticket()
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket,
+            file=SimpleUploadedFile('removed.log', b'not visible'),
+            original_name='removed.log',
+            uploaded_by=self.creator,
+            deleted_by=self.creator,
+            deleted_at=timezone.now(),
+        )
+        self.client.force_login(self.creator)
+        response = self.client.get(reverse('download_attachment', args=[attachment.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_detail_page_shows_attachment_accountability_metadata(self):
+        ticket = self._ticket()
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket,
+            file=SimpleUploadedFile('metadata.log', b'uploaded'),
+            original_name='metadata.log',
+            description='Firewall export',
+            uploaded_by=self.creator,
+        )
+        self.client.force_login(self.creator)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertContains(response, attachment.original_name)
+        self.assertContains(response, 'Firewall export')
+        self.assertContains(response, 'Uploaded by')
+        self.assertContains(response, self.creator.username)
+
+
 # 17. 'Unknown' severity (additive, human-assigned)                            #
 # ──────────────────────────────────────────────────────────────────────────── #
 

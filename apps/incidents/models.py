@@ -2118,8 +2118,23 @@ def attachment_upload_path(instance, filename):
     return f'ticket_attachments/{instance.ticket.ticket_id}/{filename}'
 
 
+class TicketAttachmentQuerySet(models.QuerySet):
+    def active(self):
+        return self.filter(deleted_at__isnull=True)
+
+
+class TicketAttachmentManager(models.Manager.from_queryset(TicketAttachmentQuerySet)):
+    """Default manager: operational views never expose removed evidence."""
+
+    def get_queryset(self):
+        return super().get_queryset().active()
+
+
 class TicketAttachment(models.Model):
     """File attached to a ticket — evidence, reports, screenshots, etc."""
+
+    objects = TicketAttachmentManager()
+    all_objects = models.Manager()
 
     ticket       = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='attachments')
     # Optional link to the response-team request this file is a deliverable for
@@ -2138,6 +2153,11 @@ class TicketAttachment(models.Model):
         related_name='uploaded_attachments',
     )
     uploaded_at  = models.DateTimeField(auto_now_add=True)
+    deleted_by   = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='deleted_attachments',
+    )
+    deleted_at   = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['uploaded_at']

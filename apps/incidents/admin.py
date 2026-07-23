@@ -97,13 +97,19 @@ class TicketSubtaskAdmin(admin.ModelAdmin):
 
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
-    list_display = ('original_name', 'ticket', 'subtask', 'uploaded_by', 'uploaded_at')
-    list_filter = ('uploaded_at',)
+    list_display = (
+        'original_name', 'ticket', 'subtask', 'uploaded_by', 'uploaded_at',
+        'deleted_by', 'deleted_at',
+    )
+    list_filter = ('uploaded_at', 'deleted_at')
     search_fields = ('original_name', 'ticket__ticket_id', 'description')
     # subtask lets a forensic/VA report file be tied to the response request it
     # was produced for; ticket stays authoritative for access control.
-    raw_id_fields = ('ticket', 'subtask', 'uploaded_by')
-    readonly_fields = ('uploaded_at',)
+    raw_id_fields = ('ticket', 'subtask', 'uploaded_by', 'deleted_by')
+    readonly_fields = ('uploaded_at', 'deleted_at', 'deleted_by')
+
+    def get_queryset(self, request):
+        return TicketAttachment.all_objects.all()
 
 
 @admin.register(NotificationTemplate)
