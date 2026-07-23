@@ -223,6 +223,11 @@ class Ticket(models.Model):
     STATUS_OWNER_REMEDIATED     = 'OWNER_REMEDIATED'
     STATUS_PENDING_T2_REVIEW    = 'PENDING_T2_REVIEW'
     STATUS_PENDING_MANAGER      = 'PENDING_MANAGER'
+    # Counter-measure gate: when Tier 2 downgrades an escalated Incident to an
+    # Event, the SOC Manager verifies that call before the case closes, so a
+    # ticket cannot be quietly disposed of by reclassifying it. Confirming an
+    # Event that Tier 1 already classified as one does NOT come through here.
+    STATUS_PENDING_MGR_EVENT_REVIEW = 'PENDING_MGR_EVENT_REVIEW'
     STATUS_APPROVED             = 'APPROVED'
     STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
 
@@ -237,6 +242,7 @@ class Ticket(models.Model):
         (STATUS_OWNER_REMEDIATED,     'เจ้าของแจ้งแก้ไขแล้ว — รอ SOC ตรวจ'),
         (STATUS_PENDING_T2_REVIEW,    'รอ Tier 2 ตรวจสอบ'),
         (STATUS_PENDING_MANAGER,      'รอผู้จัดการตรวจสอบ'),
+        (STATUS_PENDING_MGR_EVENT_REVIEW, 'รอผู้จัดการตรวจสอบการปิดแบบ Event'),
         (STATUS_APPROVED,             'อนุมัติแล้ว'),
         (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
     ]
@@ -273,6 +279,7 @@ class Ticket(models.Model):
         STATUS_OWNER_REMEDIATED:     ('#0d9488', '#ffffff'),  # deep teal — owner reported, verifying
         STATUS_PENDING_T2_REVIEW:    ('#3d5a80', '#ffffff'),  # steel — awaiting Tier 2 sign-off
         STATUS_PENDING_MANAGER:      ('#ffc107', '#212529'),  # amber — awaiting manager sign-off
+        STATUS_PENDING_MGR_EVENT_REVIEW: ('#b5651d', '#ffffff'),  # burnt orange — manager verifying an Event downgrade
         STATUS_APPROVED:             ('#198754', '#ffffff'),  # green — resolved / approved
         STATUS_CLOSED_EVENT:         ('#6c757d', '#ffffff'),  # gray — closed as event
     }
@@ -351,7 +358,14 @@ class Ticket(models.Model):
         ],
         STATUS_ESCALATED_T2: [
             STATUS_T1_REVIEW,              # Incident → T2 returns to Tier 1
-            STATUS_CLOSED_EVENT,           # Event    → T2 confirms & closes (no manager)
+            # Event that Tier 1 already classified → T2 confirms & closes.
+            STATUS_CLOSED_EVENT,
+            # Event that T2 downgraded from Incident → SOC Manager verifies.
+            STATUS_PENDING_MGR_EVENT_REVIEW,
+        ],
+        STATUS_PENDING_MGR_EVENT_REVIEW: [
+            STATUS_CLOSED_EVENT,           # manager agrees it is benign → close
+            STATUS_ESCALATED_T2,           # manager disagrees → back to Tier 2 as Incident
         ],
         STATUS_T1_REVIEW: [
             STATUS_PENDING_MGR_TRIAGE,     # T1 reviews → SOC Manager pre-containment review
@@ -403,6 +417,9 @@ class Ticket(models.Model):
         (STATUS_NEW,                  STATUS_ESCALATED_T2):         'TIER1_CREATOR',
         (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
+        (STATUS_ESCALATED_T2,         STATUS_PENDING_MGR_EVENT_REVIEW): 'TIER2',
+        (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_CLOSED_EVENT):    'MANAGER',
+        (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_ESCALATED_T2):    'MANAGER',
         (STATUS_T1_REVIEW,            STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
         # SOC Manager pre-containment review forwards to the fixed lane.
         (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_CONTAINMENT): 'MANAGER',
@@ -446,15 +463,20 @@ class Ticket(models.Model):
     # review (flag Emergency + forward) and the post-verification approval.
     MANAGER_QUEUE_STATUSES = (
         STATUS_PENDING_MGR_TRIAGE, STATUS_PENDING_MANAGER,
+        STATUS_PENDING_MGR_EVENT_REVIEW,
     )
 
-    # Edges that close a benign Event — require classification == EVENT.
-    # Tier 2 confirms an Event and closes directly; the SOC Manager is never
-    # involved in an Event. The two mid-containment edges let Tier 2 reclassify
-    # an in-flight Incident as an Event (after flipping classification → EVENT)
-    # and close it without the manager, even when the emergency flag is set.
+    # Edges that dispose of a benign Event — require classification == EVENT.
+    # Tier 2 confirming an Event that Tier 1 already classified closes directly.
+    # An Event that Tier 2 downgraded from an escalated Incident goes through
+    # the SOC Manager first (STATUS_PENDING_MGR_EVENT_REVIEW) — see the gate in
+    # can_transition_to / transition_to. The two mid-containment edges still let
+    # Tier 2 reclassify an in-flight Incident and close it without the manager,
+    # even when the emergency flag is set.
     EVENT_CLOSE_TRANSITIONS = frozenset({
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT),
+        (STATUS_ESCALATED_T2,         STATUS_PENDING_MGR_EVENT_REVIEW),
+        (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_CLOSED_EVENT),
         (STATUS_CONTAINMENT_REPORTED, STATUS_CLOSED_EVENT),
         (STATUS_PENDING_T2_REVIEW,    STATUS_CLOSED_EVENT),
     })
@@ -876,6 +898,16 @@ class Ticket(models.Model):
         null=True, blank=True, verbose_name='วันที่อัปเดตสถานะ',
     )
 
+    # Classification the ticket carried when it landed on Tier 2's desk.
+    # Re-stamped on every entry to ESCALATED_T2 (a rejected Event review sends
+    # the ticket back, so this is not write-once). Lets the Event-close gate
+    # tell a Tier 2 DOWNGRADE (Incident → Event, needs the manager) apart from
+    # Tier 2 merely confirming what Tier 1 had already called an Event.
+    classification_at_escalation = models.CharField(
+        max_length=20, choices=CLASSIFICATION_CHOICES, blank=True, default='',
+        verbose_name='ประเภทตอนส่งต่อให้ Tier 2',
+    )
+
     # ── Tier 2 queue claim (in-progress work tracking) ───────────────── #
     # Mirrors WazuhAlert.claimed_by/claimed_at on the Tier 1 triage queue: a
     # Tier 2 analyst takes a ticket out of the shared queue before acting on
@@ -1261,6 +1293,23 @@ class Ticket(models.Model):
             .exists()
         )
 
+    @property
+    def is_t2_event_downgrade(self):
+        """True when the ticket reached Tier 2 as an Incident and is now an Event.
+
+        This is the case the manager verification gate exists for: Tier 2
+        changed the call. A ticket that arrived already classified as an Event
+        is not a downgrade — Tier 2 confirming it closes directly.
+
+        Tickets escalated before this field existed have a blank
+        classification_at_escalation and are treated as NOT downgrades, so old
+        cases keep closing the way they always did.
+        """
+        return (
+            self.is_event
+            and self.classification_at_escalation == self.CLASSIFICATION_INCIDENT
+        )
+
     def can_transition_to(self, new_status):
         """Return True if new_status is a legal next state for this ticket,
         honoring the Event/Incident classification gate and the manager-routing
@@ -1301,6 +1350,15 @@ class Ticket(models.Model):
             return False
         if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
+            return False
+        # Event-downgrade split at Tier 2: a ticket Tier 2 downgraded from
+        # Incident to Event must pass the SOC Manager; one that was already an
+        # Event on arrival is confirmed and closed by Tier 2 directly.
+        if (edge == (self.STATUS_ESCALATED_T2, self.STATUS_CLOSED_EVENT)
+                and self.is_t2_event_downgrade):
+            return False
+        if (edge == (self.STATUS_ESCALATED_T2, self.STATUS_PENDING_MGR_EVENT_REVIEW)
+                and not self.is_t2_event_downgrade):
             return False
         return True
 
@@ -1414,6 +1472,21 @@ class Ticket(models.Model):
             raise ValidationError(
                 'Ticket ฉุกเฉินต้องผ่านการตรวจสอบจากผู้จัดการ SOC ก่อนปิด'
             )
+        # 5c. Event-downgrade gate: Tier 2 cannot close an escalation it just
+        # downgraded from Incident to Event — the SOC Manager verifies that call
+        # first. Confirming an Event Tier 1 already classified is untouched.
+        if (edge == (self.STATUS_ESCALATED_T2, self.STATUS_CLOSED_EVENT)
+                and self.is_t2_event_downgrade):
+            raise ValidationError(
+                'Ticket นี้ถูกปรับจาก Incident เป็น Event โดย Tier 2 — '
+                'ต้องส่งให้ผู้จัดการ SOC ตรวจสอบก่อนปิด'
+            )
+        if (edge == (self.STATUS_ESCALATED_T2, self.STATUS_PENDING_MGR_EVENT_REVIEW)
+                and not self.is_t2_event_downgrade):
+            raise ValidationError(
+                'Ticket นี้เป็น Event อยู่แล้วตั้งแต่ Tier 1 — Tier 2 ปิดได้ทันที'
+            )
+
         if (edge == (self.STATUS_PENDING_T2_REVIEW, self.STATUS_PENDING_MANAGER)
                 and not self.requires_manager_verification):
             raise ValidationError(
@@ -1482,6 +1555,16 @@ class Ticket(models.Model):
         # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
         if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:
             self.escalated_to_t2_at = now
+
+        # Record what Tier 2 was handed, so a later Event-close can tell a
+        # downgrade from a confirmation. A manager rejecting an Event review
+        # sends the ticket back as an Incident, and this re-stamps to match.
+        if new_status == self.STATUS_ESCALATED_T2:
+            if edge == (self.STATUS_PENDING_MGR_EVENT_REVIEW, self.STATUS_ESCALATED_T2):
+                # Manager overruled the downgrade: it is an Incident again, and
+                # Tier 2 has to handle it rather than re-propose the same close.
+                self.classification = self.CLASSIFICATION_INCIDENT
+            self.classification_at_escalation = self.classification
 
         # First hand-off to the system admin = the containment report going
         # out (write-once, mirrors the tracker's วันที่ออกรายงาน).

@@ -105,7 +105,12 @@ def _valid_soc_status_choices(ticket, user):
 def _transition_actions(ticket, user):
     """Return only legal, permitted forward actions for the current user."""
     labels = {
-        Ticket.STATUS_CLOSED_EVENT: 'Mark as Event -> Close',
+        Ticket.STATUS_CLOSED_EVENT: (
+            'Confirm Event -> Close'
+            if ticket.status == Ticket.STATUS_PENDING_MGR_EVENT_REVIEW
+            else 'Mark as Event -> Close'
+        ),
+        Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'Mark as Event -> SOC Manager verification',
         Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
         Ticket.STATUS_PENDING_MGR_TRIAGE: 'Route to SOC Manager review',
         Ticket.STATUS_OWNER_REMEDIATED: 'Owner fixed it -> Confirm',
@@ -127,6 +132,9 @@ def _transition_actions(ticket, user):
         if ticket.status == Ticket.STATUS_ESCALATED_T2:
             proposed = {
                 Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
+                # Same Event decision, but for a ticket Tier 2 is downgrading
+                # from Incident the model routes it via the manager instead.
+                Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: Ticket.CLASSIFICATION_EVENT,
                 Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
             }.get(next_status)
             if proposed:
@@ -823,11 +831,15 @@ def ticket_detail(request, pk):
     checklist_items, checklist_trailing = ticket.containment_checklist_display()
     transition_actions = _transition_actions(ticket, request.user)
     transition_codes = {item['status'] for item in transition_actions}
+    # The Event decision leads to one of two targets — a straight close when
+    # Tier 1 had already called it an Event, or SOC Manager verification when
+    # Tier 2 is downgrading an Incident. Exactly one is ever offered.
     can_t2_review = (
         ticket.status == Ticket.STATUS_ESCALATED_T2
-        and {
-            Ticket.STATUS_CLOSED_EVENT, Ticket.STATUS_T1_REVIEW,
-        }.issubset(transition_codes)
+        and Ticket.STATUS_T1_REVIEW in transition_codes
+        and bool(transition_codes & {
+            Ticket.STATUS_CLOSED_EVENT, Ticket.STATUS_PENDING_MGR_EVENT_REVIEW,
+        })
     )
     can_assign_admin = (
         ticket.status == Ticket.STATUS_T1_REVIEW
@@ -880,6 +892,7 @@ def ticket_detail(request, pk):
             review_form = TicketReviewForm(request.POST, instance=ticket)
             expected_classification = {
                 Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
+                Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: Ticket.CLASSIFICATION_EVENT,
                 Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
             }.get(next_status)
             if not can_t2_review or next_status not in transition_codes:

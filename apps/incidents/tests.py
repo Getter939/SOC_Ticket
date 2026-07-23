@@ -1030,6 +1030,72 @@ class Tier2EscalationTest(TestCase):
         t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'benign on review')
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
 
+    def test_t2_event_downgrade_needs_manager_verification(self):
+        """Counter-measure: Tier 2 cannot dispose of an escalated Incident by
+        relabelling it an Event — the SOC Manager verifies that call first."""
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        self.assertEqual(
+            t.classification_at_escalation, Ticket.CLASSIFICATION_INCIDENT)
+
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        self.assertTrue(t.is_t2_event_downgrade)
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'benign')
+
+        t.transition_to(Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, self.t2, 'benign')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_EVENT_REVIEW)
+
+    def test_manager_confirming_the_downgrade_closes_the_event(self):
+        manager = _make_user('t2t_mgr_ok', UserProfile.ROLE_SOC_MANAGER)
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.transition_to(Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, self.t2, 'benign')
+
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, manager, 'agreed, benign')
+        self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
+    def test_manager_rejecting_the_downgrade_returns_it_as_an_incident(self):
+        manager = _make_user('t2t_mgr_no', UserProfile.ROLE_SOC_MANAGER)
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.transition_to(Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, self.t2, 'benign')
+
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, manager, 'this is real')
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
+        # Flipped back, so Tier 2 must handle it rather than re-propose a close.
+        self.assertEqual(t.classification, Ticket.CLASSIFICATION_INCIDENT)
+        self.assertEqual(
+            t.classification_at_escalation, Ticket.CLASSIFICATION_INCIDENT)
+        self.assertFalse(t.is_t2_event_downgrade)
+
+    def test_event_classified_by_tier1_still_closes_directly(self):
+        """Not a downgrade — Tier 2 is confirming what Tier 1 already called."""
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_EVENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'event → T2 confirm')
+        self.assertFalse(t.is_t2_event_downgrade)
+
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, self.t2, 'x')
+
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirmed benign')
+        self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
     def test_t2_cannot_assign_to_admin(self):
         """No ESCALATED_T2 → AWAITING_CONTAINMENT edge exists at all."""
         t = self._escalated()
