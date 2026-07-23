@@ -114,6 +114,8 @@ def _ticket_post_data(**overrides):
         't1_route': TicketForm.ROUTE_ESCALATE_T2,
         'severity': 'High',
         'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        # Required since the form stopped defaulting it to "now" client-side.
+        'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
         'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Investigating',

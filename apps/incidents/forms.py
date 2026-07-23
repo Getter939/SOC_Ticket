@@ -285,6 +285,11 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         if self.instance and self.instance.pk and self.instance.incident_datetime:
             self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
         self.fields['log_source'].required = True
+        # The form no longer defaults this to "now", so a blank submit is now
+        # reachable. Enforce it rather than let Ticket.save() fall back silently
+        # to timezone.now() as the OLA base — the label has always shown it as
+        # mandatory anyway.
+        self.fields['incident_datetime'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
 

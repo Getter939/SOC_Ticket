@@ -114,6 +114,7 @@
                       data-rule-level="{{ alert.rule_level }}"
                       data-agent-name="{{ alert.agent_name }}"
                       data-agent-ip="{{ alert.agent_ip|default:'' }}"
+                      data-timestamp="{{ alert.timestamp|date:'Y-m-d' }}T{{ alert.timestamp|date:'H:i' }}"
                       {% if form.wazuh_alert.value|stringformat:"s" == alert.pk|stringformat:"s" %}selected{% endif %}>
                 [{{ alert.rule_level }}] {{ alert.rule_description }} — {{ alert.agent_name }} ({{ alert.timestamp|date:"Y-m-d H:i" }})
               </option>
@@ -135,11 +136,13 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.incident_datetime.id_for_label }}">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.incident_datetime.id_for_label }}">วันและเวลาที่ตรวจพบเหตุการณ์ <span class="required-star">*</span></label>
           <div class="input-group">
             {{ form.incident_datetime }}
             <button type="button" class="btn btn-outline-secondary" id="dt-now" title="ตั้งเป็นเวลาปัจจุบัน">ตอนนี้</button>
+            <button type="button" class="btn btn-outline-secondary d-none" id="dt-unlock" title="ระบุเวลาตรวจพบเอง">แก้ไข</button>
           </div>
+          <div class="field-hint" id="dt-hint">เวลาที่ระบบตรวจจับเหตุการณ์ได้ ไม่ใช่เวลาที่เปิด Ticket</div>
           {% if form.incident_datetime.errors %}<div class="text-danger small">{{ form.incident_datetime.errors }}</div>{% endif %}
         </div>
 
@@ -528,16 +531,50 @@ updateDecisionPanels();
     el.addEventListener('input', () => removeBadge(w), { once: true });
   }
 
-  // Default 'วันและเวลาที่ตรวจพบ' to now (if empty) + a "ตอนนี้" quick-set button.
+  // 'วันและเวลาที่ตรวจพบ' — deliberately NOT defaulted to now. Filing time is
+  // almost never detection time, and this field is the base of the ticket OLA
+  // clock (Ticket.save), so a silent wrong default buys a wrong deadline. Left
+  // blank to force a deliberate answer; "ตอนนี้" is still one click away for
+  // sources where filing really is the moment of detection (a phone report).
   const dt = document.getElementById('id_incident_datetime');
+  const dtNowBtn = document.getElementById('dt-now');
+  const dtUnlockBtn = document.getElementById('dt-unlock');
+  const dtHint = document.getElementById('dt-hint');
+  const DT_HINT_DEFAULT = dtHint ? dtHint.textContent : '';
+
   function localNow() {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   }
-  if (dt && !dt.value) dt.value = localNow();
-  document.getElementById('dt-now')?.addEventListener('click', () => {
+  dtNowBtn?.addEventListener('click', () => {
     if (dt) { dt.value = localNow(); dt.dispatchEvent(new Event('change')); }
+  });
+
+  // A Wazuh alert carries its own detection time, so the field is filled from
+  // the alert and locked — the analyst has nothing to decide. "แก้ไข" unlocks
+  // it for the rare case where the true detection preceded the alert.
+  function lockDetectionTime(stamp) {
+    if (!dt || !stamp) return;
+    dt.value = stamp;
+    dt.readOnly = true;
+    dt.classList.add('bg-light');
+    dtNowBtn?.classList.add('d-none');
+    dtUnlockBtn?.classList.remove('d-none');
+    if (dtHint) dtHint.textContent = 'ใช้เวลาตรวจจับจาก Wazuh alert — กด "แก้ไข" หากต้องการระบุเอง';
+    dt.dispatchEvent(new Event('change'));
+  }
+  function unlockDetectionTime(hintText) {
+    if (!dt) return;
+    dt.readOnly = false;
+    dt.classList.remove('bg-light');
+    dtNowBtn?.classList.remove('d-none');
+    dtUnlockBtn?.classList.add('d-none');
+    if (dtHint) dtHint.textContent = hintText;
+  }
+  dtUnlockBtn?.addEventListener('click', () => {
+    unlockDetectionTime('ระบุเวลาตรวจพบเอง (ต่างจากเวลาของ Wazuh alert)');
+    dt?.focus();
   });
 
   // Suggest NCSA severity from the SIEM severity, until the analyst overrides it.
@@ -566,7 +603,11 @@ updateDecisionPanels();
   // Wazuh alert — prefill empty fields from the selected alert, with badges.
   document.getElementById('id_wazuh_alert')?.addEventListener('change', function () {
     const opt = this.options[this.selectedIndex];
-    if (!opt || !opt.value) return;
+    if (!opt || !opt.value) {
+      // Alert de-selected — the detection time is the analyst's call again.
+      unlockDetectionTime(DT_HINT_DEFAULT);
+      return;
+    }
     const ruleDescription = opt.dataset.ruleDescription || '';
     const ruleLevel = parseInt(opt.dataset.ruleLevel || '', 10);
     const agentName = opt.dataset.agentName || '';
@@ -579,6 +620,8 @@ updateDecisionPanels();
       ? (agentName ? ruleDescription + ' on ' + agentName : ruleDescription).slice(0, 255)
       : '';
     fillText(document.getElementById('id_incident_name'), suggestedName, 'เติมจาก Wazuh');
+
+    lockDetectionTime(opt.dataset.timestamp || '');
 
     fillText(document.getElementById('id_issue_description'), ruleDescription, 'เติมจาก Wazuh');
     fillText(document.getElementById('id_device_name'), agentName, 'เติมจาก Wazuh');
@@ -598,6 +641,15 @@ updateDecisionPanels();
       }
     }
   });
+
+  // Arriving from the alert queue, the view has already selected the alert and
+  // filled the detection time server-side — lock it to match, so the state is
+  // the same whether the alert was pre-selected or chosen by hand.
+  (function () {
+    const alertSelect = document.getElementById('id_wazuh_alert');
+    const selected = alertSelect ? alertSelect.options[alertSelect.selectedIndex] : null;
+    if (selected && selected.value) lockDetectionTime(selected.dataset.timestamp || '');
+  })();
 
 
   // ── Insert standard containment guidance (แทรกแนวทางมาตรฐาน) ──

@@ -538,8 +538,21 @@ def create_ticket(request):
             # Source channel carries straight over — issue_type and triage
             # source now share the SOURCE_CHOICES vocabulary, so it maps 1:1.
             initial['issue_type'] = triage.source
-        if request.GET.get('wazuh_alert'):
-            initial['wazuh_alert'] = request.GET['wazuh_alert']
+        alert_pk = request.GET.get('wazuh_alert')
+        if alert_pk:
+            initial['wazuh_alert'] = alert_pk
+            # The alert's own detection time is authoritative for
+            # 'วันและเวลาที่ตรวจพบ' — the analyst should never retype it. Filled
+            # server-side so the field is right on first paint rather than only
+            # after a change event; the template locks it while an alert is
+            # selected, with an explicit unlock for the rare manual override.
+            prefill_alert = (
+                WazuhAlert.objects.filter(pk=alert_pk).first()
+                if str(alert_pk).isdigit() else None
+            )
+            if prefill_alert:
+                initial['incident_datetime'] = timezone.localtime(
+                    prefill_alert.timestamp).strftime('%Y-%m-%dT%H:%M')
         if request.GET.get('issue_description'):
             initial['issue_description'] = request.GET['issue_description']
         if request.GET.get('severity'):
