@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.incidents.models import Ticket
+from apps.incidents.models import Ticket, TicketLog
 from .models import WazuhAlert
 
 ESCALATE_TIER_CHOICES = dict(WazuhAlert.TIER_CHOICES)
@@ -191,15 +191,81 @@ def release_alert(request):
     return redirect('triage_queue')
 
 
+def _has_tier2_access(user):
+    profile = getattr(user, 'profile', None)
+    return user.is_superuser or (profile is not None and profile.is_tier2)
+
+
 @login_required
 def claim_escalation(request):
-    messages.info(request, 'Ticket escalation does not require a separate claim.')
+    """Take a ticket out of the shared Tier 2 queue.
+
+    Mirrors claim_alert: one conditional UPDATE, so two analysts pressing the
+    button at the same moment can't both win — the loser is told it is already
+    claimed instead of silently sharing the case.
+    """
+    if request.method != 'POST':
+        return redirect('escalation_queue')
+
+    if not _has_tier2_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถรับ Ticket ได้')
+        return redirect('escalation_queue')
+
+    ticket_pk = request.POST.get('ticket_id')
+    updated = Ticket.objects.filter(
+        pk=ticket_pk,
+        status__in=Ticket.TIER2_QUEUE_STATUSES,
+        t2_claimed_by__isnull=True,
+    ).update(t2_claimed_by=request.user, t2_claimed_at=timezone.now())
+
+    if not updated:
+        messages.error(request, 'Ticket นี้ถูกเจ้าหน้าที่คนอื่นรับไปแล้ว หรือไม่ได้อยู่ในคิว Tier 2')
+    else:
+        messages.success(request, 'คุณรับ Ticket นี้มาดำเนินการแล้ว')
     return redirect('escalation_queue')
 
 
 @login_required
 def release_escalation(request):
-    messages.info(request, 'Ticket escalation does not use release actions.')
+    """Hand a claimed ticket back to the Tier 2 queue.
+
+    A reason is required, same as release_alert, and it is written to the
+    ticket log at the current status — releasing is not a state transition, so
+    it must not go through transition_to.
+    """
+    if request.method != 'POST':
+        return redirect('escalation_queue')
+
+    if not _has_tier2_access(request.user):
+        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถดำเนินการนี้ได้')
+        return redirect('escalation_queue')
+
+    reason = request.POST.get('release_reason', '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการคืน Ticket กลับเข้าคิว')
+        return redirect('escalation_queue')
+
+    ticket_pk = request.POST.get('ticket_id')
+    with transaction.atomic():
+        ticket = (
+            Ticket.objects.select_for_update()
+            .filter(pk=ticket_pk, t2_claimed_by=request.user)
+            .first()
+        )
+        if ticket is None:
+            messages.error(request, 'Ticket นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
+            return redirect('escalation_queue')
+        ticket.t2_claimed_by = None
+        ticket.t2_claimed_at = None
+        ticket.save(update_fields=['t2_claimed_by', 't2_claimed_at'])
+        TicketLog.objects.create(
+            ticket=ticket,
+            note=f'คืน Ticket กลับเข้าคิว Tier 2 — เหตุผล: {reason}',
+            status_at_time=ticket.status,
+            author=request.user,
+        )
+
+    messages.success(request, 'คืน Ticket กลับเข้าคิวพร้อมเหตุผลแล้ว')
     return redirect('escalation_queue')
 
 
@@ -226,7 +292,7 @@ def escalation_queue(request):
     else:
         stage_filter = ''
         tickets_qs = Ticket.objects.filter(status__in=Ticket.TIER2_QUEUE_STATUSES)
-    tickets_qs = tickets_qs.select_related('created_by', 'assigned_admin')
+    tickets_qs = tickets_qs.select_related('created_by', 'assigned_admin', 't2_claimed_by')
 
     if emergency_filter in ('1', '0'):
         tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')

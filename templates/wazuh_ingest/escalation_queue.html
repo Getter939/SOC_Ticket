@@ -12,7 +12,7 @@
   <div class="col-md-2"><button class="btn btn-dark btn-sm" type="submit">กรอง</button></div>
 </form></div></div>
 <div class="card border-0 shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th class="text-end">Review</th></tr></thead>
+  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
   <tbody>{% for ticket in tickets %}<tr {% if ticket.is_emergency %}class="table-danger"{% endif %}>
     <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
     {# Stage labels are queue-specific, but colors come from Ticket.STATUS_PILL_COLORS (single source of truth). #}
@@ -22,8 +22,30 @@
     <td><div class="fw-semibold">{{ ticket.device_name }}</div><small class="text-muted">{{ ticket.issue_description|truncatechars:80 }}</small></td>
     <td class="small">{{ ticket.status_changed_at|date:"d/m/Y H:i" }}</td>
     <td>{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}<span class="text-muted">Unknown user</span>{% endif %}</td>
-    <td class="text-end"><a class="btn btn-sm btn-primary" href="{% url 'ticket_detail' ticket.pk %}"><i class="bi bi-pencil-square me-1"></i>ตรวจสอบและตัดสินใจ</a></td>
-  </tr>{% empty %}<tr><td colspan="8" class="text-center text-muted py-5">ไม่มี Ticket ที่รอ Tier 2</td></tr>{% endfor %}</tbody>
+    <td class="small">{% if ticket.t2_claimed_by %}{{ ticket.t2_claimed_by.get_full_name|default:ticket.t2_claimed_by.username }}<div class="text-muted">{{ ticket.t2_claimed_at|date:"d/m/Y H:i" }}</div>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+    {# Claim discipline mirrors the Tier 1 triage queue: take the ticket first, #}
+    {# then act. Only the analyst holding the claim gets the Review button.     #}
+    <td class="text-end">
+      {% if not ticket.t2_claimed_by %}
+      <form method="post" action="{% url 'claim_escalation' %}" class="d-inline">
+        {% csrf_token %}<input type="hidden" name="ticket_id" value="{{ ticket.pk }}">
+        <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-hand-index-thumb me-1"></i>รับเรื่อง (Claim)</button>
+      </form>
+      {% elif ticket.t2_claimed_by_id == request.user.id %}
+      <a class="btn btn-sm btn-success" href="{% url 'ticket_detail' ticket.pk %}"><i class="bi bi-pencil-square me-1"></i>ตรวจสอบและตัดสินใจ</a>
+      <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseTicket{{ ticket.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว</button>
+      {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
+    </td>
+  </tr>{% empty %}<tr><td colspan="9" class="text-center text-muted py-5">ไม่มี Ticket ที่รอ Tier 2</td></tr>{% endfor %}</tbody>
 </table></div></div>
+{% for ticket in tickets %}{% if ticket.t2_claimed_by_id == request.user.id %}
+<div class="modal fade" id="releaseTicket{{ ticket.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <form method="post" action="{% url 'release_escalation' %}">{% csrf_token %}<input type="hidden" name="ticket_id" value="{{ ticket.pk }}">
+    <div class="modal-header"><h5 class="modal-title">คืน Ticket #{{ ticket.ticket_id }} กลับเข้าคิว</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body"><label class="form-label fw-semibold">เหตุผล <span class="text-danger">*</span></label><textarea name="release_reason" class="form-control" rows="3" required></textarea></div>
+    <div class="modal-footer"><button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-secondary" type="submit">คืนคิว (Release)</button></div>
+  </form>
+</div></div></div>
+{% endif %}{% endfor %}
 {% if page_obj.paginator.num_pages > 1 %}<nav class="mt-3"><ul class="pagination pagination-sm justify-content-center"><li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li></ul></nav>{% endif %}
 {% endblock %}

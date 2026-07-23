@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
@@ -580,11 +581,76 @@ class EscalationQueueTest(TestCase):
         response = self.client.get(reverse('escalation_queue'))
         self.assertRedirects(response, reverse('ticket_list'))
 
-    def test_queue_never_renders_alert_claim_or_release_actions(self):
+    def test_unclaimed_ticket_offers_claim_but_not_release(self):
         self.client.login(username='esc_t2', password='testpass123')
         response = self.client.get(reverse('escalation_queue'))
-        self.assertNotContains(response, reverse('claim_escalation'))
+        self.assertContains(response, reverse('claim_escalation'))
         self.assertNotContains(response, reverse('release_escalation'))
+
+    def test_claim_takes_the_ticket_and_offers_release(self):
+        self.client.login(username='esc_t2', password='testpass123')
+        self.client.post(reverse('claim_escalation'), {'ticket_id': self.ticket.pk})
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.t2_claimed_by.username, 'esc_t2')
+        self.assertIsNotNone(self.ticket.t2_claimed_at)
+
+        response = self.client.get(reverse('escalation_queue'))
+        self.assertContains(response, reverse('release_escalation'))
+
+    def test_second_analyst_cannot_claim_a_claimed_ticket(self):
+        self.client.login(username='esc_t2', password='testpass123')
+        self.client.post(reverse('claim_escalation'), {'ticket_id': self.ticket.pk})
+
+        self.client.login(username='esc_t2_other', password='testpass123')
+        self.client.post(reverse('claim_escalation'), {'ticket_id': self.ticket.pk})
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.t2_claimed_by, self.t2_analyst)
+
+    def test_release_requires_a_reason_and_returns_it_to_the_queue(self):
+        self.client.login(username='esc_t2', password='testpass123')
+        self.client.post(reverse('claim_escalation'), {'ticket_id': self.ticket.pk})
+
+        self.client.post(reverse('release_escalation'), {'ticket_id': self.ticket.pk})
+        self.ticket.refresh_from_db()
+        self.assertIsNotNone(self.ticket.t2_claimed_by, 'no reason given — claim must hold')
+
+        self.client.post(reverse('release_escalation'), {
+            'ticket_id': self.ticket.pk, 'release_reason': 'ต้องส่งต่อให้ทีมอื่น',
+        })
+        self.ticket.refresh_from_db()
+        self.assertIsNone(self.ticket.t2_claimed_by)
+        self.assertIsNone(self.ticket.t2_claimed_at)
+
+    def _claim_for(self, user):
+        self.ticket.t2_claimed_by = user
+        self.ticket.t2_claimed_at = timezone.now()
+        self.ticket.save(update_fields=['t2_claimed_by', 't2_claimed_at'])
+
+    def test_another_analysts_claim_blocks_the_transition(self):
+        self._claim_for(self.t2_analyst)
+        with self.assertRaises(ValidationError):
+            self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst2)
+
+    def test_unclaimed_ticket_stays_actionable(self):
+        # Tier 2 also works straight from ticket detail, which has no claim
+        # button — an unclaimed ticket must not be locked out.
+        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
+        self.assertEqual(self.ticket.status, Ticket.STATUS_T1_REVIEW)
+
+    def test_claim_holder_may_transition(self):
+        self._claim_for(self.t2_analyst)
+        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
+        self.assertEqual(self.ticket.status, Ticket.STATUS_T1_REVIEW)
+
+    def test_claim_is_cleared_when_the_ticket_moves_stage(self):
+        self._claim_for(self.t2_analyst)
+        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
+
+        self.ticket.refresh_from_db()
+        self.assertIsNone(self.ticket.t2_claimed_by)
+        self.assertIsNone(self.ticket.t2_claimed_at)
 
 
 class SuperuserWazuhAccessTest(TestCase):

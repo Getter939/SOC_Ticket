@@ -874,6 +874,19 @@ class Ticket(models.Model):
         null=True, blank=True, verbose_name='วันที่อัปเดตสถานะ',
     )
 
+    # ── Tier 2 queue claim (in-progress work tracking) ───────────────── #
+    # Mirrors WazuhAlert.claimed_by/claimed_at on the Tier 1 triage queue: a
+    # Tier 2 analyst takes a ticket out of the shared queue before acting on
+    # it, so two analysts can't review the same case at once. Cleared on every
+    # transition (see transition_to) because the Tier 2 queue spans three
+    # stages and a claim only covers the stage it was made in — otherwise a
+    # ticket would stay locked to whoever touched it first all the way through.
+    t2_claimed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='t2_claimed_tickets', verbose_name='Tier 2 ผู้รับเรื่อง',
+    )
+    t2_claimed_at = models.DateTimeField(null=True, blank=True)
+
     # ── Lifecycle timestamps (dashboard metrics) ─────────────────────── #
     # acknowledged_at — when an analyst picked the case up (วันที่รับเคส).
     #   Backfilled by the TrendMicro import; for tickets born in this system
@@ -1276,6 +1289,31 @@ class Ticket(models.Model):
             return False
         return True
 
+    def t2_claim_blocks(self, user):
+        """Whether the Tier 2 queue claim stops ``user`` acting on this ticket.
+
+        Only applies while the ticket sits in the Tier 2 queue, and only to
+        Tier 2 analysts — the claim is queue discipline between peers, not a
+        lock against the manager, the admin or the owner, who reach these
+        statuses by their own paths. Superusers always bypass.
+
+        Only a claim held by *someone else* blocks. An unclaimed ticket stays
+        actionable, because Tier 2 also works straight from the ticket detail
+        page, which has no claim button — requiring a queue round-trip there
+        would block legitimate work rather than prevent collisions. The queue
+        UI still leads with Claim; this is the guarantee underneath it.
+        """
+        if user.is_superuser:
+            return False
+        if self.status not in self.TIER2_QUEUE_STATUSES:
+            return False
+        if self.t2_claimed_by_id is None:
+            return False
+        profile = getattr(user, 'profile', None)
+        if profile is None or not profile.is_tier2:
+            return False
+        return self.t2_claimed_by_id != user.pk
+
     def transition_to(self, new_status, user, note=''):
         status_map = dict(self.STATUS_CHOICES)
 
@@ -1310,6 +1348,12 @@ class Ticket(models.Model):
                 f"ไม่สามารถเปลี่ยนสถานะจาก "
                 f"'{status_map.get(self.status, self.status)}' "
                 f"เป็น '{status_map.get(new_status, new_status)}' ได้"
+            )
+
+        # ── 3b. Tier 2 queue claim ────────────────────────────────────── #
+        if self.t2_claim_blocks(user):
+            raise ValidationError(
+                'Ticket นี้ถูกเจ้าหน้าที่ Tier 2 คนอื่นรับไปดำเนินการแล้ว'
             )
 
         prev_status = self.status
@@ -1413,6 +1457,12 @@ class Ticket(models.Model):
         # field tracks lifecycle moves exactly — never note edits or emergency
         # toggles, which both keep the status unchanged.
         self.status_changed_at = now
+
+        # The Tier 2 claim covers one stage only. Clearing it on every move
+        # means a ticket re-entering the queue at a later stage is up for grabs
+        # again rather than staying locked to whoever handled the last stage.
+        self.t2_claimed_by = None
+        self.t2_claimed_at = None
 
         # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
         if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:
