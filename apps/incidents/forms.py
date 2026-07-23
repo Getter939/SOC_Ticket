@@ -216,7 +216,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'assigned_admin',
         ]
         widgets = {
-            'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Suspicious SoftEther Signed File'}),
+            'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Malware – Suspicious SoftEther signed file on SRV-DB-01'}),
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},

@@ -126,7 +126,11 @@
         <div class="col-12">
           <label class="form-label fw-semibold" for="{{ form.incident_name.id_for_label }}">ชื่อเหตุการณ์ <small class="text-muted">(Incident/Event Name)</small></label>
           {{ form.incident_name }}
-          <div class="field-hint">ชื่อสั้น ๆ ของเหตุการณ์สำหรับใช้ในรายงานและรายการ (ไม่บังคับ)</div>
+          <div class="field-hint">
+            ชื่อสั้น ๆ ของเหตุการณ์สำหรับใช้ในรายงานและรายการ (ไม่บังคับ) —
+            แนะนำรูปแบบ <code>[หมวดหมู่ภัยคุกคาม] – [สิ่งที่ตรวจพบ] on [asset]</code>
+            เช่น <em>Malware – Suspicious SoftEther signed file on SRV-DB-01</em>
+          </div>
           {% if form.incident_name.errors %}<div class="text-danger small">{{ form.incident_name.errors }}</div>{% endif %}
         </div>
 
@@ -555,6 +559,14 @@ updateDecisionPanels();
     const ruleLevel = parseInt(opt.dataset.ruleLevel || '', 10);
     const agentName = opt.dataset.agentName || '';
     const agentIp = opt.dataset.agentIp || '';
+
+    // Incident name follows the house convention "<สิ่งที่ตรวจพบ> on <asset>".
+    // Truncated to the model's max_length so a long rule description can't be
+    // rejected on save.
+    const suggestedName = ruleDescription
+      ? (agentName ? ruleDescription + ' on ' + agentName : ruleDescription).slice(0, 255)
+      : '';
+    fillText(document.getElementById('id_incident_name'), suggestedName, 'เติมจาก Wazuh');
 
     fillText(document.getElementById('id_issue_description'), ruleDescription, 'เติมจาก Wazuh');
     fillText(document.getElementById('id_device_name'), agentName, 'เติมจาก Wazuh');
