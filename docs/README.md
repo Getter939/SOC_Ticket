@@ -1,6 +1,6 @@
-# Documentation Index
+﻿# Documentation Index
 
-> **Audience:** everyone · **Status:** Current · **Last updated:** 2026-07-21
+> **Audience:** everyone · **Status:** Current · **Last updated:** 2026-07-23
 > **Conventions:** lowercase kebab-case filenames; `.th.md` marks a Thai version
 
 Every document in this folder, by audience. Start with the row that matches who
@@ -34,8 +34,8 @@ reading the source.
 
 | File | Contents |
 |---|---|
-| [ticket-lifecycle-states.md](architecture/ticket-lifecycle-states.md) | The current 12-state lifecycle as a mermaid diagram + transition table, organised by responsible role |
-| [workflow-change-log.md](architecture/workflow-change-log.md) | Rationale for the workflow redesign and each later amendment (manager triage, response teams) |
+| [ticket-lifecycle-states.md](architecture/ticket-lifecycle-states.md) | The current 13-state lifecycle as a mermaid diagram + transition table, organised by responsible role |
+| [workflow-change-log.md](architecture/workflow-change-log.md) | Rationale for the workflow redesign and each later amendment (manager triage, response teams, the Event-downgrade gate + Tier 2 claim + Tier 1 My Queue) |
 | [reporting-layer-design.md](architecture/reporting-layer-design.md) | Reporting layer (Layer ③ `mart` schema) design spec — grains, canonical metric definitions, severity normalization, derived-vs-snapshot, phased rollout |
 | [reporting-layer-build.md](architecture/reporting-layer-build.md) | As-built record of the reporting layer (Phases 1–3): objects, migrations, privilege model, decisions |
 | [data-infrastructure.md](architecture/data-infrastructure.md) | The whole data picture — every store, the flows between them, the four-layer model, and how backup fits (with a mermaid diagram) |

@@ -1,6 +1,6 @@
 # Workflow Change Log
 
-> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-07-21
+> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-07-23
 > **Current-state reference:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md)
 
 A dated record of every workflow redesign and amendment, newest first, with the
@@ -95,6 +95,86 @@ detail, responder update panel (status / notes / file) in the subtask section,
 legacy subtask form (Investigation / Countermeasure only), a cross-cutting
 "รอทีมตอบสนอง" row on the executive summary (with `?f=RESPONSE_PENDING`
 drill-down), admin registration for `TicketAttachment`, and seed/test accounts.
+
+---
+
+## 0.2. 2026-07-23 update — Event-downgrade gate, Tier 2 claim, Tier 1 My Queue
+
+Driven by UAT feedback. Migrations `incidents/0047`–`0051` (all additive).
+
+### New blocking state `PENDING_MGR_EVENT_REVIEW`
+
+Tier 2 could close an escalated Incident outright by relabelling it an Event:
+`ESCALATED_T2→CLOSED_EVENT` ended the case with no further review, so a ticket
+was disposable by reclassification. The manager now verifies that call.
+
+**FSM delta:**
+- **Added:** `ESCALATED_T2→PENDING_MGR_EVENT_REVIEW` [TIER2],
+  `PENDING_MGR_EVENT_REVIEW→CLOSED_EVENT` [MANAGER] (confirm),
+  `PENDING_MGR_EVENT_REVIEW→ESCALATED_T2` [MANAGER] (reject — flips
+  `classification` back to INCIDENT so Tier 2 must handle it).
+- **Conditioned:** `ESCALATED_T2→CLOSED_EVENT` now requires that the ticket was
+  *not* downgraded by Tier 2. New field `classification_at_escalation` is
+  re-stamped on every entry to `ESCALATED_T2`, and `Ticket.is_t2_event_downgrade`
+  splits the two edges deterministically in `can_transition_to`/`transition_to`.
+  Exactly one Event button is ever offered on the detail page.
+- **Backwards compatible:** rows escalated before the field existed have it
+  blank, are treated as *not* downgrades, and close the way they always did.
+
+**Deliberately out of scope:** `CONTAINMENT_REPORTED→CLOSED_EVENT` and
+`PENDING_T2_REVIEW→CLOSED_EVENT` still close with no manager, even when the
+emergency flag is set. Same disposal risk one stage later — a scope decision,
+not an oversight. Revisit if the gate proves its worth.
+
+### Tier 2 queue claim/release
+
+`claim_escalation` / `release_escalation` were **no-op stubs** stating that
+escalation "does not require a separate claim", so any Tier 2 could act on any
+queued ticket and two could review the same case at once. They are now the real
+implementation (URL names unchanged): `t2_claimed_by` / `t2_claimed_at`, claimed
+by a single conditional `UPDATE`, released with a mandatory reason logged to the
+ticket, cleared on every transition (the queue spans three stages, so a claim
+only covers the stage it was made in). Enforced via `Ticket.t2_claim_blocks` in
+`transition_to`. Only *another* analyst's claim blocks — an unclaimed ticket
+stays actionable, because Tier 2 also works from the ticket detail page, which
+has no claim button.
+
+### Tier 1 My Queue — Manual Triage absorbed
+
+`T1_REVIEW` is creator-gated, so when Tier 2 returned a case only its opener
+could act — and nothing told them. Tier 1 was also the only SOC role without a
+work queue. `/incidents/my-queue/` now carries their own-court tickets
+(`Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue on one page. The
+historical `triage_list` URL name renders the same view, so every manual-triage
+redirect and deep link still works; the **Manual Triage** menu entry is retired,
+and the two case-creation entries merged into one (scope chosen inside the form,
+carrying `triage_id`/`wazuh_alert` across). Tier 1 sidebar: 8 items → 6.
+
+`TriageRecord` gained a disposal path (dismiss as junk: `decision=FP`, no
+ticket) and `resolved_by`/`resolved_at`, since `claimed_by` is cleared on
+disposal and a dismissal previously left no accountable owner.
+
+### Retired, not removed
+
+`TriageRecord`'s pre-ticket Tier 2 escalation (`DECISION_ESCALATED`,
+`escalated_to`, `t2_*`) has been unreachable since the decision moved onto the
+Ticket. The dead `respond_escalation` view and `is_pending_t2` are gone; the
+**columns are kept** (legacy data, zero cost) but are now read-only in the
+admin, which was the actual hazard — a record could be given escalation state
+the app has no code to process. `final_decision` and `DECISION_ESCALATED` stay:
+the first is still used so an old escalated record can be converted rather than
+stranded, and dropping the second would render legacy rows as a raw code.
+
+### Surfaces updated
+
+Shared OLA countdown badge (`incidents/_ola_badge.html`, thresholds from
+`apps/incidents/ola.py`) on all four queues, plus an OLA sort on the two that
+lacked one; ticket-list breach tint corrected to the live *contain* deadline
+(it measured the historical triage breach while the banner, filter and sort
+measured contain — so the counts never agreed); attachment uploads gated by
+workflow position with soft-delete audit; `MANAGER_QUEUE_STATUSES` and the
+dashboard court/heatmap groupings extended for the new state (both guarded by
+exhaustiveness tests, which caught the omission).
 
 ---
 
@@ -279,6 +359,14 @@ both still write-once.
 ---
 
 ## 3. UI surfaces still to update (NOT touched in this backend change)
+
+> **✅ All resolved — kept for history.** This was the follow-up list from the
+> 2026-07-08 backend change; every item has since shipped. Item 2 in particular
+> ("decide whether to retire Manual Triage or align it") was answered on
+> 2026-07-23 — see §0.2: the queue is retained (it is the only intake path for
+> non-SIEM reports) but absorbed into Tier 1's **My Queue**, and
+> `triage_list.html` / `respond_escalation` no longer exist. Do not treat the
+> list below as open work.
 
 These reference renamed states/labels, the removed actions, the new classification field, or
 the emergency flag and must be reworked by the UI prompt:

@@ -1,7 +1,7 @@
-# เอกสารส่งมอบงานด้านวิศวกรรม — ระบบ SOC Ticketing
+﻿# เอกสารส่งมอบงานด้านวิศวกรรม — ระบบ SOC Ticketing
 
 > **ผู้อ่าน:** developer ที่จะรับช่วงดูแลโค้ดเบสนี้ · **สถานะ:** เป็นปัจจุบัน
-> **อ้างอิงจาก:** repo ที่ commit `3967bfb` ("21/7 Codebase Audit")
+> **อ้างอิงจาก:** repo ที่ commit `564a196` ("23/7 Document TriageRecord's real workflow…")
 > **ฉบับภาษาอังกฤษ:** [engineering-handover.md](engineering-handover.md)
 
 เอกสารนี้เป็นจุดเริ่มต้นสำหรับผู้ที่จะรับช่วงดูแลโปรเจกต์นี้ต่อ ครอบคลุมว่าระบบนี้คืออะไร
@@ -81,13 +81,19 @@ Migration head ณ เวลาที่เขียน: `incidents 0046`, `wazu
 
 ### 3.1 วงจรชีวิตของตั๋ว (state machine)
 
-มี **12 state** กำหนดไว้ใน `apps/incidents/models.py` (`STATUS_CHOICES`,
+มี **13 state** กำหนดไว้ใน `apps/incidents/models.py` (`STATUS_CHOICES`,
 `ALLOWED_TRANSITIONS`) และบังคับใช้โดย `Ticket.transition_to`:
 
 ```
 NEW
- ├─(T1 escalate; classification ใดก็ได้)──► ESCALATED_T2
- │                                            ├─(T2: EVENT)──────► CLOSED_EVENT (terminal)
+ ├─(T1 escalate; classification ใดก็ได้)──► ESCALATED_T2  [T2 ต้อง Claim ก่อน]
+ │                                            ├─(T2 ยืนยัน EVENT ที่ T1 จัดไว้
+ │                                            │   แต่แรก)─────────► CLOSED_EVENT (terminal)
+ │                                            ├─(T2 ปรับ INCIDENT ลงเป็น
+ │                                            │   EVENT)──────────► PENDING_MGR_EVENT_REVIEW
+ │                                            │                       ├─(mgr เห็นด้วย)──► CLOSED_EVENT
+ │                                            │                       └─(mgr ไม่เห็นด้วย → กลับเป็น INCIDENT)
+ │                                            │                            └──► ESCALATED_T2
  │                                            └─(T2: INCIDENT)───► T1_REVIEW
  │                                                                    │
  └─(T1 ยืนยันเป็น INCIDENT พร้อมเลือก t1_route)◄─────────────────────┘

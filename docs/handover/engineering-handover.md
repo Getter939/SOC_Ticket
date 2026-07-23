@@ -1,7 +1,7 @@
-# Engineering Handover — SOC Ticketing System
+﻿# Engineering Handover — SOC Ticketing System
 
 > **Audience:** the developer taking over this codebase · **Status:** Current
-> **Reflects:** repo at commit `3967bfb` ("21/7 Codebase Audit")
+> **Reflects:** repo at commit `564a196` ("23/7 Document TriageRecord's real workflow…")
 > **Thai version:** [engineering-handover.th.md](engineering-handover.th.md)
 
 This document is the entry point for anyone taking over this project. It covers
@@ -87,13 +87,19 @@ Migration heads at time of writing: `incidents 0046`, `wazuh_ingest 0006`,
 
 ### 3.1 Ticket lifecycle (state machine)
 
-**Twelve** states, defined in `apps/incidents/models.py` (`STATUS_CHOICES`,
+**Thirteen** states, defined in `apps/incidents/models.py` (`STATUS_CHOICES`,
 `ALLOWED_TRANSITIONS`) and enforced by `Ticket.transition_to`:
 
 ```
 NEW
- ├─(T1 escalates; either classification)──► ESCALATED_T2
- │                                            ├─(T2: EVENT)──────► CLOSED_EVENT (terminal)
+ ├─(T1 escalates; either classification)──► ESCALATED_T2  [T2 must hold the claim]
+ │                                            ├─(T2 confirms an EVENT T1 already
+ │                                            │   classified)─────► CLOSED_EVENT (terminal)
+ │                                            ├─(T2 DOWNGRADES an INCIDENT to
+ │                                            │   EVENT)──────────► PENDING_MGR_EVENT_REVIEW
+ │                                            │                       ├─(mgr confirms)──► CLOSED_EVENT
+ │                                            │                       └─(mgr rejects; back to INCIDENT)
+ │                                            │                            └──► ESCALATED_T2
  │                                            └─(T2: INCIDENT)───► T1_REVIEW
  │                                                                    │
  └─(T1 commits an INCIDENT, picking t1_route)◄───────────────────────┘
@@ -125,10 +131,23 @@ Rules that are easy to get wrong:
   lanes. `ADMIN` → System Admin contains it; `OWNER` → the system owner fixes
   it themselves and Tier 1 records the outcome.
 - **The manager review is blocking and Incident-only.** Every Incident passes
-  `PENDING_MGR_TRIAGE` before any containment work starts. Events never reach
-  it — the SOC Manager is never involved in an Event.
-- **On escalations T2 can only return tickets to T1 (`T1_REVIEW`) or close
-  events** — T2 never assigns admins and never creates tickets. T2 *does*
+  `PENDING_MGR_TRIAGE` before any containment work starts.
+- **A Tier 2 Event *downgrade* now reaches the manager** (2026-07-23). The old
+  blanket rule "the SOC Manager is never involved in an Event" is **no longer
+  true** at the escalation stage: if a ticket arrived at Tier 2 as an Incident
+  and Tier 2 relabels it an Event, it routes to `PENDING_MGR_EVENT_REVIEW`
+  instead of closing. `classification_at_escalation` (re-stamped on every entry
+  to `ESCALATED_T2`) is what distinguishes a *downgrade* from Tier 2 merely
+  *confirming* an Event Tier 1 had already classified — the latter still closes
+  directly. Rejecting sends it back to `ESCALATED_T2` as an Incident.
+- **Tier 2 must hold the claim.** `t2_claimed_by`/`t2_claimed_at` +
+  `Ticket.t2_claim_blocks`, enforced inside `transition_to`. Only *another*
+  analyst's claim blocks; unclaimed tickets stay actionable because Tier 2 also
+  works from ticket detail, which has no claim button. The claim is cleared on
+  every transition — the queue spans three stages.
+- **On escalations T2 can only return tickets to T1 (`T1_REVIEW`), close a
+  confirmed event, or send a downgrade to the manager** — T2 never assigns
+  admins and never creates tickets. T2 *does*
   verify: `CONTAINMENT_REPORTED` and `PENDING_T2_REVIEW` are both Tier 2
   queues (`TIER2_QUEUE_STATUSES`), and the owner lane's T2 verification is
   mandatory, not optional.
@@ -138,7 +157,10 @@ Rules that are easy to get wrong:
 - **Mid-containment reclassification**: Tier 2 may flip an in-flight Incident
   to `EVENT` and close it from either verification queue
   (`EVENT_CLOSE_TRANSITIONS`) — this bypasses the manager *even if the
-  emergency flag is set*, because the manager never handles Events.
+  emergency flag is set*. ⚠️ Note the asymmetry with the escalation-stage
+  downgrade gate above: these two edges were deliberately left uncovered on
+  2026-07-23, so the same "dispose of it by relabelling it" route still exists
+  one stage later. Revisit if the gate proves useful.
 - **Manager routing**: `requires_manager_verification` is true **only when the
   ticket is flagged emergency** — severity alone never routes to the manager
   (the old `SOC_SEVERITY_FLOOR` setting is gone). An emergency ticket passes
@@ -270,8 +292,12 @@ tickets — one per affected system — grouped by a `ProjectIncident` with a
 - `--fixture` mode loads bundled demo alerts with no network access (see
   README) — this is how you demo/test without reaching the cluster.
 - Triage (claim / create ticket / release) is **Tier-1-only**. Releasing an
-  alert **requires a reason** (`release_reason`). The alert-level
-  `escalation_queue` is vestigial — escalation now happens at ticket level.
+  alert **requires a reason** (`release_reason`).
+- `escalation_queue` is the **ticket-level Tier 2 queue** and is fully live. Its
+  `claim_escalation` / `release_escalation` views were dead stubs until
+  2026-07-23 and are now the real claim/release implementation (URL names
+  unchanged). The alert-level escalation *concept* is what became vestigial —
+  escalation happens at ticket level.
 - There is **no scheduler in the repo** for ingestion — if production ingests
   periodically, that's an external cron/scheduled task on the host. Verify
   with the operator.
@@ -449,12 +475,16 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
    `ticket_history.html` (onchange). Planned next hardening step.
 3. **No file-type/magic-byte validation on uploads** (low priority — mitigated
    by forced-download serving, §8).
-4. **Alert-level `escalation_queue` is vestigial** after the redesign;
-   escalation is ticket-level now.
+4. ~~**Alert-level `escalation_queue` is vestigial**~~ — resolved 2026-07-23.
+   The view is the live ticket-level Tier 2 queue with working claim/release.
 5. **`runserver-8099.*.log` files in the repo root** are stray dev logs —
    deletable.
 6. **OLA breach semantics are asymmetric** (fixed triage fact vs live contain
    countdown, §3.4) — easy to "fix" incorrectly if you assume both are live.
+   The ticket-list row tint used the *triage* fact while the banner, filter and
+   sort used the live *contain* deadline, so their counts never agreed; the
+   tint was switched to contain on 2026-07-23. The two properties still mean
+   different things — read §3.4 before touching either.
 7. **The 0030 data migration recomputed all OLA deadlines** under the new
    per-severity policy. Historical breach stats from before 2026-07-01 reflect
    the recomputation, not what dashboards showed at the time.
