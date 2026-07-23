@@ -1,5 +1,7 @@
+from django.db.models import Q
+
 from .models import WazuhAlert
-from apps.incidents.models import Ticket, TicketSubtask
+from apps.incidents.models import Ticket, TicketSubtask, TriageRecord
 
 
 def pending_triage_count(request):
@@ -28,6 +30,21 @@ def pending_triage_count(request):
             triage_status=WazuhAlert.TRIAGE_PENDING,
         ).count(),
     }
+
+    if user.is_superuser or (profile and profile.is_tier1):
+        # My Queue badge: manual reports this analyst can pick up or already
+        # holds, plus their own-court tickets — above all cases Tier 2
+        # returned (T1_REVIEW), which previously surfaced nowhere.
+        context['my_queue_count'] = (
+            TriageRecord.objects.filter(
+                decision='', ticket__isnull=True,
+            ).filter(
+                Q(claimed_by__isnull=True) | Q(claimed_by=user)
+            ).count()
+            + Ticket.objects.filter(
+                created_by=user, status__in=Ticket.TIER1_QUEUE_STATUSES,
+            ).count()
+        )
 
     if user.is_superuser or (profile and profile.is_tier2):
         # Everything waiting on Tier 2: escalation triage + both verification

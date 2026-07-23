@@ -1759,6 +1759,67 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertIsNone(triage.claimed_by)
         self.assertEqual(triage.release_reason, 'Shift handoff.')
 
+    def test_my_queue_shows_manual_reports_and_returned_tickets(self):
+        """My Queue = the manual-intake queue plus the analyst's own-court
+        tickets — above all a case Tier 2 returned (T1_REVIEW)."""
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Caller reported odd VPN logins.',
+            notes='Awaiting triage.',
+        )
+        returned = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_T1_REVIEW,
+        )
+        # Another analyst's returned case must NOT appear — T1_REVIEW is
+        # creator-gated, so it is not this analyst's work.
+        _make_ticket(
+            created_by=self.other_t1,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_T1_REVIEW,
+        )
+        # A ticket parked with Tier 2 is not own-court work either.
+        _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_ESCALATED_T2,
+        )
+
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('my_queue'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Caller reported odd VPN logins.')
+        my_ids = {t.pk for t in response.context['my_tickets']}
+        self.assertEqual(my_ids, {returned.pk})
+        self.assertEqual(response.context['returned_count'], 1)
+
+    def test_my_queue_and_triage_list_are_the_same_page(self):
+        """The historical URL name must keep landing on the merged page, so
+        every manual-triage redirect and deep link still works."""
+        self.client.force_login(self.t1)
+        for name in ('my_queue', 'triage_list'):
+            with self.subTest(url_name=name):
+                response = self.client.get(reverse(name))
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, 'incidents/my_queue.html')
+
+    def test_my_queue_badge_counts_pickable_reports_and_own_tickets(self):
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL, analyst=self.t1,
+            alert_description='Unclaimed report.', notes='n',
+        )
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL, analyst=self.t1,
+            alert_description='Claimed by someone else.', notes='n',
+            claimed_by=self.other_t1, claimed_at=timezone.now(),
+        )
+        _make_ticket(created_by=self.t1, status=Ticket.STATUS_T1_REVIEW,
+                     classification=Ticket.CLASSIFICATION_INCIDENT)
+
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('my_queue'))
+        # 1 unclaimed report + 1 own ticket; the peer-claimed report excluded.
+        self.assertEqual(response.context['my_queue_count'], 2)
+
     def test_invalid_ticket_form_keeps_wazuh_alert_in_progress(self):
         alert = WazuhAlert.objects.create(
             opensearch_id='invalid-ticket-alert', timestamp=timezone.now(),
@@ -3020,7 +3081,7 @@ class TemplateMarkupRegressionTest(TestCase):
 
     def test_page_titles_use_em_dash_separator(self):
         templates = [
-            'incidents/ticket_detail.html', 'incidents/triage_list.html',
+            'incidents/ticket_detail.html', 'incidents/my_queue.html',
             'incidents/triage_form.html', 'wazuh_ingest/triage_queue.html',
             'wazuh_ingest/escalation_queue.html', 'dashboard/dashboard.html',
         ]

@@ -56,12 +56,7 @@ from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 #
 # INVARIANT: OWN + BLOCKED together cover every non-terminal status exactly
 # once — enforced by AnalystHeatmapTest.
-_ANALYST_OWN_STATUSES = [
-    Ticket.STATUS_NEW,
-    Ticket.STATUS_T1_REVIEW,
-    Ticket.STATUS_AWAITING_OWNER,
-    Ticket.STATUS_OWNER_REMEDIATED,
-]
+_ANALYST_OWN_STATUSES = list(Ticket.TIER1_QUEUE_STATUSES)
 _ANALYST_BLOCKED_STATUSES = [
     Ticket.STATUS_ESCALATED_T2,
     Ticket.STATUS_PENDING_MGR_TRIAGE,

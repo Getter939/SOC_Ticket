@@ -453,6 +453,16 @@ class Ticket(models.Model):
         STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
     })
 
+    # Statuses where the ball is in the OPENING ANALYST's court — the Tier 1
+    # "My Queue". T1_REVIEW is the big one: Tier 2 returned the case and only
+    # the creator may act (CREATOR_REVIEW_STATUSES), so it must surface
+    # somewhere the creator actually looks. The dashboard's analyst heatmap
+    # derives its own-court columns from this same tuple.
+    TIER1_QUEUE_STATUSES = (
+        STATUS_NEW, STATUS_T1_REVIEW,
+        STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
+    )
+
     # Statuses that sit in the Tier 2 work queue: escalation triage plus the
     # two verification stages (admin containment / owner remediation).
     TIER2_QUEUE_STATUSES = (

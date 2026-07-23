@@ -248,16 +248,19 @@
     {% if request.user.is_superuser or not profile.is_system_owner %}
     {% if request.user.is_superuser or profile.is_tier1 %}
     <div class="nav-section-label">Intake &amp; Triage</div>
+    <a href="{% url 'my_queue' %}" data-label="My Queue"
+       class="nav-link {% if request.resolver_match.url_name in 'my_queue,triage_list,create_triage,claim_manual_triage,release_manual_triage' %}active{% endif %}">
+        <i class="bi bi-inbox-fill"></i> <span class="nav-label">My Queue</span>
+        {% if my_queue_count %}
+        <span class="badge bg-info text-dark ms-auto">{{ my_queue_count }}</span>
+        {% endif %}
+    </a>
     <a href="{% url 'triage_queue' %}" data-label="Wazuh Alert Triage"
        class="nav-link {% if request.resolver_match.url_name == 'triage_queue' %}active{% endif %}">
         <i class="bi bi-shield-fill-exclamation"></i> <span class="nav-label">Wazuh Alert Triage</span>
         {% if pending_triage_count %}
         <span class="badge bg-danger ms-auto">{{ pending_triage_count }}</span>
         {% endif %}
-    </a>
-    <a href="{% url 'triage_list' %}" data-label="Manual Triage"
-       class="nav-link {% if request.resolver_match.url_name in 'triage_list,create_triage,claim_manual_triage,release_manual_triage' %}active{% endif %}">
-        <i class="bi bi-clipboard2-pulse"></i> <span class="nav-label">Manual Triage</span>
     </a>
     <a href="{% url 'create_ticket' %}" data-label="Open New Ticket"
        class="nav-link {% if request.resolver_match.url_name == 'create_ticket' %}active{% endif %}">

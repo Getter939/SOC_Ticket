@@ -10,7 +10,7 @@ from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -1307,6 +1307,19 @@ def ticket_history(request):
 
 @login_required
 def triage_list(request):
+    """Tier 1's single work queue ("My Queue" / คิวงานของฉัน).
+
+    Two sections on one page:
+      1. Manual-intake reports awaiting triage (TriageRecord) — the former
+         Manual Triage page, with the same claim / convert / release actions.
+      2. The analyst's own-court tickets (TIER1_QUEUE_STATUSES, created by
+         them) — above all T1_REVIEW, where Tier 2 returned the case and only
+         the creator may act. Before this page there was no surface telling
+         the creator a case had come back.
+
+    Keeps the historical `triage_list` URL name: every redirect and deep link
+    from the manual-triage flow lands here, where the manual queue still lives.
+    """
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and (profile is None or not profile.is_tier1):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่เข้าถึงหน้านี้ได้')
@@ -1319,9 +1332,24 @@ def triage_list(request):
         'analyst', 'ticket',
     ).order_by('-created_at')[:50]
 
-    return render(request, 'incidents/triage_list.html', {
+    # Own-court tickets, most urgent contain-OLA first (no deadline = notify-
+    # only Medium/Low → below everything actually on a clock).
+    my_tickets = (
+        Ticket.objects.filter(
+            created_by=request.user, status__in=Ticket.TIER1_QUEUE_STATUSES,
+        )
+        .select_related('assigned_admin')
+        .order_by(
+            F('ola_contain_deadline').asc(nulls_last=True),
+            '-status_changed_at',
+        )
+    )
+
+    return render(request, 'incidents/my_queue.html', {
         'manual_queue': queue,
         'manual_history': history,
+        'my_tickets': my_tickets,
+        'returned_count': my_tickets.filter(status=Ticket.STATUS_T1_REVIEW).count(),
     })
 
 

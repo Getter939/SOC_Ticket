@@ -26,6 +26,10 @@ urlpatterns = [
     path('response-requests/', views.response_request_queue, name='response_request_queue'),
     path('history/', views.ticket_history, name='ticket_history'),
     # Triage
+    # My Queue — Tier 1's single work queue. The historical 'triage_list' name
+    # stays on the same view so every manual-triage redirect and deep link
+    # keeps working; 'my_queue' is the canonical name the sidebar uses.
+    path('my-queue/', views.triage_list, name='my_queue'),
     path('triage/', views.triage_list, name='triage_list'),
     path('triage/new/', views.create_triage, name='create_triage'),
     path('triage/<int:triage_id>/claim/', views.claim_manual_triage, name='claim_manual_triage'),
