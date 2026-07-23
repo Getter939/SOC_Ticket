@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, F
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -98,7 +98,13 @@ def triage_queue(request):
         except ValueError:
             rule_level_filter = ''
 
-    alerts = alerts.select_related('claimed_by').order_by('-rule_level', 'timestamp')
+    # ola_deadline is timestamp + a flat OLA_HOURS, so ordering by timestamp
+    # ascending is the OLA order — no annotation needed.
+    sort = request.GET.get('sort', 'level').strip()
+    if sort not in ('level', 'ola'):
+        sort = 'level'
+    order = ('timestamp',) if sort == 'ola' else ('-rule_level', 'timestamp')
+    alerts = alerts.select_related('claimed_by').order_by(*order)
 
     paginator = Paginator(alerts, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -116,6 +122,7 @@ def triage_queue(request):
         'triaging_count': queue.filter(triage_status=WazuhAlert.TRIAGE_TRIAGING).count(),
         'level_summary': level_summary,
         'rule_level_filter': rule_level_filter,
+        'sort': sort,
         'tier_choices': _allowed_escalation_tiers(profile, request.user),
         'category_choices': WazuhAlert.CATEGORY_CHOICES,
     })
@@ -302,6 +309,9 @@ def escalation_queue(request):
     # meaningful for all three stages, unlike escalated_to_t2_at.
     sort_map = {
         'emergency': ('-is_emergency', '-status_changed_at'),
+        # Nulls last: Medium/Low have no contain deadline, so they belong below
+        # everything that is actually on a clock.
+        'ola': (F('ola_contain_deadline').asc(nulls_last=True), '-status_changed_at'),
         'newest': ('-status_changed_at',),
         'severity': ('severity', '-status_changed_at'),
     }

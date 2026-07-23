@@ -122,6 +122,7 @@
                     <th class="ps-4">Ticket ID</th>
                     <th>เรื่องที่แจ้ง</th>
                     <th>ความรุนแรง</th>
+                    <th>OLA</th>
                     <th>Source</th>
                     <th>System Admin</th>
                     <th>Initial Tier 1</th>
@@ -144,6 +145,7 @@
                         <div class="text-muted" style="font-size:0.75rem;">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → {{ ticket.ip_address }}{% endif %}</div>
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+                    <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
                     <td>
                         <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
                     </td>
@@ -175,7 +177,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="9" class="text-center py-5 text-muted">
+                    <td colspan="10" class="text-center py-5 text-muted">
                         <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                         {% if search or status_filter or severity_filter or emergency_filter %}
                             ไม่พบรายการที่ตรงกับเงื่อนไขการค้นหา

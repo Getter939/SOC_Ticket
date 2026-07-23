@@ -4,6 +4,9 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+# ola holds no model imports, so this stays a one-way dependency.
+from apps.incidents.ola import badge_for
+
 
 class WazuhAlert(models.Model):
     """A single Wazuh alert pulled from the OpenSearch `wazuh-alerts-*` indices."""
@@ -147,6 +150,18 @@ class WazuhAlert(models.Model):
             return False
         remaining = self.ola_deadline - timezone.now()
         return timedelta() < remaining <= timedelta(hours=1)
+
+    @property
+    def ola_badge(self):
+        """Live triage-OLA pill for the queue table (incidents/_ola_badge.html).
+
+        Drops away once the alert is triaged — the clock has stopped, and
+        triage_duration is the meaningful figure from then on.
+        """
+        return badge_for(
+            self.ola_deadline,
+            done=self.triage_status not in self.UNTRIAGED_STATUSES,
+        )
 
     @property
     def triage_duration(self):

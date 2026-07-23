@@ -23,6 +23,13 @@
           <option value="7" {% if rule_level_filter == '7' %}selected{% endif %}>7+ Medium</option>
         </select>
       </div>
+      <div class="col-md-3">
+        <label class="form-label small fw-bold">เรียงตาม</label>
+        <select name="sort" class="form-select form-select-sm">
+          <option value="level" {% if sort == 'level' %}selected{% endif %}>Rule level สูงสุด</option>
+          <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
+        </select>
+      </div>
       <div class="col-md-3"><button class="btn btn-dark btn-sm" type="submit">กรอง</button></div>
     </form>
   </div>
@@ -32,12 +39,13 @@
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
       <thead class="table-light">
-        <tr><th>เวลา</th><th>Agent</th><th>Level</th><th>Rule</th><th>สถานะ</th><th>ผู้รับผิดชอบ</th><th class="text-end">Actions</th></tr>
+        <tr><th>เวลา</th><th>OLA</th><th>Agent</th><th>Level</th><th>Rule</th><th>สถานะ</th><th>ผู้รับผิดชอบ</th><th class="text-end">Actions</th></tr>
       </thead>
       <tbody>
         {% for alert in alerts %}
         <tr>
           <td class="font-monospace small">{{ alert.timestamp|date:"Y-m-d H:i" }}</td>
+          <td>{% include 'incidents/_ola_badge.html' with ola=alert.ola_badge %}</td>
           <td>{{ alert.agent_name|default:"-" }}</td>
           <td><span class="badge {% if alert.rule_level >= 13 %}bg-danger{% elif alert.rule_level >= 10 %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ alert.rule_level }}</span></td>
           <td style="max-width:420px;">{{ alert.rule_description }}</td>
@@ -55,7 +63,7 @@
             {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
           </td>
         </tr>
-        {% empty %}<tr><td colspan="7" class="text-center text-muted py-5">ไม่มี Alert ที่รอ Triage</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="8" class="text-center text-muted py-5">ไม่มี Alert ที่รอ Triage</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

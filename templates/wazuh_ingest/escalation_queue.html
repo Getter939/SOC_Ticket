@@ -8,11 +8,11 @@
 <div class="card border-0 shadow-sm mb-3"><div class="card-body py-3"><form method="get" class="row g-2 align-items-end">
   <div class="col-md-3"><label class="form-label small fw-bold">ขั้นตอน</label><select name="stage" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="escalated" {% if stage_filter == 'escalated' %}selected{% endif %}>รอตรวจสอบ (Escalated)</option><option value="containment" {% if stage_filter == 'containment' %}selected{% endif %}>รอยืนยันการควบคุม (Admin)</option><option value="owner" {% if stage_filter == 'owner' %}selected{% endif %}>รอยืนยันการแก้ไข (Owner)</option></select></div>
   <div class="col-md-3"><label class="form-label small fw-bold">Emergency</label><select name="emergency" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select></div>
-  <div class="col-md-3"><label class="form-label small fw-bold">เรียงตาม</label><select name="sort" class="form-select form-select-sm"><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option><option value="severity" {% if sort == 'severity' %}selected{% endif %}>Severity</option></select></div>
+  <div class="col-md-3"><label class="form-label small fw-bold">เรียงตาม</label><select name="sort" class="form-select form-select-sm"><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option><option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option><option value="severity" {% if sort == 'severity' %}selected{% endif %}>Severity</option></select></div>
   <div class="col-md-2"><button class="btn btn-dark btn-sm" type="submit">กรอง</button></div>
 </form></div></div>
 <div class="card border-0 shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
+  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>OLA</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
   <tbody>{% for ticket in tickets %}<tr {% if ticket.is_emergency %}class="table-danger"{% endif %}>
     <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
     {# Stage labels are queue-specific, but colors come from Ticket.STATUS_PILL_COLORS (single source of truth). #}
@@ -20,6 +20,7 @@
     <td>{% if ticket.is_emergency %}<span class="badge bg-danger">EMERGENCY</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
     <td><div class="fw-semibold">{{ ticket.device_name }}</div><small class="text-muted">{{ ticket.issue_description|truncatechars:80 }}</small></td>
+    <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
     <td class="small">{{ ticket.status_changed_at|date:"d/m/Y H:i" }}</td>
     <td>{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}<span class="text-muted">Unknown user</span>{% endif %}</td>
     <td class="small">{% if ticket.t2_claimed_by %}{{ ticket.t2_claimed_by.get_full_name|default:ticket.t2_claimed_by.username }}<div class="text-muted">{{ ticket.t2_claimed_at|date:"d/m/Y H:i" }}</div>{% else %}<span class="text-muted">-</span>{% endif %}</td>
@@ -36,7 +37,7 @@
       <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseTicket{{ ticket.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว</button>
       {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
     </td>
-  </tr>{% empty %}<tr><td colspan="9" class="text-center text-muted py-5">ไม่มี Ticket ที่รอ Tier 2</td></tr>{% endfor %}</tbody>
+  </tr>{% empty %}<tr><td colspan="10" class="text-center text-muted py-5">ไม่มี Ticket ที่รอ Tier 2</td></tr>{% endfor %}</tbody>
 </table></div></div>
 {% for ticket in tickets %}{% if ticket.t2_claimed_by_id == request.user.id %}
 <div class="modal fade" id="releaseTicket{{ ticket.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">

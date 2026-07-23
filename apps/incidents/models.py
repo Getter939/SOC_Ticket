@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+
+from . import ola
 from datetime import timedelta
 
 
@@ -1115,6 +1117,19 @@ class Ticket(models.Model):
     @property
     def is_ola_breached(self):
         return self.is_ola_triage_breached
+
+    @property
+    def ola_badge(self):
+        """Live contain-OLA pill for the queue tables (incidents/_ola_badge.html).
+
+        Deliberately the CONTAIN deadline, matching what the lists sort and
+        filter on — is_ola_breached is the historical "was it raised in time"
+        fact and would contradict the ordering if shown here.
+        """
+        return ola.badge_for(
+            self.ola_contain_deadline,
+            done=self.status in self.TERMINAL_STATUSES,
+        )
 
     @property
     def is_ola_contain_breached(self):

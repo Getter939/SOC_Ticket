@@ -16,6 +16,7 @@ an existing contain deadline is to now().
 from datetime import timedelta
 
 from django.db.models import Case, CharField, Q, Value, When
+from django.utils import timezone
 
 OVERDUE = 'overdue'
 DUE_1H = 'due_1h'
@@ -36,6 +37,11 @@ OLA_BUCKETS = [
     (ON_TRACK, 'On-track', '#198754'),
 ]
 BUCKET_KEYS = {key for key, _, _ in OLA_BUCKETS}
+BUCKET_BG = {key: color for key, _, color in OLA_BUCKETS}
+# Amber needs dark text to stay readable; the rest carry white.
+BUCKET_FG = {
+    OVERDUE: '#ffffff', DUE_1H: '#ffffff', DUE_4H: '#212529', ON_TRACK: '#ffffff',
+}
 
 
 def _edges(now):
@@ -75,3 +81,64 @@ def bucket_filter(bucket_key, now):
     if bucket_key == ON_TRACK:
         return Q(ola_contain_deadline__gt=t4)
     return Q()
+
+
+# ---------------------------------------------------------------------- #
+# Row-level presentation — the queue tables' OLA column                   #
+# ---------------------------------------------------------------------- #
+
+def bucket_for(deadline, now=None):
+    """Bucket a single deadline in Python — the row-level twin of bucket_case.
+
+    Kept beside bucket_case deliberately: the two must agree, or a list sorted
+    by the ORM bucket would show badges that contradict the ordering.
+    """
+    if deadline is None:
+        return None
+    now = now or timezone.now()
+    t1, t4 = _edges(now)
+    if deadline < now:
+        return OVERDUE
+    if deadline <= t1:
+        return DUE_1H
+    if deadline <= t4:
+        return DUE_4H
+    return ON_TRACK
+
+
+def _humanize(delta):
+    """Coarse Thai duration: minutes under an hour, days once past one."""
+    total_minutes = int(delta.total_seconds() // 60)
+    if total_minutes < 1:
+        return 'ไม่ถึง 1 น.'
+    days, rem = divmod(total_minutes, 60 * 24)
+    hours, minutes = divmod(rem, 60)
+    if days:
+        return f'{days} ว. {hours} ชม.' if hours else f'{days} ว.'
+    if hours:
+        return f'{hours} ชม. {minutes} น.' if minutes else f'{hours} ชม.'
+    return f'{minutes} น.'
+
+
+def badge_for(deadline, *, done=False, now=None):
+    """Presentation dict for the shared ``incidents/_ola_badge.html`` include.
+
+    Returns None when there is nothing meaningful to show — no deadline at all
+    (Medium/Low are notification-only, so they never get a contain deadline) or
+    the work is already finished, where a live countdown would be noise.
+    """
+    if deadline is None or done:
+        return None
+    now = now or timezone.now()
+    bucket = bucket_for(deadline, now)
+    delta = deadline - now
+    overdue = delta.total_seconds() < 0
+    amount = _humanize(abs(delta))
+    return {
+        'bucket': bucket,
+        'bg': BUCKET_BG[bucket],
+        'fg': BUCKET_FG[bucket],
+        'overdue': overdue,
+        'label': f'เกิน {amount}' if overdue else f'เหลือ {amount}',
+        'deadline': deadline,
+    }

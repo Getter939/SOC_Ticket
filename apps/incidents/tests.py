@@ -47,6 +47,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
+from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
     AttachmentForm, ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
 )
@@ -2108,6 +2109,55 @@ class TicketListOlaFilterTest(TestCase):
         ids, resp = self._list(ola='bogus')
         self.assertEqual(resp.context['ola_filter'], '')
         self.assertEqual(len(ids), 4)
+
+
+class OlaBadgeTest(TestCase):
+    """The shared queue OLA pill (incidents/_ola_badge.html via ola.badge_for).
+
+    The badge must agree with bucket_case/bucket_filter — a list sorted by the
+    ORM bucket showing contradicting badges would be worse than no badge.
+    """
+
+    def setUp(self):
+        self.now = timezone.now()
+
+    def _badge(self, deadline, **kwargs):
+        return ola_buckets.badge_for(deadline, now=self.now, **kwargs)
+
+    def test_bucket_matches_the_orm_bucketing(self):
+        cases = [
+            (self.now - timedelta(hours=1), ola_buckets.OVERDUE),
+            (self.now + timedelta(minutes=30), ola_buckets.DUE_1H),
+            (self.now + timedelta(hours=2), ola_buckets.DUE_4H),
+            (self.now + timedelta(hours=10), ola_buckets.ON_TRACK),
+        ]
+        for deadline, expected in cases:
+            with self.subTest(bucket=expected):
+                self.assertEqual(self._badge(deadline)['bucket'], expected)
+                self.assertEqual(
+                    ola_buckets.bucket_for(deadline, self.now), expected)
+
+    def test_overdue_reads_as_elapsed_and_on_track_as_remaining(self):
+        overdue = self._badge(self.now - timedelta(hours=2, minutes=5))
+        self.assertTrue(overdue['overdue'])
+        self.assertTrue(overdue['label'].startswith('เกิน'))
+
+        remaining = self._badge(self.now + timedelta(minutes=45))
+        self.assertFalse(remaining['overdue'])
+        self.assertEqual(remaining['label'], 'เหลือ 45 น.')
+
+    def test_nothing_to_show_without_a_deadline_or_once_done(self):
+        # Medium/Low never get a contain deadline; finished work has no clock.
+        self.assertIsNone(self._badge(None))
+        self.assertIsNone(self._badge(self.now + timedelta(hours=1), done=True))
+
+    def test_ticket_badge_uses_the_contain_deadline_and_stops_when_terminal(self):
+        ticket = _make_ticket(
+            ola_contain_deadline=timezone.now() + timedelta(minutes=30))
+        self.assertEqual(ticket.ola_badge['bucket'], ola_buckets.DUE_1H)
+
+        ticket.status = Ticket.STATUS_APPROVED
+        self.assertIsNone(ticket.ola_badge)
 
 
 class OlaPolicyTest(TestCase):
