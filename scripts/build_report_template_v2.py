@@ -396,6 +396,7 @@ def build(output_path=OUTPUT_PATH):
             ('chk_asset_computer', 'Computer'), ('chk_asset_server', 'Server'),
             ('chk_asset_network', 'Network Device')])),
         ('ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', '{{asset_owner}}'),
+        ('ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
         ('ระบบที่ได้รับผลกระทบ', '{{system_name}}'),
         ('สถานะปัจจุบัน', '{{status}}'),
         ('เรื่องที่ดำเนินการแล้ว', '{{actions_taken_summary}}'),
@@ -411,6 +412,7 @@ def build(output_path=OUTPUT_PATH):
     add_kv_table(doc, [
         ('ระบบ/บริการ', '{{system_name}}'),
         ('หน่วยงานเจ้าของทรัพย์สิน', '{{asset_owner}}'),
+        ('ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
         ('Host Name', '{{host_name}}'),
         ('IP Address', '{{ip_address}}'),
         ('Operating System', '{{operating_system}}'),

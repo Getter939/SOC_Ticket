@@ -157,6 +157,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'host_ip': _host_ip(ticket),
         'system_name': _value(ticket.device_name),
         'asset_owner': _value(ticket.asset_owner),
+        'asset_owner_name': _value(ticket.asset_owner_name),
         'host_name': _value(ticket.device_name),
         'ip_address': _value(ticket.ip_address),
         'operating_system': _value(ticket.operating_system),
@@ -252,6 +253,7 @@ def build_ticket_report_sections(report, ticket):
             kv('ทรัพย์สินที่ได้รับผลกระทบ', report['host_ip']),
             checks('ประเภททรัพย์สินที่ได้รับผลกระทบ', asset_options),
             kv('ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', report['asset_owner']),
+            kv('ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
             kv('ระบบที่ได้รับผลกระทบ', report['system_name']),
             kv('สถานะปัจจุบัน', report['status']),
             kv('เรื่องที่ดำเนินการแล้ว', report['actions_taken_summary']),
@@ -264,6 +266,7 @@ def build_ticket_report_sections(report, ticket):
         {'number': '3', 'title': 'Scope ทรัพย์สินที่ได้รับผลกระทบ', 'rows': [
             kv('ระบบ/บริการ', report['system_name']),
             kv('หน่วยงานเจ้าของทรัพย์สิน', report['asset_owner']),
+            kv('ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
             kv('Host Name', report['host_name']),
             kv('IP Address', report['ip_address']),
             kv('Operating System', report['operating_system']),

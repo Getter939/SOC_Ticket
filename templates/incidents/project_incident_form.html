@@ -244,6 +244,11 @@
               {{ tform.asset_owner }}
               {% if tform.asset_owner.errors %}<div class="text-danger small">{{ tform.asset_owner.errors }}</div>{% endif %}
             </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold mb-1">ชื่อเจ้าของทรัพย์สิน</label>
+              {{ tform.asset_owner_name }}
+              {% if tform.asset_owner_name.errors %}<div class="text-danger small">{{ tform.asset_owner_name.errors }}</div>{% endif %}
+            </div>
           </div>
         </div>
         {% endfor %}
@@ -306,6 +311,10 @@
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">หน่วยงานเจ้าของทรัพย์สิน</label>
         {{ target_formset.empty_form.asset_owner }}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold mb-1">ชื่อเจ้าของทรัพย์สิน</label>
+        {{ target_formset.empty_form.asset_owner_name }}
       </div>
     </div>
   </div>

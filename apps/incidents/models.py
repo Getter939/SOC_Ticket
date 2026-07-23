@@ -728,6 +728,14 @@ class Ticket(models.Model):
         max_length=150, blank=True, default='',
         verbose_name='หน่วยงานเจ้าของทรัพย์สิน',
     )
+    # Name of the individual who owns/looks after the asset (ชื่อเจ้าของทรัพย์สิน
+    # on the report). Free text on purpose: this identifies an employee for the
+    # report and for follow-up, and that person is not expected to hold an
+    # account here — so it is neither the ``system_owner`` FK nor tied to one.
+    asset_owner_name = models.CharField(
+        max_length=150, blank=True, default='',
+        verbose_name='ชื่อเจ้าของทรัพย์สิน',
+    )
     spread_to_others = models.BooleanField(
         null=True, blank=True,
         verbose_name='มีการกระจายไปยังจุดอื่น',

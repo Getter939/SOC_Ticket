@@ -201,6 +201,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'asset_type',
             'operating_system',
             'asset_owner',
+            'asset_owner_name',
             'spread_to_others',
             # Section 5
             'destination_ip',
@@ -237,6 +238,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
             'asset_owner':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น ฝ่ายเทคโนโลยีสารสนเทศ / กองระบบงาน HR'}),
+            'asset_owner_name':   forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -415,7 +417,8 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         model = Ticket
         fields = [
             'device_name', 'ip_address', 'mac_address', 'asset_type',
-            'operating_system', 'asset_owner', 'assigned_admin',
+            'operating_system', 'asset_owner', 'asset_owner_name',
+            'assigned_admin',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
@@ -423,6 +426,7 @@ class ProjectIncidentTargetForm(forms.ModelForm):
             'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
             'asset_owner': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ฝ่ายไอที'}),
+            'asset_owner_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
             'operating_system': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น Windows Server 2019'}),
         }
 
@@ -453,7 +457,8 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'incident_datetime', 'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address', 'mac_address',
-            'asset_type', 'operating_system', 'asset_owner', 'spread_to_others',
+            'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
+            'spread_to_others',
             'destination_ip', 'ioc_details', 'mitre_phase', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
         ]

@@ -253,6 +253,13 @@
         </div>
 
         <div class="col-md-4">
+          <label class="form-label fw-semibold" for="{{ form.asset_owner_name.id_for_label }}">ชื่อเจ้าของทรัพย์สิน</label>
+          {{ form.asset_owner_name }}
+          <div class="field-hint">ชื่อพนักงานผู้ดูแล/เจ้าของทรัพย์สิน สำหรับใช้ในรายงานและการติดตาม</div>
+          {% if form.asset_owner_name.errors %}<div class="text-danger small">{{ form.asset_owner_name.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
           <div class="form-label fw-semibold d-block" id="spread-group-label">มีการกระจายไปยังจุดอื่น</div>
           <div class="spread-group" id="spread-group" role="group" aria-labelledby="spread-group-label">
             {% for radio in form.spread_to_others %}
