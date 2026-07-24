@@ -176,6 +176,32 @@ workflow position with soft-delete audit; `MANAGER_QUEUE_STATUSES` and the
 dashboard court/heatmap groupings extended for the new state (both guarded by
 exhaustiveness tests, which caught the omission).
 
+### Emergency assessment split (later the same day)
+
+The pre-containment review had **two** controls writing `is_emergency`: a
+standalone toggle card (visible at every stage, including terminal) and an
+Emergency **checkbox** inside the forward form. Duplicated decision points, and
+"Normal" was merely an unchecked box — no evidence a decision was made.
+
+- The forward form now carries a **required two-option assessment** (Normal /
+  Emergency). `assess_emergency_initial(value, user)` stamps
+  `emergency_decided_by` / `emergency_decided_at` **write-once even for Normal**.
+- The standalone toggle is gone. `set_emergency` / `can_set_emergency` are
+  replaced by `assess_emergency_initial` + `reassess_emergency` /
+  `can_reassess_emergency`.
+- **Reassessment** (`reassess_emergency`) is manager-only, needs a written
+  reason, logs old→new+reason, and is allowed only at an active stage **past**
+  the review — **not at `PENDING_MGR_TRIAGE`, not after closure**. The one
+  deliberate behaviour change: terminal tickets can no longer have Emergency
+  flipped (the old `set_emergency` allowed it). Migration `incidents/0052`.
+- `is_emergency` and `requires_manager_verification` are unchanged, so closure
+  routing is identical.
+
+> **Note on §0's older text below:** references to `can_set_emergency` /
+> `set_emergency` and "adjustable at any stage including terminal" describe the
+> pre-2026-07-23 mechanism. They are left as dated record; the rules above
+> supersede them.
+
 ---
 
 ## 1. CURRENT implementation (before this change)

@@ -763,6 +763,28 @@ class ExecutiveDashboardViewTest(TestCase):
             html,
         )
 
+    # ── Pipeline phase coverage (guards silent-drop bugs) ───────────────── #
+
+    def test_ir_phases_cover_every_status_exactly_once(self):
+        """A status missing from _IR_PHASES is silently dropped from the exec
+        pipeline chart AND its drill-down filter — the bug that hid
+        PENDING_MGR_EVENT_REVIEW until 2026-07-23."""
+        from apps.dashboard.views import _IR_PHASES
+
+        covered = [s for _, _, sts in _IR_PHASES for s in sts]
+        all_statuses = [s for s, _ in Ticket.STATUS_CHOICES]
+        self.assertEqual(sorted(covered), sorted(set(covered)),
+                         'a status is in two IR phases')
+        self.assertEqual(sorted(covered), sorted(all_statuses),
+                         'IR phase coverage != all statuses')
+
+    def test_event_downgrade_review_lands_in_identification(self):
+        self._ticket(
+            status=Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, severity='Critical',
+        )
+        pbs = self._get().context['pipeline_by_severity']
+        self.assertEqual(pbs['matrix']['Critical']['IDENTIFICATION'], 1)
+
 
 # ── Monitoring dashboard: analyst workload heatmap ───────────────────────── #
 

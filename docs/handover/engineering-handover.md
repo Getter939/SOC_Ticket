@@ -204,13 +204,30 @@ before role checks** — superusers created via `createsuperuser` have no profil
 
 ### 3.3 Emergency flag
 
-`is_emergency` is **SOC-Manager-only** (`can_set_emergency`; superusers may
-too). No other role — including Tier 1 and Tier 2 — may touch it. The canonical
-decision point is the pre-containment review (`PENDING_MGR_TRIAGE`), where the
-manager rules Emergency yes/no before forwarding, but the manager may still
-correct or raise it at **any** later stage, including terminal states. Every
-toggle writes a `TicketLog` recording who changed it and the old→new value.
-Emergency is the sole trigger for manager verification before close.
+`is_emergency` is **SOC-Manager-only** (superusers too); no other role may
+touch it. It is the sole trigger for manager verification before close
+(`requires_manager_verification == is_emergency`). Since 2026-07-23 there are
+**two distinct write paths**, and no generic `set_emergency` any more:
+
+- **Initial assessment** — `assess_emergency_initial(value, user)`, called from
+  the pre-containment review (`PENDING_MGR_TRIAGE`) forward action. It is an
+  **explicit, required** Normal/Emergency choice (a radio, not a checkbox), and
+  it stamps `emergency_decided_by` / `emergency_decided_at` **write-once even
+  for Normal** — so there is positive evidence the decision was made. It writes
+  no separate log; the forward's review note (which the view prefixes with the
+  verdict) and the transition log carry it.
+- **Reassessment** — `reassess_emergency(value, user, reason)`. Manager-only,
+  **requires a written reason**, rejects a no-change, and writes a `TicketLog`
+  with old→new + reason. Gated by `can_reassess_emergency`: allowed only at an
+  **active** stage **past** the review — **forbidden at `PENDING_MGR_TRIAGE`**
+  (the initial assessment is the control there) **and after closure**
+  (`APPROVED` / `CLOSED_EVENT`). This is the one deliberate behaviour change:
+  terminal tickets can no longer have Emergency flipped.
+
+The UI mirrors this: the ticket-detail Emergency card is read-only status +
+initial-decision metadata, with the reassess form appearing only when
+`can_reassess_emergency`. There is no standalone editable toggle at
+`PENDING_MGR_TRIAGE`.
 
 > Historical note: an earlier design let any role *except* Tier 1 toggle this,
 > with a `was_escalated_to_t2` carve-out. That rule is gone — if you find code

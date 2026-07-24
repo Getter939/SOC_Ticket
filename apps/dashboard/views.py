@@ -491,6 +491,36 @@ _EXEC_COURT_GROUPS = {
 }
 
 
+# Executive pipeline chart — every workflow status collapsed into a SANS-IR
+# phase column. Drives both the stacked bars and the phase drill-down filter.
+#
+# INVARIANT: every status in Ticket.STATUS_CHOICES (active AND terminal) appears
+# here exactly once. A status missing here is silently dropped from the exec
+# pipeline and its filter — exactly the bug that hid PENDING_MGR_EVENT_REVIEW
+# until 2026-07-23. Enforced by ExecutivePipelinePhaseTest.
+_IR_PHASES = [
+    ('PREPARATION',    'Preparation',             [Ticket.STATUS_NEW]),
+    ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
+                                                   Ticket.STATUS_T1_REVIEW,
+                                                   Ticket.STATUS_PENDING_MGR_TRIAGE,
+                                                   # SOC Manager verifying a Tier 2 Event
+                                                   # downgrade — a disposition decision, not
+                                                   # recovery. Added 2026-07-23.
+                                                   Ticket.STATUS_PENDING_MGR_EVENT_REVIEW]),
+    ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
+                                                   Ticket.STATUS_CONTAINMENT_REPORTED,
+                                                   Ticket.STATUS_AWAITING_OWNER,
+                                                   Ticket.STATUS_OWNER_REMEDIATED]),
+    # Recovery = the verification stages (work done, being signed off).
+    ('RECOVERY',       'Recovery',                [Ticket.STATUS_PENDING_MANAGER,
+                                                   Ticket.STATUS_PENDING_T2_REVIEW]),
+    # Lessons Learned = both terminals. APPROVED lived under Recovery until
+    # 2026-07-16, which read as "still recovering" for a closed case.
+    ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_APPROVED,
+                                                   Ticket.STATUS_CLOSED_EVENT]),
+]
+
+
 @login_required
 def executive_dashboard(request):
     """Executive dashboard — glanceable posture summary for management.
@@ -679,27 +709,10 @@ def executive_dashboard(request):
     # SANS-IR phase: several workflow statuses collapse into one phase column.
     # Emergency counts are a subset overlay per phase, not an extra segment.
     status_map = dict(Ticket.STATUS_CHOICES)
-    IR_PHASES = [
-        ('PREPARATION',    'Preparation',             [Ticket.STATUS_NEW]),
-        ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
-                                                       Ticket.STATUS_T1_REVIEW,
-                                                       Ticket.STATUS_PENDING_MGR_TRIAGE]),
-        ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
-                                                       Ticket.STATUS_CONTAINMENT_REPORTED,
-                                                       Ticket.STATUS_AWAITING_OWNER,
-                                                       Ticket.STATUS_OWNER_REMEDIATED]),
-        # Recovery = the verification stages (work done, being signed off).
-        ('RECOVERY',       'Recovery',                [Ticket.STATUS_PENDING_MANAGER,
-                                                       Ticket.STATUS_PENDING_T2_REVIEW]),
-        # Lessons Learned = both terminals. APPROVED lived under Recovery until
-        # 2026-07-16, which read as "still recovering" for a closed case.
-        ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_APPROVED,
-                                                       Ticket.STATUS_CLOSED_EVENT]),
-    ]
-    phase_order = [key for key, _, _ in IR_PHASES]
-    phase_display = {key: label for key, label, _ in IR_PHASES}
-    phase_statuses = {key: sts for key, _, sts in IR_PHASES}
-    status_to_phase = {st: key for key, _, sts in IR_PHASES for st in sts}
+    phase_order = [key for key, _, _ in _IR_PHASES]
+    phase_display = {key: label for key, label, _ in _IR_PHASES}
+    phase_statuses = {key: sts for key, _, sts in _IR_PHASES}
+    status_to_phase = {st: key for key, _, sts in _IR_PHASES for st in sts}
 
     sev_display = dict(Ticket.SEVERITY_CHOICES)
     severity_order = sorted(

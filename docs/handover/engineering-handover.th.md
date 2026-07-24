@@ -177,13 +177,27 @@ superuser ที่สร้างผ่าน `createsuperuser` ไม่มี
 
 ### 3.3 ธง Emergency
 
-`is_emergency` เป็นสิทธิ์ของ **SOC Manager เท่านั้น** (`can_set_emergency`;
-superuser ตั้งได้ด้วย) ไม่มี role อื่นแตะได้ รวมถึง Tier 1 และ Tier 2
-จุดตัดสินใจหลักคือการตรวจก่อน containment (`PENDING_MGR_TRIAGE`) ที่ manager
-ชี้ว่าฉุกเฉินหรือไม่ก่อนส่งต่อ แต่ manager ยังแก้ไขหรือยกระดับได้ใน**ทุก** stage
-ภายหลัง รวมถึง terminal state การเปิด/ปิดทุกครั้งจะบันทึก `TicketLog` ว่าใครเป็น
-ผู้เปลี่ยนและเปลี่ยนจากค่าใดเป็นค่าใด และธง emergency เป็นเงื่อนไขเดียวที่บังคับให้
-ต้องผ่านการตรวจสอบของ manager ก่อนปิด
+`is_emergency` เป็นสิทธิ์ของ **SOC Manager เท่านั้น** (superuser ตั้งได้ด้วย)
+ไม่มี role อื่นแตะได้ และเป็นเงื่อนไขเดียวที่บังคับให้ต้องผ่านการตรวจสอบของ manager
+ก่อนปิด (`requires_manager_verification == is_emergency`) ตั้งแต่ 2026-07-23 มี
+**สองเส้นทางการเขียนที่แยกกัน** (ไม่มี `set_emergency` แบบรวมอีกต่อไป):
+
+- **การประเมินครั้งแรก** — `assess_emergency_initial(value, user)` เรียกจากการ
+  ส่งต่อที่ขั้นตรวจก่อนมอบหมาย (`PENDING_MGR_TRIAGE`) เป็นการเลือก Normal/Emergency
+  แบบ**บังคับและชัดเจน** (radio ไม่ใช่ checkbox) และบันทึก `emergency_decided_by` /
+  `emergency_decided_at` แบบ **write-once แม้ผลเป็น Normal** เพื่อเป็นหลักฐานว่ามี
+  การตัดสินใจจริง ไม่เขียน log แยก — ใช้บันทึกการตรวจของการส่งต่อ (view จะเติมผลการ
+  ประเมินไว้หน้าโน้ต) และ transition log
+- **การประเมินใหม่** — `reassess_emergency(value, user, reason)` เฉพาะ manager,
+  **ต้องระบุเหตุผล**, ปฏิเสธถ้าไม่มีการเปลี่ยนค่า และเขียน `TicketLog` พร้อม old→new +
+  เหตุผล ควบคุมโดย `can_reassess_emergency`: อนุญาตเฉพาะ stage ที่ **active และ
+  ผ่านการตรวจแล้ว** — **ห้ามที่ `PENDING_MGR_TRIAGE`** (ใช้การประเมินครั้งแรกแทน)
+  **และห้ามหลังปิดเคส** (`APPROVED` / `CLOSED_EVENT`) นี่คือการเปลี่ยนพฤติกรรมที่ตั้งใจ
+  จุดเดียว: ticket ที่ปิดแล้วเปลี่ยน Emergency ไม่ได้อีก
+
+UI สอดคล้องกัน: การ์ด Emergency ในหน้า ticket detail เป็นสถานะอ่านอย่างเดียว + ข้อมูล
+การประเมินครั้งแรก และฟอร์มประเมินใหม่จะแสดงเฉพาะเมื่อ `can_reassess_emergency` เท่านั้น
+ไม่มีปุ่มสลับ Emergency แบบเดี่ยวที่ `PENDING_MGR_TRIAGE`
 
 > หมายเหตุเชิงประวัติ: การออกแบบเดิมเคยให้ทุก role **ยกเว้น** Tier 1 เปิด/ปิดได้
 > พร้อมข้อยกเว้น `was_escalated_to_t2` กติกานั้นถูกยกเลิกแล้ว หากพบโค้ดหรือเอกสาร
