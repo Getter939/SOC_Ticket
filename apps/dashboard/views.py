@@ -177,22 +177,26 @@ def dashboard(request):
         'mttr_n':              mttr_n,                 # count of resolved in last 30 days
     }
 
-    # ── Pipeline chart — every status, in STATUS_CHOICES order ───────────── #
+    # ── Pipeline chart — ACTIVE statuses only, in STATUS_CHOICES order ───── #
     status_map   = dict(Ticket.STATUS_CHOICES)
-    status_order = [s for s, _ in Ticket.STATUS_CHOICES]
+    # Terminal statuses are deliberately excluded: this is the *active* pipeline
+    # (where work is piling up now). Closed cases would otherwise accumulate and
+    # dwarf the live columns; their count is on the "Closed This Month" KPI tile
+    # and in Ticket History. (2026-07-23)
+    status_order = [s for s, _ in Ticket.STATUS_CHOICES
+                    if s not in Ticket.TERMINAL_STATUSES]
     # ── Pipeline by severity × status (stacked-bar source) ───────────────── #
-    # statuses: STATUS_CHOICES progression order (earliest → terminal).
+    # statuses: STATUS_CHOICES progression order, active states only.
     # severities: SEVERITY_RANK order, HIGHEST first (Critical=4 … Unknown=0).
-    # All tickets (incl. terminal) so the funnel is complete; respects the
-    # active GET filters via all_tickets. Single group-by query (no N+1);
-    # the matrix is zero-filled so every status appears under every severity.
+    # Respects the active GET filters via active_qs. Single group-by query (no
+    # N+1); the matrix is zero-filled so every status appears under every severity.
     sev_display      = dict(Ticket.SEVERITY_CHOICES)
     severity_order   = sorted(
         sev_display, key=lambda s: Ticket.SEVERITY_RANK.get(s, 0), reverse=True)
     pipeline_matrix  = {
         sev: {st: 0 for st in status_order} for sev in severity_order
     }
-    for row in all_tickets.values('severity', 'status').annotate(c=Count('id')):
+    for row in active_qs.values('severity', 'status').annotate(c=Count('id')):
         sev, st = row['severity'], row['status']
         if sev in pipeline_matrix and st in pipeline_matrix[sev]:
             pipeline_matrix[sev][st] = row['c']

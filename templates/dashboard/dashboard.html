@@ -368,12 +368,12 @@
     <div class="col-md-6">
         <div class="panel p-3 h-100">
             <h6 class="panel-title mb-2">
-                <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะ Ticket ทั้งหมด
+                <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะที่กำลังดำเนินการ
             </h6>
             <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a segment to filter the dashboard.</p>
             <div style="height:320px;">
                 <canvas id="chartPipeline" role="img"
-                        aria-label="Pipeline chart showing ticket counts by workflow status and severity"></canvas>
+                        aria-label="Pipeline chart showing active ticket counts by workflow status and severity"></canvas>
             </div>
             <div class="visually-hidden">
             <table>
@@ -832,7 +832,7 @@ function applyDashboardFilters(filters) {
 // ── Pipeline by status × severity (stacked vertical bar) ──
 (function () {
     const pbs = readJSON('pipeline-by-severity');
-    const statuses   = pbs.statuses;    // [[slug, display], ...] STATUS order
+    const statuses   = pbs.statuses;    // [[slug, display], ...] active STATUS order
     const severities = pbs.severities;  // [[slug, display], ...] highest rank first
     const matrix     = pbs.matrix;      // { sev_slug: { status_slug: count } }
 

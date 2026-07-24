@@ -392,13 +392,22 @@ class DashboardManagementViewTest(TestCase):
         self.assertEqual(pbs['matrix']['Critical'][Ticket.STATUS_NEW], 1)
         self.assertEqual(pbs['matrix']['Low'][Ticket.STATUS_NEW], 0)
 
-    def test_pipeline_includes_terminal_statuses(self):
-        """Pipeline covers the full funnel, including terminal statuses."""
+    def test_pipeline_excludes_terminal_statuses(self):
+        """The pipeline is the ACTIVE funnel — terminal statuses are omitted so
+        accumulating closed cases don't dwarf the live columns. Closed counts
+        live on the 'Closed This Month' KPI tile instead. (2026-07-23)"""
         _make_ticket(status=Ticket.STATUS_APPROVED)
+        _make_ticket(status=Ticket.STATUS_CLOSED_EVENT)
+        _make_ticket(status=Ticket.STATUS_NEW)
         pbs = self._get().context['pipeline_by_severity']
         status_slugs = [slug for slug, _ in pbs['statuses']]
-        self.assertIn(Ticket.STATUS_APPROVED, status_slugs)
-        self.assertIn(Ticket.STATUS_CLOSED_EVENT, status_slugs)
+        self.assertNotIn(Ticket.STATUS_APPROVED, status_slugs)
+        self.assertNotIn(Ticket.STATUS_CLOSED_EVENT, status_slugs)
+        # …and no terminal column leaks into the matrix.
+        for sev_slug, _ in pbs['severities']:
+            self.assertNotIn(Ticket.STATUS_APPROVED, pbs['matrix'][sev_slug])
+        # Active statuses are still present.
+        self.assertIn(Ticket.STATUS_NEW, status_slugs)
 
     # ── New context keys ───────────────────────────────────────────────── #
 
