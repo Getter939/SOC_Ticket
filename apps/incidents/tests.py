@@ -1332,79 +1332,127 @@ class EmergencyFlagTest(TestCase):
             status=Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
         )
 
-    # ── SOC Manager only — no other role may touch the flag ─────────────── #
+    # ── SOC Manager only — no other role may reassess the flag ──────────── #
 
-    def test_t1_cannot_set_emergency(self):
+    def test_t1_cannot_reassess_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertFalse(t.can_set_emergency(self.t1))
+        self.assertFalse(t.can_reassess_emergency(self.t1))
         with self.assertRaises(ValidationError):
-            t.set_emergency(True, self.t1)
+            t.reassess_emergency(True, self.t1, 'reason')
 
-    def test_t1_cannot_set_emergency_even_on_escalated_ticket(self):
+    def test_t1_cannot_reassess_emergency_even_on_escalated_ticket(self):
         """The old escalation exception is gone — the manager decides, full stop."""
         t = self._escalated_ticket()
-        self.assertFalse(t.can_set_emergency(self.t1))
+        self.assertFalse(t.can_reassess_emergency(self.t1))
         with self.assertRaises(ValidationError):
-            t.set_emergency(True, self.t1)
+            t.reassess_emergency(True, self.t1, 'reason')
 
-    def test_t2_cannot_set_emergency(self):
+    def test_t2_cannot_reassess_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertFalse(t.can_set_emergency(self.t2))
+        self.assertFalse(t.can_reassess_emergency(self.t2))
         with self.assertRaises(ValidationError):
-            t.set_emergency(True, self.t2)
+            t.reassess_emergency(True, self.t2, 'reason')
 
-    def test_system_admin_cannot_set_emergency(self):
+    def test_system_admin_cannot_reassess_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertFalse(t.can_set_emergency(self.admin))
+        self.assertFalse(t.can_reassess_emergency(self.admin))
         with self.assertRaises(ValidationError):
-            t.set_emergency(True, self.admin)
+            t.reassess_emergency(True, self.admin, 'reason')
 
-    def test_owner_cannot_set_emergency(self):
-        self.assertFalse(self._direct_admin_ticket().can_set_emergency(self.owner))
+    def test_owner_cannot_reassess_emergency(self):
+        self.assertFalse(self._direct_admin_ticket().can_reassess_emergency(self.owner))
 
-    def test_manager_can_set_emergency(self):
+    def test_manager_can_reassess_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertTrue(t.can_set_emergency(self.mgr))
-        t.set_emergency(True, self.mgr)
+        self.assertTrue(t.can_reassess_emergency(self.mgr))
+        t.reassess_emergency(True, self.mgr, 'situation escalated')
         t.refresh_from_db()
         self.assertTrue(t.is_emergency)
 
-    def test_superuser_can_set_emergency(self):
+    def test_superuser_can_reassess_emergency(self):
         t = self._direct_admin_ticket()
-        self.assertTrue(t.can_set_emergency(self.superuser))
+        self.assertTrue(t.can_reassess_emergency(self.superuser))
 
-    # ── Mutable at any stage + audit ────────────────────────────────────── #
+    # ── Initial assessment (pre-containment review) ─────────────────────── #
 
-    def test_emergency_toggleable_at_terminal_stage(self):
+    def test_initial_assessment_stamps_metadata_even_for_normal(self):
+        t = self._escalated_ticket()
+        t.assess_emergency_initial(False, self.mgr)
+        t.save()
+        t.refresh_from_db()
+        self.assertFalse(t.is_emergency)
+        self.assertEqual(t.emergency_decided_by, self.mgr)
+        self.assertIsNotNone(t.emergency_decided_at)
+
+    def test_initial_assessment_emergency_sets_flag_and_metadata(self):
+        t = self._escalated_ticket()
+        t.assess_emergency_initial(True, self.mgr)
+        t.save()
+        t.refresh_from_db()
+        self.assertTrue(t.is_emergency)
+        self.assertEqual(t.emergency_decided_by, self.mgr)
+
+    def test_initial_assessment_metadata_is_write_once(self):
+        t = self._escalated_ticket()
+        t.assess_emergency_initial(False, self.mgr)
+        t.save()
+        first_at = t.emergency_decided_at
+        # A later reassessment must not overwrite the initial-decision metadata.
+        t.status = Ticket.STATUS_AWAITING_CONTAINMENT
+        t.save()
+        t.reassess_emergency(True, self.superuser, 'later change')
+        t.refresh_from_db()
+        self.assertEqual(t.emergency_decided_by, self.mgr)
+        self.assertEqual(t.emergency_decided_at, first_at)
+
+    def test_non_manager_cannot_make_initial_assessment(self):
+        t = self._escalated_ticket()
+        with self.assertRaises(ValidationError):
+            t.assess_emergency_initial(True, self.t1)
+
+    # ── Reassessment: terminal block + reason + audit ───────────────────── #
+
+    def test_reassessment_forbidden_after_closure(self):
+        for terminal in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
+            with self.subTest(status=terminal):
+                t = _make_ticket(
+                    created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+                    status=terminal,
+                )
+                self.assertFalse(t.can_reassess_emergency(self.mgr))
+                with self.assertRaises(ValidationError):
+                    t.reassess_emergency(True, self.mgr, 'too late')
+
+    def test_reassessment_forbidden_at_pending_mgr_triage(self):
         t = _make_ticket(
             created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
-            status=Ticket.STATUS_APPROVED,
+            status=Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
         )
-        t.set_emergency(True, self.mgr)
-        t.refresh_from_db()
-        self.assertTrue(t.is_emergency)
+        self.assertFalse(t.can_reassess_emergency(self.mgr))
+        with self.assertRaises(ValidationError):
+            t.reassess_emergency(True, self.mgr, 'use the review form')
 
-    def test_setting_emergency_writes_audit_log(self):
-        t = self._escalated_ticket()
+    def test_reassessment_requires_a_reason(self):
+        t = self._direct_admin_ticket()
+        with self.assertRaises(ValidationError):
+            t.reassess_emergency(True, self.mgr, '   ')
+        t.refresh_from_db()
+        self.assertFalse(t.is_emergency)
+
+    def test_reassessment_rejects_no_change(self):
+        t = self._direct_admin_ticket()  # already Normal
+        with self.assertRaises(ValidationError):
+            t.reassess_emergency(False, self.mgr, 'no actual change')
+
+    def test_reassessment_writes_audit_log_with_reason(self):
+        t = self._direct_admin_ticket()
         before = t.logs.count()
-        t.set_emergency(True, self.mgr, 'urgent')
+        t.reassess_emergency(True, self.mgr, 'attacker moved laterally')
         self.assertEqual(t.logs.count(), before + 1)
         log = t.logs.first()
         self.assertEqual(log.author, self.mgr)
         self.assertIn('Emergency', log.note)
-
-    def test_no_op_toggle_does_not_log(self):
-        t = self._escalated_ticket()
-        before = t.logs.count()
-        t.set_emergency(False, self.mgr)  # already False
-        self.assertEqual(t.logs.count(), before)
-
-    def test_clear_emergency_logs(self):
-        t = self._escalated_ticket()
-        t.set_emergency(True, self.mgr)
-        t.set_emergency(False, self.mgr)
-        t.refresh_from_db()
-        self.assertFalse(t.is_emergency)
+        self.assertIn('attacker moved laterally', log.note)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #

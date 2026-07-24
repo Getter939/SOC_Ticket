@@ -215,37 +215,48 @@ class WorkflowUiContractTest(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
         self.assertEqual(ticket.device_name, 'EDITED-BY-T2')
 
-    def test_emergency_toggle_is_manager_only(self):
-        """Only the SOC Manager sees an enabled Emergency toggle; everyone else
-        gets the disabled card with the manager-only explanation."""
+    def test_reassess_emergency_control_is_manager_only(self):
+        """Only the SOC Manager sees the Reassess Emergency control at an active
+        post-review stage; Tier 1 / Tier 2 see the read-only status only."""
         ticket = self.make_ticket(
             Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now(),
         )
-        reason = 'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถตั้ง/ยกเลิกสถานะฉุกเฉินได้'
+        control = 'value="reassess_emergency"'
         self.client.force_login(self.t1)
-        self.assertContains(
-            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        self.assertNotContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), control,
         )
         self.client.force_login(self.t2)
-        self.assertContains(
-            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        self.assertNotContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), control,
         )
         self.client.force_login(self.manager)
-        # Manager work queue only lists manager stages, but the manager can
-        # still open any ticket directly and gets the live toggle.
-        self.assertNotContains(
-            self.client.get(reverse('ticket_detail', args=[ticket.pk])), reason,
+        self.assertContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])), control,
         )
 
-    def test_t2_cannot_toggle_emergency_via_post(self):
+    def test_t2_cannot_reassess_emergency_via_post(self):
         ticket = self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
         self.client.force_login(self.t2)
         self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
-            'action': 'toggle_emergency', 'emergency_value': '1',
-            'emergency_note': 'sneaky escalation',
+            'action': 'reassess_emergency', 'emergency_value': '1',
+            'emergency_reason': 'sneaky escalation',
         })
         ticket.refresh_from_db()
         self.assertFalse(ticket.is_emergency)
+
+    def test_no_editable_emergency_control_at_pending_mgr_triage(self):
+        """No standalone Emergency toggle on the pre-containment review screen —
+        the initial assessment lives in the forward form, not a duplicate."""
+        ticket = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        detail = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        # The reassess control must NOT appear here…
+        self.assertNotContains(detail, 'value="reassess_emergency"')
+        # …but the required two-option initial assessment must.
+        self.assertContains(detail, 'name="emergency_assessment"')
 
     def test_t2_verification_actions_match_routing(self):
         review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())
@@ -288,7 +299,7 @@ class WorkflowUiContractTest(TestCase):
         self.assertContains(detail, 'Verify -&gt; Close')
         self.assertNotContains(detail, 'Send to System Admin')
 
-    def test_manager_review_panel_shows_forward_and_emergency(self):
+    def test_manager_review_panel_shows_forward_and_emergency_assessment(self):
         triage = self.make_ticket(
             Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
         )
@@ -296,21 +307,52 @@ class WorkflowUiContractTest(TestCase):
         detail = self.client.get(reverse('ticket_detail', args=[triage.pk]))
         self.assertContains(detail, 'SOC Manager Review')
         self.assertContains(detail, 'mgr_forward')
-        self.assertContains(detail, 'Emergency')
+        self.assertContains(detail, 'name="emergency_assessment"')
 
-    def test_manager_forward_admin_lane_moves_to_containment(self):
+    def test_manager_forward_requires_an_explicit_assessment(self):
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        # No emergency_assessment → rejected, ticket stays put.
+        self.client.post(reverse('ticket_detail', args=[triage.pk]), {
+            'action': 'mgr_forward',
+            'decision_note': 'Forgot to assess.',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertIsNone(triage.emergency_decided_by)
+
+    def test_manager_forward_emergency_assessment_moves_to_containment(self):
         triage = self.make_ticket(
             Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
         )
         self.client.force_login(self.manager)
         resp = self.client.post(reverse('ticket_detail', args=[triage.pk]), {
-            'action': 'mgr_forward', 'is_emergency': '1',
+            'action': 'mgr_forward', 'emergency_assessment': 'emergency',
             'decision_note': 'Reviewed, flagged emergency, forwarding.',
         })
         self.assertRedirects(resp, reverse('ticket_detail', args=[triage.pk]))
         triage.refresh_from_db()
         self.assertEqual(triage.status, Ticket.STATUS_AWAITING_CONTAINMENT)
         self.assertTrue(triage.is_emergency)
+        self.assertEqual(triage.emergency_decided_by, self.manager)
+
+    def test_manager_forward_normal_assessment_records_metadata(self):
+        triage = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        self.client.post(reverse('ticket_detail', args=[triage.pk]), {
+            'action': 'mgr_forward', 'emergency_assessment': 'normal',
+            'decision_note': 'Reviewed, not an emergency, forwarding.',
+        })
+        triage.refresh_from_db()
+        self.assertEqual(triage.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertFalse(triage.is_emergency)
+        # "Normal" is still a recorded decision, not an unchecked box.
+        self.assertEqual(triage.emergency_decided_by, self.manager)
+        self.assertIsNotNone(triage.emergency_decided_at)
 
     def test_t1_cannot_forward_from_mgr_triage_via_ui(self):
         triage = self.make_ticket(

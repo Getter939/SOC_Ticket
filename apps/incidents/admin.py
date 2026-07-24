@@ -29,6 +29,7 @@ class TicketAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         'ticket_id', 'created_at', 'updated_at', 'escalated_to_t2_at',
+        'emergency_decided_by', 'emergency_decided_at',
         'verified_by', 'verified_at',
         'approved_by', 'approved_at',
         'report_template_version', 'report_generated_by', 'report_generated_at',
@@ -53,6 +54,7 @@ class TicketAdmin(admin.ModelAdmin):
         }),
         ('สถานะและการจัดประเภท', {
             'fields': ('status', 'classification', 'is_emergency',
+                       'emergency_decided_by', 'emergency_decided_at',
                        'escalated_to_t2_at', 'containment_report', 'remediation_summary'),
         }),
         ('การมอบหมาย', {

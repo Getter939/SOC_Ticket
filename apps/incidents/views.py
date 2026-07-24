@@ -942,13 +942,16 @@ def ticket_detail(request, pk):
     if request.method == 'POST':
         action = request.POST.get('action')
 
-        if action == 'toggle_emergency':
+        if action == 'reassess_emergency':
+            # Auditable reassessment after the initial review. The model enforces
+            # manager-only + not-terminal + not-PENDING_MGR_TRIAGE + reason; we
+            # don't pre-check the UI flag here so the server stays authoritative.
             value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
-            note = request.POST.get('emergency_note', '').strip()
+            reason = request.POST.get('emergency_reason', '').strip()
             try:
-                ticket.set_emergency(value, request.user, note)
-                state = 'เปิด' if value else 'ปิด'
-                messages.success(request, f'{state}สถานะฉุกเฉิน (Emergency) เรียบร้อยแล้ว')
+                ticket.reassess_emergency(value, request.user, reason)
+                state = 'ตั้งเป็น Emergency' if value else 'ยกเลิก Emergency'
+                messages.success(request, f'ประเมินสถานะฉุกเฉินใหม่ ({state}) เรียบร้อยแล้ว')
             except ValidationError as e:
                 messages.error(request, e.message)
 
@@ -1016,20 +1019,28 @@ def ticket_detail(request, pk):
                 messages.error(request, 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
 
         elif action == 'mgr_forward':
-            # SOC Manager reviews, optionally flags Emergency, and forwards the
-            # ticket to the lane Tier 1 fixed. The manager cannot divert the lane.
+            # SOC Manager review: make the REQUIRED Normal/Emergency assessment,
+            # then forward to the lane Tier 1 fixed (the manager cannot divert
+            # the lane). The assessment is an explicit two-option choice, not a
+            # checkbox — "Normal" is a positive decision, recorded as such.
             note = request.POST.get('decision_note', '').strip()
-            want_emergency = request.POST.get('is_emergency', '') in ('1', 'true', 'on')
+            assessment = request.POST.get('emergency_assessment', '')
             if not can_mgr_forward:
                 messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
             elif not note:
                 messages.error(request, 'กรุณากรอกบันทึกการตรวจ')
+            elif assessment not in ('normal', 'emergency'):
+                messages.error(request, 'กรุณาประเมินสถานะฉุกเฉิน (Normal หรือ Emergency)')
             else:
+                want_emergency = assessment == 'emergency'
+                # Prepend the verdict to the forward note so the timeline shows
+                # the Normal/Emergency decision (Q1: one review note is enough).
+                verdict = 'Emergency' if want_emergency else 'Normal'
+                forward_note = f'[ประเมินสถานะฉุกเฉิน: {verdict}] {note}'
                 try:
                     with transaction.atomic():
-                        if want_emergency != ticket.is_emergency:
-                            ticket.set_emergency(want_emergency, request.user, note)
-                        ticket.transition_to(mgr_forward_target, request.user, note)
+                        ticket.assess_emergency_initial(want_emergency, request.user)
+                        ticket.transition_to(mgr_forward_target, request.user, forward_note)
                     if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
                         _notify_containment(ticket, None, request)
                 except ValidationError as e:
@@ -1196,7 +1207,7 @@ def ticket_detail(request, pk):
         'RESPONSE_TYPES': list(TicketSubtask.RESPONSE_TYPES),
         'T1_ROUTE_ADMIN': Ticket.T1_ROUTE_ADMIN,
         'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,
-        'can_set_emergency': ticket.can_set_emergency(request.user),
+        'can_reassess_emergency': ticket.can_reassess_emergency(request.user),
         'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
         'subtasks': subtasks,
         'subtask_form': subtask_form,

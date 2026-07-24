@@ -870,12 +870,26 @@ class Ticket(models.Model):
         null=True, blank=True, verbose_name='เวลาที่ส่งต่อ Tier 2 ครั้งแรก',
     )
 
-    # Emergency marker — decided by the SOC Manager at the pre-containment
-    # review (PENDING_MGR_TRIAGE) and adjustable by the manager at any later
-    # stage; no other role may set it (see set_emergency / can_set_emergency).
-    # Feeds requires_manager_verification.
+    # Emergency marker — the operational flag that feeds
+    # requires_manager_verification (closure routing). The SOC Manager makes an
+    # explicit Normal/Emergency assessment at the pre-containment review
+    # (PENDING_MGR_TRIAGE) via assess_emergency_initial, and may reassess it at
+    # any later active stage via reassess_emergency (auditable, reason required,
+    # forbidden after closure). No other role may change it.
     is_emergency = models.BooleanField(
         default=False, verbose_name='เหตุฉุกเฉิน (Emergency)',
+    )
+    # Who made the INITIAL Normal/Emergency assessment, and when. Stamped once
+    # at the pre-containment review even when the verdict is Normal, so there is
+    # positive evidence the decision was made rather than a checkbox left blank.
+    # Write-once: later changes are reassessments, recorded in the timeline.
+    emergency_decided_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='emergency_assessed_tickets',
+        verbose_name='ผู้ประเมินสถานะฉุกเฉิน (ครั้งแรก)',
+    )
+    emergency_decided_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='เวลาประเมินสถานะฉุกเฉิน (ครั้งแรก)',
     )
 
     # ── System Owner ─────────────────────────────────────────────────── #
@@ -1619,40 +1633,79 @@ class Ticket(models.Model):
     # Emergency flag                                                      #
     # ------------------------------------------------------------------ #
 
-    def can_set_emergency(self, user):
-        """Who may toggle ``is_emergency``.
-
-        SOC Manager only (superuser always may). The canonical decision point
-        is the pre-containment review (PENDING_MGR_TRIAGE), where the manager
-        rules Emergency yes/no before forwarding to the handling lane — but the
-        manager may still correct or raise the flag at any later stage if the
-        situation changes. No other role may touch it.
-        """
+    def _is_emergency_manager(self, user):
+        """SOC Manager (or superuser) — the only role that may set is_emergency."""
         if user.is_superuser:
             return True
         profile = getattr(user, 'profile', None)
         return profile is not None and profile.is_soc_manager
 
-    def set_emergency(self, value, user, note=''):
-        """Set/clear the emergency flag with permission check + audit log.
+    def assess_emergency_initial(self, value, user):
+        """Record the SOC Manager's INITIAL Normal/Emergency assessment.
 
-        Mutable at ANY lifecycle stage (including terminal). Writes a TicketLog
-        recording who toggled it and the old→new value.
+        Called from the pre-containment review (PENDING_MGR_TRIAGE) forward
+        action. Sets ``is_emergency`` and stamps ``emergency_decided_by/at``
+        write-once — even when the verdict is Normal, so there is a positive
+        record the decision was made. The forward action's own review note (and
+        the transition log) carry the reasoning; this method writes no separate
+        log. Permission is enforced by the forward action's manager gate.
+        """
+        if not self._is_emergency_manager(user):
+            raise ValidationError(
+                'คุณไม่มีสิทธิ์ประเมินสถานะฉุกเฉินของ Ticket นี้'
+            )
+        self.is_emergency = bool(value)
+        if self.emergency_decided_by_id is None:
+            self.emergency_decided_by = user
+            self.emergency_decided_at = timezone.now()
+        # Persisted by the caller's transition_to() save; kept in-memory here so
+        # the two writes share one atomic block.
+
+    def can_reassess_emergency(self, user):
+        """Who may reassess ``is_emergency`` AFTER the initial review.
+
+        SOC Manager only (superuser always may), and only while the ticket is
+        active and past the pre-containment review — at PENDING_MGR_TRIAGE the
+        initial assessment is the control, and terminal tickets are frozen
+        (reassessment forbidden after APPROVED / CLOSED_EVENT).
+        """
+        if self.status in self.TERMINAL_STATUSES:
+            return False
+        if self.status == self.STATUS_PENDING_MGR_TRIAGE:
+            return False
+        return self._is_emergency_manager(user)
+
+    def reassess_emergency(self, value, user, reason):
+        """Change ``is_emergency`` after the initial review — auditable.
+
+        Requires a written reason and records old value, new value, actor,
+        timestamp and reason in the ticket timeline (TicketLog). Forbidden on
+        terminal tickets and at PENDING_MGR_TRIAGE (see can_reassess_emergency).
+        A no-change reassessment is rejected so the audit trail stays meaningful.
         """
         value = bool(value)
-        if not self.can_set_emergency(user):
+        if not self._is_emergency_manager(user):
             raise ValidationError(
                 'คุณไม่มีสิทธิ์เปลี่ยนสถานะฉุกเฉินของ Ticket นี้'
             )
+        if not self.can_reassess_emergency(user):
+            raise ValidationError(
+                'ไม่สามารถประเมินสถานะฉุกเฉินใหม่ได้ในขั้นตอนนี้ '
+                '(ปิดเคสแล้ว หรืออยู่ในขั้นตรวจก่อนมอบหมาย)'
+            )
+        reason = (reason or '').strip()
+        if not reason:
+            raise ValidationError('กรุณาระบุเหตุผลในการประเมินสถานะฉุกเฉินใหม่')
         if value == self.is_emergency:
-            return  # no-op — don't pollute the audit trail
+            raise ValidationError('สถานะฉุกเฉินเป็นค่านี้อยู่แล้ว')
         old = self.is_emergency
         self.is_emergency = value
         self.save(update_fields=['is_emergency', 'updated_at'])
-        action = 'ตั้งค่า' if value else 'ยกเลิก'
-        audit = f'🚨 {action}สถานะฉุกเฉิน (Emergency: {old} → {value})'
-        if note:
-            audit = f'{audit} — {note}'
+        action = 'ตั้งเป็น' if value else 'ยกเลิก'
+        audit = (
+            f'🚨 ประเมินสถานะฉุกเฉินใหม่: {action} Emergency '
+            f'({old} → {value}) — เหตุผล: {reason}'
+        )
         TicketLog.objects.create(
             ticket=self, note=audit, status_at_time=self.status, author=user,
         )
