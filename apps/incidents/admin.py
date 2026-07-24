@@ -1,16 +1,39 @@
 from django.contrib import admin
 from .models import (
-    NotificationTemplate, ProjectIncident, ThreatGuidance, Ticket,
+    NotificationTemplate, ProjectIncident, ProjectIncidentAttachment,
+    ProjectIncidentLog, ThreatGuidance, Ticket,
     TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
 )
 
 
 @admin.register(ProjectIncident)
 class ProjectIncidentAdmin(admin.ModelAdmin):
-    list_display = ('project_code', 'title', 'member_count', 'created_by', 'created_at')
+    list_display = (
+        'project_code', 'title', 'is_emergency', 'member_count',
+        'created_by', 'created_at',
+    )
     search_fields = ('project_code', 'title', 'summary')
-    readonly_fields = ('project_code', 'created_at', 'updated_at')
-    raw_id_fields = ('created_by',)
+    list_filter = ('is_emergency', 'created_at')
+    readonly_fields = (
+        'project_code', 'emergency_decided_by', 'emergency_decided_at',
+        'created_at', 'updated_at',
+    )
+    raw_id_fields = ('created_by', 'emergency_decided_by')
+
+
+@admin.register(ProjectIncidentLog)
+class ProjectIncidentLogAdmin(admin.ModelAdmin):
+    list_display = ('project', 'author', 'created_at')
+    search_fields = ('project__project_code', 'project__title', 'note')
+    raw_id_fields = ('project', 'author')
+
+
+@admin.register(ProjectIncidentAttachment)
+class ProjectIncidentAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('original_name', 'project', 'uploaded_by', 'uploaded_at')
+    search_fields = ('original_name', 'project__project_code', 'description')
+    raw_id_fields = ('project', 'uploaded_by')
+    readonly_fields = ('uploaded_at',)
 
 
 @admin.register(Ticket)

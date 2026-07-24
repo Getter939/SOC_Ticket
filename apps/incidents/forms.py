@@ -328,10 +328,10 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """Shared, incident-level fields for a multi-system case bundle.
 
-    Classification is implicitly Incident and every member is routed to its
-    system admin, so this form carries neither the classification radio nor the
-    route selector — only the facts common to every affected system. Per-target
-    fields live on ``ProjectIncidentTargetForm``. This form is never saved
+    Classification is implicitly Incident, so this form carries no
+    classification radio — only the facts common to every affected system.
+    Per-target fields, including each member's handling route, live on
+    ``ProjectIncidentTargetForm``. This form is never saved
     directly; ``create_project_incident`` reads ``cleaned_data`` and copies the
     shared values onto each generated member ticket.
     """
@@ -358,6 +358,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             'destination_ip', 'ioc_details', 'mitre_phase',
             'spread_to_others',
             'action_required', 'action_precautions',
+            'actions_taken_summary', 'next_steps_summary',
         ]
         widgets = {
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
@@ -383,6 +384,14 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             'action_precautions': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ข้อควรระวัง — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
+            }),
+            'actions_taken_summary': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'สรุปสิ่งที่ SOC ดำเนินการแล้ว — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
+            }),
+            'next_steps_summary': forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 3,
+                'placeholder': 'สรุปขั้นตอนถัดไปหรือการติดตามผล — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
             }),
         }
 
@@ -416,8 +425,22 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         queryset=User.objects.filter(
             profile__role=UserProfile.ROLE_SYSTEM_ADMIN, is_active=True,
         ).order_by('first_name', 'username'),
-        required=True, label='ผู้ดูแลระบบ', empty_label='-- เลือกผู้ดูแลระบบ --',
+        required=False, label='ผู้ดูแลระบบ', empty_label='-- เลือกผู้ดูแลระบบ --',
         widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+    system_owner = UserChoiceField(
+        queryset=User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_OWNER, is_active=True,
+        ).order_by('first_name', 'username'),
+        required=False, label='เจ้าของระบบ',
+        empty_label='-- เลือกเจ้าของระบบ --',
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+    t1_route = forms.ChoiceField(
+        choices=Ticket.T1_ROUTE_CHOICES,
+        required=True,
+        label='เส้นทางการดำเนินการ',
+        widget=forms.RadioSelect(attrs={'class': 'route-radio'}),
     )
 
     class Meta:
@@ -425,7 +448,7 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         fields = [
             'device_name', 'ip_address', 'mac_address', 'asset_type',
             'operating_system', 'asset_owner', 'asset_owner_name',
-            'assigned_admin',
+            'assigned_admin', 'system_owner',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
@@ -442,6 +465,15 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         # A single-ticket create requires an IP; a bundle target may be a
         # service with none, so relax it here (model already allows null).
         self.fields['ip_address'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        route = cleaned.get('t1_route')
+        if route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
+            self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบ')
+        elif route == Ticket.T1_ROUTE_OWNER and not cleaned.get('system_owner'):
+            self.add_error('system_owner', 'กรุณาเลือกเจ้าของระบบ')
+        return cleaned
 
 
 ProjectIncidentTargetFormSet = forms.formset_factory(

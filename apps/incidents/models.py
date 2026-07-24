@@ -89,9 +89,9 @@ def bundle_suffix_for_index(index):
 class ProjectIncident(models.Model):
     """
     One real-world security incident that hit MULTIPLE systems and is therefore
-    worked as several linked tickets — one per affected system, each routed to
-    that system's own admin. The member tickets share the containment guidance
-    and classification; only the target (device / IP / owner / admin) differs.
+    worked as several linked tickets — one per affected system. The member
+    tickets share the incident facts and Project Review decision; only the
+    target (device / IP / owner / admin) and handling route may differ.
 
     This is the "Case Bundling" grouping: the bundle counts as a single
     incident/report, while its member tickets are contained and closed
@@ -106,6 +106,23 @@ class ProjectIncident(models.Model):
     title = models.CharField(max_length=255, verbose_name='หัวข้อเหตุการณ์')
     summary = models.TextField(
         blank=True, default='', verbose_name='รายละเอียดโดยรวม',
+    )
+    # A Project Incident is one real-world event. The manager rules its
+    # Emergency assessment once at group review; active members inherit it.
+    is_emergency = models.BooleanField(default=False, verbose_name='สถานะฉุกเฉิน')
+    emergency_decided_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='emergency_assessed_projects',
+        verbose_name='ผู้ประเมินสถานะฉุกเฉิน',
+    )
+    emergency_decided_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='เวลาประเมินสถานะฉุกเฉิน',
+    )
+    actions_taken_summary = models.TextField(
+        blank=True, default='', verbose_name='สรุปเรื่องที่ดำเนินการแล้ว',
+    )
+    next_steps_summary = models.TextField(
+        blank=True, default='', verbose_name='สรุปการดำเนินการลำดับถัดไป',
     )
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -191,6 +208,46 @@ class ProjectIncident(models.Model):
     def all_closed(self):
         total = self.member_count
         return total > 0 and self.open_member_count == 0
+
+
+class ProjectIncidentLog(models.Model):
+    """Audit history for group-level coordination decisions."""
+
+    project = models.ForeignKey(
+        ProjectIncident, on_delete=models.CASCADE, related_name='logs',
+    )
+    note = models.TextField(verbose_name='บันทึกรายละเอียด')
+    created_at = models.DateTimeField(auto_now_add=True)
+    author = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='project_incident_logs',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+def project_attachment_upload_path(instance, filename):
+    return f'project_attachments/{instance.project.project_code}/{filename}'
+
+
+class ProjectIncidentAttachment(models.Model):
+    """Evidence shared by every member of a Project Incident."""
+
+    project = models.ForeignKey(
+        ProjectIncident, on_delete=models.CASCADE, related_name='attachments',
+    )
+    file = models.FileField(upload_to=project_attachment_upload_path)
+    original_name = models.CharField(max_length=255)
+    description = models.CharField(max_length=255, blank=True, default='')
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='uploaded_project_attachments',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
 
 
 class Ticket(models.Model):
@@ -1350,6 +1407,12 @@ class Ticket(models.Model):
             return False
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             return False
+        if (
+            self.project_incident_id
+            and self.status == self.STATUS_PENDING_MGR_TRIAGE
+            and self.project_incident.emergency_decided_at is None
+        ):
+            return False
         # SOC Manager forward at the pre-containment review: the manager can only
         # send the ticket to the lane Tier 1 already chose (t1_route), never the
         # other one. This keeps the case "on the way either way" — the manager
@@ -1467,6 +1530,18 @@ class Ticket(models.Model):
             )
 
         # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #
+        # A Project Incident is assessed and forwarded once at group level.
+        # No member may be forwarded independently before that Project Review
+        # has recorded its Normal/Emergency verdict.
+        if (
+            self.project_incident_id
+            and self.status == self.STATUS_PENDING_MGR_TRIAGE
+            and self.project_incident.emergency_decided_at is None
+        ):
+            raise ValidationError(
+                'Member Ticket ของ Project Incident ต้องผ่าน Project Review ก่อนส่งต่อ'
+            )
+
         # 5a. SOC Manager forward honors Tier 1's fixed lane (t1_route): the
         # manager reviews and forwards, but cannot swap Admin ↔ Owner.
         if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_CONTAINMENT)
@@ -1673,6 +1748,8 @@ class Ticket(models.Model):
             return False
         if self.status == self.STATUS_PENDING_MGR_TRIAGE:
             return False
+        if self.project_incident_id:
+            return False
         return self._is_emergency_manager(user)
 
     def reassess_emergency(self, value, user, reason):
@@ -1687,6 +1764,10 @@ class Ticket(models.Model):
         if not self._is_emergency_manager(user):
             raise ValidationError(
                 'คุณไม่มีสิทธิ์เปลี่ยนสถานะฉุกเฉินของ Ticket นี้'
+            )
+        if self.project_incident_id:
+            raise ValidationError(
+                'Member Ticket ของ Project Incident ต้องประเมิน Emergency ใหม่จากหน้า Project Incident'
             )
         if not self.can_reassess_emergency(user):
             raise ValidationError(

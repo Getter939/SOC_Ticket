@@ -9,6 +9,7 @@ urlpatterns = [
     # Project Incident (Case Bundling) — one incident → many linked tickets
     path('project-incident/new/', views.create_project_incident, name='create_project_incident'),
     path('project-incident/<int:pk>/', views.project_incident_detail, name='project_incident_detail'),
+    path('project-attachment/<int:attachment_id>/download/', views.download_project_attachment, name='download_project_attachment'),
     path('lookup/ip/', views.ip_lookup, name='ip_lookup'),
     path('search/', views.global_search, name='global_search'),
     path('ticket/<int:pk>/', views.ticket_detail, name='ticket_detail'),

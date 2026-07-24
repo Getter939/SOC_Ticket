@@ -53,7 +53,8 @@ from apps.incidents.forms import (
     ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
 )
 from apps.incidents.models import (
-    ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
+    ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
+    ThreatGuidance, Ticket, TicketAttachment, TicketLog,
     TicketSubtask, TriageRecord, bundle_suffix_for_index,
 )
 from apps.incidents.notifications import (
@@ -2694,10 +2695,12 @@ def _pi_post_data(admin_a, admin_b, **overrides):
         'target-0-device_name': 'HR Portal',
         'target-0-ip_address': '192.0.2.11',
         'target-0-assigned_admin': str(admin_a.pk),
+        'target-0-t1_route': Ticket.T1_ROUTE_ADMIN,
         # target B
         'target-1-device_name': 'AD Server',
         'target-1-ip_address': '192.0.2.12',
         'target-1-assigned_admin': str(admin_b.pk),
+        'target-1-t1_route': Ticket.T1_ROUTE_ADMIN,
     }
     data.update(overrides)
     return data
@@ -2716,8 +2719,10 @@ class ProjectIncidentFanOutTest(TestCase):
     def setUpTestData(cls):
         cls.t1      = _make_t1('pi_t1')
         cls.t2      = _make_t2('pi_t2')
+        cls.manager = _make_user('pi_manager', UserProfile.ROLE_SOC_MANAGER)
         cls.admin_a = _make_user('pi_admin_a', UserProfile.ROLE_SYSTEM_ADMIN)
         cls.admin_b = _make_user('pi_admin_b', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.owner_b = _make_user('pi_owner_b', UserProfile.ROLE_SYSTEM_OWNER)
 
     def test_fanout_creates_linked_member_tickets(self):
         self.client.login(username='pi_t1', password='testpass123')
@@ -2761,11 +2766,99 @@ class ProjectIncidentFanOutTest(TestCase):
         )
         project = ProjectIncident.objects.get()
         first, second = list(project.members)
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_mgr_forward',
+            'emergency_assessment': 'normal',
+            'decision_note': 'Shared assessment complete.',
+        })
+        first.refresh_from_db()
         _advance_to(first, Ticket.STATUS_APPROVED, self.t1, admin=self.admin_a, t2=self.t2)
         second.refresh_from_db()
-        self.assertEqual(second.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(second.status, Ticket.STATUS_AWAITING_CONTAINMENT)
         self.assertEqual(project.open_member_count, 1)
         self.assertFalse(project.all_closed)
+
+    def test_project_review_controls_all_member_routes_and_emergency(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        data = _pi_post_data(
+            self.admin_a, self.admin_b,
+            **{
+                'target-1-t1_route': Ticket.T1_ROUTE_OWNER,
+                'target-1-system_owner': str(self.owner_b.pk),
+                'evidence_files': SimpleUploadedFile(
+                    'timeline.txt', b'project-wide evidence',
+                    content_type='text/plain',
+                ),
+            },
+        )
+        self.client.post(reverse('create_project_incident'), data)
+        project = ProjectIncident.objects.get()
+        first, second = list(project.members)
+
+        with self.assertRaises(ValidationError):
+            first.transition_to(
+                Ticket.STATUS_AWAITING_CONTAINMENT, self.manager, 'bypass attempt',
+            )
+
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        response = self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_mgr_forward',
+            'emergency_assessment': 'emergency',
+            'decision_note': 'One incident, shared urgent response.',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        project.refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertTrue(project.is_emergency)
+        self.assertEqual(project.emergency_decided_by, self.manager)
+        self.assertEqual(first.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.assertEqual(second.status, Ticket.STATUS_AWAITING_OWNER)
+        self.assertTrue(first.is_emergency)
+        self.assertTrue(second.is_emergency)
+        self.assertTrue(ProjectIncidentLog.objects.filter(project=project).exists())
+        self.assertEqual(ProjectIncidentAttachment.objects.filter(project=project).count(), 1)
+
+        self.client.logout()
+        self.client.login(username='pi_admin_a', password='testpass123')
+        attachment = project.attachments.get()
+        download = self.client.get(
+            reverse('download_project_attachment', args=[attachment.pk]),
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertIn('attachment', download['Content-Disposition'])
+
+    def test_project_reassessment_changes_all_active_members_together(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_mgr_forward',
+            'emergency_assessment': 'emergency',
+            'decision_note': 'Initial group assessment.',
+        })
+        response = self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_reassess_emergency',
+            'emergency_value': '0',
+            'emergency_reason': 'Scope reduced after validation.',
+        })
+        self.assertEqual(response.status_code, 302)
+        project.refresh_from_db()
+        self.assertFalse(project.is_emergency)
+        self.assertFalse(project.members.filter(is_emergency=True).exists())
+
+        member = project.members.first()
+        with self.assertRaises(ValidationError):
+            member.reassess_emergency(True, self.manager, 'individual exception')
 
     def test_fewer_than_two_targets_is_rejected(self):
         self.client.login(username='pi_t1', password='testpass123')

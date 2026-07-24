@@ -193,6 +193,18 @@
           {{ form.action_precautions }}
           {% if form.action_precautions.errors %}<div class="text-danger small">{{ form.action_precautions.errors }}</div>{% endif %}
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">สรุปสิ่งที่ดำเนินการแล้ว</label>
+          {{ form.actions_taken_summary }}
+          <div class="field-hint">ข้อมูลร่วมสำหรับรายงานของทุก Ticket ในกลุ่ม</div>
+          {% if form.actions_taken_summary.errors %}<div class="text-danger small">{{ form.actions_taken_summary.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ขั้นตอนถัดไป / การติดตามผล</label>
+          {{ form.next_steps_summary }}
+          <div class="field-hint">ข้อมูลร่วมสำหรับรายงานของทุก Ticket ในกลุ่ม</div>
+          {% if form.next_steps_summary.errors %}<div class="text-danger small">{{ form.next_steps_summary.errors }}</div>{% endif %}
+        </div>
       </div>
     </div>
 
@@ -218,10 +230,20 @@
               {{ tform.device_name }}
               {% if tform.device_name.errors %}<div class="text-danger small">{{ tform.device_name.errors }}</div>{% endif %}
             </div>
-            <div class="col-md-4">
-              <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin) <span class="required-star">*</span></label>
+            <div class="col-md-7">
+              <div class="form-label small fw-semibold mb-1">เส้นทางการดำเนินการ <span class="required-star">*</span></div>
+              {% for radio in tform.t1_route %}<div class="form-check form-check-inline">{{ radio.tag }}<label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label></div>{% endfor %}
+              {% if tform.t1_route.errors %}<div class="text-danger small">{{ tform.t1_route.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4 route-admin-field">
+              <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin)</label>
               {{ tform.assigned_admin }}
               {% if tform.assigned_admin.errors %}<div class="text-danger small">{{ tform.assigned_admin.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4 route-owner-field">
+              <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (Direct-to-Owner)</label>
+              {{ tform.system_owner }}
+              {% if tform.system_owner.errors %}<div class="text-danger small">{{ tform.system_owner.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
               <label class="form-label small fw-semibold mb-1">IP Address</label>
@@ -262,10 +284,10 @@
     </div>
 
     <div class="form-section">
-      <div class="section-header">5. หลักฐาน <small>แนบกับ Ticket แรกของกลุ่ม</small></div>
+      <div class="section-header">5. หลักฐานร่วม <small>Shared evidence for every member Ticket</small></div>
       <input type="file" name="evidence_files" class="form-control" multiple
              accept="image/*,.pdf,.txt,.log,.csv,.doc,.docx,.xls,.xlsx,.zip">
-      <div class="field-hint">หลักฐานส่วนกลางของเหตุการณ์ — จะถูกแนบไว้กับ Ticket แรกของกลุ่ม</div>
+      <div class="field-hint">หลักฐานส่วนกลางของเหตุการณ์ — สมาชิกที่ได้รับสิทธิ์ใน Ticket ใด ๆ ของกลุ่มจะเข้าถึงได้</div>
     </div>
 
     <div class="d-flex gap-2 mt-2 mb-4">
@@ -290,9 +312,17 @@
         <label class="form-label small fw-semibold mb-1">ระบบ / บริการ <span class="required-star">*</span></label>
         {{ target_formset.empty_form.device_name }}
       </div>
-      <div class="col-md-4">
-        <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin) <span class="required-star">*</span></label>
+      <div class="col-md-7">
+        <div class="form-label small fw-semibold mb-1">เส้นทางการดำเนินการ <span class="required-star">*</span></div>
+        {% for radio in target_formset.empty_form.t1_route %}<div class="form-check form-check-inline">{{ radio.tag }}<label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label></div>{% endfor %}
+      </div>
+      <div class="col-md-4 route-admin-field">
+        <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin)</label>
         {{ target_formset.empty_form.assigned_admin }}
+      </div>
+      <div class="col-md-4 route-owner-field">
+        <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (Direct-to-Owner)</label>
+        {{ target_formset.empty_form.system_owner }}
       </div>
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">IP Address</label>
@@ -346,6 +376,27 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     });
   }
 
+  function syncTargetRoute(card) {
+    const selected = card.querySelector('input[name$="-t1_route"]:checked');
+    const route = selected ? selected.value : '';
+    const admin = card.querySelector('.route-admin-field');
+    const owner = card.querySelector('.route-owner-field');
+    if (!route) {
+      [admin, owner].forEach(field => {
+        field.classList.remove('d-none');
+        field.querySelector('select').disabled = false;
+      });
+      return;
+    }
+    const isOwnerRoute = route === 'OWNER';
+    admin.classList.toggle('d-none', isOwnerRoute);
+    owner.classList.toggle('d-none', !isOwnerRoute);
+    admin.querySelector('select').disabled = isOwnerRoute;
+    owner.querySelector('select').disabled = !isOwnerRoute;
+  }
+
+  container.querySelectorAll('.target-card').forEach(syncTargetRoute);
+
   document.getElementById('add-target').addEventListener('click', () => {
     const idx = parseInt(totalInput.value, 10);
     const html = tmpl.innerHTML.replace(/__prefix__/g, idx);
@@ -353,6 +404,7 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     wrap.innerHTML = html.trim();
     container.appendChild(wrap.firstElementChild);
     totalInput.value = idx + 1;
+    syncTargetRoute(container.lastElementChild);
     renumber();
   });
 
@@ -360,6 +412,9 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
   container.addEventListener('change', (e) => {
     if (e.target.classList.contains('delete-flag')) {
       e.target.closest('.target-card').classList.toggle('to-delete', e.target.checked);
+    }
+    if (e.target.matches('input[name$="-t1_route"]')) {
+      syncTargetRoute(e.target.closest('.target-card'));
     }
   });
 })();

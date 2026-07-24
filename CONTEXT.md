@@ -51,8 +51,12 @@ _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, reso
 ## Grouping
 
 **Project Incident**:
-One real-world Incident that hit multiple systems, worked as several linked Tickets — one per affected system. The grouping and rollup unit; it does not have its own lifecycle.
+One real-world Incident that hit multiple systems, worked as several linked Tickets — one per affected system. The grouping and rollup unit. It has one group coordination gate, Project Review, but Containment and closure remain on each Member Ticket.
 _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Incident" in prose
+
+**Project Review**:
+The SOC Manager's one-time, group-level Manager Triage Review for a Project Incident. It records one Normal/Emergency assessment and forwards every waiting Member Ticket to its already-selected handling route. A later reassessment changes the Emergency state of all active members together.
+_Avoid_: member review, group approval
 
 **Member Ticket**:
 A Ticket that belongs to a Project Incident. Each member is contained and closed independently on its own OLA clock; only its target (device / IP / owner / admin) differs from its siblings.
@@ -67,7 +71,7 @@ A work stream spawned off a single Ticket, tracked independently of the parent T
 _Avoid_: Task, linked ticket
 
 **Response Request**:
-A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It runs in parallel to Containment and is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, the parent Incident cannot be approved (closed) — Event-close is exempt.
+A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It belongs to one Member Ticket, even inside a Project Incident, and runs in parallel to that Ticket's Containment. It is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, its parent Incident cannot be approved (closed) — Event-close is exempt.
 _Avoid_: Investigation (that is the SOC-side subtask), escalation, ticket
 
 ## People and roles
@@ -123,7 +127,7 @@ An explicitly unclassified severity — the analyst cannot yet rank it. It is *n
 _Avoid_: treating Unknown as equivalent to Low
 
 **Emergency**:
-A flag only the SOC Manager may set or clear — ruled at the Manager Triage Review before the Ticket reaches its handling lane, and adjustable by the manager at any later stage. Forces the Ticket through SOC Manager verification before close, regardless of Severity.
+A flag only the SOC Manager may set or clear — ruled at the Manager Triage Review before the Ticket reaches its handling lane, and adjustable by the manager at any later stage. For a Project Incident it is decided and reassessed at the group level, then shared by all active Member Tickets. Forces a Ticket through SOC Manager verification before close, regardless of Severity.
 _Avoid_: Urgent, priority flag, critical flag
 
 ## Detection detail

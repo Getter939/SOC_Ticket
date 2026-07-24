@@ -16,10 +16,53 @@
     {% endif %}
   </div>
 
+  {% if can_manage_project and pending_member_count and not project.emergency_decided_at %}
+  <div class="card border-warning shadow-sm mb-4">
+    <div class="card-header bg-warning text-dark fw-bold">Project Review — รอตรวจ {{ pending_member_count }} Ticket</div>
+    <div class="card-body">
+      <p class="small text-muted">ประเมิน Emergency หนึ่งครั้งสำหรับทั้ง Project Incident และส่งต่อ Member Ticket ที่รอทั้งหมดตามเส้นทางที่ Tier 1 เลือก</p>
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="project_mgr_forward">
+        <div class="mb-3"><div class="fw-semibold mb-1">Emergency Assessment <span class="text-danger">*</span></div>
+          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-normal" value="normal" required><label class="form-check-label" for="assessment-normal">Normal</label></div>
+          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-emergency" value="emergency"><label class="form-check-label text-danger fw-semibold" for="assessment-emergency">Emergency</label></div>
+        </div>
+        <label class="form-label fw-semibold">บันทึกการตรวจ <span class="text-danger">*</span></label><textarea class="form-control mb-3" name="decision_note" rows="3" required></textarea>
+        <button class="btn btn-warning" type="submit">Review and forward all pending members</button>
+      </form>
+    </div>
+  </div>
+  {% elif project.emergency_decided_at %}
+  <div class="card border-light shadow-sm mb-4">
+    <div class="card-body d-flex flex-wrap align-items-center gap-3">
+      <div><span class="fw-semibold">Project Emergency:</span> {% if project.is_emergency %}<span class="badge bg-danger">Emergency</span>{% else %}<span class="badge bg-success">Normal</span>{% endif %}</div>
+      <div class="small text-muted">ประเมินโดย {{ project.emergency_decided_by.get_full_name|default:project.emergency_decided_by.username|default:"-" }} · {{ project.emergency_decided_at|date:"d M Y H:i" }}</div>
+      {% if can_manage_project and not project.all_closed %}
+      <form method="post" class="ms-auto">{% csrf_token %}<input type="hidden" name="action" value="project_reassess_emergency"><input type="hidden" name="emergency_value" value="{% if project.is_emergency %}0{% else %}1{% endif %}">
+        <div class="input-group input-group-sm"><input class="form-control" name="emergency_reason" required placeholder="เหตุผลในการประเมินใหม่"><button class="btn {% if project.is_emergency %}btn-outline-success{% else %}btn-outline-danger{% endif %}" type="submit">{% if project.is_emergency %}Reassess as Normal{% else %}Reassess as Emergency{% endif %}</button></div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if project.attachments.all %}
+  <div class="card shadow-sm mb-4"><div class="card-header fw-bold">หลักฐานส่วนกลาง</div><div class="list-group list-group-flush">{% for attachment in project.attachments.all %}<a class="list-group-item list-group-item-action" href="{% url 'download_project_attachment' attachment.pk %}"><i class="bi bi-paperclip me-2"></i>{{ attachment.original_name }} <span class="text-muted small">— {{ attachment.uploaded_at|date:"d M Y H:i" }}</span></a>{% endfor %}</div></div>
+  {% endif %}
+
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
       <h5 class="fw-semibold mb-2">{{ project.title }}</h5>
       {% if project.summary %}<p class="text-muted mb-3" style="white-space:pre-line;">{{ project.summary }}</p>{% endif %}
+      {% if project.actions_taken_summary or project.next_steps_summary %}
+      <div class="row g-3 border-top pt-3 mb-3">
+        {% if project.actions_taken_summary %}
+        <div class="col-md-6"><div class="small text-muted fw-semibold">Actions taken</div><div style="white-space:pre-line;">{{ project.actions_taken_summary }}</div></div>
+        {% endif %}
+        {% if project.next_steps_summary %}
+        <div class="col-md-6"><div class="small text-muted fw-semibold">Next steps</div><div style="white-space:pre-line;">{{ project.next_steps_summary }}</div></div>
+        {% endif %}
+      </div>
+      {% endif %}
       <div class="row small text-muted g-2">
         <div class="col-md-4"><i class="bi bi-person me-1"></i>เปิดโดย: {{ project.created_by.get_full_name|default:project.created_by.username|default:"—" }}</div>
         <div class="col-md-4"><i class="bi bi-clock me-1"></i>เมื่อ: {{ project.created_at|date:"Y-m-d H:i" }}</div>
@@ -57,7 +100,7 @@
           <th style="width:8rem;">รหัส</th>
           <th>ระบบ / บริการ</th>
           <th>หน่วยงานเจ้าของ</th>
-          <th>ผู้ดูแลระบบ</th>
+           <th>เส้นทาง / ผู้รับผิดชอบ</th>
           <th>ความรุนแรง</th>
           <th>สถานะ</th>
           <th class="text-end">การดำเนินการ</th>
@@ -69,7 +112,7 @@
           <td><span class="fw-semibold">{{ ticket.bundle_ref }}</span><div class="text-muted small">{{ ticket.ticket_id }}</div></td>
           <td>{{ ticket.device_name }}{% if ticket.ip_address %}<div class="text-muted small">{{ ticket.ip_address }}</div>{% endif %}{% if ticket.operating_system %}<div class="text-muted small"><i class="bi bi-pc-display me-1"></i>{{ ticket.operating_system }}</div>{% endif %}</td>
           <td>{{ ticket.asset_owner|default:"—" }}</td>
-          <td>{{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}</td>
+           <td>{% if ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">Owner</span> {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username|default:"—" }}{% else %}<span class="badge bg-light text-dark border">Admin</span> {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}{% endif %}</td>
           <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
           <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
           <td class="text-end"><a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3">ดูรายละเอียด</a></td>
@@ -80,6 +123,10 @@
       </tbody>
     </table>
   </div>
+
+  {% if project_logs %}
+  <div class="card shadow-sm mt-4"><div class="card-header fw-bold">ประวัติระดับ Project</div><div class="list-group list-group-flush">{% for log in project_logs %}<div class="list-group-item"><div class="small text-muted">{{ log.created_at|date:"d M Y H:i" }} · {{ log.author.get_full_name|default:log.author.username|default:"Unknown user" }}</div>{{ log.note }}</div>{% endfor %}</div></div>
+  {% endif %}
 
   <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4 mt-2"><i class="bi bi-arrow-left me-1"></i>กลับไปที่รายการ Ticket</a>
 </div>

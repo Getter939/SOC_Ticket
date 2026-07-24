@@ -27,8 +27,9 @@ from .forms import (
     SubtaskUpdateForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
-    ProjectIncident, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
-    TicketSubtask, TriageRecord, bundle_suffix_for_index, validate_attachment,
+    ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
+    ThreatGuidance, Ticket, TicketAttachment, TicketLog, TicketSubtask,
+    TriageRecord, bundle_suffix_for_index, validate_attachment,
 )
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
@@ -151,6 +152,12 @@ def _case_switch_qs(triage_id=None, alert_id=None):
 
 def _transition_actions(ticket, user):
     """Return only legal, permitted forward actions for the current user."""
+    if (
+        ticket.project_incident_id
+        and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
+        and ticket.project_incident.emergency_decided_at is None
+    ):
+        return []
     labels = {
         Ticket.STATUS_CLOSED_EVENT: (
             'Confirm Event -> Close'
@@ -708,6 +715,8 @@ def create_project_incident(request):
                         title=shared['title'],
                         summary=shared.get('issue_description', ''),
                         created_by=request.user,
+                        actions_taken_summary=shared.get('actions_taken_summary', ''),
+                        next_steps_summary=shared.get('next_steps_summary', ''),
                     )
                     for tform in target_formset:
                         cd = getattr(tform, 'cleaned_data', None)
@@ -719,10 +728,9 @@ def create_project_incident(request):
                         # The bundle title doubles as each member's incident name.
                         ticket.incident_name = shared['title']
                         ticket.classification = Ticket.CLASSIFICATION_INCIDENT
-                        # Each member is an admin-assigned Incident, so it takes
-                        # the same SOC Manager pre-containment review as a single
-                        # ticket before reaching the admin.
-                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+                        # Each member follows its own Tier-1-selected handling
+                        # route, then waits for the shared Manager Review.
+                        ticket.t1_route = cd['t1_route']
                         ticket.created_by = request.user
                         ticket.assigned_to = request.user
                         ticket.project_incident = project
@@ -741,12 +749,12 @@ def create_project_incident(request):
                             'ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident'
                         )
 
-                    # Evidence attaches to the first member — it is the shared
-                    # incident evidence; per-target files can be added later.
+                    # Shared evidence belongs to the Project Incident itself,
+                    # not an arbitrary first member ticket.
                     for evidence_file in request.FILES.getlist('evidence_files'):
                         validate_attachment(evidence_file)
-                        TicketAttachment.objects.create(
-                            ticket=created[0], file=evidence_file,
+                        ProjectIncidentAttachment.objects.create(
+                            project=project, file=evidence_file,
                             original_name=evidence_file.name, uploaded_by=request.user,
                         )
 
@@ -860,6 +868,104 @@ def create_project_incident(request):
 def project_incident_detail(request, pk):
     """Overview of a case bundle: the shared incident and its member tickets."""
     project = get_object_or_404(ProjectIncident, pk=pk)
+    profile = getattr(request.user, 'profile', None)
+    can_manage_project = request.user.is_superuser or (
+        profile is not None and profile.is_soc_manager
+    )
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'project_mgr_forward':
+            assessment = request.POST.get('emergency_assessment', '')
+            note = request.POST.get('decision_note', '').strip()
+            if not can_manage_project:
+                messages.error(request, 'เฉพาะผู้จัดการ SOC เท่านั้นที่ดำเนินการ Project Review ได้')
+            elif project.emergency_decided_at is not None:
+                messages.error(request, 'Project Incident นี้ผ่าน Project Review แล้ว')
+            elif assessment not in ('normal', 'emergency') or not note:
+                messages.error(request, 'กรุณาเลือก Normal หรือ Emergency และกรอกบันทึกการตรวจ')
+            else:
+                want_emergency = assessment == 'emergency'
+                with transaction.atomic():
+                    pending = list(
+                        project.member_tickets.select_for_update().filter(
+                            status=Ticket.STATUS_PENDING_MGR_TRIAGE,
+                        )
+                    )
+                    if not pending:
+                        messages.error(request, 'ไม่มี Member Ticket ที่รอ Project Review')
+                    else:
+                        now = timezone.now()
+                        project.is_emergency = want_emergency
+                        project.emergency_decided_by = request.user
+                        project.emergency_decided_at = now
+                        project.save(update_fields=(
+                            'is_emergency', 'emergency_decided_by',
+                            'emergency_decided_at', 'updated_at',
+                        ))
+                        verdict = 'Emergency' if want_emergency else 'Normal'
+                        ProjectIncidentLog.objects.create(
+                            project=project,
+                            author=request.user,
+                            note=f'Project Review: {verdict} — {note}',
+                        )
+                        for ticket in pending:
+                            ticket.assess_emergency_initial(want_emergency, request.user)
+                            target = (
+                                Ticket.STATUS_AWAITING_OWNER
+                                if ticket.t1_route == Ticket.T1_ROUTE_OWNER
+                                else Ticket.STATUS_AWAITING_CONTAINMENT
+                            )
+                            ticket.transition_to(
+                                target, request.user,
+                                f'[Project Review: {verdict}] {note}',
+                            )
+                for ticket in pending:
+                    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
+                        _notify_containment(ticket, None, request)
+                messages.success(request, 'Project Review เสร็จสิ้นและส่งต่อ Member Ticket ที่รอทั้งหมดแล้ว')
+        elif action == 'project_reassess_emergency':
+            value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
+            reason = request.POST.get('emergency_reason', '').strip()
+            if not can_manage_project:
+                messages.error(request, 'เฉพาะผู้จัดการ SOC เท่านั้นที่ประเมิน Emergency ใหม่ได้')
+            elif project.emergency_decided_at is None:
+                messages.error(request, 'Project Incident ต้องผ่าน Project Review ก่อน')
+            elif not reason:
+                messages.error(request, 'กรุณาระบุเหตุผลในการประเมิน Emergency ใหม่')
+            else:
+                with transaction.atomic():
+                    active_members = list(
+                        project.member_tickets.select_for_update().exclude(
+                            status__in=Ticket.TERMINAL_STATUSES,
+                        ).exclude(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+                    )
+                    for ticket in active_members:
+                        if ticket.is_emergency != value:
+                            old = ticket.is_emergency
+                            ticket.is_emergency = value
+                            ticket.save(update_fields=('is_emergency', 'updated_at'))
+                            action_label = 'ตั้งเป็น' if value else 'ยกเลิก'
+                            TicketLog.objects.create(
+                                ticket=ticket,
+                                author=request.user,
+                                status_at_time=ticket.status,
+                                note=(
+                                    f'[Project Reassess Emergency] {action_label} Emergency '
+                                    f'({old} → {value}) — เหตุผล: {reason}'
+                                ),
+                            )
+                    project.is_emergency = value
+                    project.save(update_fields=('is_emergency', 'updated_at'))
+                    state = 'Emergency' if value else 'Normal'
+                    ProjectIncidentLog.objects.create(
+                        project=project,
+                        author=request.user,
+                        note=f'Reassess Emergency: {state} — {reason}',
+                    )
+                messages.success(request, 'อัปเดต Emergency สำหรับ Member Ticket ที่ยังดำเนินการอยู่แล้ว')
+        return redirect('project_incident_detail', pk=project.pk)
+
     members = (
         project.member_tickets.visible_to(request.user)
         .select_related('assigned_admin', 'system_owner', 'project_incident')
@@ -871,7 +977,27 @@ def project_incident_detail(request, pk):
     return render(request, 'incidents/project_incident_detail.html', {
         'project': project,
         'members': members,
+        'project_logs': project.logs.select_related('author'),
+        'can_manage_project': can_manage_project,
+        'pending_member_count': project.member_tickets.filter(
+            status=Ticket.STATUS_PENDING_MGR_TRIAGE,
+        ).count(),
     })
+
+
+@login_required
+def download_project_attachment(request, attachment_id):
+    """Serve shared Project Incident evidence to any authorized member viewer."""
+    attachment = get_object_or_404(ProjectIncidentAttachment, pk=attachment_id)
+    if not attachment.project.member_tickets.visible_to(request.user).exists():
+        raise Http404('ไม่พบไฟล์แนบ')
+    response = FileResponse(
+        attachment.file.open('rb'),
+        as_attachment=True,
+        filename=attachment.original_name,
+    )
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 @login_required
@@ -915,6 +1041,7 @@ def ticket_detail(request, pk):
     can_mgr_forward = (
         not is_terminal
         and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
+        and not ticket.project_incident_id
         and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
     )
     mgr_forward_target = (
