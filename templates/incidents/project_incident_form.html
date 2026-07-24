@@ -46,6 +46,7 @@
   <div class="d-flex align-items-center gap-3 mb-3">
     <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3-fill text-primary me-2"></i>PROJECT INCIDENT</h4>
     <span class="text-muted" style="font-size:.8rem;">เหตุการณ์เดียวที่กระทบหลายระบบ — สร้าง Ticket แยกตามระบบ (Case Bundling)</span>
+    <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
   </div>
 
   {% include 'incidents/_case_mode_switch.html' %}
@@ -294,7 +295,7 @@
       <button type="submit" class="btn btn-primary px-4 fw-semibold">
         <i class="bi bi-diagram-3 me-1"></i>สร้าง Project Incident
       </button>
-      <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4">ยกเลิก</a>
+      <a href="{% url 'ticket_list' %}" id="cancel-btn" class="btn btn-light border px-4">ยกเลิก</a>
     </div>
   </form>
 </div>
@@ -397,7 +398,7 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
 
   container.querySelectorAll('.target-card').forEach(syncTargetRoute);
 
-  document.getElementById('add-target').addEventListener('click', () => {
+  function addTarget() {
     const idx = parseInt(totalInput.value, 10);
     const html = tmpl.innerHTML.replace(/__prefix__/g, idx);
     const wrap = document.createElement('div');
@@ -406,7 +407,10 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     totalInput.value = idx + 1;
     syncTargetRoute(container.lastElementChild);
     renumber();
-  });
+  }
+
+  document.getElementById('add-target').addEventListener('click', addTarget);
+  container.addEventListener('project:add-target', addTarget);
 
   // Toggle a strikethrough style when a row is flagged for deletion.
   container.addEventListener('change', (e) => {
@@ -416,6 +420,85 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     if (e.target.matches('input[name$="-t1_route"]')) {
       syncTargetRoute(e.target.closest('.target-card'));
     }
+  });
+})();
+
+// ── Draft autosave (localStorage) ──────────────────────────────────────────
+// Project Incident drafts include all current member-target rows. File inputs
+// are deliberately excluded: browsers do not permit restoring file selections.
+(function () {
+  const DRAFT_KEY = 'project_incident_form_draft{% if source_alert %}_alert_{{ source_alert.pk }}{% elif source_triage %}_triage_{{ source_triage.pk }}{% endif %}';
+  const form = document.querySelector('form[enctype="multipart/form-data"]');
+  const statusEl = document.getElementById('draft-status');
+  const targetRows = document.getElementById('target-rows');
+  if (!form || !targetRows) return;
+
+  function isRestorable(field) {
+    return field.name && field.type !== 'file' && field.type !== 'hidden'
+      && field.name !== 'csrfmiddlewaretoken';
+  }
+
+  function saveDraft() {
+    const fields = {};
+    form.querySelectorAll('input, select, textarea').forEach(field => {
+      if (!isRestorable(field)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        if (field.checked) fields[field.name] = field.value;
+      } else {
+        fields[field.name] = field.value;
+      }
+    });
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      fields,
+      targetCount: targetRows.querySelectorAll('.target-card').length,
+    }));
+    if (statusEl) {
+      statusEl.textContent = 'ร่างถูกบันทึกไว้ในเครื่องเมื่อ '
+        + new Date().toLocaleTimeString('th-TH');
+    }
+  }
+
+  function restoreDraft() {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    let draft;
+    try { draft = JSON.parse(raw); } catch (e) { return; }
+    const fields = draft.fields || {};
+    const wantedTargetCount = Number(draft.targetCount) || 0;
+    while (targetRows.querySelectorAll('.target-card').length < wantedTargetCount) {
+      targetRows.dispatchEvent(new Event('project:add-target'));
+    }
+    form.querySelectorAll('input, select, textarea').forEach(field => {
+      if (!isRestorable(field) || !(field.name in fields)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        field.checked = field.value === fields[field.name];
+        if (field.checked) field.dispatchEvent(new Event('change'));
+      } else {
+        field.value = fields[field.name];
+      }
+    });
+    if (statusEl) statusEl.textContent = 'กู้คืนข้อมูลร่างที่กรอกไว้ก่อนหน้านี้แล้ว';
+  }
+
+  {% if not form.is_bound %}
+  restoreDraft();
+  {% endif %}
+
+  let saveTimer;
+  form.addEventListener('input', () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 500);
+  });
+  form.addEventListener('change', saveDraft);
+
+  form.addEventListener('submit', () => localStorage.removeItem(DRAFT_KEY));
+  document.getElementById('cancel-btn')?.addEventListener('click', function (e) {
+    if (!localStorage.getItem(DRAFT_KEY)) return;
+    if (!confirm('ยกเลิกและล้างข้อมูลที่กรอกไว้ทั้งหมดใช่หรือไม่?')) {
+      e.preventDefault();
+      return;
+    }
+    localStorage.removeItem(DRAFT_KEY);
   });
 })();
 

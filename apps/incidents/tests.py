@@ -3557,6 +3557,14 @@ class TemplateMarkupRegressionTest(TestCase):
                 self.assertIn(f'aria-labelledby="{group_id}-label"', source)
                 self.assertIn(f'id="{group_id}-label"', source)
 
+    def test_project_incident_form_has_local_draft_autosave(self):
+        source = self._source('incidents/project_incident_form.html')
+        self.assertIn('project_incident_form_draft', source)
+        self.assertIn('targetCount:', source)
+        self.assertIn('project:add-target', source)
+        self.assertIn("field.type !== 'file'", source)
+        self.assertIn("localStorage.removeItem(DRAFT_KEY)", source)
+
 
 class LoginRedirectsAuthenticatedUserTest(TestCase):
     """
