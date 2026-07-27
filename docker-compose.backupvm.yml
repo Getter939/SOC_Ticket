@@ -1,0 +1,61 @@
+# Backup VM stack — NOT production, and NOT an application server.
+#
+# This is the minimum needed to PROVE the pulled archives are restorable: a
+# PostgreSQL 16 instance to restore into, plus the existing restore_verify
+# script pointed at the archive directory. No web, no nginx, no ingestion.
+#
+# The archive directory is mounted READ-ONLY so a verification run can never
+# damage the backups it is checking.
+#
+# Usage (on the backup VM):
+#   docker compose -f docker-compose.backupvm.yml up -d db
+#   BACKUP_FILE=/backups/<archive> \
+#     docker compose -f docker-compose.backupvm.yml --profile verify \
+#     run --rm restore_verify
+#
+# See docs/operations/backup-vm-handbook.md.
+
+services:
+
+  db:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ticketdata}
+      POSTGRES_USER: ${DB_USER:-ticket}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the backup VM .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ticket} -d ${DB_NAME:-ticketdata}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Not published to the host: nothing outside this compose network needs it.
+
+  restore_verify:
+    image: postgres:16
+    profiles: ["verify"]
+    env_file:
+      - .env
+    environment:
+      PGHOST: "db"
+      PGPORT: "5432"
+      PGMAINTENANCE_DB: "${PGMAINTENANCE_DB:-postgres}"
+      RESTORE_DB: "${RESTORE_DB:-ticketdata_restoretest}"
+      RESTORE_DROP_AFTER_TEST: "${RESTORE_DROP_AFTER_TEST:-true}"
+      BACKUP_FILE: "${BACKUP_FILE:-}"
+      BACKUP_ENCRYPTION_PASSWORD: "${BACKUP_ENCRYPTION_PASSWORD:-}"
+      BACKUP_ENCRYPTION_PASSWORD_FILE: "${BACKUP_ENCRYPTION_PASSWORD_FILE:-}"
+    volumes:
+      - ./scripts/backup:/scripts:ro
+      - ${ARCHIVE_HOST_PATH:-/srv/soc-ticket/archive}:/backups:ro
+      # Mount the decryption passphrase read-only if you use a password file.
+      - ${BACKUP_PASSPHRASE_HOST_PATH:-/etc/soc-ticket/backup-passphrase}:/run/secrets/soc_ticket_backup_password:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/restore_verify.sh"]
+
+volumes:
+  postgres_data:

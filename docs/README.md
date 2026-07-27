@@ -16,6 +16,7 @@ you are.
 | A SOC analyst / manager using the app | [user-guides/end-user-guide.th.md](user-guides/end-user-guide.th.md) |
 | Running a UAT session | [uat/uat-environment-setup.md](uat/uat-environment-setup.md) |
 | An executive wanting the summary | [user-guides/executive-brief.th.md](user-guides/executive-brief.th.md) |
+| Wondering how far the project is from done | [project-roadmap.md](project-roadmap.md) |
 
 ---
 
@@ -59,6 +60,8 @@ area they cover — they record *why*, which the code cannot.
 | [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Running & deploying the reporting layer: the `refresh_reporting` command, scheduling, the **production-readiness checklist**, verification, rollback, troubleshooting |
 | [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4 cutover) |
 | [backup-and-restore.md](operations/backup-and-restore.md) | What the backup covers, the restore procedure (incl. the roles/grants-not-in-the-dump gap), retention, and the 3-2-1 storage strategy |
+| [backup-and-standby-handbook.windows.md](operations/backup-and-standby-handbook.windows.md) | **The build book for this deployment.** Windows Server + native PostgreSQL: production backups, off-host pull to the spare VM, restore drills, streaming standby, failover & DR runbooks |
+| backup-vm-handbook.md ⚠️ | Linux/Docker variant of the off-host backup VM build. **Superseded** — does not apply to the Windows deployment |
 | [backup-storage-decision-brief.md](operations/backup-storage-decision-brief.md) | One-page brief for the CISO / data-governance / compliance decision on backup storage location & retention |
 | grafana-wazuh-wall.md 🚫 | The "Wazuh SOC Wall" big-screen board. Reads **directly** from the Wazuh Indexer (OpenSearch), not from this app's PostgreSQL |
 
