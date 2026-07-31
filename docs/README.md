@@ -11,7 +11,7 @@ you are.
 | A developer taking over the project | [handover/engineering-handover.md](handover/engineering-handover.md) |
 | New to the domain vocabulary | [../CONTEXT.md](../CONTEXT.md) — the glossary |
 | Setting up a dev environment | [../README.md](../README.md) |
-| Deploying to production | [operations/production-deployment.md](operations/production-deployment.md) |
+| Deploying to production | [operations/production-deployment.windows.md](operations/production-deployment.windows.md) |
 | Operating the reporting / analytics layer | [operations/reporting-layer-operations.md](operations/reporting-layer-operations.md) |
 | A SOC analyst / manager using the app | [user-guides/end-user-guide.th.md](user-guides/end-user-guide.th.md) |
 | Running a UAT session | [uat/uat-environment-setup.md](uat/uat-environment-setup.md) |
@@ -56,10 +56,11 @@ area they cover — they record *why*, which the code cannot.
 
 | File | Contents |
 |---|---|
-| [production-deployment.md](operations/production-deployment.md) | Docker/nginx/gunicorn runbook, account creation, roles, logs |
+| [production-deployment.windows.md](operations/production-deployment.windows.md) | **The build book for production.** Windows Server + native PostgreSQL + Waitress + IIS: OS baseline, database, `.env`, migrations, the app service, IIS reverse proxy, smoke tests, deferred HTTPS |
+| production-deployment.md ⚠️ | Docker/nginx/gunicorn runbook. **Superseded** — does not apply to the Windows deployment |
 | [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Running & deploying the reporting layer: the `refresh_reporting` command, scheduling, the **production-readiness checklist**, verification, rollback, troubleshooting |
 | [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4 cutover) |
-| [backup-and-restore.md](operations/backup-and-restore.md) | What the backup covers, the restore procedure (incl. the roles/grants-not-in-the-dump gap), retention, and the 3-2-1 storage strategy |
+| [backup-and-restore.md](operations/backup-and-restore.md) ⚠️ | Backup *concepts* — what an archive contains, the roles/grants-not-in-the-dump restore gap, the 3-2-1 storage strategy. **Partially superseded**: describes the Docker/Linux mechanism; production uses the Windows handbook above, but the concepts still apply |
 | [backup-and-standby-handbook.windows.md](operations/backup-and-standby-handbook.windows.md) | **The build book for this deployment.** Windows Server + native PostgreSQL: production backups, off-host pull to the spare VM, restore drills, streaming standby, failover & DR runbooks |
 | backup-vm-handbook.md ⚠️ | Linux/Docker variant of the off-host backup VM build. **Superseded** — does not apply to the Windows deployment |
 | [backup-storage-decision-brief.md](operations/backup-storage-decision-brief.md) | One-page brief for the CISO / data-governance / compliance decision on backup storage location & retention |

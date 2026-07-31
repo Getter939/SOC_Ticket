@@ -29,6 +29,9 @@ param(
     [int]$RetentionWeeklyDays  = 180,
     [int]$RetentionMonthlyDays = 1095,
     [int]$RetentionManualDays  = 90,
+    # Config bundles are kilobytes and are what you rebuild the host from.
+    # Keep them far longer than the data they accompany.
+    [int]$RetentionConfigDays  = 730,
     [int]$QuarantineDays       = 14,
 
     # 0 disables the size cap. When set, pruning continues past the age rules
@@ -59,7 +62,8 @@ $tiers = @(
     @{ Name = 'daily';   Days = $RetentionDailyDays   },
     @{ Name = 'weekly';  Days = $RetentionWeeklyDays  },
     @{ Name = 'monthly'; Days = $RetentionMonthlyDays },
-    @{ Name = 'manual';  Days = $RetentionManualDays  }
+    @{ Name = 'manual';  Days = $RetentionManualDays  },
+    @{ Name = 'config';  Days = $RetentionConfigDays  }
 )
 
 Write-Host "prune: pruning $ArchiveDir (WhatIfOnly=$WhatIfOnly)"
@@ -84,8 +88,10 @@ if ((Test-Path -LiteralPath $quarantineDir) -and $QuarantineDays -gt 0) {
 
 if ($MaxArchiveGB -gt 0) {
     $capBytes = [int64]$MaxArchiveGB * 1GB
+    # Config bundles are exempt: they are kilobytes, they are what you rebuild
+    # the host from, and evicting them to reclaim space would save nothing.
     $files = @(Get-ChildItem -LiteralPath $ArchiveDir -File |
-               Where-Object { $_.Name -like "$Prefix`_*" } |
+               Where-Object { $_.Name -like "$Prefix`_*" -and $_.Name -notlike "$Prefix`_config_*" } |
                Sort-Object LastWriteTime)   # oldest first
     $total = ($files | Measure-Object -Property Length -Sum).Sum
     if ($null -eq $total) { $total = 0 }
