@@ -92,6 +92,39 @@ class DashboardAccessTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertRedirects(response, reverse('ticket_list'), fetch_redirect_response=False)
 
+    def test_user_without_profile_is_denied(self):
+        """Regression — 2026-07-31 VA, HIGH-03.
+
+        The role checks in dashboard() are routing, not authorization: each is
+        written `and profile and ...`, so an account with NO UserProfile matched
+        none of them and fell through to the org-wide query, receiving the
+        ENTIRE active ticket queue as clickable rows.
+
+        This is not an exotic state. Nothing auto-creates a UserProfile, and
+        Django's BaseUserAdmin hides the UserProfileInline on the "Add user"
+        form — so every admin-created account is profile-less until someone
+        re-opens it and fills the inline, and can log in during that window.
+        """
+        from django.contrib.auth.models import User
+        no_profile = User.objects.create_user(username='no_profile_ac', password='pw')
+        self.assertFalse(hasattr(no_profile, 'profile'))
+
+        self.client.force_login(no_profile)
+        response = self.client.get(DASHBOARD_URL)
+        self.assertEqual(response.status_code, 403)
+
+    def test_user_with_unset_role_is_denied(self):
+        """UserProfile.role no longer defaults to SOC_STAFF, so a profile saved
+        without an explicit role holds '' — which must grant nothing rather
+        than falling back to full SOC visibility."""
+        from django.contrib.auth.models import User
+        user = User.objects.create_user(username='blank_role_ac', password='pw')
+        UserProfile.objects.create(user=user, department='X', phone='0')
+        self.assertEqual(user.profile.role, '')
+
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(DASHBOARD_URL).status_code, 403)
+
     def test_system_admin_sidebar_hides_dashboard_link(self):
         """System admins work tickets, but must not see the SOC dashboard entry point."""
         self.client.force_login(self.sys_admin)

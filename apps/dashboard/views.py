@@ -86,21 +86,44 @@ def humanize_minutes(total_minutes):
 
 @login_required
 def dashboard(request):
-    # System Owners see their own portal, not the SOC dashboard
     profile = getattr(request.user, 'profile', None)
+
+    # System Owners see their own portal, not the SOC dashboard
     if not request.user.is_superuser and profile and profile.is_system_owner:
-        from django.shortcuts import redirect
         return redirect('system_owner_dashboard')
     if not request.user.is_superuser and profile and profile.is_system_admin:
-        from django.shortcuts import redirect
         return redirect('ticket_list')
     # Response teams (Forensic Analyst / Red Team Manager) work single requests
     # under a response-only access model — org-wide aggregates (active counts,
     # per-analyst workload, MTTR) are outside their need-to-know. Send them to
     # their own queue, mirroring the System Admin rule above.
     if not request.user.is_superuser and profile and profile.is_response_team:
-        from django.shortcuts import redirect
         return redirect('response_request_queue')
+    # FAIL CLOSED — this must be the last word before any data is read.
+    #
+    # The redirects above are ROUTING, not authorization. Each is written
+    # `and profile and ...`, so a user with NO UserProfile matches none of them
+    # and used to fall straight through to the query below — which renders the
+    # ENTIRE active queue (see recent_tickets) for the whole organisation.
+    #
+    # That state is routine, not hypothetical: nothing auto-creates a
+    # UserProfile, and Django's BaseUserAdmin hides the UserProfileInline on the
+    # "Add user" form — so an admin-created account has no profile until someone
+    # re-opens it and fills the inline. It can log in during that gap.
+    #
+    # An explicit allowlist rather than Ticket.objects.visible_to(): this page is
+    # an org-wide aggregate view, which is a coarser question than "which tickets
+    # may this user open". visible_to() returns none() for EXECUTIVE, so routing
+    # the query through it would silently blank a dashboard executives are meant
+    # to see (they reach /executive/ from this page's sidebar). Roles listed here
+    # are exactly those already trusted with org-wide data; anything new — or
+    # anything with no profile — is denied until someone decides otherwise.
+    may_see_org_wide = request.user.is_superuser or (
+        profile is not None
+        and (profile.is_soc or profile.is_executive)
+    )
+    if not may_see_org_wide:
+        raise PermissionDenied
 
     today = timezone.now()
     now   = today
@@ -113,6 +136,7 @@ def dashboard(request):
     status_filter   = request.GET.get('status', '')
     severity_filter = request.GET.get('severity', '')
 
+    # Org-wide by design; reachable only via the may_see_org_wide gate above.
     all_tickets = Ticket.objects.all()
 
     if date_range == 'today':

@@ -146,6 +146,24 @@ X_FRAME_OPTIONS = 'DENY'             # clickjacking (with XFrameOptionsMiddlewar
 # discarded when the browser closes — there is no "remember me" feature here.
 # Prevents a persistent auth cookie lingering on shared workstations (CWE-539).
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+# Idle timeout. Browser-close expiry alone does not help the common SOC case: a
+# shared console left logged in with the browser still open. SESSION_COOKIE_AGE
+# is the inactivity window and SESSION_SAVE_EVERY_REQUEST slides it on every
+# request, so an analyst who is actively working is never logged out mid-task,
+# while an abandoned session dies in SESSION_IDLE_MINUTES. Raise it via .env if
+# UAT testers find 30 minutes disruptive.
+SESSION_COOKIE_AGE = config('SESSION_IDLE_MINUTES', default=30, cast=int) * 60
+SESSION_SAVE_EVERY_REQUEST = True
+
+# Required for HTTPS POSTs once TLS terminates at a proxy (Django checks Origin
+# against this list on secure requests). Empty over plain HTTP, so this is inert
+# today — it is here so the Stage 13 TLS cutover does not fail every form
+# submission with "Origin checking failed". Set to the full scheme+host, e.g.
+# CSRF_TRUSTED_ORIGINS=https://soc.example.com,https://10.0.188.102
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in config('CSRF_TRUSTED_ORIGINS', default='').split(',')
+    if o.strip()
+]
 
 # HTTPS-dependent — turn these ON in production behind TLS via .env. They
 # default OFF so an internal HTTP deployment keeps working: enabling secure

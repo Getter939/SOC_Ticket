@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -1724,6 +1725,17 @@ def global_search(request):
 
 # ── IOC / IP lookup tool ─────────────────────────────────────────────── #
 
+# This view makes an outbound request to a third party on demand, so it is
+# rate-limited per user: without a cap any authenticated account can drive
+# unbounded traffic through the server to rdap.org, each call holding a worker
+# for up to the 5s timeout. Results are cached because RDAP registration data
+# changes on a timescale of days — a repeat lookup of the same IP during an
+# investigation should not leave the building at all.
+IP_LOOKUP_RATE_LIMIT = 30            # lookups per user per window
+IP_LOOKUP_RATE_WINDOW = 60           # seconds
+IP_LOOKUP_CACHE_SECONDS = 60 * 60    # per-IP result cache
+
+
 @login_required
 def ip_lookup(request):
     """RDAP (WHOIS) lookup for an IP address — returns a small JSON summary
@@ -1738,6 +1750,30 @@ def ip_lookup(request):
 
     if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
         return JsonResponse({'error': 'เป็น IP ภายใน (private/loopback) — ไม่มีข้อมูล WHOIS'}, status=200)
+
+    cache_key = f'ip_lookup:result:{ip_obj.compressed}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return JsonResponse(cached)
+
+    # Fixed-window counter. add() only succeeds on the first call of a window,
+    # which is what establishes the TTL; incr() afterwards leaves it intact so
+    # the window really expires instead of sliding forward on every request.
+    rate_key = f'ip_lookup:rate:{request.user.pk}'
+    if cache.add(rate_key, 1, IP_LOOKUP_RATE_WINDOW):
+        used = 1
+    else:
+        try:
+            used = cache.incr(rate_key)
+        except ValueError:
+            # Key expired between add() and incr() — treat as a fresh window.
+            cache.set(rate_key, 1, IP_LOOKUP_RATE_WINDOW)
+            used = 1
+    if used > IP_LOOKUP_RATE_LIMIT:
+        logger.warning('IP lookup rate limit reached for user %s', request.user.pk)
+        return JsonResponse(
+            {'error': 'ค้นหาบ่อยเกินไป — กรุณารอสักครู่แล้วลองใหม่'}, status=429,
+        )
 
     try:
         resp = requests.get(f'https://rdap.org/ip/{ip}', timeout=5)
@@ -1774,6 +1810,7 @@ def ip_lookup(request):
         'country': country,
         'type': data.get('type', ''),
     }
+    cache.set(cache_key, result, IP_LOOKUP_CACHE_SECONDS)
     return JsonResponse(result)
 
 

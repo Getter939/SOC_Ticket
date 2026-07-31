@@ -36,8 +36,15 @@ class UserProfile(models.Model):
     phone        = models.CharField(max_length=15, verbose_name="เบอร์โทรศัพท์")
     request_date = models.DateField(auto_now_add=True, verbose_name="วันที่ขอเข้าใช้งาน")
     note         = models.TextField(blank=True, null=True, verbose_name="บันทึกเพิ่มเติม")
+    # NO default. is_soc is true for ROLE_SOC_STAFF, and visible_to() grants
+    # is_soc every ticket in the system — so defaulting to SOC_STAFF meant an
+    # admin who saved this inline without consciously picking a role handed out
+    # org-wide incident access. With no default the field falls back to '',
+    # which matches no is_* property, so visible_to() returns none(): an
+    # unconfigured profile sees nothing rather than everything. The admin form
+    # renders an empty required <select>, forcing an explicit choice.
     role         = models.CharField(
-        max_length=20, choices=ROLE_CHOICES, default=ROLE_SOC_STAFF, verbose_name="บทบาท",
+        max_length=20, choices=ROLE_CHOICES, verbose_name="บทบาท",
     )
     tier         = models.CharField(
         max_length=5, choices=TIER_CHOICES, blank=True, default='', verbose_name="ระดับ (Tier)",

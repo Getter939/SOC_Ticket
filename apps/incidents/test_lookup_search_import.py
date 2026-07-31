@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
@@ -52,6 +53,11 @@ class IpLookupViewTest(TestCase):
         cls.t1 = _make_user('t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
 
     def setUp(self):
+        # ip_lookup caches results per IP and counts calls per user in the cache.
+        # The default LocMemCache is process-wide and survives between test
+        # methods, so without this a cached 8.8.8.8 result (or a spent rate-limit
+        # window) leaks from one test into the next.
+        cache.clear()
         self.client.login(username='t1', password='testpass123')
 
     def test_requires_login(self):
@@ -105,6 +111,60 @@ class IpLookupViewTest(TestCase):
         resp = self.client.get(reverse('ip_lookup'), {'ip': '8.8.8.8'})
         self.assertEqual(resp.status_code, 502)
         self.assertIn('error', resp.json())
+
+    @patch('apps.incidents.views.requests.get')
+    def test_repeat_lookup_is_served_from_cache(self, mock_get):
+        """A second lookup of the same IP must not leave the building — RDAP
+        data is near-static, and repeat queries would otherwise disclose the
+        same investigation target to a third party over and over."""
+        mock_get.return_value = Mock(
+            json=Mock(return_value={'name': 'EXAMPLE-NET', 'entities': []}),
+            raise_for_status=Mock(),
+        )
+        first = self.client.get(reverse('ip_lookup'), {'ip': '8.8.8.8'})
+        second = self.client.get(reverse('ip_lookup'), {'ip': '8.8.8.8'})
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.json(), first.json())
+        mock_get.assert_called_once()
+
+    @patch('apps.incidents.views.requests.get')
+    def test_rate_limit_returns_429(self, mock_get):
+        """An authenticated user must not be able to drive unbounded outbound
+        traffic through the server. Distinct IPs so the result cache cannot
+        absorb the calls and mask a broken limiter."""
+        from apps.incidents.views import IP_LOOKUP_RATE_LIMIT
+
+        mock_get.return_value = Mock(
+            json=Mock(return_value={'name': 'NET', 'entities': []}),
+            raise_for_status=Mock(),
+        )
+        for i in range(IP_LOOKUP_RATE_LIMIT):
+            resp = self.client.get(reverse('ip_lookup'), {'ip': f'8.8.{i}.1'})
+            self.assertEqual(resp.status_code, 200, f'call {i} should be allowed')
+
+        blocked = self.client.get(reverse('ip_lookup'), {'ip': '9.9.9.9'})
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn('error', blocked.json())
+        self.assertEqual(mock_get.call_count, IP_LOOKUP_RATE_LIMIT)
+
+    @patch('apps.incidents.views.requests.get')
+    def test_rate_limit_is_per_user(self, mock_get):
+        """One analyst exhausting the limit must not lock out the rest of the
+        SOC during an incident."""
+        from apps.incidents.views import IP_LOOKUP_RATE_LIMIT
+
+        mock_get.return_value = Mock(
+            json=Mock(return_value={'name': 'NET', 'entities': []}),
+            raise_for_status=Mock(),
+        )
+        for i in range(IP_LOOKUP_RATE_LIMIT + 1):
+            self.client.get(reverse('ip_lookup'), {'ip': f'8.8.{i}.1'})
+
+        _make_user('t1_other', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        self.client.login(username='t1_other', password='testpass123')
+        resp = self.client.get(reverse('ip_lookup'), {'ip': '9.9.9.9'})
+        self.assertEqual(resp.status_code, 200)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #

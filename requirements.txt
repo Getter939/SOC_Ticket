@@ -11,7 +11,7 @@ psycopg2-binary==2.9.12
 python-decouple==3.8
 
 # Static files serving (dev + production)
-whitenoise==6.9.0
+whitenoise==6.12.0
 
 # WSGI server (production — Dockerfile CMD). Never run `runserver` in prod.
 gunicorn==23.0.0

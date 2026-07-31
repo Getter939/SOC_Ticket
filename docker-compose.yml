@@ -10,7 +10,10 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"          # expose so pgAdmin can connect if needed
+      # Bound to loopback, NOT 0.0.0.0. "5432:5432" published the database to
+      # every interface, putting the Postgres password on the LAN attack
+      # surface. pgAdmin on this host still connects via 127.0.0.1:5432.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ticket -d ticketdata"]
       interval: 5s
