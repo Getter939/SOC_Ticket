@@ -17,16 +17,22 @@ them on with override_settings to prove the production configuration behaves.
 """
 import re
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 from unittest.mock import patch
 
+from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
+from django.contrib.messages.storage.fallback import FallbackStorage
 from django.urls import reverse
 
-from .models import PasswordChangeAudit
+from axes.models import AccessAttempt
+
+from .admin import AccessAttemptAdmin
+from .models import AccountLockoutAudit, PasswordChangeAudit
 
 
 class AntiFramingHeaderTest(TestCase):
@@ -289,3 +295,87 @@ class PasswordChangeAuditTest(TestCase):
         audit = PasswordChangeAudit.objects.get(user=target)
         self.assertEqual(audit.source, PasswordChangeAudit.SOURCE_ADMIN)
         self.assertEqual(audit.actor, admin_user)
+
+
+class AccountLockoutAdminTest(TestCase):
+    """Manual Axes resets must be precise, privileged, and auditable."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.admin_user = User.objects.create_superuser(
+            'unlock_admin', 'unlock-admin@example.test', 'AdminPassword!123',
+        )
+        self.target = User.objects.create_user(
+            'locked_user', 'locked-user@example.test', 'UserPassword!123',
+        )
+        self.model_admin = AccessAttemptAdmin(AccessAttempt, admin.site)
+
+    def _request(self, user, **data):
+        request = self.factory.post('/admin/axes/accessattempt/', data)
+        request.user = user
+        request.session = self.client.session
+        request._messages = FallbackStorage(request)
+        return request
+
+    def test_unlock_clears_only_selected_username_ip_pair_and_records_reason(self):
+        request = self._request(
+            self.admin_user,
+            confirm_unlock='yes',
+            reason='Identity verified by the service desk.',
+        )
+        attempt = SimpleNamespace(
+            username=self.target.username,
+            ip_address='203.0.113.45',
+        )
+
+        with patch('apps.accounts.admin.reset_axes_attempts', return_value=2) as reset:
+            response = self.model_admin.unlock_selected_lockouts(request, [attempt])
+
+        self.assertIsNone(response)
+        reset.assert_called_once_with(username=self.target.username, ip='203.0.113.45')
+        audit = AccountLockoutAudit.objects.get()
+        self.assertEqual(audit.user, self.target)
+        self.assertEqual(audit.username, self.target.username)
+        self.assertEqual(audit.ip_address, '203.0.113.45')
+        self.assertEqual(audit.actor, self.admin_user)
+        self.assertEqual(audit.reason, 'Identity verified by the service desk.')
+        self.assertEqual(audit.attempts_cleared, 2)
+
+    def test_unlock_requires_a_reason(self):
+        request = self._request(self.admin_user, confirm_unlock='yes', reason='')
+        attempt = SimpleNamespace(
+            pk=1,
+            username=self.target.username,
+            ip_address='203.0.113.45',
+            failures_since_start=5,
+            attempt_time='2026-08-04 10:00:00',
+        )
+
+        with patch('apps.accounts.admin.reset_axes_attempts') as reset:
+            response = self.model_admin.unlock_selected_lockouts(request, [attempt])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'A reason is required')
+        reset.assert_not_called()
+        self.assertFalse(AccountLockoutAudit.objects.exists())
+
+    def test_non_superuser_cannot_unlock_an_account(self):
+        staff_user = User.objects.create_user(
+            'staff_only', 'staff@example.test', 'StaffPassword!123', is_staff=True,
+        )
+        request = self._request(
+            staff_user,
+            confirm_unlock='yes',
+            reason='This must not be accepted.',
+        )
+        attempt = SimpleNamespace(
+            username=self.target.username,
+            ip_address='203.0.113.45',
+        )
+
+        with patch('apps.accounts.admin.reset_axes_attempts') as reset:
+            response = self.model_admin.unlock_selected_lockouts(request, [attempt])
+
+        self.assertIsNone(response)
+        reset.assert_not_called()
+        self.assertFalse(AccountLockoutAudit.objects.exists())
