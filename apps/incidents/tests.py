@@ -40,6 +40,7 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -54,7 +55,7 @@ from apps.incidents.forms import (
 )
 from apps.incidents.models import (
     ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
-    ThreatGuidance, Ticket, TicketAttachment, TicketLog,
+    StagedAttachment, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
     TicketSubtask, TriageRecord, bundle_suffix_for_index,
 )
 from apps.incidents.notifications import (
@@ -2817,6 +2818,7 @@ class BundleSuffixHelperTest(TestCase):
         self.assertEqual(bundle_suffix_for_index(26), 'AA')
 
 
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_project_test_media_'))
 class ProjectIncidentFanOutTest(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -3846,3 +3848,324 @@ class T1RouteToggleCspTest(TestCase):
         html = resp.content.decode()
         bare = re.findall(r'<script(?![^>]*\bnonce=)(?![^>]*\bsrc=)[^>]*>', html)
         self.assertEqual(bare, [], f'inline script(s) without a nonce: {bare}')
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 24. Evidence staging — attachments survive a validation-error re-render       #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_staging_test_media_'))
+class EvidenceStagingTest(TestCase):
+    """A browser cannot repopulate <input type=file> after a page load, so the
+    server has to hold uploaded evidence across a failed submit itself."""
+
+    def setUp(self):
+        self.t1 = _make_t1('staging_t1')
+        self.client.login(username='staging_t1', password='testpass123')
+
+    @staticmethod
+    def _files(*names):
+        return [
+            SimpleUploadedFile(name, f'evidence for {name}'.encode())
+            for name in names
+        ]
+
+    def test_multiple_files_in_one_post_all_attach(self):
+        """The create-ticket evidence loop had no coverage at all before this."""
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_files=self._files('a.log', 'b.log', 'c.txt'),
+        ))
+        self.assertEqual(resp.status_code, 302)
+        ticket = Ticket.objects.get()
+        self.assertEqual(ticket.attachments.count(), 3)
+        self.assertEqual(
+            sorted(a.original_name for a in ticket.attachments.all()),
+            ['a.log', 'b.log', 'c.txt'],
+        )
+        # Nothing left behind in staging once the ticket exists.
+        self.assertEqual(StagedAttachment.objects.count(), 0)
+
+    def test_files_survive_a_validation_error(self):
+        """Regression: evidence used to be discarded when the form came back."""
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='',  # required — forces a re-render
+            evidence_files=self._files('keepme.log', 'keeptoo.txt'),
+        ))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(TicketAttachment.objects.count(), 0)
+
+        staged = StagedAttachment.objects.filter(uploaded_by=self.t1)
+        self.assertEqual(staged.count(), 2)
+
+        # And the analyst can see they are being held.
+        html = resp.content.decode()
+        self.assertIn('keepme.log', html)
+        self.assertIn('keeptoo.txt', html)
+        token = staged.first().token
+        self.assertIn(f'name="evidence_token" value="{token}"', html)
+
+    def test_resubmit_adopts_staged_files_without_reattaching(self):
+        """The whole point: fix the field, submit again, keep the evidence."""
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='',
+            evidence_files=self._files('first.log', 'second.log'),
+        ))
+        token = StagedAttachment.objects.first().token
+
+        # Second submit is valid and carries NO files — only the token.
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=token,
+        ))
+        self.assertEqual(resp.status_code, 302)
+
+        ticket = Ticket.objects.get()
+        self.assertEqual(
+            sorted(a.original_name for a in ticket.attachments.all()),
+            ['first.log', 'second.log'],
+        )
+        self.assertEqual(StagedAttachment.objects.count(), 0)
+
+    def test_resubmit_with_extra_files_accumulates(self):
+        """Adding more files on the retry tops up rather than replaces."""
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('one.log'),
+        ))
+        token = StagedAttachment.objects.first().token
+
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=token, evidence_files=self._files('two.log'),
+        ))
+        ticket = Ticket.objects.get()
+        self.assertEqual(
+            sorted(a.original_name for a in ticket.attachments.all()),
+            ['one.log', 'two.log'],
+        )
+
+    def test_invalid_file_is_rejected_by_name(self):
+        """A rejected upload must be named, never silently dropped."""
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_files=[
+                SimpleUploadedFile('good.log', b'fine'),
+                SimpleUploadedFile('bad.html', b'<script>alert(1)</script>'),
+            ],
+        ))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Ticket.objects.count(), 0)
+        self.assertContains(resp, 'bad.html')
+        # The valid one is still held, so the analyst only re-picks the bad one.
+        self.assertEqual(
+            [s.original_name for s in StagedAttachment.objects.all()], ['good.log'],
+        )
+
+    def test_batch_over_total_cap_is_refused_with_a_message(self):
+        """Guards the bare nginx 413 that reads as 'my files vanished'."""
+        with patch('apps.incidents.staging.MAX_ATTACHMENT_BATCH_SIZE', 12):
+            resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+                evidence_files=[
+                    SimpleUploadedFile('a.log', b'0123456789'),
+                    SimpleUploadedFile('b.log', b'0123456789'),
+                ],
+            ))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'b.log')
+        self.assertEqual(StagedAttachment.objects.count(), 1)
+
+    def test_staged_files_are_scoped_to_their_uploader(self):
+        """The token travels in a hidden field and a query string, so it is not
+        a secret — the uploader check is what actually protects the evidence."""
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('mine.log'),
+        ))
+        staged = StagedAttachment.objects.get()
+
+        _make_t1('staging_intruder')
+        self.client.logout()
+        self.client.login(username='staging_intruder', password='testpass123')
+
+        # Cannot discard it...
+        resp = self.client.post(
+            reverse('discard_staged_attachment', args=[staged.pk]))
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(StagedAttachment.objects.filter(pk=staged.pk).exists())
+
+        # ...and cannot adopt it onto a ticket of their own.
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=staged.token,
+        ))
+        self.assertEqual(Ticket.objects.get().attachments.count(), 0)
+        self.assertTrue(StagedAttachment.objects.filter(pk=staged.pk).exists())
+
+    def test_owner_can_discard_a_staged_file(self):
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('oops.log', 'keep.log'),
+        ))
+        unwanted = StagedAttachment.objects.get(original_name='oops.log')
+        stored = unwanted.file.path
+
+        resp = self.client.post(
+            reverse('discard_staged_attachment', args=[unwanted.pk]))
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(StagedAttachment.objects.filter(pk=unwanted.pk).exists())
+        self.assertFalse(Path(stored).exists())
+
+        # The other one is untouched and still adoptable.
+        token = StagedAttachment.objects.get().token
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=token))
+        self.assertEqual(
+            [a.original_name for a in Ticket.objects.get().attachments.all()],
+            ['keep.log'],
+        )
+
+    def test_discard_requires_post(self):
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('x.log'),
+        ))
+        staged = StagedAttachment.objects.get()
+        resp = self.client.get(
+            reverse('discard_staged_attachment', args=[staged.pk]))
+        self.assertEqual(resp.status_code, 405)
+        self.assertTrue(StagedAttachment.objects.filter(pk=staged.pk).exists())
+
+    def test_case_mode_switch_carries_the_evidence_token(self):
+        """The single-to-multi toggle is a full page load; without the token in
+        the link the staged evidence would be stranded."""
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('shared.log'),
+        ))
+        token = StagedAttachment.objects.get().token
+
+        resp = self.client.get(
+            reverse('create_project_incident'), {'evidence_token': token})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'shared.log')
+        self.assertContains(resp, f'name="evidence_token" value="{token}"')
+
+    def test_purge_command_removes_only_expired_staging(self):
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('stale.log'),
+        ))
+        ticket = _make_ticket(created_by=self.t1)
+        TicketAttachment.objects.create(
+            ticket=ticket, file=SimpleUploadedFile('real.log', b'evidence'),
+            original_name='real.log', uploaded_by=self.t1,
+        )
+        stale_path = StagedAttachment.objects.get().file.path
+
+        call_command('purge_staged_attachments', '--hours', '0')
+
+        self.assertEqual(StagedAttachment.objects.count(), 0)
+        self.assertFalse(Path(stale_path).exists())
+        # Real evidence is never in scope for the purge.
+        self.assertEqual(TicketAttachment.objects.count(), 1)
+
+    def test_purge_command_spares_fresh_staging(self):
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('fresh.log'),
+        ))
+        call_command('purge_staged_attachments', '--hours', '24')
+        self.assertEqual(StagedAttachment.objects.count(), 1)
+
+    def test_purge_command_sweeps_row_less_files(self):
+        """A file is written before its row commits, so a crash in between can
+        leave one behind that the row-driven purge would never see."""
+        orphan_dir = Path(settings.MEDIA_ROOT) / 'staged_attachments' / ('a' * 32)
+        orphan_dir.mkdir(parents=True, exist_ok=True)
+        orphan = orphan_dir / 'ghost.log'
+        orphan.write_bytes(b'no row points at me')
+
+        # A staged file that DOES have a row must survive a purge that spares
+        # its age, proving the sweep goes by row-existence and not by path.
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='', evidence_files=self._files('tracked.log'),
+        ))
+        tracked = Path(StagedAttachment.objects.get().file.path)
+
+        call_command('purge_staged_attachments', '--hours', '0')
+
+        self.assertFalse(orphan.exists())
+        self.assertFalse(orphan_dir.exists(), 'empty token dir should be tidied')
+        # The tracked one went too (--hours 0), but via its row, not the sweep.
+        self.assertEqual(StagedAttachment.objects.count(), 0)
+        self.assertFalse(tracked.exists())
+
+    def test_purge_sweep_spares_recent_row_less_files(self):
+        """A file being written by a request in flight must not be yanked."""
+        orphan_dir = Path(settings.MEDIA_ROOT) / 'staged_attachments' / ('b' * 32)
+        orphan_dir.mkdir(parents=True, exist_ok=True)
+        inflight = orphan_dir / 'writing-right-now.log'
+        inflight.write_bytes(b'still uploading')
+
+        call_command('purge_staged_attachments', '--hours', '24')
+
+        self.assertTrue(inflight.exists())
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 25. Multi-file upload on the ticket detail page                               #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_multiupload_test_media_'))
+class MultiFileAttachmentUploadTest(TestCase):
+    def setUp(self):
+        self.t1 = _make_t1('multi_t1')
+        self.ticket = _make_ticket(
+            created_by=self.t1, assigned_to=self.t1, status=Ticket.STATUS_NEW,
+        )
+        self.client.login(username='multi_t1', password='testpass123')
+
+    def test_several_files_upload_in_one_post(self):
+        resp = self.client.post(
+            reverse('upload_attachment', args=[self.ticket.pk]),
+            {
+                'description': 'batch evidence',
+                'file': [
+                    SimpleUploadedFile('one.log', b'first'),
+                    SimpleUploadedFile('two.log', b'second'),
+                    SimpleUploadedFile('three.txt', b'third'),
+                ],
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        attachments = self.ticket.attachments.all()
+        self.assertEqual(attachments.count(), 3)
+        # The single description applies to the whole batch.
+        self.assertTrue(all(a.description == 'batch evidence' for a in attachments))
+        self.assertEqual(
+            sorted(a.original_name for a in attachments),
+            ['one.log', 'three.txt', 'two.log'],
+        )
+
+    def test_a_single_file_still_works(self):
+        resp = self.client.post(
+            reverse('upload_attachment', args=[self.ticket.pk]),
+            {'description': '', 'file': SimpleUploadedFile('solo.log', b'only')},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.ticket.attachments.count(), 1)
+
+    def test_one_bad_file_rejects_the_batch_and_names_it(self):
+        resp = self.client.post(
+            reverse('upload_attachment', args=[self.ticket.pk]),
+            {
+                'description': '',
+                'file': [
+                    SimpleUploadedFile('fine.log', b'ok'),
+                    SimpleUploadedFile('evil.html', b'<script>alert(1)</script>'),
+                ],
+            },
+            follow=True,
+        )
+        self.assertEqual(self.ticket.attachments.count(), 0)
+        self.assertContains(resp, 'html')
+
+    def test_multiple_form_accepts_a_list(self):
+        form = AttachmentForm(
+            data={'description': 'ok'},
+            files={'file': [
+                SimpleUploadedFile('a.log', b'one'),
+                SimpleUploadedFile('b.log', b'two'),
+            ]},
+        )
+        self.assertTrue(form.is_valid(), msg=form.errors)
+        self.assertEqual(len(form.cleaned_data['file']), 2)

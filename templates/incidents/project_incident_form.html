@@ -70,6 +70,8 @@
     {% csrf_token %}
     {% if source_alert %}<input type="hidden" name="wazuh_alert" value="{{ source_alert.pk }}">{% endif %}
     {% if source_triage %}<input type="hidden" name="triage_id" value="{{ source_triage.pk }}">{% endif %}
+    {# Ties this submit to evidence already staged server-side — see ticket_form. #}
+    <input type="hidden" name="evidence_token" value="{{ evidence_token }}">
     {% if form.errors or target_formset.total_error_count %}
     <div class="alert alert-danger" id="error-summary">
       <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วนก่อนสร้าง Project Incident</div>
@@ -286,9 +288,7 @@
 
     <div class="form-section">
       <div class="section-header">5. หลักฐานร่วม <small>Shared evidence for every member Ticket</small></div>
-      <input type="file" name="evidence_files" class="form-control" multiple
-             accept="image/*,.pdf,.txt,.log,.csv,.doc,.docx,.xls,.xlsx,.zip">
-      <div class="field-hint">หลักฐานส่วนกลางของเหตุการณ์ — สมาชิกที่ได้รับสิทธิ์ใน Ticket ใด ๆ ของกลุ่มจะเข้าถึงได้</div>
+      {% include 'incidents/_evidence_picker.html' with picker_hint='หลักฐานส่วนกลางของเหตุการณ์ — สมาชิกที่ได้รับสิทธิ์ใน Ticket ใด ๆ ของกลุ่มจะเข้าถึงได้ (เลือกจากหลายโฟลเดอร์ได้)' %}
     </div>
 
     <div class="d-flex gap-2 mt-2 mb-4">
@@ -300,6 +300,8 @@
   </form>
 </div>
 </div>
+
+{% include 'incidents/_evidence_picker_js.html' %}
 
 <!-- Empty-form template for cloning new target rows -->
 <template id="empty-target-form">

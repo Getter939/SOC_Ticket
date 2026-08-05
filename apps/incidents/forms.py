@@ -699,19 +699,46 @@ class SubtaskUpdateForm(forms.ModelForm):
         }
 
 
+class MultipleFileInput(forms.ClearableFileInput):
+    """File widget that keeps every selected file instead of just the last."""
+
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    """FileField that cleans a list of uploads.
+
+    Django's FileField deliberately handles one file; this is the documented
+    recipe for the multi-upload case. Every file goes through the shared
+    ``validate_attachment`` so the rules match the create-form path exactly.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('widget', MultipleFileInput(attrs={'class': 'form-control'}))
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single = super().clean
+        if isinstance(data, (list, tuple)):
+            cleaned = [single(item, initial) for item in data]
+        else:
+            cleaned = [single(data, initial)]
+        for item in cleaned:
+            validate_attachment(item)
+        return cleaned
+
+
 class AttachmentForm(forms.ModelForm):
+    # Declared explicitly rather than taken from the model: the ticket detail
+    # page uploads a whole batch of evidence at once, sharing one description.
+    file = MultipleFileField(label='ไฟล์แนบ')
+
     class Meta:
         model = TicketAttachment
         fields = ['file', 'description']
         widgets = {
-            'file':        forms.ClearableFileInput(attrs={'class': 'form-control'}),
             'description': forms.TextInput(attrs={
                 'class': 'form-control',
                 'placeholder': 'คำอธิบายไฟล์ (ไม่บังคับ)',
             }),
         }
-
-    def clean_file(self):
-        uploaded = self.cleaned_data.get('file')
-        validate_attachment(uploaded)
-        return uploaded

@@ -89,6 +89,9 @@
     {{ threat_guidance|json_script:"threat-guidance-data" }}
     {{ guidance_note|json_script:"guidance-note-data" }}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
+    {# Ties this submit to the evidence already staged server-side, so a #}
+    {# validation error does not lose the analyst's attachments. #}
+    <input type="hidden" name="evidence_token" value="{{ evidence_token }}">
     {% if form.errors %}
     <div class="alert alert-danger" id="error-summary">
       <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วนก่อนบันทึก</div>
@@ -312,10 +315,7 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold" for="id_evidence_files">แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)</label>
-          <input type="file" name="evidence_files" id="id_evidence_files" class="form-control" multiple
-                 accept="image/*,.pdf,.txt,.log,.csv,.doc,.docx,.xls,.xlsx,.zip">
-          <div class="field-hint">สามารถแนบได้หลายไฟล์ เช่น ภาพหน้าจอ, log, หรือเอกสารประกอบ</div>
+          {% include 'incidents/_evidence_picker.html' with picker_label='แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)' %}
         </div>
 
       </div>
@@ -399,6 +399,8 @@
   </form>
 </div>
 </div>
+
+{% include 'incidents/_evidence_picker_js.html' %}
 
 <script nonce="{{ request.csp_nonce }}">
 // Severity pills — highlight selected on click

@@ -1,5 +1,6 @@
 import calendar
 import ipaddress
+import json
 import logging
 from urllib.parse import urlencode
 
@@ -13,10 +14,11 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import F, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_POST
 
 from apps.accounts.models import UserProfile
@@ -28,9 +30,15 @@ from .forms import (
     SubtaskUpdateForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
-    ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
-    ThreatGuidance, Ticket, TicketAttachment, TicketLog, TicketSubtask,
-    TriageRecord, bundle_suffix_for_index, validate_attachment,
+    MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
+    ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
+    TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
+    allowed_attachment_extensions, bundle_suffix_for_index,
+    validate_attachment,
+)
+from .staging import (
+    MAX_ATTACHMENT_COUNT, adopt_staged, discard_staged, staged_for,
+    stage_uploads,
 )
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
@@ -49,6 +57,12 @@ from .reports import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Matches django.utils.html.json_script: keeps a payload from breaking out of
+# the <script> element it is embedded in.
+_JSON_SCRIPT_ESCAPES = {
+    ord('>'): '\\u003E', ord('<'): '\\u003C', ord('&'): '\\u0026',
+}
 
 
 # ── Private helpers ──────────────────────────────────────────────────── #
@@ -167,17 +181,45 @@ def _valid_soc_status_choices(ticket, user):
     return result
 
 
-def _case_switch_qs(triage_id=None, alert_id=None):
+def _case_switch_qs(triage_id=None, alert_id=None, evidence_token=None):
     """Query string carrying the case's origin across the single ↔ multi switch.
 
     The two creation forms are one menu entry with a mode toggle, so switching
     must not lose the manual-triage record or Wazuh alert the analyst started
-    from — otherwise the new case would come back unlinked.
+    from — otherwise the new case would come back unlinked. The evidence token
+    rides along for the same reason: the toggle is a full page load, so without
+    it any staged evidence would be stranded.
     """
     params = {k: v for k, v in (
         ('triage_id', triage_id), ('wazuh_alert', alert_id),
+        ('evidence_token', evidence_token),
     ) if v}
     return urlencode(params)
+
+
+def _attachment_limits():
+    """Upload rules handed to the evidence picker's client-side pre-check.
+
+    Derived from the model constants rather than restated in the template, so
+    the `accept` list and the in-browser checks cannot drift from what
+    validate_attachment actually enforces.
+
+    ``json`` is pre-serialised here rather than left to the |json_script filter
+    because that filter emits its own <script> tag, which the CSP has no nonce
+    for. Same escaping the filter uses, so it is safe to interpolate.
+    """
+    extensions = allowed_attachment_extensions()
+    limits = {
+        'allowed_extensions': extensions,
+        'accept': ','.join('.' + ext for ext in extensions),
+        'max_file_size': MAX_ATTACHMENT_SIZE,
+        'max_batch_size': MAX_ATTACHMENT_BATCH_SIZE,
+        'max_count': MAX_ATTACHMENT_COUNT,
+    }
+    limits['json'] = mark_safe(
+        json.dumps(limits).translate(_JSON_SCRIPT_ESCAPES)
+    )
+    return limits
 
 
 def _transition_actions(ticket, user):
@@ -529,6 +571,12 @@ def create_ticket(request):
 
     if request.method == 'POST':
         form = TicketForm(request.POST, request.FILES, user=request.user)
+        # Stage evidence BEFORE validating. A browser cannot repopulate a file
+        # input after a page load, so anything not persisted here is lost the
+        # moment the form comes back with an error.
+        evidence_token, staged_errors = stage_uploads(request)
+        for staged_error in staged_errors:
+            form.add_error(None, staged_error)
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -604,14 +652,7 @@ def create_ticket(request):
                             link_ticket=ticket,
                         )
 
-                    for evidence_file in request.FILES.getlist('evidence_files'):
-                        validate_attachment(evidence_file)
-                        TicketAttachment.objects.create(
-                            ticket=ticket,
-                            file=evidence_file,
-                            original_name=evidence_file.name,
-                            uploaded_by=request.user,
-                        )
+                    adopt_staged(evidence_token, request.user, ticket=ticket)
             except ValidationError as exc:
                 form.add_error(None, exc.message)
                 ticket = None
@@ -665,6 +706,9 @@ def create_ticket(request):
             if parent:
                 initial['detailed_issue'] = parent
         form = TicketForm(initial=initial, user=request.user)
+        # Carried by the single ↔ multi toggle so switching mode does not
+        # strand evidence the analyst already uploaded.
+        evidence_token = request.GET.get('evidence_token', '')
 
     # Standard containment guidance per threat category (admin-editable) for
     # the "แทรกแนวทางมาตรฐาน" button — inserted client-side, never auto-applied.
@@ -681,10 +725,13 @@ def create_ticket(request):
         'triage_id': triage_id or '',
         'case_mode': 'single',
         'case_switch_qs': _case_switch_qs(
-            triage_id, request.GET.get('wazuh_alert')),
+            triage_id, request.GET.get('wazuh_alert'), evidence_token),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'threat_guidance': threat_guidance,
         'guidance_note': GUIDANCE_COORDINATION_NOTE,
+        'evidence_token': evidence_token,
+        'staged_files': staged_for(request.user, evidence_token),
+        'attachment_limits': _attachment_limits(),
     })
 
 
@@ -736,6 +783,10 @@ def create_project_incident(request):
         shared_form = ProjectIncidentForm(request.POST, request.FILES, user=request.user)
         target_formset = ProjectIncidentTargetFormSet(request.POST, prefix='target')
         project = None
+        # Staged before validation — see create_ticket for why.
+        evidence_token, staged_errors = stage_uploads(request)
+        for staged_error in staged_errors:
+            shared_form.add_error(None, staged_error)
         if shared_form.is_valid() and target_formset.is_valid():
             shared = shared_form.cleaned_data
             created = []
@@ -779,15 +830,6 @@ def create_project_incident(request):
                             'ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident'
                         )
 
-                    # Shared evidence belongs to the Project Incident itself,
-                    # not an arbitrary first member ticket.
-                    for evidence_file in request.FILES.getlist('evidence_files'):
-                        validate_attachment(evidence_file)
-                        ProjectIncidentAttachment.objects.create(
-                            project=project, file=evidence_file,
-                            original_name=evidence_file.name, uploaded_by=request.user,
-                        )
-
                     # Consume the originating alert: link it to the bundle and
                     # mark it handled so it leaves the triage queue (mirrors the
                     # single-ticket flow, but pointing at the ProjectIncident).
@@ -826,6 +868,11 @@ def create_project_incident(request):
                             user=request.user,
                             project_incident=project,
                         )
+
+                    # Shared evidence belongs to the Project Incident itself,
+                    # not an arbitrary first member ticket. Adopted last so a
+                    # rollback above cannot leave copied files orphaned on disk.
+                    adopt_staged(evidence_token, request.user, project=project)
             except ValidationError as exc:
                 shared_form.add_error(None, exc.message)
                 project = None
@@ -879,6 +926,7 @@ def create_project_incident(request):
                 initial['detailed_issue'] = parent
         shared_form = ProjectIncidentForm(initial=initial, user=request.user)
         target_formset = ProjectIncidentTargetFormSet(prefix='target')
+        evidence_token = request.GET.get('evidence_token', '')
 
     return render(request, 'incidents/project_incident_form.html', {
         'form': shared_form,
@@ -890,7 +938,11 @@ def create_project_incident(request):
         'case_switch_qs': _case_switch_qs(
             source_triage.pk if source_triage else None,
             source_alert.pk if source_alert else None,
+            evidence_token,
         ),
+        'evidence_token': evidence_token,
+        'staged_files': staged_for(request.user, evidence_token),
+        'attachment_limits': _attachment_limits(),
     })
 
 
@@ -1340,6 +1392,7 @@ def ticket_detail(request, pk):
         'logs': logs,
         'attachments': attachments,
         'attachment_form': attachment_form,
+        'attachment_limits': _attachment_limits(),
         'profile': profile,
         'is_terminal': is_terminal,
         'can_upload_attachment': can_upload_attachment,
@@ -2057,15 +2110,46 @@ def upload_attachment(request, pk):
     if request.method == 'POST':
         form = AttachmentForm(request.POST, request.FILES)
         if form.is_valid():
-            att = form.save(commit=False)
-            att.ticket = ticket
-            att.original_name = request.FILES['file'].name
-            att.uploaded_by = request.user
-            att.save()
-            messages.success(request, f'อัพโหลด "{att.original_name}" เรียบร้อยแล้ว')
+            description = form.cleaned_data.get('description', '')
+            uploads = form.cleaned_data['file']
+            for upload in uploads:
+                TicketAttachment.objects.create(
+                    ticket=ticket,
+                    file=upload,
+                    original_name=upload.name,
+                    description=description,
+                    uploaded_by=request.user,
+                )
+            if len(uploads) == 1:
+                messages.success(request, f'อัพโหลด "{uploads[0].name}" เรียบร้อยแล้ว')
+            else:
+                messages.success(request, f'อัพโหลด {len(uploads)} ไฟล์เรียบร้อยแล้ว')
         else:
-            messages.error(request, 'ไม่สามารถอัพโหลดไฟล์ได้ — กรุณาตรวจสอบไฟล์อีกครั้ง')
+            # Name the offending file — "check your file again" is useless when
+            # several were selected and only one was rejected.
+            detail = '; '.join(
+                msg for errors in form.errors.values() for msg in errors
+            )
+            messages.error(
+                request,
+                f'ไม่สามารถอัพโหลดไฟล์ได้ — {detail}' if detail
+                else 'ไม่สามารถอัพโหลดไฟล์ได้ — กรุณาตรวจสอบไฟล์อีกครั้ง',
+            )
     return redirect('ticket_detail', pk=pk)
+
+
+@login_required
+@require_POST
+def discard_staged_attachment(request, pk):
+    """Drop one file being held for an in-progress case form.
+
+    Scoped to the uploader inside discard_staged; a 404 here means the row is
+    gone or was never theirs. Answers 204 so the picker can just remove the
+    chip without a page reload.
+    """
+    if not discard_staged(request.user, pk):
+        raise Http404
+    return HttpResponse(status=204)
 
 
 @login_required

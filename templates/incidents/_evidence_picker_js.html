@@ -1,0 +1,193 @@
+{% comment %}
+Styles + behaviour for _evidence_picker.html. Include ONCE per page, after the
+form; it drives every .evidence-picker on the page.
+{% endcomment %}
+<style>
+  .evidence-chip {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .25rem .5rem; border: 1px solid #ced4da; border-radius: 999px;
+    background: #f8f9fa; font-size: .82rem; max-width: 100%;
+  }
+  .evidence-chip-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18rem;
+  }
+  .evidence-chip-size { color: #6c757d; font-size: .75rem; white-space: nowrap; }
+  .evidence-chip-x {
+    border: 0; background: transparent; color: #6c757d; line-height: 1;
+    font-size: 1.1rem; padding: 0 .15rem; cursor: pointer;
+  }
+  .evidence-chip-x:hover { color: #dc3545; }
+  .evidence-chip-staged { background: #e8f5e9; border-color: #a5d6a7; }
+  .evidence-chip-bad { background: #fdecea; border-color: #f5c2c7; color: #842029; }
+  .evidence-chip-bad .evidence-chip-size { color: #842029; }
+  .evidence-total { font-size: .78rem; color: #6c757d; }
+</style>
+
+<script nonce="{{ request.csp_nonce }}">
+// ── Evidence picker ──────────────────────────────────────────────────────
+// Two things a bare <input type="file" multiple> gets wrong for us:
+//   1. a second visit to the file dialog REPLACES the selection instead of
+//      adding to it, so files from a second folder wipe the first batch;
+//   2. nothing shows the user what is actually attached.
+// We keep our own array of File objects and write it back into the input via
+// a DataTransfer — assigning input.files is what makes the accumulation real.
+(function () {
+  var LIMITS = {{ attachment_limits.json }};
+  var ALLOWED = LIMITS.allowed_extensions || [];
+
+  function humanSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    var units = ['KB', 'MB', 'GB'], i = -1, v = bytes;
+    do { v /= 1024; i++; } while (v >= 1024 && i < units.length - 1);
+    return v.toFixed(v < 10 ? 1 : 0) + ' ' + units[i];
+  }
+
+  function extensionOf(name) {
+    var dot = name.lastIndexOf('.');
+    return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  }
+
+  // Mirrors validate_attachment() server-side. This is a courtesy check to
+  // save a round trip — the server still rejects anything bad.
+  function fileProblem(file) {
+    var ext = extensionOf(file.name);
+    if (!ext) return 'ไม่มีนามสกุลไฟล์';
+    if (ALLOWED.indexOf(ext) === -1) return 'ชนิดไฟล์ ".' + ext + '" ไม่รองรับ';
+    if (file.size > LIMITS.max_file_size) {
+      return 'ใหญ่เกิน ' + humanSize(LIMITS.max_file_size);
+    }
+    return null;
+  }
+
+  function setup(root) {
+    var input = document.getElementById(root.dataset.picker);
+    if (!input) return;
+    var list = document.getElementById(input.id + '-list');
+    var errorEl = document.getElementById(input.id + '-error');
+    var form = input.form;
+    var picked = [];
+
+    function key(f) { return f.name + '|' + f.size + '|' + f.lastModified; }
+
+    // Push `picked` back into the input so the form submits every file.
+    function syncInput() {
+      var dt = new DataTransfer();
+      picked.forEach(function (f) { dt.items.add(f); });
+      input.files = dt.files;
+    }
+
+    function stagedBytes() {
+      var total = 0;
+      root.querySelectorAll('.evidence-chip-staged').forEach(function (chip) {
+        total += parseInt(chip.dataset.bytes || '0', 10);
+      });
+      return total;
+    }
+
+    function showError(msg) {
+      if (!errorEl) return;
+      errorEl.textContent = msg || '';
+      errorEl.classList.toggle('d-none', !msg);
+    }
+
+    function render() {
+      list.innerHTML = '';
+      var total = 0, bad = 0;
+      picked.forEach(function (file, index) {
+        var problem = fileProblem(file);
+        if (problem) bad++;
+        total += file.size;
+
+        var li = document.createElement('li');
+        li.className = 'evidence-chip' + (problem ? ' evidence-chip-bad' : '');
+
+        var nameEl = document.createElement('span');
+        nameEl.className = 'evidence-chip-name';
+        nameEl.textContent = file.name;
+        nameEl.title = file.name;
+
+        var sizeEl = document.createElement('span');
+        sizeEl.className = 'evidence-chip-size';
+        sizeEl.textContent = problem ? problem : humanSize(file.size);
+
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'evidence-chip-x';
+        x.innerHTML = '&times;';
+        x.setAttribute('aria-label', 'ลบไฟล์ ' + file.name);
+        x.addEventListener('click', function () {
+          picked.splice(index, 1);
+          syncInput();
+          render();
+        });
+
+        li.appendChild(nameEl);
+        li.appendChild(sizeEl);
+        li.appendChild(x);
+        list.appendChild(li);
+      });
+
+      var grandTotal = total + stagedBytes();
+      if (picked.length) {
+        var summary = document.createElement('li');
+        summary.className = 'evidence-total align-self-center';
+        summary.textContent = picked.length + ' ไฟล์ · ' + humanSize(grandTotal);
+        list.appendChild(summary);
+      }
+
+      if (bad) {
+        showError('มีไฟล์ที่ไม่ผ่านเงื่อนไข ' + bad + ' ไฟล์ — กรุณาลบออกก่อนบันทึก');
+      } else if (grandTotal > LIMITS.max_batch_size) {
+        showError('ไฟล์แนบรวมกัน ' + humanSize(grandTotal) + ' เกินขีดจำกัด '
+                  + humanSize(LIMITS.max_batch_size) + ' — กรุณาลบบางไฟล์ออก');
+      } else if (picked.length > LIMITS.max_count) {
+        showError('แนบไฟล์ได้สูงสุด ' + LIMITS.max_count + ' ไฟล์');
+      } else {
+        showError('');
+      }
+    }
+
+    function blocked() {
+      return errorEl && !errorEl.classList.contains('d-none');
+    }
+
+    input.addEventListener('change', function () {
+      var seen = {};
+      picked.forEach(function (f) { seen[key(f)] = true; });
+      Array.prototype.forEach.call(input.files, function (f) {
+        if (!seen[key(f)]) { seen[key(f)] = true; picked.push(f); }
+      });
+      syncInput();
+      render();
+    });
+
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        if (blocked()) {
+          e.preventDefault();
+          if (errorEl) errorEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      });
+    }
+
+    // Discard a file the server is already holding.
+    var csrf = form && form.querySelector('input[name=csrfmiddlewaretoken]');
+    root.querySelectorAll('[data-discard]').forEach(function (btn) {
+      var chip = btn.closest('.evidence-chip-staged');
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        fetch(btn.dataset.discard, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrf ? csrf.value : '' },
+          credentials: 'same-origin',
+        }).then(function (resp) {
+          if (resp.ok) { chip.remove(); render(); }
+          else { btn.disabled = false; }
+        }).catch(function () { btn.disabled = false; });
+      });
+    });
+  }
+
+  document.querySelectorAll('.evidence-picker').forEach(setup);
+})();
+</script>

@@ -1,0 +1,53 @@
+{% comment %}
+Evidence file picker — accumulating, with a visible file list.
+
+A bare <input type="file" multiple> replaces its whole selection every time the
+user visits the picker, so files chosen from a second folder silently wipe the
+first batch. This partial keeps its own array of File objects and writes them
+back into the input through a DataTransfer, so picks accumulate.
+
+Params (all optional):
+  input_name    form field name           (default evidence_files)
+  input_id      element id                (default id_<input_name>)
+  picker_label  label text                (default: evidence wording)
+  picker_hint   hint line under the input
+  staged_files  StagedAttachment rows already held server-side
+Requires `attachment_limits` in the template context (see views._attachment_limits).
+{% endcomment %}
+{% with name=input_name|default:'evidence_files' %}
+{% with pid=input_id|default:'id_evidence_files' %}
+<div class="evidence-picker" data-picker="{{ pid }}">
+  {% if picker_label %}
+    <label class="form-label fw-semibold" for="{{ pid }}">{{ picker_label }}</label>
+  {% endif %}
+
+  {% if staged_files %}
+    <div class="staged-evidence mb-2" id="{{ pid }}-staged">
+      <div class="small text-success-emphasis mb-1">
+        <strong>ไฟล์ที่ระบบเก็บไว้ให้แล้ว</strong> — แนบต่อได้เลย ไม่ต้องเลือกใหม่
+      </div>
+      <ul class="list-unstyled mb-0 d-flex flex-wrap gap-2">
+        {% for staged in staged_files %}
+          <li class="evidence-chip evidence-chip-staged" data-bytes="{{ staged.file.size }}">
+            <span class="evidence-chip-name" title="{{ staged.original_name }}">{{ staged.original_name }}</span>
+            <span class="evidence-chip-size">{{ staged.file.size|filesizeformat }}</span>
+            <button type="button" class="evidence-chip-x"
+                    data-discard="{% url 'discard_staged_attachment' staged.pk %}"
+                    aria-label="ลบไฟล์ {{ staged.original_name }}">&times;</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <input type="file" name="{{ name }}" id="{{ pid }}" class="form-control" multiple
+         accept="{{ attachment_limits.accept }}">
+  <div class="field-hint">
+    {{ picker_hint|default:'สามารถแนบได้หลายไฟล์ เช่น ภาพหน้าจอ, log, หรือเอกสารประกอบ — เลือกจากหลายโฟลเดอร์ได้ ระบบจะเก็บสะสมไว้ให้' }}
+  </div>
+
+  <ul class="evidence-list list-unstyled mt-2 mb-0 d-flex flex-wrap gap-2" id="{{ pid }}-list"></ul>
+  <div class="text-danger small mt-1 d-none" id="{{ pid }}-error"></div>
+</div>
+{% endwith %}
+{% endwith %}

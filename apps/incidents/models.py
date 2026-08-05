@@ -2225,6 +2225,13 @@ class NotificationTemplate(models.Model):
 # legitimately needs more headroom.
 MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024  # 25 MB
 
+# Total cap across every file in one submit. Separate from the per-file cap
+# because the real ceiling is the reverse proxy: nginx rejects an oversized
+# body with a bare 413 *before* Django runs, which looks to the analyst like
+# "my files vanished". Keep this comfortably under nginx's client_max_body_size
+# (128M) so the batch is refused with a real message instead.
+MAX_ATTACHMENT_BATCH_SIZE = 100 * 1024 * 1024  # 100 MB
+
 # Extension allowlist for uploaded evidence. This is a SOC evidence store, so
 # the default is deliberately broad — logs, captures, documents, images and
 # archives are all legitimate evidence — but it still blocks active-web content
@@ -2273,6 +2280,19 @@ def validate_attachment_size(uploaded_file):
         raise ValidationError(
             f'ไฟล์มีขนาดใหญ่เกินไป — สูงสุด {MAX_ATTACHMENT_SIZE // (1024 * 1024)} MB'
         )
+
+
+def allowed_attachment_extensions():
+    """Sorted list of the extensions this deployment accepts.
+
+    Single source of truth for the picker UI: the `accept` attribute and the
+    client-side pre-check are both built from this, so they can never drift
+    from what validate_attachment_type actually enforces.
+    """
+    return sorted(getattr(
+        settings, 'ATTACHMENT_ALLOWED_EXTENSIONS',
+        DEFAULT_ALLOWED_ATTACHMENT_EXTENSIONS,
+    ))
 
 
 def validate_attachment_type(uploaded_file):
@@ -2372,6 +2392,40 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return f'{self.original_name} → {self.ticket.ticket_id}'
+
+
+def staged_attachment_upload_path(instance, filename):
+    return f'staged_attachments/{instance.token}/{filename}'
+
+
+class StagedAttachment(models.Model):
+    """Evidence held between a failed submit and the retry.
+
+    A browser cannot repopulate an <input type="file"> after a page load, so
+    when the create form comes back with a validation error the bytes the
+    analyst already uploaded would be lost. Uploads are therefore written here
+    *before* the form is validated, then adopted onto a TicketAttachment (or
+    ProjectIncidentAttachment) once the case is actually created.
+
+    This is scratch data, not evidence of record: nothing here has a ticket
+    yet, and abandoned rows are removed by `purge_staged_attachments`.
+    """
+
+    # Random per-form token, round-tripped through a hidden field. Always
+    # queried together with uploaded_by — see staging.staged_for().
+    token         = models.CharField(max_length=32, db_index=True)
+    file          = models.FileField(upload_to=staged_attachment_upload_path)
+    original_name = models.CharField(max_length=255)
+    uploaded_by   = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='staged_attachments',
+    )
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.original_name} (staged {self.token[:8]})'
 
 
 class ThreatGuidance(models.Model):
