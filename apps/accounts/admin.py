@@ -5,8 +5,12 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
+from django.template.response import TemplateResponse
 
-from .models import PasswordChangeAudit, UserProfile
+from axes.models import AccessAttempt
+from axes.utils import reset as reset_axes_attempts
+
+from .models import AccountLockoutAudit, PasswordChangeAudit, UserProfile
 from .password_audit import password_audit_context
 from .passwords import send_password_reset_email
 
@@ -137,5 +141,146 @@ class PasswordChangeAuditAdmin(admin.ModelAdmin):
         return False
 
 
+@admin.register(AccountLockoutAudit)
+class AccountLockoutAuditAdmin(admin.ModelAdmin):
+    """Expose manual lockout resets as a read-only security audit trail."""
+
+    list_display = ('unlocked_at', 'username', 'ip_address', 'actor', 'attempts_cleared')
+    list_filter = ('unlocked_at',)
+    search_fields = ('username', 'ip_address', 'actor__username')
+    list_select_related = ('user', 'actor')
+    ordering = ('-unlocked_at',)
+    readonly_fields = (
+        'user', 'username', 'ip_address', 'actor', 'reason',
+        'attempts_cleared', 'unlocked_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class AccessAttemptAdmin(admin.ModelAdmin):
+    """Let a superuser clear one selected Axes username/IP lockout at a time."""
+
+    list_display = ('username', 'ip_address', 'failures_since_start', 'attempt_time')
+    list_filter = ('attempt_time',)
+    search_fields = ('username', 'ip_address')
+    ordering = ('-attempt_time',)
+    actions = ('unlock_selected_lockouts',)
+
+    @admin.action(description='Unlock selected username/IP lockouts')
+    def unlock_selected_lockouts(self, request, queryset):
+        if not request.user.is_superuser:
+            self.message_user(
+                request,
+                'Only superusers may manually unlock accounts.',
+                level=messages.ERROR,
+            )
+            return None
+
+        attempts = list(queryset)
+        if not attempts:
+            self.message_user(request, 'Select at least one lockout to unlock.', level=messages.WARNING)
+            return None
+
+        if request.POST.get('confirm_unlock') != 'yes':
+            return self._confirmation_response(request, attempts)
+
+        reason = request.POST.get('reason', '').strip()
+        if not reason:
+            return self._confirmation_response(
+                request,
+                attempts,
+                error='A reason is required before an account can be unlocked.',
+            )
+
+        unlocked_pairs = set()
+        total_attempts_cleared = 0
+        skipped = 0
+        for attempt in attempts:
+            username = (attempt.username or '').strip()
+            ip_address = attempt.ip_address
+            if not username or not ip_address:
+                skipped += 1
+                continue
+
+            pair = (username, ip_address)
+            if pair in unlocked_pairs:
+                continue
+
+            cleared = reset_axes_attempts(username=username, ip=ip_address)
+            AccountLockoutAudit.objects.create(
+                user=User.objects.filter(username=username).first(),
+                username=username,
+                ip_address=ip_address,
+                actor=request.user,
+                reason=reason,
+                attempts_cleared=cleared,
+            )
+            unlocked_pairs.add(pair)
+            total_attempts_cleared += cleared
+
+        if unlocked_pairs:
+            self.message_user(
+                request,
+                f'Unlocked {len(unlocked_pairs)} username/IP lockout pair(s) and cleared '
+                f'{total_attempts_cleared} Axes attempt record(s).',
+                level=messages.SUCCESS,
+            )
+        if skipped:
+            self.message_user(
+                request,
+                f'Skipped {skipped} selected record(s) without both a username and IP address.',
+                level=messages.WARNING,
+            )
+        return None
+
+    def _confirmation_response(self, request, attempts, error=None):
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Confirm account unlock',
+            'attempts': attempts,
+            'opts': self.model._meta,
+            'action_checkbox_name': admin.helpers.ACTION_CHECKBOX_NAME,
+            'error': error,
+            'reason': request.POST.get('reason', ''),
+        }
+        return TemplateResponse(
+            request,
+            'admin/accounts/accessattempt/unlock_confirmation.html',
+            context,
+        )
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            actions.pop('unlock_selected_lockouts', None)
+        return actions
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
+
+# django-axes registers this model with the default admin site.  Replace that
+# generic registration with a confirmation-and-audit workflow, but retain the
+# same staff/model permissions for viewing attempts.
+try:
+    admin.site.unregister(AccessAttempt)
+except admin.sites.NotRegistered:
+    pass
+admin.site.register(AccessAttempt, AccessAttemptAdmin)

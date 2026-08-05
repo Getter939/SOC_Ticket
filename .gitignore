@@ -65,6 +65,7 @@ desktop.ini
 # were updated 2026-07-21 when docs/ was reorganised into category subfolders.
 !docs/README.md
 !docs/operations/production-deployment.md
+!docs/operations/postgresql-standby-handbook.md
 !docs/architecture/workflow-change-log.md
 # Deliberately NOT un-ignored: docs/uat/uat-*.md and
 # docs/operations/grafana-wazuh-wall.md contain a shared UAT password and

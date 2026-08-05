@@ -164,3 +164,44 @@ class PasswordChangeAudit(models.Model):
 
     def __str__(self):
         return f'Password change for {self.user.username} at {self.created_at:%Y-%m-%d %H:%M:%S}'
+
+
+class AccountLockoutAudit(models.Model):
+    """Immutable record of a privileged manual lockout reset.
+
+    The username and IP address are retained even if the corresponding Django
+    user is later renamed or deleted.  They identify the exact Axes lockout
+    pair that was cleared; no password or login request data is stored here.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='account_lockout_resets',
+    )
+    username = models.CharField(max_length=150)
+    ip_address = models.GenericIPAddressField()
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='account_lockout_reset_actions',
+    )
+    reason = models.TextField()
+    attempts_cleared = models.PositiveIntegerField()
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-unlocked_at',)
+        indexes = [
+            models.Index(fields=('username', 'unlocked_at')),
+            models.Index(fields=('ip_address', 'unlocked_at')),
+        ]
+
+    def __str__(self):
+        return (
+            f'Lockout reset for {self.username} ({self.ip_address}) '
+            f'at {self.unlocked_at:%Y-%m-%d %H:%M:%S}'
+        )

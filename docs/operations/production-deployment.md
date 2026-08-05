@@ -153,6 +153,18 @@ In **Users**, select one or more accounts and use the admin actions:
 - **"รีเซ็ตรหัสผ่านและส่งเมลแจ้ง User"** — generates a new random password
   and emails it
 
+### Unlocking a temporarily locked account
+
+Only a Django **superuser** may clear a login lockout before its configured
+cool-off period ends. Go to **Axes → Access attempts**, find the exact
+username/IP record, select it, and choose **"Unlock selected username/IP
+lockouts"**. The confirmation screen requires a reason and records the
+superuser, username, IP address, time, and number of cleared attempt records
+in **Accounts → Account lockout audits**.
+
+Use this only after verifying the user's identity. Resetting a lockout deletes
+that specific Axes attempt record; it does not reset other IPs or other users.
+
 ## Logs
 
 ```bash

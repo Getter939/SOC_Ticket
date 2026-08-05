@@ -1,0 +1,45 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block content %}
+<div id="content-main">
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="unlock_selected_lockouts">
+        <input type="hidden" name="confirm_unlock" value="yes">
+        {% for attempt in attempts %}
+            <input type="hidden" name="{{ action_checkbox_name }}" value="{{ attempt.pk }}">
+        {% endfor %}
+
+        <p>You are about to unlock the following username/IP lockout pair{{ attempts|length|pluralize }}.</p>
+        <table>
+            <thead>
+                <tr><th>Username</th><th>IP address</th><th>Failed attempts</th><th>Latest attempt</th></tr>
+            </thead>
+            <tbody>
+                {% for attempt in attempts %}
+                    <tr>
+                        <td>{{ attempt.username|default:"—" }}</td>
+                        <td>{{ attempt.ip_address|default:"—" }}</td>
+                        <td>{{ attempt.failures_since_start }}</td>
+                        <td>{{ attempt.attempt_time }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if error %}
+            <p class="errornote">{{ error }}</p>
+        {% endif %}
+        <div class="form-row">
+            <label for="id_reason">Reason for unlock:</label>
+            <textarea id="id_reason" name="reason" rows="4" required>{{ reason }}</textarea>
+            <p class="help">This is saved in the immutable lockout-reset audit trail.</p>
+        </div>
+        <div class="submit-row">
+            <input type="submit" value="Unlock selected account(s)">
+            <a class="button cancel-link" href="{% url opts|admin_urlname:'changelist' %}">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
