@@ -46,7 +46,8 @@ class TicketQuerySet(models.QuerySet):
           - SOC staff / SOC manager       → all tickets
           - System admin                  → only tickets where assigned_admin == user
           - Forensic Analyst / Red Team   → only tickets carrying a RESPONSE
-            Manager                         request assigned to them
+            Manager                         request OF THEIR OWN TYPE assigned
+                                            to them
           - No profile / unknown role     → empty queryset (safest default)
         """
         if user.is_superuser:
@@ -64,10 +65,17 @@ class TicketQuerySet(models.QuerySet):
         # solely because it carries a RESPONSE-type request assigned to them —
         # never because they were handed an ordinary Investigation/Countermeasure
         # subtask. distinct() guards against duplicates when several are assigned.
+        #
+        # types_for_role() rather than RESPONSE_TYPES: the request must also be
+        # one their role actually receives. Assignment alone is not enough,
+        # because assignment is only validated in TicketSubtask.clean() — a row
+        # written by a seed, a data migration, or objects.create() can hand a
+        # Red Team Manager a FORENSIC_RCA request, and that must not become a
+        # key to the ticket. Read-time enforcement is what closes that path.
         if profile.is_response_team:
             return self.filter(
                 subtasks__assigned_to=user,
-                subtasks__subtask_type__in=TicketSubtask.RESPONSE_TYPES,
+                subtasks__subtask_type__in=TicketSubtask.types_for_role(profile.role),
             ).distinct()
         return self.none()
 
@@ -2071,6 +2079,19 @@ class TicketSubtask(models.Model):
         return cls.response_routing().get(subtask_type)
 
     @classmethod
+    def types_for_role(cls, role):
+        """The response-request types a given role may be handed.
+
+        Inverse of ``response_routing()`` — derived from it rather than written
+        out again, so there is still exactly one routing map to keep correct.
+        Returns an empty frozenset for any role that owns no response type
+        (SOC, admins, owners, executives, blank roles), which makes it safe to
+        drop straight into a ``subtask_type__in=`` filter: an unknown role
+        matches nothing rather than everything.
+        """
+        return frozenset(t for t, r in cls.response_routing().items() if r == role)
+
+    @classmethod
     def eligible_assignees(cls, subtask_type):
         """Active users who may be auto-assigned a request of ``subtask_type``.
 
@@ -2082,6 +2103,41 @@ class TicketSubtask(models.Model):
         if not role:
             return User.objects.none()
         return User.objects.filter(is_active=True, profile__role=role)
+
+    def clean(self):
+        """Reject a response request handed to someone the type doesn't route to.
+
+        The routing invariant (VA/PT + InfraSec → Red Team Manager, Forensics/RCA
+        → Forensic Analyst) used to live only in ``create_response_request``. That
+        left every other write path — Django admin, seed commands, data migrations
+        — free to produce a mismatched row, which would then surface in the wrong
+        person's queue AND unlock the parent ticket through
+        ``TicketQuerySet.visible_to()``.
+
+        This is the write-time half of the fix. It runs through ``full_clean()``,
+        so it covers ModelForms and the admin but NOT a bare
+        ``TicketSubtask.objects.create()`` — the read-time filters in
+        ``visible_to()`` and ``response_request_queue`` are what make the
+        invariant hold even then. Both layers are deliberate; neither is
+        redundant.
+
+        Legacy Investigation/Countermeasure subtasks route nowhere and keep their
+        existing freedom (``SubtaskForm`` already excludes response-team users).
+        """
+        super().clean()
+        if self.subtask_type not in self.RESPONSE_TYPES or self.assigned_to_id is None:
+            return
+        expected_role = self.role_for_type(self.subtask_type)
+        profile = getattr(self.assigned_to, 'profile', None)
+        # No profile → fail closed, matching visible_to()'s treatment of the
+        # profile-less account that can exist between creation and setup.
+        if profile is None or profile.role != expected_role:
+            raise ValidationError({
+                'assigned_to': (
+                    f'คำขอประเภท "{self.get_subtask_type_display()}" '
+                    f'ต้องมอบหมายให้ผู้ที่มีบทบาท "{expected_role}" เท่านั้น'
+                )
+            })
 
 
 # ======================================================================= #

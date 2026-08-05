@@ -303,6 +303,12 @@
     {% endif %}
     {% endif %}
 
+    {% comment %}
+    Hidden from Executives: visible_to() returns none() for them, so all three
+    of these links render an empty page. The pages themselves stay reachable
+    (an empty 200 leaks nothing) — this only removes the dead end from the nav.
+    {% endcomment %}
+    {% if request.user.is_superuser or not profile.is_executive %}
     <div class="nav-section-label">Tickets</div>
     <a href="{% url 'ticket_list' %}" data-label="Active Tickets"
        class="nav-link {% if request.resolver_match.url_name in 'ticket_list,ticket_detail,upload_attachment,delete_attachment,edit_log' %}active{% endif %}">
@@ -316,6 +322,7 @@
        class="nav-link {% if request.resolver_match.url_name == 'global_search' %}active{% endif %}">
         <i class="bi bi-search"></i> <span class="nav-label">IOC Search</span>
     </a>
+    {% endif %}
     {% endif %}
 
     {% endwith %}

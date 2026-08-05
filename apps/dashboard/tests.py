@@ -651,6 +651,28 @@ class ExecutiveDashboardViewTest(TestCase):
         html = self.client.get(DASHBOARD_URL).content.decode()
         self.assertNotIn('Executive Dashboard', html)
 
+    def test_executive_sidebar_hides_the_ticket_links(self):
+        # K11. visible_to() returns none() for executives, so Active Tickets /
+        # Ticket History / IOC Search all render empty for them. The pages stay
+        # reachable (an empty 200 leaks nothing) — the nav just stops offering
+        # the dead end.
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertNotIn('Active Tickets', html)
+        self.assertNotIn('Ticket History', html)
+        self.assertNotIn('IOC Search', html)
+
+        # ...but SOC staff still get them.
+        self.client.force_login(self.soc)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn('Active Tickets', html)
+        self.assertIn('Ticket History', html)
+        self.assertIn('IOC Search', html)
+
+    def test_executive_ticket_list_stays_reachable_and_empty(self):
+        response = self.client.get(reverse('ticket_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context['tickets']), [])
+
     def _ticket(
         self,
         status=Ticket.STATUS_NEW,

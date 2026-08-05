@@ -62,7 +62,9 @@ from apps.incidents.notifications import (
     notify_response_request_created,
     notify_response_request_completed,
 )
-from apps.incidents.views import _can_create_ticket_from_triage
+from apps.incidents.views import (
+    _can_create_ticket_from_triage, _can_upload_ticket_attachment,
+)
 from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
     build_ticket_report_context, build_ticket_report_sections,
@@ -270,11 +272,54 @@ class TicketVisibilityQuerysetTest(TestCase):
 
     def test_response_team_visibility_is_not_duplicated(self):
         # A second request assigned to the same responder must not double-count.
+        # It has to be a type their role actually receives, or visible_to()
+        # filters it out and the distinct() guard never gets exercised.
         TicketSubtask.objects.create(
-            ticket=self.ticket_a, subtask_type=TicketSubtask.TYPE_INFRA_SEC,
-            title='Harden', assigned_to=self.forensic,
+            ticket=self.ticket_a, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Second RCA', assigned_to=self.forensic,
         )
+        self.assertEqual(self.ticket_a.subtasks.filter(assigned_to=self.forensic).count(), 2)
         self.assertEqual(Ticket.objects.visible_to(self.forensic).count(), 1)
+
+    def test_mismatched_response_type_does_not_expose_ticket(self):
+        # K9. Assignment alone must not be a key to the ticket: the request also
+        # has to be one this role receives. Written with objects.create() on
+        # purpose — that bypasses TicketSubtask.clean(), reproducing exactly what
+        # a seed command, a data migration, or the Django admin could leave
+        # behind. Read-time filtering is what has to catch it.
+        TicketSubtask.objects.create(
+            ticket=self.ticket_unassigned,
+            subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Misrouted RCA', assigned_to=self.redteam,
+        )
+        visible = Ticket.objects.visible_to(self.redteam)
+        self.assertNotIn(self.ticket_unassigned, visible)
+        self.assertEqual(list(visible), [self.ticket_b])  # only their VA/PT one
+
+    def test_types_for_role_is_the_inverse_of_response_routing(self):
+        self.assertEqual(
+            TicketSubtask.types_for_role(UserProfile.ROLE_REDTEAM_MANAGER),
+            frozenset({TicketSubtask.TYPE_VA_PT, TicketSubtask.TYPE_INFRA_SEC}),
+        )
+        self.assertEqual(
+            TicketSubtask.types_for_role(UserProfile.ROLE_FORENSIC),
+            frozenset({TicketSubtask.TYPE_FORENSIC_RCA}),
+        )
+        # Every response type is routed to exactly one role, and no type is lost.
+        routed = set()
+        for role in (UserProfile.ROLE_REDTEAM_MANAGER, UserProfile.ROLE_FORENSIC):
+            routed |= TicketSubtask.types_for_role(role)
+        self.assertEqual(routed, set(TicketSubtask.RESPONSE_TYPES))
+
+    def test_types_for_role_is_empty_for_non_response_roles(self):
+        # Safe to drop into a subtask_type__in= filter: an unrecognised role
+        # matches nothing rather than everything.
+        for role in (
+            UserProfile.ROLE_SOC_STAFF, UserProfile.ROLE_SOC_MANAGER,
+            UserProfile.ROLE_SYSTEM_ADMIN, UserProfile.ROLE_SYSTEM_OWNER,
+            UserProfile.ROLE_EXECUTIVE, '',
+        ):
+            self.assertEqual(TicketSubtask.types_for_role(role), frozenset(), role)
 
     def test_response_team_legacy_subtask_does_not_expose_ticket(self):
         # Response-only access: being handed an ordinary Investigation subtask on
@@ -2305,6 +2350,64 @@ class AttachmentWorkflowPermissionTest(TestCase):
         self.assertEqual(subtask.status, TicketSubtask.STATUS_OPEN)
         self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
 
+    def _update_subtask(self, user, subtask, filename='result.log'):
+        self.client.force_login(user)
+        return self.client.post(
+            reverse('update_subtask', args=[subtask.pk]),
+            data={
+                'status': TicketSubtask.STATUS_DONE,
+                'result_notes': 'Report attached',
+                'result_file': SimpleUploadedFile(filename, b'findings'),
+            },
+        )
+
+    def test_soc_staff_cannot_attach_a_file_through_the_subtask_route(self):
+        # K16. update_subtask used to accept a file from anyone with is_soc,
+        # letting a non-creator T1 put an attachment on a ticket that
+        # _can_upload_ticket_attachment() would refuse them. The notes/status
+        # update still goes through — only the file is rejected.
+        ticket = self._ticket(status=Ticket.STATUS_T1_REVIEW)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Collect logs', assigned_to=self.creator,
+        )
+        self.assertFalse(_can_upload_ticket_attachment(ticket, self.other_t1))
+
+        self._update_subtask(self.other_t1, subtask)
+
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
+        subtask.refresh_from_db()
+        self.assertEqual(subtask.status, TicketSubtask.STATUS_DONE)
+
+    def test_assignee_can_attach_a_result_even_when_the_ticket_is_elsewhere(self):
+        # The documented exception: for a response request the court that
+        # matters is the REQUEST, not the ticket's workflow status. The
+        # ticket-level rule for PENDING_MGR_TRIAGE answers is_soc_manager,
+        # which would wrongly refuse the assigned responder.
+        forensic = _make_forensic('attachment_forensic')
+        ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=forensic,
+        )
+        self.assertFalse(_can_upload_ticket_attachment(ticket, forensic))
+
+        self._update_subtask(forensic, subtask, filename='rca.log')
+
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, subtask=subtask, uploaded_by=forensic).exists())
+
+    def test_soc_manager_can_attach_a_result(self):
+        mgr = _make_user('attachment_sub_mgr', UserProfile.ROLE_SOC_MANAGER)
+        ticket = self._ticket(status=Ticket.STATUS_T1_REVIEW)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Collect logs', assigned_to=self.creator,
+        )
+        self._update_subtask(mgr, subtask)
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, uploaded_by=mgr).exists())
+
     def test_delete_retains_attachment_and_records_ticket_audit(self):
         ticket = self._ticket()
         attachment = TicketAttachment.objects.create(
@@ -3332,6 +3435,121 @@ class ResponseRequestRoutingTest(TestCase):
         self.assertTrue(self.redteam.profile.is_redteam_manager)
         self.assertTrue(self.redteam.profile.is_response_team)
         self.assertFalse(self.redteam.profile.is_soc)
+
+
+class ResponseRequestAssignmentValidationTest(TestCase):
+    """K9 write-time half: TicketSubtask.clean() rejects a misrouted assignment.
+
+    Covers the paths that go through full_clean() — ModelForms and the Django
+    admin. objects.create() deliberately skips this; that gap is covered by the
+    read-time tests in TicketVisibilityQuerysetTest.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.forensic = _make_forensic('av_forensic')
+        cls.redteam  = _make_redteam_manager('av_redteam')
+        cls.soc      = _make_t1('av_soc')
+        cls.ticket   = _make_ticket()
+
+    def _subtask(self, subtask_type, assigned_to):
+        return TicketSubtask(
+            ticket=self.ticket, subtask_type=subtask_type,
+            title='x', assigned_to=assigned_to,
+        )
+
+    def test_forensic_rca_assigned_to_redteam_is_rejected(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self._subtask(TicketSubtask.TYPE_FORENSIC_RCA, self.redteam).full_clean()
+        self.assertIn('assigned_to', ctx.exception.error_dict)
+
+    def test_va_pt_assigned_to_forensic_is_rejected(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self._subtask(TicketSubtask.TYPE_VA_PT, self.forensic).full_clean()
+        self.assertIn('assigned_to', ctx.exception.error_dict)
+
+    def test_response_request_assigned_to_non_response_user_is_rejected(self):
+        with self.assertRaises(ValidationError) as ctx:
+            self._subtask(TicketSubtask.TYPE_INFRA_SEC, self.soc).full_clean()
+        self.assertIn('assigned_to', ctx.exception.error_dict)
+
+    def test_profileless_assignee_is_rejected(self):
+        # Fail closed, matching visible_to()'s treatment of the profile-less
+        # account that exists between admin creation and profile setup.
+        stray = User.objects.create_user(username='av_stray', password='testpass123')
+        with self.assertRaises(ValidationError) as ctx:
+            self._subtask(TicketSubtask.TYPE_VA_PT, stray).full_clean()
+        self.assertIn('assigned_to', ctx.exception.error_dict)
+
+    def test_correctly_routed_assignments_validate(self):
+        self._subtask(TicketSubtask.TYPE_FORENSIC_RCA, self.forensic).full_clean()
+        self._subtask(TicketSubtask.TYPE_VA_PT, self.redteam).full_clean()
+        self._subtask(TicketSubtask.TYPE_INFRA_SEC, self.redteam).full_clean()
+
+    def test_unassigned_response_request_validates(self):
+        # The spawn flow legitimately leaves assigned_to blank when a picker is
+        # needed; clean() must not turn that into an error.
+        self._subtask(TicketSubtask.TYPE_VA_PT, None).full_clean()
+
+    def test_legacy_subtask_assignment_is_unconstrained(self):
+        # Investigation/Countermeasure route nowhere and keep their freedom;
+        # SubtaskForm is what keeps response-team users out of them.
+        self._subtask(TicketSubtask.TYPE_INVESTIGATION, self.soc).full_clean()
+        self._subtask(TicketSubtask.TYPE_COUNTERMEASURE, self.soc).full_clean()
+
+
+class ResponseRequestQueueScopingTest(TestCase):
+    """K9 read-time half, at the HTTP level."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.forensic = _make_forensic('qs_forensic')
+        cls.redteam  = _make_redteam_manager('qs_redteam')
+        cls.mgr      = _make_user('qs_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+        cls.ticket_rt  = _make_ticket()
+        cls.ticket_bad = _make_ticket()
+
+        cls.va_pt = TicketSubtask.objects.create(
+            ticket=cls.ticket_rt, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest the DMZ', assigned_to=cls.redteam,
+        )
+        # Misrouted on purpose (objects.create bypasses clean()) — this is the
+        # row a seed or migration could leave behind.
+        cls.misrouted = TicketSubtask.objects.create(
+            ticket=cls.ticket_bad, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Memory dump RCA', assigned_to=cls.redteam,
+        )
+
+    def test_queue_hides_a_request_of_another_teams_type(self):
+        self.client.login(username='qs_redteam', password='testpass123')
+        body = self.client.get(reverse('response_request_queue')).content.decode()
+        self.assertIn('Pentest the DMZ', body)
+        self.assertNotIn('Memory dump RCA', body)
+
+    def test_misrouted_request_does_not_unlock_the_ticket(self):
+        self.client.login(username='qs_redteam', password='testpass123')
+        self.assertEqual(
+            self.client.get(
+                reverse('ticket_detail', kwargs={'pk': self.ticket_bad.pk})
+            ).status_code, 404,
+        )
+
+    def test_correctly_routed_request_still_grants_access(self):
+        self.client.login(username='qs_redteam', password='testpass123')
+        self.assertEqual(
+            self.client.get(
+                reverse('ticket_detail', kwargs={'pk': self.ticket_rt.pk})
+            ).status_code, 200,
+        )
+
+    def test_soc_overview_still_sees_every_type(self):
+        # The all-team overview is unfiltered by design — scoping applies only
+        # to a response-team member's own queue.
+        self.client.login(username='qs_mgr', password='testpass123')
+        body = self.client.get(reverse('response_request_queue')).content.decode()
+        self.assertIn('Pentest the DMZ', body)
+        self.assertIn('Memory dump RCA', body)
 
 
 class ResponseRequestApprovalGateTest(TestCase):

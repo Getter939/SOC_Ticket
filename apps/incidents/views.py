@@ -79,6 +79,10 @@ def _can_upload_ticket_attachment(ticket, user):
     Seeing a ticket is deliberately broader than acting on it. Attachments
     therefore follow the same "whose court is it?" rule as the workflow, and
     are never accepted after a ticket has reached a terminal state.
+
+    This gates ``upload_attachment``. There is exactly one documented exception:
+    a response-request deliverable uploaded through ``update_subtask``, which
+    runs on _can_upload_subtask_result() instead — see the reasoning there.
     """
     if ticket.status in Ticket.TERMINAL_STATUSES:
         return False
@@ -104,6 +108,31 @@ def _can_upload_ticket_attachment(ticket, user):
     if ticket.status == Ticket.STATUS_AWAITING_OWNER:
         return profile.is_system_owner and ticket.system_owner_id == user.pk
     return False
+
+
+def _can_upload_subtask_result(subtask, user):
+    """Whether user may attach a deliverable to this subtask.
+
+    A deliberate exception to _can_upload_ticket_attachment()'s "whose court is
+    the TICKET in?" rule, because for a response request the court that matters
+    is the REQUEST. A Forensic Analyst must be able to file their report while
+    the parent ticket sits in PENDING_MGR_TRIAGE — a state whose ticket-level
+    rule answers `profile.is_soc_manager`, which would refuse them.
+
+    Narrower than the `is_soc or is_assignee` test this replaces: plain SOC
+    staff could previously attach a file here to a ticket they had no
+    ticket-level upload right on. The assignee does the work, the SOC manager
+    owns the request lifecycle, and nobody else needs a file on it.
+
+    Terminal-status refusal is NOT repeated here — callers check it first, ahead
+    of the superuser bypass, which is what makes a closed ticket refuse everyone.
+    """
+    if user.is_superuser:
+        return True
+    if subtask.assigned_to_id == user.pk:
+        return True
+    profile = getattr(user, 'profile', None)
+    return profile is not None and profile.is_soc_manager
 
 
 def _valid_soc_status_choices(ticket, user):
@@ -1934,18 +1963,28 @@ def update_subtask(request, subtask_id):
 
             # Optional deliverable file (e.g. forensic report / scan output),
             # linked to both the subtask and its ticket so it serves through the
-            # hardened download_attachment path.
+            # hardened download_attachment path. Gated more tightly than the
+            # notes/status update above: can_update lets any SOC member edit a
+            # request, but only the assignee, a SOC manager, or a superuser may
+            # put a file on the ticket through this route.
             upload = request.FILES.get('result_file')
             if upload is not None:
-                try:
-                    validate_attachment(upload)
-                    TicketAttachment.objects.create(
-                        ticket=ticket, subtask=subtask, file=upload,
-                        original_name=upload.name, uploaded_by=request.user,
-                        description=request.POST.get('result_file_desc', '').strip(),
+                if not _can_upload_subtask_result(subtask, request.user):
+                    messages.error(
+                        request,
+                        'คุณไม่มีสิทธิ์แนบไฟล์ผลการดำเนินการของคำขอนี้ '
+                        '— บันทึกข้อความถูกจัดเก็บแล้ว แต่ไฟล์ไม่ถูกแนบ',
                     )
-                except ValidationError as e:
-                    messages.error(request, e.message)
+                else:
+                    try:
+                        validate_attachment(upload)
+                        TicketAttachment.objects.create(
+                            ticket=ticket, subtask=subtask, file=upload,
+                            original_name=upload.name, uploaded_by=request.user,
+                            description=request.POST.get('result_file_desc', '').strip(),
+                        )
+                    except ValidationError as e:
+                        messages.error(request, e.message)
 
             # A response request reaching DONE for the first time pings the SOC
             # managers so they can review the result and proceed to approval.
@@ -1981,7 +2020,14 @@ def response_request_queue(request):
         .order_by('status', '-created_at')
     )
     if is_response and not is_overview:
-        requests_qs = requests_qs.filter(assigned_to=request.user)
+        # Both conditions matter. assigned_to alone would surface a request of
+        # another team's type that was mis-assigned by a seed, a data migration,
+        # or the admin — the queue must not be the place that invariant is
+        # discovered. Mirrors the same filter in TicketQuerySet.visible_to().
+        requests_qs = requests_qs.filter(
+            assigned_to=request.user,
+            subtask_type__in=TicketSubtask.types_for_role(profile.role),
+        )
 
     status_filter = request.GET.get('status', '').strip()
     if status_filter in dict(TicketSubtask.STATUS_CHOICES):

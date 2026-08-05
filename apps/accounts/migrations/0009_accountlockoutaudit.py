@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ('accounts', '0007_passwordchangeaudit'),
+        ('accounts', '0008_alter_userprofile_role'),
     ]
 
     operations = [
@@ -31,10 +31,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='accountlockoutaudit',
-            index=models.Index(fields=['username', 'unlocked_at'], name='accounts_al_username_5e2965_idx'),
+            index=models.Index(fields=['username', 'unlocked_at'], name='accounts_ac_usernam_de0f27_idx'),
         ),
         migrations.AddIndex(
             model_name='accountlockoutaudit',
-            index=models.Index(fields=['ip_address', 'unlocked_at'], name='accounts_al_ip_addr_2c56bf_idx'),
+            index=models.Index(fields=['ip_address', 'unlocked_at'], name='accounts_ac_ip_addr_75784d_idx'),
         ),
     ]

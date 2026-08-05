@@ -379,3 +379,124 @@ class AccountLockoutAdminTest(TestCase):
         self.assertIsNone(response)
         reset.assert_not_called()
         self.assertFalse(AccountLockoutAudit.objects.exists())
+
+
+class DjangoAdminAccessByRoleTest(TestCase):
+    """K13: /admin/ is for SOC Managers and superusers only.
+
+    Nothing in this codebase ever assigns ``is_staff`` — every flag in a live
+    database was set by hand. These tests pin the RULE; ``manage.py
+    audit_staff_flags`` is what checks the live roster against it.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.accounts.models import UserProfile
+
+        def _make(username, role, **flags):
+            user = User.objects.create_user(
+                username, f'{username}@example.test', 'AdminAccess!123', **flags,
+            )
+            UserProfile.objects.create(
+                user=user, department='Test', phone='000', role=role,
+            )
+            return user
+
+        cls.system_admin = _make('k13_sysadmin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.tier2 = _make('k13_t2', UserProfile.ROLE_SOC_STAFF, )
+        cls.tier2.profile.tier = UserProfile.TIER_T2
+        cls.tier2.profile.save(update_fields=['tier'])
+        cls.soc_manager = _make(
+            'k13_manager', UserProfile.ROLE_SOC_MANAGER, is_staff=True,
+        )
+
+    def _get_admin_index(self, user):
+        self.client.force_login(user)
+        return self.client.get('/admin/', follow=False)
+
+    def test_system_admin_is_bounced_to_the_admin_login(self):
+        response = self._get_admin_index(self.system_admin)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/admin/login/', response['Location'])
+
+    def test_tier2_analyst_is_bounced_to_the_admin_login(self):
+        response = self._get_admin_index(self.tier2)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/admin/login/', response['Location'])
+
+    def test_soc_manager_with_is_staff_reaches_the_admin(self):
+        self.assertEqual(self._get_admin_index(self.soc_manager).status_code, 200)
+
+    def test_a_soc_role_alone_does_not_grant_admin_access(self):
+        # The role is not what opens /admin/ — is_staff is. Strip the flag from
+        # the manager and the door closes, confirming no role->is_staff mapping
+        # has crept in.
+        self.soc_manager.is_staff = False
+        self.soc_manager.save(update_fields=['is_staff'])
+        response = self._get_admin_index(self.soc_manager)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/admin/login/', response['Location'])
+
+
+class AuditStaffFlagsCommandTest(TestCase):
+    """The live-data half of K13."""
+
+    @staticmethod
+    def _run(**kwargs):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out, err = StringIO(), StringIO()
+        try:
+            call_command('audit_staff_flags', stdout=out, stderr=err, **kwargs)
+            code = 0
+        except SystemExit as exc:
+            code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_passes_when_only_superusers_and_soc_managers_hold_is_staff(self):
+        from apps.accounts.models import UserProfile
+
+        User.objects.create_superuser('af_root', 'r@example.test', 'Pw!123456789')
+        mgr = User.objects.create_user(
+            'af_mgr', 'm@example.test', 'Pw!123456789', is_staff=True,
+        )
+        UserProfile.objects.create(
+            user=mgr, department='T', phone='0', role=UserProfile.ROLE_SOC_MANAGER,
+        )
+
+        code, out, _ = self._run()
+        self.assertEqual(code, 0)
+        self.assertIn('af_root', out)
+        self.assertIn('af_mgr', out)
+
+    def test_fails_on_an_unexpected_staff_account(self):
+        from apps.accounts.models import UserProfile
+
+        stray = User.objects.create_user(
+            'af_stray', 's@example.test', 'Pw!123456789', is_staff=True,
+        )
+        UserProfile.objects.create(
+            user=stray, department='T', phone='0',
+            role=UserProfile.ROLE_SYSTEM_ADMIN,
+        )
+
+        code, _, err = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn('af_stray', err)
+
+    def test_profileless_staff_account_is_reported(self):
+        User.objects.create_user(
+            'af_noprofile', 'n@example.test', 'Pw!123456789', is_staff=True,
+        )
+        code, _, err = self._run()
+        self.assertEqual(code, 1)
+        self.assertIn('af_noprofile', err)
+
+    def test_command_never_mutates_flags(self):
+        stray = User.objects.create_user(
+            'af_readonly', 'ro@example.test', 'Pw!123456789', is_staff=True,
+        )
+        self._run()
+        stray.refresh_from_db()
+        self.assertTrue(stray.is_staff)
