@@ -22,23 +22,24 @@ from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_POST
 
 from apps.accounts.models import UserProfile
+from apps.incidents import history
 from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentForm,
     ProjectIncidentTargetFormSet, ResponseRequestForm, SubtaskForm,
-    SubtaskUpdateForm, TicketForm, TicketReviewForm, TriageForm,
+    SubtaskUpdateForm, TicketEditForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
     ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
-    TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
+    TicketAttachment, TicketLog, TicketLogRevision, TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
     validate_attachment,
 )
 from .staging import (
-    MAX_ATTACHMENT_COUNT, adopt_staged, discard_staged, staged_for,
-    stage_uploads,
+    MAX_ATTACHMENT_COUNT, adopt_staged, discard_staged, restore_staged,
+    staged_for, stage_uploads,
 )
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
@@ -122,6 +123,72 @@ def _can_upload_ticket_attachment(ticket, user):
     if ticket.status == Ticket.STATUS_AWAITING_OWNER:
         return profile.is_system_owner and ticket.system_owner_id == user.pk
     return False
+
+
+def _can_delete_ticket_attachment(ticket, attachment, user):
+    """Whether user may remove this piece of evidence.
+
+    Removing evidence is deliberately narrower than adding it. The terminal
+    check comes first, ahead of the superuser bypass — the same order as
+    _can_upload_ticket_attachment, and what makes a closed case refuse
+    everyone. Once a ticket is APPROVED or CLOSED_EVENT its evidence is frozen;
+    that is the window in which a quiet deletion would never be noticed.
+
+    "Any SOC member" is not enough: SOC can see every ticket, so that rule let
+    an uninvolved analyst remove another team's evidence. The uploader may undo
+    their own mistake, and a SOC Manager may act on anything still open.
+    """
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        return False
+    if user.is_superuser:
+        return True
+    if attachment.uploaded_by_id == user.pk:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc_manager)
+
+
+def _can_edit_ticket(ticket, user):
+    """Whether user may correct this ticket's content.
+
+    There was no edit surface at all before this: Tier 1's original content
+    could only ever be fixed by a Tier 2 analyst while the ticket sat at
+    ESCALATED_T2, so a ticket routed straight to the manager was uneditable for
+    its whole life.
+
+    The creator gets to fix their own typo while the ticket is still untouched
+    (NEW — nobody else has acted on it). After that it is SOC's call, because by
+    then the content is what other roles are acting on. Closed cases are frozen,
+    and every edit is recorded field-by-field (see apps.incidents.history).
+
+    Note the creator clause is currently redundant: only Tier 1 can open a
+    ticket, and Tier 1 is SOC, so the final line already covers them. It is
+    written out anyway so that narrowing SOC's edit rights later cannot silently
+    take away the author's right to correct their own untouched ticket.
+    """
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        return False
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    if profile is None:
+        return False
+    if ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == user.pk:
+        return profile.is_tier1
+    return profile.is_soc
+
+
+def _can_restore_ticket_attachment(user):
+    """Whether user may bring deleted evidence back.
+
+    Not gated on terminal status, unlike deletion. Refusing removal on a closed
+    case protects the evidence set; refusing *recovery* would only make a
+    mistake permanent, so restore stays available after closure.
+    """
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc_manager)
 
 
 def _can_upload_subtask_result(subtask, user):
@@ -1186,6 +1253,21 @@ def ticket_detail(request, pk):
             except ValidationError as e:
                 messages.error(request, e.message)
 
+        elif action == 'step_back':
+            # Same shape as reassess_emergency: the model owns manager-only,
+            # not-terminal and reason-required, so the server stays authoritative
+            # regardless of what the UI offered.
+            try:
+                target = ticket.step_back(
+                    request.user, request.POST.get('step_back_reason', ''))
+                messages.success(
+                    request,
+                    'ย้อนขั้นตอนเรียบร้อยแล้ว — '
+                    f'สถานะปัจจุบัน: {dict(Ticket.STATUS_CHOICES).get(target, target)}',
+                )
+            except ValidationError as e:
+                messages.error(request, e.message)
+
         elif action == 't2_review':
             next_status = request.POST.get('status', '')
             review_form = TicketReviewForm(request.POST, instance=ticket)
@@ -1201,7 +1283,14 @@ def ticket_detail(request, pk):
             elif review_form.is_valid():
                 try:
                     with transaction.atomic():
+                        # Tier 2 rewrites ~25 content fields here; without this
+                        # the previous values would be unrecoverable. Read from
+                        # the DB — review_form.is_valid() has already written the
+                        # submitted data onto the in-memory ticket.
+                        before = history.snapshot_saved(ticket)
                         ticket = review_form.save()
+                        history.record_changes(
+                            ticket, before, request.user, source='t2_review')
                         ticket.transition_to(
                             next_status, request.user,
                             request.POST.get('decision_note', '').strip()
@@ -1311,6 +1400,10 @@ def ticket_detail(request, pk):
                 if not report:
                     messages.error(request, 'กรุณากรอกรายงานการควบคุม')
                 else:
+                    # Tier 2 can bounce a containment report back for rework,
+                    # and the form returns pre-filled — so a resubmit overwrites
+                    # the previous text. Keep what it replaced.
+                    before = history.snapshot(ticket)
                     ticket.containment_report = report
                     if remediation:
                         ticket.remediation_summary = remediation
@@ -1340,6 +1433,8 @@ def ticket_detail(request, pk):
                             request.user,
                             transition_note,
                         )
+                        history.record_changes(
+                            ticket, before, request.user, source='containment')
                         if not notify_containment_submitted(ticket):
                             messages.warning(
                                 request,
@@ -1416,6 +1511,20 @@ def ticket_detail(request, pk):
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
         'can_access_report': _can_access_ticket_report(request.user),
+        'can_edit_ticket': _can_edit_ticket(ticket, request.user),
+        'can_step_back': ticket.can_step_back(request.user),
+        'step_back_target_label': dict(Ticket.STATUS_CHOICES).get(
+            ticket.step_back_target(), ''),
+        'field_changes': ticket.field_changes.select_related(
+            'changed_by', 'subtask')[:50],
+        'can_restore_attachment': _can_restore_ticket_attachment(request.user),
+        # Removed evidence, shown only to the roles that can bring it back.
+        'deleted_attachments': (
+            TicketAttachment.all_objects
+            .filter(ticket=ticket, deleted_at__isnull=False)
+            .select_related('deleted_by').order_by('-deleted_at')
+            if _can_restore_ticket_attachment(request.user) else []
+        ),
         'profile': profile,
         'is_terminal': is_terminal,
         'can_upload_attachment': can_upload_attachment,
@@ -1527,7 +1636,16 @@ def edit_log(request, log_id):
         note = (request.POST.get('note') or '').strip()
         if not note:
             messages.error(request, 'บันทึกต้องไม่เว้นว่าง')
+        elif note == log.note:
+            return redirect('ticket_detail', pk=ticket_id)
         else:
+            # Bank the previous text before overwriting. The timeline is the
+            # audit trail, and this view lets the author — or any SOC manager —
+            # rewrite it, so without a revision the record of an action could be
+            # edited by the person who took it, leaving nothing behind.
+            TicketLogRevision.objects.create(
+                log=log, previous_note=log.note, edited_by=request.user,
+            )
             log.note = note
             log.save(update_fields=['note', 'updated_at'])
             messages.success(request, 'แก้ไขบันทึกเรียบร้อยแล้ว')
@@ -2039,9 +2157,15 @@ def update_subtask(request, subtask_id):
 
     if request.method == 'POST':
         was_done = subtask.is_done
+        # Result notes are freely overwritable by any SOC member and previously
+        # left no audit at all, so a forensic analyst's findings could be
+        # replaced silently. Capture what was there first.
+        previous_notes = subtask.result_notes
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
             subtask = form.save()
+            history.record_subtask_change(
+                subtask, previous_notes, subtask.result_notes, request.user)
 
             # Optional deliverable file (e.g. forensic report / scan output),
             # linked to both the subtask and its ticket so it serves through the
@@ -2170,11 +2294,12 @@ def upload_attachment(request, pk):
 @login_required
 @require_POST
 def discard_staged_attachment(request, pk):
-    """Drop one file being held for an in-progress case form.
+    """Remove one file from an in-progress case form.
 
     Scoped to the uploader inside discard_staged; a 404 here means the row is
-    gone or was never theirs. Answers 204 so the picker can just remove the
-    chip without a page reload.
+    gone or was never theirs. Answers 204 so the picker can grey the chip out
+    without a page reload. The file is retained so restore_staged_attachment
+    can undo this.
     """
     if not discard_staged(request.user, pk):
         raise Http404
@@ -2182,27 +2307,139 @@ def discard_staged_attachment(request, pk):
 
 
 @login_required
+@require_POST
+def restore_staged_attachment(request, pk):
+    """Undo a discard while the case form is still open."""
+    if not restore_staged(request.user, pk):
+        raise Http404
+    return HttpResponse(status=204)
+
+
+@login_required
+@require_POST
 def delete_attachment(request, attachment_id):
     att = get_object_or_404(TicketAttachment, pk=attachment_id)
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
-    profile = getattr(request.user, 'profile', None)
-    # Only SOC or the original uploader may delete
-    can_delete = (
-        request.user.is_superuser
-        or (profile and profile.is_soc)
-        or att.uploaded_by == request.user
-    )
-    if request.method == 'POST' and can_delete:
-        att.deleted_by = request.user
-        att.deleted_at = timezone.now()
-        att.save(update_fields=('deleted_by', 'deleted_at'))
-        TicketLog.objects.create(
-            ticket=ticket,
-            note=f'Attachment removed: {att.original_name}',
-            status_at_time=ticket.status,
-            author=request.user,
+
+    if not _can_delete_ticket_attachment(ticket, att, request.user):
+        # A refused attempt used to be a silent redirect, so probing left no
+        # trace at all. It goes to the application log rather than TicketLog:
+        # anyone who can see a ticket could otherwise flood its timeline.
+        logger.warning(
+            'Refused attachment delete: user=%s attachment=%s ticket=%s status=%s',
+            request.user.pk, att.pk, ticket.ticket_id, ticket.status,
         )
-        messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว')
+        messages.error(
+            request,
+            'คุณไม่มีสิทธิ์ลบไฟล์นี้ หรือเคสถูกปิดแล้ว — หลักฐานของเคสที่ปิดแล้วจะถูกล็อกไว้',
+        )
+        return redirect('ticket_detail', pk=ticket.pk)
+
+    reason = (request.POST.get('reason') or '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการลบไฟล์')
+        return redirect('ticket_detail', pk=ticket.pk)
+
+    att.deleted_by = request.user
+    att.deleted_at = timezone.now()
+    att.deleted_reason = reason[:255]
+    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
+    TicketLog.objects.create(
+        ticket=ticket,
+        note=f'Attachment removed: {att.original_name} — เหตุผล: {reason}',
+        status_at_time=ticket.status,
+        author=request.user,
+    )
+    messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว — ผู้จัดการ SOC สามารถกู้คืนได้')
+    return redirect('ticket_detail', pk=ticket.pk)
+
+
+@login_required
+def edit_ticket(request, pk):
+    """Correct a ticket's content, recording every field that moves.
+
+    Deliberately cannot change status, route, or sign-off: this is a correction
+    surface, not a workflow one. Use the transition controls for that.
+    """
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    if not _can_edit_ticket(ticket, request.user):
+        messages.error(
+            request,
+            'คุณไม่มีสิทธิ์แก้ไขข้อมูลเคสนี้ '
+            '— เจ้าของเคสแก้ไขได้ขณะยังไม่มีผู้อื่นดำเนินการ หลังจากนั้นเป็นสิทธิ์ของ SOC '
+            'และเคสที่ปิดแล้วจะถูกล็อกไว้',
+        )
+        return redirect('ticket_detail', pk=pk)
+
+    if request.method == 'POST':
+        form = TicketEditForm(request.POST, instance=ticket)
+        if form.is_valid():
+            reason = (request.POST.get('reason') or '').strip()
+            if not reason:
+                messages.error(request, 'กรุณาระบุเหตุผลในการแก้ไข')
+            else:
+                with transaction.atomic():
+                    # From the DB, not the instance: form.is_valid() above has
+                    # already copied the submitted values onto `ticket`.
+                    before = history.snapshot_saved(ticket)
+                    ticket = form.save()
+                    changes = history.record_changes(
+                        ticket, before, request.user, source='edit')
+                    if changes:
+                        summary = ', '.join(c.field_label for c in changes)
+                        TicketLog.objects.create(
+                            ticket=ticket,
+                            note=(f'แก้ไขข้อมูลเคส ({len(changes)} รายการ): '
+                                  f'{summary}\nเหตุผล: {reason}'),
+                            status_at_time=ticket.status,
+                            author=request.user,
+                        )
+                if changes:
+                    messages.success(
+                        request, f'บันทึกการแก้ไข {len(changes)} รายการเรียบร้อยแล้ว')
+                else:
+                    messages.info(request, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
+                return redirect('ticket_detail', pk=pk)
+    else:
+        form = TicketEditForm(instance=ticket)
+
+    return render(request, 'incidents/ticket_edit.html', {
+        'ticket': ticket,
+        'form': form,
+        'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
+    })
+
+
+@login_required
+@require_POST
+def restore_attachment(request, attachment_id):
+    """Bring back evidence removed by mistake. SOC Manager / superuser only."""
+    att = get_object_or_404(
+        TicketAttachment.all_objects, pk=attachment_id, deleted_at__isnull=False)
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
+
+    if not _can_restore_ticket_attachment(request.user):
+        logger.warning(
+            'Refused attachment restore: user=%s attachment=%s ticket=%s',
+            request.user.pk, att.pk, ticket.ticket_id,
+        )
+        messages.error(request, 'กู้คืนไฟล์ได้เฉพาะผู้จัดการ SOC เท่านั้น')
+        return redirect('ticket_detail', pk=ticket.pk)
+
+    removed_by = (
+        att.deleted_by.get_full_name() or att.deleted_by.username
+    ) if att.deleted_by else 'ไม่ทราบผู้ลบ'
+    att.deleted_by = None
+    att.deleted_at = None
+    att.deleted_reason = ''
+    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
+    TicketLog.objects.create(
+        ticket=ticket,
+        note=f'Attachment restored: {att.original_name} (เดิมลบโดย {removed_by})',
+        status_at_time=ticket.status,
+        author=request.user,
+    )
+    messages.success(request, f'กู้คืน "{att.original_name}" เรียบร้อยแล้ว')
     return redirect('ticket_detail', pk=ticket.pk)
 
 

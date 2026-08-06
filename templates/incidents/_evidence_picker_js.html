@@ -18,6 +18,12 @@ form; it drives every .evidence-picker on the page.
   }
   .evidence-chip-x:hover { color: #dc3545; }
   .evidence-chip-staged { background: #e8f5e9; border-color: #a5d6a7; }
+  .evidence-chip-removed { background: #f1f3f5; border-color: #dee2e6; opacity: .65; }
+  .evidence-chip-removed .evidence-chip-name { text-decoration: line-through; }
+  .evidence-chip-undo {
+    border: 0; background: transparent; color: #0d6efd; font-size: .78rem;
+    padding: 0 .15rem; cursor: pointer; text-decoration: underline;
+  }
   .evidence-chip-bad { background: #fdecea; border-color: #f5c2c7; color: #842029; }
   .evidence-chip-bad .evidence-chip-size { color: #842029; }
   .evidence-total { font-size: .78rem; color: #6c757d; }
@@ -78,9 +84,12 @@ form; it drives every .evidence-picker on the page.
 
     function stagedBytes() {
       var total = 0;
-      root.querySelectorAll('.evidence-chip-staged').forEach(function (chip) {
-        total += parseInt(chip.dataset.bytes || '0', 10);
-      });
+      // Discarded chips are still in the DOM (so they can be undone) but the
+      // server no longer counts them, so neither does the size check.
+      root.querySelectorAll('.evidence-chip-staged:not(.evidence-chip-removed)')
+        .forEach(function (chip) {
+          total += parseInt(chip.dataset.bytes || '0', 10);
+        });
       return total;
     }
 
@@ -170,20 +179,47 @@ form; it drives every .evidence-picker on the page.
       });
     }
 
-    // Discard a file the server is already holding.
+    // Discard / restore a file the server is already holding. The chip is
+    // greyed rather than removed, so an accidental click is one click back —
+    // the server keeps the bytes until purge_staged_attachments runs.
     var csrf = form && form.querySelector('input[name=csrfmiddlewaretoken]');
-    root.querySelectorAll('[data-discard]').forEach(function (btn) {
-      var chip = btn.closest('.evidence-chip-staged');
-      btn.addEventListener('click', function () {
-        btn.disabled = true;
-        fetch(btn.dataset.discard, {
-          method: 'POST',
-          headers: { 'X-CSRFToken': csrf ? csrf.value : '' },
-          credentials: 'same-origin',
-        }).then(function (resp) {
-          if (resp.ok) { chip.remove(); render(); }
-          else { btn.disabled = false; }
-        }).catch(function () { btn.disabled = false; });
+    function post(url) {
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf ? csrf.value : '' },
+        credentials: 'same-origin',
+      });
+    }
+
+    root.querySelectorAll('.evidence-chip-staged').forEach(function (chip) {
+      var discardBtn = chip.querySelector('[data-discard]');
+      var undoBtn = chip.querySelector('.evidence-chip-undo');
+      if (!discardBtn || !undoBtn) return;
+
+      function setDiscarded(flag) {
+        chip.classList.toggle('evidence-chip-removed', flag);
+        discardBtn.classList.toggle('d-none', flag);
+        undoBtn.classList.toggle('d-none', !flag);
+        chip.dataset.discarded = flag ? '1' : '';
+        render();
+      }
+
+      discardBtn.addEventListener('click', function () {
+        var name = chip.querySelector('.evidence-chip-name').textContent;
+        if (!window.confirm('ลบไฟล์ "' + name + '" ออกจากรายการแนบ?')) return;
+        discardBtn.disabled = true;
+        post(discardBtn.dataset.discard).then(function (resp) {
+          if (resp.ok) setDiscarded(true);
+          discardBtn.disabled = false;
+        }).catch(function () { discardBtn.disabled = false; });
+      });
+
+      undoBtn.addEventListener('click', function () {
+        undoBtn.disabled = true;
+        post(chip.dataset.restore).then(function (resp) {
+          if (resp.ok) setDiscarded(false);
+          undoBtn.disabled = false;
+        }).catch(function () { undoBtn.disabled = false; });
       });
     });
   }

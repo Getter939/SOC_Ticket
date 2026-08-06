@@ -74,6 +74,7 @@
       <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</button></form>
       <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</button></form>
       {% endif %}
+      {% if can_edit_ticket %}<a class="btn btn-light btn-sm px-3" href="{% url 'edit_ticket' ticket.pk %}"><i class="bi bi-pencil-square me-1"></i>แก้ไขข้อมูล</a>{% endif %}
       <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
       {# "Regenerate the report" is only actionable by whoever can generate one. #}
       {% if can_access_report and ticket.report_generated_at and ticket.report_ticket_updated_at and ticket.updated_at > ticket.report_ticket_updated_at %}
@@ -217,18 +218,110 @@
         <div class="timeline">
           {% for log in logs %}
           <details class="timeline-entry" {% if forloop.first %}open{% endif %}>
-            <summary><div class="d-flex justify-content-between align-items-start gap-2"><div><span class="badge bg-light text-dark border me-1">{{ log.status_display }}</span><span class="small fw-semibold">{% if log.author %}{{ log.author.get_full_name|default:log.author.username }}{% else %}Unknown user{% endif %}</span></div><small class="text-muted text-nowrap">{{ log.created_at|date:"d M Y H:i" }}</small></div></summary>
+            <summary><div class="d-flex justify-content-between align-items-start gap-2"><div><span class="badge bg-light text-dark border me-1">{{ log.status_display }}</span><span class="small fw-semibold">{% if log.author %}{{ log.author.get_full_name|default:log.author.username }}{% else %}Unknown user{% endif %}</span>{% if log.was_edited %}<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle ms-1" title="รายการนี้ถูกแก้ไขหลังบันทึก">แก้ไขแล้ว</span>{% endif %}</div><small class="text-muted text-nowrap">{{ log.created_at|date:"d M Y H:i" }}</small></div></summary>
             <div class="timeline-note">{{ log.note|linebreaksbr }}</div>
+            {# The timeline is the audit trail, so a rewrite must not erase what #}
+            {# was there — every earlier version stays visible here. #}
+            {% if log.was_edited %}
+            <details class="mt-2">
+              <summary class="small text-muted">ประวัติการแก้ไข ({{ log.revisions.count }})</summary>
+              {% for rev in log.revisions.all %}
+              <div class="small border-start ps-2 mt-2">
+                <div class="text-muted">แก้ไขโดย {% if rev.edited_by %}{{ rev.edited_by.get_full_name|default:rev.edited_by.username }}{% else %}ไม่ทราบ{% endif %} · {{ rev.edited_at|date:"d M Y H:i" }}</div>
+                <div class="text-decoration-line-through text-muted">{{ rev.previous_note|linebreaksbr }}</div>
+              </div>
+              {% endfor %}
+            </details>
+            {% endif %}
           </details>
           {% empty %}<p class="text-muted small">ยังไม่มีประวัติ</p>{% endfor %}
         </div>
+
+        {# Field-level history. The timeline above says what happened; this says #}
+        {# what changed, so a rewritten ticket can be reconstructed. #}
+        {% if field_changes %}
+        <div class="mt-3">
+          <button class="btn btn-sm btn-link text-muted p-0" type="button" data-bs-toggle="collapse" data-bs-target="#field-changes">
+            <i class="bi bi-pencil-square me-1"></i>ประวัติการแก้ไขข้อมูล ({{ field_changes|length }})
+          </button>
+          <div class="collapse mt-2" id="field-changes">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle small mb-0">
+                <thead><tr><th>ฟิลด์</th><th>เดิม</th><th>ใหม่</th><th class="text-nowrap">ผู้แก้ไข</th></tr></thead>
+                <tbody>
+                  {% for change in field_changes %}
+                  <tr>
+                    <td>{{ change.field_label }}</td>
+                    <td class="text-muted text-decoration-line-through">{{ change.old_value|default:"—"|truncatechars:80 }}</td>
+                    <td>{{ change.new_value|default:"—"|truncatechars:80 }}</td>
+                    <td class="text-nowrap">
+                      {% if change.changed_by %}{{ change.changed_by.get_full_name|default:change.changed_by.username }}{% else %}ไม่ทราบ{% endif %}
+                      <div class="text-muted">{{ change.changed_at|date:"d M Y H:i" }}</div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </section>
 
     <section class="card section-card">
       <div class="card-header"><h2 class="section-title"><i class="bi bi-paperclip me-2"></i>ไฟล์แนบ</h2></div>
       <div class="card-body">
-        {% for att in attachments %}<div class="d-flex justify-content-between gap-3 border-bottom py-2"><div><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>{% if att.description %}<div class="small">{{ att.description }}</div>{% endif %}<div class="small text-muted">Uploaded by {% if att.uploaded_by %}{{ att.uploaded_by.get_full_name|default:att.uploaded_by.username }}{% else %}Unknown user{% endif %} · {{ att.uploaded_at|date:"d M Y H:i" }}</div></div>{% if request.user.is_superuser or profile and profile.is_soc or att.uploaded_by == request.user %}<form method="post" action="{% url 'delete_attachment' att.pk %}">{% csrf_token %}<button class="btn btn-sm btn-link text-danger" type="submit">ลบ</button></form>{% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีไฟล์แนบ</p>{% endfor %}
+        {% for att in attachments %}<div class="d-flex justify-content-between gap-3 border-bottom py-2"><div><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>{% if att.description %}<div class="small">{{ att.description }}</div>{% endif %}<div class="small text-muted">Uploaded by {% if att.uploaded_by %}{{ att.uploaded_by.get_full_name|default:att.uploaded_by.username }}{% else %}Unknown user{% endif %} · {{ att.uploaded_at|date:"d M Y H:i" }}</div></div>
+          {# Mirrors _can_delete_ticket_attachment: frozen once the case closes, #}
+          {# then uploader or SOC Manager only. Deleting needs a written reason, #}
+          {# so the modal doubles as the confirmation step. #}
+          {% if not is_terminal %}{% if request.user.is_superuser or att.uploaded_by == request.user or profile and profile.is_soc_manager %}
+          <div>
+            <button type="button" class="btn btn-sm btn-link text-danger" data-bs-toggle="modal" data-bs-target="#delete-att-{{ att.pk }}">ลบ</button>
+          </div>
+          <div class="modal fade" id="delete-att-{{ att.pk }}" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+              <form method="post" action="{% url 'delete_attachment' att.pk %}" class="modal-content">
+                {% csrf_token %}
+                <div class="modal-header">
+                  <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>ลบไฟล์หลักฐาน</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button>
+                </div>
+                <div class="modal-body">
+                  <p class="mb-2">กำลังจะลบ <strong>{{ att.original_name }}</strong> ออกจากเคสนี้</p>
+                  <p class="small text-muted">ไฟล์จะถูกซ่อนจากเคส แต่ยังเก็บไว้ในระบบ — ผู้จัดการ SOC สามารถกู้คืนได้</p>
+                  <label class="form-label fw-semibold" for="reason-att-{{ att.pk }}">เหตุผลในการลบ <span class="text-danger">*</span></label>
+                  <textarea class="form-control" id="reason-att-{{ att.pk }}" name="reason" rows="2" required maxlength="255" placeholder="เช่น แนบไฟล์ผิดเคส / ไฟล์ซ้ำ"></textarea>
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
+                  <button type="submit" class="btn btn-danger">ยืนยันการลบ</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          {% endif %}{% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีไฟล์แนบ</p>{% endfor %}
+
+        {% if deleted_attachments %}
+        <div class="mt-3">
+          <button class="btn btn-sm btn-link text-muted p-0" type="button" data-bs-toggle="collapse" data-bs-target="#deleted-attachments">
+            <i class="bi bi-trash3 me-1"></i>ไฟล์ที่ถูกลบ ({{ deleted_attachments|length }})
+          </button>
+          <div class="collapse mt-2" id="deleted-attachments">
+            {% for att in deleted_attachments %}
+            <div class="d-flex justify-content-between gap-3 border-bottom py-2">
+              <div>
+                <span class="text-decoration-line-through">{{ att.original_name }}</span>
+                <div class="small text-muted">ลบโดย {% if att.deleted_by %}{{ att.deleted_by.get_full_name|default:att.deleted_by.username }}{% else %}ไม่ทราบ{% endif %} · {{ att.deleted_at|date:"d M Y H:i" }}</div>
+                {% if att.deleted_reason %}<div class="small">เหตุผล: {{ att.deleted_reason }}</div>{% endif %}
+              </div>
+              <form method="post" action="{% url 'restore_attachment' att.pk %}">{% csrf_token %}<button class="btn btn-sm btn-link" type="submit">กู้คืน</button></form>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
         {% if can_upload_attachment %}<form method="post" action="{% url 'upload_attachment' ticket.pk %}" enctype="multipart/form-data" class="row g-2 mt-2">{% csrf_token %}<div class="col-md-5">{% include 'incidents/_evidence_picker.html' with input_name='file' input_id='id_file' picker_hint='เลือกได้หลายไฟล์ และเลือกจากหลายโฟลเดอร์ต่อกันได้' %}</div><div class="col-md-5">{{ attachment_form.description }}</div><div class="col-md-2"><button class="btn btn-outline-secondary btn-sm w-100" type="submit">อัปโหลด</button></div></form>{% endif %}
       </div>
     </section>
@@ -269,6 +362,28 @@
         </form>
         {% endif %}
       </div></div>
+
+      {% if can_step_back %}
+      {# The forward-only state machine has no edge back from a lane to the #}
+      {# manager's own triage. Closure stays terminal — this never reopens. #}
+      <div class="card shadow-sm mb-3" style="border:1px solid #f0c987;">
+        <div class="card-header fw-bold text-dark" style="background:#fdf0d5;"><i class="bi bi-arrow-counterclockwise me-1"></i>ย้อนขั้นตอน (ผู้จัดการ SOC)</div>
+        <div class="card-body">
+          <p class="small text-muted mb-2">
+            ส่งเคสกลับไปยัง <strong>{{ step_back_target_label }}</strong> เมื่อมอบหมายผิดพลาดหรือต้องทบทวนใหม่
+            — ลายเซ็นผู้ตรวจ/ผู้อนุมัติและผลการประเมินฉุกเฉินเดิมจะไม่ถูกลบ
+          </p>
+          <form method="post">{% csrf_token %}<input type="hidden" name="action" value="step_back">
+            <label class="form-label small fw-bold mb-1">เหตุผล <span class="text-danger">*</span></label>
+            <textarea name="step_back_reason" class="form-control mb-2" rows="2" required
+                      placeholder="เช่น มอบหมายผิดผู้ดูแลระบบ / ต้องประเมินความรุนแรงใหม่"></textarea>
+            <button class="btn btn-outline-dark btn-sm w-100" type="submit">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>ย้อนกลับไป {{ step_back_target_label }}
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endif %}
 
       {% if can_request_response %}
       <div class="card shadow-sm mb-3" style="border:1px solid #b8d4ea;">

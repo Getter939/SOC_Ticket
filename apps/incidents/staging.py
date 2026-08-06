@@ -24,6 +24,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE,
@@ -68,7 +69,9 @@ def staged_for(user, token):
     token = _clean_token(token)
     if not token:
         return StagedAttachment.objects.none()
-    return StagedAttachment.objects.filter(token=token, uploaded_by=user)
+    return StagedAttachment.objects.filter(
+        token=token, uploaded_by=user, discarded_at__isnull=True,
+    )
 
 
 def staged_total_size(user, token):
@@ -163,6 +166,10 @@ def adopt_staged(token, user, *, ticket=None, project=None):
     *files* are only unlinked once the transaction commits — deleting them
     inline would leave a rolled-back row pointing at a file that no longer
     exists, which is the one failure mode that actually loses evidence.
+
+    Discarded rows are skipped: staged_for() filters them out, so a file the
+    analyst removed from the picker can never reappear on the finished ticket.
+    They stay behind for purge_staged_attachments to clear.
     """
     if (ticket is None) == (project is None):
         raise ValueError('adopt_staged needs exactly one of ticket/project')
@@ -184,12 +191,30 @@ def adopt_staged(token, user, *, ticket=None, project=None):
 
 
 def discard_staged(user, pk):
-    """Remove one staged file. Returns True if something was removed."""
-    staged = StagedAttachment.objects.filter(pk=pk, uploaded_by=user).first()
+    """Mark one staged file as removed. Returns True if something changed.
+
+    Deliberately not a delete: the analyst is one stray click away from losing
+    evidence they just uploaded, so the row and its bytes are kept and simply
+    hidden. ``purge_staged_attachments`` clears them on its normal schedule,
+    and ``restore_staged`` undoes this while the form is still open.
+    """
+    staged = StagedAttachment.objects.filter(
+        pk=pk, uploaded_by=user, discarded_at__isnull=True).first()
     if staged is None:
         return False
-    staged.file.delete(save=False)
-    staged.delete()
+    staged.discarded_at = timezone.now()
+    staged.save(update_fields=('discarded_at',))
+    return True
+
+
+def restore_staged(user, pk):
+    """Undo a discard. Returns True if something was restored."""
+    staged = StagedAttachment.objects.filter(
+        pk=pk, uploaded_by=user, discarded_at__isnull=False).first()
+    if staged is None:
+        return False
+    staged.discarded_at = None
+    staged.save(update_fields=('discarded_at',))
     return True
 
 

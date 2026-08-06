@@ -28,12 +28,15 @@ Requires `attachment_limits` in the template context (see views._attachment_limi
       </div>
       <ul class="list-unstyled mb-0 d-flex flex-wrap gap-2">
         {% for staged in staged_files %}
-          <li class="evidence-chip evidence-chip-staged" data-bytes="{{ staged.file.size }}">
+          <li class="evidence-chip evidence-chip-staged" data-bytes="{{ staged.file.size }}"
+              data-restore="{% url 'restore_staged_attachment' staged.pk %}">
             <span class="evidence-chip-name" title="{{ staged.original_name }}">{{ staged.original_name }}</span>
             <span class="evidence-chip-size">{{ staged.file.size|filesizeformat }}</span>
             <button type="button" class="evidence-chip-x"
                     data-discard="{% url 'discard_staged_attachment' staged.pk %}"
                     aria-label="ลบไฟล์ {{ staged.original_name }}">&times;</button>
+            {# Shown in place of the file once discarded, so a misclick is one click back. #}
+            <button type="button" class="evidence-chip-undo d-none">เลิกทำ</button>
           </li>
         {% endfor %}
       </ul>

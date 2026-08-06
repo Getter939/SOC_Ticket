@@ -1805,6 +1805,85 @@ class Ticket(models.Model):
             ticket=self, note=audit, status_at_time=self.status, author=user,
         )
 
+    # ── Manager step-back ────────────────────────────────────────────── #
+    # Some forward decisions had no way back at all. The worst was the SOC
+    # Manager's own forward at PENDING_MGR_TRIAGE: once sent to a lane, nobody
+    # could pull it back, and the emergency verdict was stamped write-once in
+    # the same transaction. Approval at PENDING_MANAGER was likewise
+    # approve-or-nothing, with no way to ask for more work.
+    #
+    # Closure is deliberately absent: APPROVED and CLOSED_EVENT stay terminal,
+    # so a closed case is still final.
+    STEP_BACK_TARGETS = {
+        STATUS_AWAITING_CONTAINMENT: STATUS_PENDING_MGR_TRIAGE,
+        STATUS_AWAITING_OWNER:       STATUS_PENDING_MGR_TRIAGE,
+    }
+
+    def step_back_target(self):
+        """Where a manager step-back would send this ticket, or None.
+
+        PENDING_MANAGER is resolved from the lane Tier 1 chose, because the
+        ticket arrives there from either the admin lane (CONTAINMENT_REPORTED)
+        or the owner lane (PENDING_T2_REVIEW) and the two must not be confused.
+        """
+        if self.status == self.STATUS_PENDING_MANAGER:
+            return (
+                self.STATUS_CONTAINMENT_REPORTED
+                if self.t1_route == self.T1_ROUTE_ADMIN
+                else self.STATUS_PENDING_T2_REVIEW
+            )
+        return self.STEP_BACK_TARGETS.get(self.status)
+
+    def can_step_back(self, user):
+        """SOC Manager only, never out of a terminal state."""
+        if self.status in self.TERMINAL_STATUSES:
+            return False
+        if self.step_back_target() is None:
+            return False
+        if self.project_incident_id:
+            return False
+        return self._is_emergency_manager(user)
+
+    def step_back(self, user, reason):
+        """Return the ticket one step, with a written reason. Auditable.
+
+        Bypasses ALLOWED_TRANSITIONS on purpose — these are exactly the edges
+        the forward-only state machine does not have. Everything else about a
+        transition still applies: the move is logged, and the write-once stamps
+        (verified_by, approved_by, emergency_decided_by …) are left untouched,
+        so stepping back never rewrites who decided what.
+        """
+        if not self._is_emergency_manager(user):
+            raise ValidationError('เฉพาะผู้จัดการ SOC เท่านั้นที่ย้อนขั้นตอนได้')
+        if self.status in self.TERMINAL_STATUSES:
+            raise ValidationError(
+                'เคสที่ปิดแล้วไม่สามารถย้อนขั้นตอนได้ — ต้องเปิดเคสใหม่'
+            )
+        if self.project_incident_id:
+            raise ValidationError(
+                'Member Ticket ของ Project Incident ต้องย้อนขั้นตอนจากหน้า Project Incident'
+            )
+        target = self.step_back_target()
+        if target is None:
+            raise ValidationError('ขั้นตอนนี้ไม่รองรับการย้อนกลับ')
+        reason = (reason or '').strip()
+        if not reason:
+            raise ValidationError('กรุณาระบุเหตุผลในการย้อนขั้นตอน')
+
+        labels = dict(self.STATUS_CHOICES)
+        previous = self.status
+        self.status = target
+        self.save(update_fields=['status', 'updated_at'])
+        TicketLog.objects.create(
+            ticket=self,
+            note=(f'↩ ย้อนขั้นตอนโดยผู้จัดการ SOC: '
+                  f'{labels.get(previous, previous)} → {labels.get(target, target)} '
+                  f'— เหตุผล: {reason}'),
+            status_at_time=target,
+            author=user,
+        )
+        return target
+
 
 class TicketLog(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='logs')
@@ -1827,6 +1906,81 @@ class TicketLog(models.Model):
     def status_display(self):
         """Human label for the status code recorded at log time."""
         return dict(Ticket.STATUS_CHOICES).get(self.status_at_time, self.status_at_time)
+
+    @property
+    def was_edited(self):
+        """Whether this timeline entry has been rewritten since it was made."""
+        return self.revisions.exists()
+
+
+class TicketFieldChange(models.Model):
+    """One field's before/after, recorded whenever ticket content is rewritten.
+
+    TicketLog stores prose — "sent for review", "returned to Tier 1" — which is
+    enough to follow the workflow but not to answer "who changed the IP address,
+    and what was it before?". Several surfaces overwrite content in place (Tier 2
+    review rewrites ~25 fields, the admin's containment report is replaced when
+    Tier 2 bounces it back, subtask result notes had no audit at all), so
+    without this the previous values were simply gone.
+
+    This is also what makes an edit view and a manager step-back safe to offer:
+    an undo needs something to restore *from*.
+    """
+
+    ticket      = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name='field_changes',
+    )
+    # Set when the change belongs to a response-team deliverable rather than
+    # the ticket's own fields.
+    subtask     = models.ForeignKey(
+        'TicketSubtask', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='field_changes',
+    )
+    field_name  = models.CharField(max_length=60)
+    field_label = models.CharField(max_length=120)
+    old_value   = models.TextField(blank=True, default='')
+    new_value   = models.TextField(blank=True, default='')
+    changed_by  = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ticket_field_changes',
+    )
+    changed_at  = models.DateTimeField(auto_now_add=True)
+    # Which surface made the change — 't2_review', 'containment', 'edit', …
+    source      = models.CharField(max_length=30, blank=True, default='')
+
+    class Meta:
+        ordering = ['-changed_at', 'field_name']
+        indexes = [models.Index(fields=['ticket', '-changed_at'])]
+
+    def __str__(self):
+        return f'{self.field_label} changed on {self.ticket_id}'
+
+
+class TicketLogRevision(models.Model):
+    """The text a timeline entry held before someone rewrote it.
+
+    The timeline is the audit trail, and edit_log lets the original author or
+    any SOC manager rewrite an entry in place. Without this, the record of an
+    action — an attachment deletion, say — could be edited by the very person
+    who took it, leaving no trace. Each edit banks the previous text here first,
+    so a rewrite adds to the history instead of replacing it.
+    """
+
+    log           = models.ForeignKey(
+        TicketLog, on_delete=models.CASCADE, related_name='revisions',
+    )
+    previous_note = models.TextField(verbose_name='ข้อความก่อนแก้ไข')
+    edited_by     = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ticket_log_revisions', verbose_name='ผู้แก้ไข',
+    )
+    edited_at     = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-edited_at']
+
+    def __str__(self):
+        return f'Revision of log #{self.log_id} at {self.edited_at:%Y-%m-%d %H:%M}'
 
 
 # ======================================================================= #
@@ -2392,6 +2546,9 @@ class TicketAttachment(models.Model):
         related_name='deleted_attachments',
     )
     deleted_at   = models.DateTimeField(null=True, blank=True)
+    # Why the evidence was removed. Mandatory at the view layer rather than the
+    # model, so historical rows deleted before this field existed stay valid.
+    deleted_reason = models.CharField(max_length=255, blank=True, default='')
 
     class Meta:
         ordering = ['uploaded_at']
@@ -2426,6 +2583,11 @@ class StagedAttachment(models.Model):
         User, on_delete=models.CASCADE, related_name='staged_attachments',
     )
     created_at    = models.DateTimeField(auto_now_add=True)
+    # Set when the analyst removes the chip. The row and its bytes are kept so
+    # a misclick can be undone; purge_staged_attachments clears them on its
+    # normal schedule. Discarded rows are hidden from the picker and are never
+    # adopted onto a ticket.
+    discarded_at  = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['created_at']

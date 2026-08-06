@@ -539,6 +539,16 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         return cleaned
 
 
+class TicketEditForm(TicketReviewForm):
+    """Correcting a ticket's content outside the Tier 2 review step.
+
+    Same field set as TicketReviewForm — general incident information, with no
+    ``t1_route`` and no status, so an edit can never move the ticket through the
+    workflow. Subclassed rather than duplicated so the two can't drift; the
+    parent's name reflects where it was first used, not what it can do.
+    """
+
+
 class AdminAssignmentForm(forms.ModelForm):
     assigned_admin = UserChoiceField(queryset=User.objects.none())
 

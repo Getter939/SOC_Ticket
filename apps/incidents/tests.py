@@ -48,6 +48,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
+from apps.incidents import history
 from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentTargetForm,
@@ -2424,18 +2425,22 @@ class AttachmentWorkflowPermissionTest(TestCase):
         )
         file_name = attachment.file.name
         self.client.force_login(self.creator)
-        response = self.client.post(reverse('delete_attachment', args=[attachment.pk]))
+        response = self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]),
+            {'reason': 'แนบผิดเคส'},
+        )
         self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
         self.assertFalse(TicketAttachment.objects.filter(pk=attachment.pk).exists())
 
         retained = TicketAttachment.all_objects.get(pk=attachment.pk)
         self.assertEqual(retained.deleted_by, self.creator)
         self.assertIsNotNone(retained.deleted_at)
+        self.assertEqual(retained.deleted_reason, 'แนบผิดเคส')
         self.assertTrue(retained.file.storage.exists(file_name))
         self.assertTrue(TicketLog.objects.filter(
             ticket=ticket,
             author=self.creator,
-            note='Attachment removed: retain.log',
+            note='Attachment removed: retain.log — เหตุผล: แนบผิดเคส',
         ).exists())
 
     def test_soft_deleted_attachment_cannot_be_downloaded(self):
@@ -4010,11 +4015,16 @@ class EvidenceStagingTest(TestCase):
         resp = self.client.post(
             reverse('discard_staged_attachment', args=[unwanted.pk]))
         self.assertEqual(resp.status_code, 204)
-        self.assertFalse(StagedAttachment.objects.filter(pk=unwanted.pk).exists())
-        self.assertFalse(Path(stored).exists())
+        # Discard is now recoverable: the row and its bytes survive so the
+        # analyst can undo a misclick. purge_staged_attachments clears them.
+        unwanted.refresh_from_db()
+        self.assertIsNotNone(unwanted.discarded_at)
+        self.assertTrue(Path(stored).exists())
 
-        # The other one is untouched and still adoptable.
-        token = StagedAttachment.objects.get().token
+        # The other one is untouched and still adoptable; the discarded one is
+        # excluded from the picker and never reaches the ticket.
+        token = StagedAttachment.objects.filter(
+            discarded_at__isnull=True).get().token
         self.client.post(reverse('create_ticket'), _ticket_post_data(
             evidence_token=token))
         self.assertEqual(
@@ -4550,3 +4560,748 @@ class ReportNTFormLayoutTest(TestCase):
         self.assertIn('02-575-6883', GUIDANCE_COORDINATION_NOTE)
         # The pre-existing วปกก. contact must survive the addition.
         self.assertIn('02-574-8186', GUIDANCE_COORDINATION_NOTE)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 29. Evidence deletion safeguards                                              #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_delete_test_media_'))
+class AttachmentDeletionSafeguardTest(TestCase):
+    """Removing evidence must be deliberate, attributable, reversible, and
+    impossible once a case is closed."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.uploader = _make_t1('del_uploader')
+        cls.other_t1 = _make_t1('del_other_t1')
+        cls.t2 = _make_t2('del_t2')
+        cls.manager = _make_user('del_manager', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('del_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.root = User.objects.create_superuser('del_root', password='testpass123')
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def _ticket(self, status=Ticket.STATUS_NEW):
+        return _make_ticket(
+            status=status, created_by=self.uploader, assigned_admin=self.admin,
+        )
+
+    def _attachment(self, ticket, name='evidence.log'):
+        return TicketAttachment.objects.create(
+            ticket=ticket,
+            file=SimpleUploadedFile(name, b'evidence bytes'),
+            original_name=name,
+            uploaded_by=self.uploader,
+        )
+
+    def _delete(self, user, attachment, reason='แนบผิดเคส'):
+        self.client.force_login(user)
+        data = {'reason': reason} if reason is not None else {}
+        return self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]), data)
+
+    # ── Who may delete ───────────────────────────────────────────────── #
+
+    def test_uploader_may_delete_their_own_evidence(self):
+        att = self._attachment(self._ticket())
+        self._delete(self.uploader, att)
+        self.assertFalse(TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_soc_manager_may_delete(self):
+        att = self._attachment(self._ticket())
+        self._delete(self.manager, att)
+        self.assertFalse(TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_plain_soc_staff_who_did_not_upload_is_refused(self):
+        """Regression: 'any SOC member' used to be enough, and SOC sees every
+        ticket — so an uninvolved analyst could remove another team's evidence."""
+        att = self._attachment(self._ticket())
+        for user in (self.other_t1, self.t2):
+            with self.subTest(user=user.username):
+                self._delete(user, att)
+                self.assertTrue(
+                    TicketAttachment.objects.filter(pk=att.pk).exists(),
+                    f'{user.username} should not be able to delete this',
+                )
+
+    def test_refused_delete_writes_no_timeline_row(self):
+        ticket = self._ticket()
+        att = self._attachment(ticket)
+        self._delete(self.other_t1, att)
+        self.assertFalse(
+            TicketLog.objects.filter(ticket=ticket, author=self.other_t1).exists())
+
+    # ── Closed cases are frozen ──────────────────────────────────────── #
+
+    def test_deletion_refused_on_a_closed_ticket_for_every_role(self):
+        """The sharp edge: a closed case is when a quiet deletion would never
+        be noticed. Terminal check runs ahead of the superuser bypass."""
+        for status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
+            for user in (self.uploader, self.manager, self.root):
+                with self.subTest(status=status, user=user.username):
+                    att = self._attachment(self._ticket(status=status))
+                    self._delete(user, att)
+                    self.assertTrue(
+                        TicketAttachment.objects.filter(pk=att.pk).exists(),
+                        f'{user.username} deleted evidence on a {status} ticket',
+                    )
+
+    # ── A reason is mandatory ────────────────────────────────────────── #
+
+    def test_delete_without_a_reason_is_refused(self):
+        att = self._attachment(self._ticket())
+        for reason in (None, '', '   '):
+            with self.subTest(reason=reason):
+                self._delete(self.uploader, att, reason=reason)
+                self.assertTrue(
+                    TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_reason_is_stored_and_logged(self):
+        ticket = self._ticket()
+        att = self._attachment(ticket)
+        self._delete(self.uploader, att, reason='ไฟล์ซ้ำกับที่แนบไว้แล้ว')
+        att.refresh_from_db()
+        self.assertEqual(att.deleted_reason, 'ไฟล์ซ้ำกับที่แนบไว้แล้ว')
+        self.assertTrue(TicketLog.objects.filter(
+            ticket=ticket, note__contains='ไฟล์ซ้ำกับที่แนบไว้แล้ว').exists())
+
+    def test_get_does_not_delete(self):
+        att = self._attachment(self._ticket())
+        self.client.force_login(self.uploader)
+        resp = self.client.get(reverse('delete_attachment', args=[att.pk]))
+        self.assertEqual(resp.status_code, 405)
+        self.assertTrue(TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    # ── Restore ──────────────────────────────────────────────────────── #
+
+    def test_soc_manager_can_restore_deleted_evidence(self):
+        ticket = self._ticket()
+        att = self._attachment(ticket)
+        self._delete(self.uploader, att)
+
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('restore_attachment', args=[att.pk]))
+        self.assertRedirects(resp, reverse('ticket_detail', args=[ticket.pk]))
+
+        att.refresh_from_db()
+        self.assertIsNone(att.deleted_at)
+        self.assertEqual(att.deleted_reason, '')
+        self.assertTrue(TicketAttachment.objects.filter(pk=att.pk).exists())
+        # And it downloads again.
+        self.assertEqual(
+            self.client.get(reverse('download_attachment', args=[att.pk])).status_code,
+            200,
+        )
+
+    def test_non_manager_cannot_restore(self):
+        att = self._attachment(self._ticket())
+        self._delete(self.uploader, att)
+        for user in (self.uploader, self.t2, self.admin):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.client.post(reverse('restore_attachment', args=[att.pk]))
+                self.assertFalse(
+                    TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_restore_works_on_a_closed_ticket_even_though_delete_does_not(self):
+        """Deliberate asymmetry: refusing removal on a closed case protects the
+        evidence set; refusing recovery would only make a mistake permanent."""
+        ticket = self._ticket()
+        att = self._attachment(ticket)
+        self._delete(self.uploader, att)
+
+        Ticket.objects.filter(pk=ticket.pk).update(status=Ticket.STATUS_APPROVED)
+        self.client.force_login(self.manager)
+        self.client.post(reverse('restore_attachment', args=[att.pk]))
+        self.assertTrue(TicketAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_deleted_evidence_is_listed_for_managers_only(self):
+        ticket = self._ticket()
+        att = self._attachment(ticket, name='removed-evidence.log')
+        self._delete(self.uploader, att, reason='แนบผิดเคส')
+        restore_url = reverse('restore_attachment', args=[att.pk])
+
+        self.client.force_login(self.manager)
+        html = self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode()
+        self.assertIn('ไฟล์ที่ถูกลบ', html)
+        self.assertIn(restore_url, html)
+        self.assertIn('แนบผิดเคส', html)
+
+        # The uploader still sees the deletion in the timeline audit note —
+        # that is the point of it — but gets no recovery block or control.
+        self.client.force_login(self.uploader)
+        html = self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode()
+        self.assertNotIn('ไฟล์ที่ถูกลบ', html)
+        self.assertNotIn(restore_url, html)
+
+    def test_delete_control_hidden_once_the_ticket_closes(self):
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        self._attachment(ticket)
+        self.client.force_login(self.manager)
+        html = self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode()
+        self.assertNotIn(
+            reverse('delete_attachment', args=[ticket.attachments.get().pk]), html)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 30. Staged discard is recoverable                                             #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_discard_test_media_'))
+class StagedDiscardRecoveryTest(TestCase):
+    def setUp(self):
+        self.t1 = _make_t1('discard_t1')
+        self.client.login(username='discard_t1', password='testpass123')
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            device_name='',
+            evidence_files=[SimpleUploadedFile('oops.log', b'staged bytes')],
+        ))
+        self.staged = StagedAttachment.objects.get()
+
+    def _discard(self):
+        return self.client.post(
+            reverse('discard_staged_attachment', args=[self.staged.pk]))
+
+    def _restore(self):
+        return self.client.post(
+            reverse('restore_staged_attachment', args=[self.staged.pk]))
+
+    def test_discard_keeps_the_bytes(self):
+        stored = self.staged.file.path
+        self.assertEqual(self._discard().status_code, 204)
+        self.staged.refresh_from_db()
+        self.assertIsNotNone(self.staged.discarded_at)
+        self.assertTrue(Path(stored).exists())
+
+    def test_discarded_file_is_hidden_from_the_picker(self):
+        self._discard()
+        resp = self.client.get(
+            reverse('create_ticket'), {'evidence_token': self.staged.token})
+        self.assertNotContains(resp, 'oops.log')
+
+    def test_discarded_file_is_never_adopted_onto_the_ticket(self):
+        self._discard()
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=self.staged.token))
+        self.assertEqual(Ticket.objects.get().attachments.count(), 0)
+
+    def test_undo_brings_it_back_and_it_adopts_normally(self):
+        self._discard()
+        self.assertEqual(self._restore().status_code, 204)
+        self.staged.refresh_from_db()
+        self.assertIsNone(self.staged.discarded_at)
+
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            evidence_token=self.staged.token))
+        self.assertEqual(
+            [a.original_name for a in Ticket.objects.get().attachments.all()],
+            ['oops.log'],
+        )
+
+    def test_discarded_rows_do_not_count_toward_the_batch_cap(self):
+        from apps.incidents.staging import staged_total_size
+        before = staged_total_size(self.t1, self.staged.token)
+        self.assertGreater(before, 0)
+        self._discard()
+        self.assertEqual(staged_total_size(self.t1, self.staged.token), 0)
+
+    def test_purge_removes_discarded_rows_and_their_files(self):
+        stored = self.staged.file.path
+        self._discard()
+        call_command('purge_staged_attachments', '--hours', '0')
+        self.assertFalse(StagedAttachment.objects.filter(pk=self.staged.pk).exists())
+        self.assertFalse(Path(stored).exists())
+
+    def test_discard_and_restore_are_owner_scoped(self):
+        _make_t1('discard_intruder')
+        self.client.logout()
+        self.client.login(username='discard_intruder', password='testpass123')
+        self.assertEqual(self._discard().status_code, 404)
+        self.staged.refresh_from_db()
+        self.assertIsNone(self.staged.discarded_at)
+
+        self.staged.discarded_at = timezone.now()
+        self.staged.save(update_fields=('discarded_at',))
+        self.assertEqual(self._restore().status_code, 404)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 31. Timeline-note edits are versioned                                         #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class TicketLogRevisionTest(TestCase):
+    """The timeline is the audit trail, and edit_log lets the author or any SOC
+    manager rewrite it — so a rewrite must not be able to erase what was there."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('logrev_t1')
+        cls.manager = _make_user('logrev_manager', UserProfile.ROLE_SOC_MANAGER)
+        cls.ticket = _make_ticket(created_by=cls.t1)
+
+    def _log(self, note='Attachment removed: secret.log — เหตุผล: ไม่เกี่ยวข้อง'):
+        return TicketLog.objects.create(
+            ticket=self.ticket, note=note,
+            status_at_time=self.ticket.status, author=self.t1,
+        )
+
+    def test_editing_banks_the_previous_text(self):
+        log = self._log()
+        self.client.force_login(self.t1)
+        self.client.post(reverse('edit_log', args=[log.pk]), {'note': 'rewritten'})
+
+        log.refresh_from_db()
+        self.assertEqual(log.note, 'rewritten')
+        revision = log.revisions.get()
+        self.assertEqual(
+            revision.previous_note,
+            'Attachment removed: secret.log — เหตุผล: ไม่เกี่ยวข้อง',
+        )
+        self.assertEqual(revision.edited_by, self.t1)
+
+    def test_a_deletion_record_survives_being_rewritten(self):
+        """The point of the whole change: whoever removed the evidence cannot
+        quietly remove the record of having done so."""
+        log = self._log()
+        self.client.force_login(self.t1)
+        self.client.post(reverse('edit_log', args=[log.pk]), {'note': 'routine note'})
+
+        log.refresh_from_db()
+        self.assertNotIn('secret.log', log.note)
+        self.assertIn('secret.log', log.revisions.get().previous_note)
+
+    def test_repeated_edits_accumulate(self):
+        log = self._log(note='first')
+        self.client.force_login(self.manager)
+        for note in ('second', 'third'):
+            self.client.post(reverse('edit_log', args=[log.pk]), {'note': note})
+        self.assertEqual(
+            [r.previous_note for r in log.revisions.all()], ['second', 'first'])
+
+    def test_unchanged_note_creates_no_revision(self):
+        log = self._log(note='unchanged')
+        self.client.force_login(self.t1)
+        self.client.post(reverse('edit_log', args=[log.pk]), {'note': 'unchanged'})
+        self.assertEqual(log.revisions.count(), 0)
+
+    def test_was_edited_flag_and_badge(self):
+        log = self._log()
+        self.assertFalse(log.was_edited)
+        self.client.force_login(self.t1)
+        self.client.post(reverse('edit_log', args=[log.pk]), {'note': 'changed'})
+        self.assertTrue(TicketLog.objects.get(pk=log.pk).was_edited)
+
+        html = self.client.get(
+            reverse('ticket_detail', args=[self.ticket.pk])).content.decode()
+        self.assertIn('แก้ไขแล้ว', html)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 32. Field-level change history (Phase 2)                                      #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class TicketFieldHistoryTest(TestCase):
+    """TicketLog says what happened; this says what changed. Without it every
+    content edit was destructive and unrecoverable."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('hist_t1')
+        cls.t2 = _make_t2('hist_t2')
+        cls.manager = _make_user('hist_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+    def test_snapshot_and_record_captures_only_what_moved(self):
+        ticket = _make_ticket(
+            created_by=self.t1, device_name='OLD-HOST', ip_address='10.0.0.1')
+        before = history.snapshot(ticket)
+        ticket.device_name = 'NEW-HOST'
+        ticket.save()
+        rows = history.record_changes(ticket, before, self.t1, source='edit')
+
+        self.assertEqual(len(rows), 1)
+        change = ticket.field_changes.get()
+        self.assertEqual(change.field_name, 'device_name')
+        self.assertEqual(change.old_value, 'OLD-HOST')
+        self.assertEqual(change.new_value, 'NEW-HOST')
+        self.assertEqual(change.changed_by, self.t1)
+        self.assertEqual(change.source, 'edit')
+
+    def test_no_change_records_nothing(self):
+        ticket = _make_ticket(created_by=self.t1, device_name='SAME')
+        before = history.snapshot(ticket)
+        history.record_changes(ticket, before, self.t1)
+        self.assertEqual(ticket.field_changes.count(), 0)
+
+    def test_choice_fields_are_stored_as_labels(self):
+        ticket = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_EVENT)
+        before = history.snapshot(ticket)
+        ticket.classification = Ticket.CLASSIFICATION_INCIDENT
+        ticket.save()
+        history.record_changes(ticket, before, self.t1)
+        change = ticket.field_changes.get(field_name='classification')
+        # Reads as the label a human sees, not the stored code.
+        self.assertNotEqual(change.new_value, Ticket.CLASSIFICATION_INCIDENT)
+        self.assertTrue(change.new_value)
+
+    def test_booleans_render_readably(self):
+        ticket = _make_ticket(created_by=self.t1, spread_to_others=False)
+        before = history.snapshot(ticket)
+        ticket.spread_to_others = True
+        ticket.save()
+        history.record_changes(ticket, before, self.t1)
+        self.assertEqual(
+            ticket.field_changes.get(field_name='spread_to_others').new_value, 'ใช่')
+
+    def test_tier2_review_records_its_rewrites(self):
+        """Tier 2 overwrites ~25 fields in one submit; the old values used to
+        vanish with only a prose note left behind."""
+        ticket = _make_ticket(
+            created_by=self.t1, status=Ticket.STATUS_ESCALATED_T2,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            device_name='ORIGINAL-HOST', ip_address='10.0.0.9',
+            issue_description='original description',
+            log_source='Wazuh', issue_type='SIEM',
+            detailed_issue='Investigating', detailed_issue2='Investigating Other',
+            severity='High', ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            incident_datetime=timezone.now(),
+        )
+        self.client.force_login(self.t2)
+        self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
+            'action': 't2_review',
+            'status': Ticket.STATUS_T1_REVIEW,
+            'classification': Ticket.CLASSIFICATION_INCIDENT,
+            'incident_name': '', 'severity': 'High',
+            'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
+            'log_source': 'Wazuh', 'issue_type': 'SIEM',
+            'detailed_issue': 'Investigating',
+            'detailed_issue2': 'Investigating Other',
+            'device_name': 'CORRECTED-HOST',
+            'issue_description': 'corrected description',
+            'ip_address': '10.0.0.9',
+            'decision_note': 'returning to T1',
+        })
+        changed = {c.field_name: c for c in ticket.field_changes.all()}
+        self.assertIn('device_name', changed)
+        self.assertEqual(changed['device_name'].old_value, 'ORIGINAL-HOST')
+        self.assertEqual(changed['device_name'].new_value, 'CORRECTED-HOST')
+        self.assertEqual(changed['device_name'].source, 't2_review')
+
+    def test_subtask_result_overwrite_is_recorded(self):
+        """Result notes could be replaced by any SOC member with no audit at
+        all — a forensic analyst's findings could vanish silently."""
+        ticket = _make_ticket(created_by=self.t1)
+        forensic = _make_forensic('hist_forensic')
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=forensic, result_notes='original findings',
+        )
+        self.client.force_login(self.manager)
+        self.client.post(reverse('update_subtask', args=[subtask.pk]), {
+            'status': subtask.status, 'result_notes': 'overwritten findings',
+        })
+        change = ticket.field_changes.get(subtask=subtask)
+        self.assertEqual(change.old_value, 'original findings')
+        self.assertEqual(change.new_value, 'overwritten findings')
+        self.assertEqual(change.changed_by, self.manager)
+
+    def test_history_is_shown_on_the_ticket_page(self):
+        ticket = _make_ticket(created_by=self.t1, device_name='SHOWN-HOST')
+        before = history.snapshot(ticket)
+        ticket.device_name = 'CHANGED-HOST'
+        ticket.save()
+        history.record_changes(ticket, before, self.t1, source='edit')
+
+        self.client.force_login(self.t1)
+        html = self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode()
+        self.assertIn('ประวัติการแก้ไขข้อมูล', html)
+        self.assertIn('SHOWN-HOST', html)
+        self.assertIn('CHANGED-HOST', html)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 33. Ticket edit view (Phase 3)                                                #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class TicketEditViewTest(TestCase):
+    """Before this there was no ticket edit route at all: Tier 1's content could
+    only ever be corrected by Tier 2 during ESCALATED_T2."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.creator = _make_t1('edit_creator')
+        cls.other_t1 = _make_t1('edit_other_t1')
+        cls.t2 = _make_t2('edit_t2')
+        cls.manager = _make_user('edit_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('edit_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def _ticket(self, status=Ticket.STATUS_NEW):
+        return _make_ticket(
+            status=status, created_by=self.creator, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            device_name='ORIGINAL-HOST', ip_address='192.0.2.1',
+            issue_description='original text',
+            log_source='Wazuh', issue_type='SIEM',
+            detailed_issue='Investigating', detailed_issue2='Investigating Other',
+            severity='High', ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            incident_datetime=timezone.now(),
+        )
+
+    def _payload(self, ticket, **overrides):
+        data = {
+            'classification': ticket.classification,
+            'incident_name': ticket.incident_name or '',
+            'severity': 'High',
+            'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
+            'log_source': 'Wazuh', 'issue_type': 'SIEM',
+            'detailed_issue': 'Investigating',
+            'detailed_issue2': 'Investigating Other',
+            'device_name': ticket.device_name,
+            'issue_description': ticket.issue_description,
+            'ip_address': ticket.ip_address,
+            'reason': 'พิมพ์ผิด',
+        }
+        data.update(overrides)
+        return data
+
+    # ── Access ───────────────────────────────────────────────────────── #
+
+    def test_creator_may_edit_while_the_ticket_is_untouched(self):
+        ticket = self._ticket()
+        self.client.force_login(self.creator)
+        self.assertEqual(
+            self.client.get(reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_creator_keeps_access_after_the_ticket_moves_because_they_are_soc(self):
+        """"Creator while untouched, then SOC" — and Tier 1 *is* SOC, so the
+        creator keeps access either way. The rule bites on non-SOC roles; the
+        NEW-and-creator clause only matters for a Tier 1 who did not create it.
+        """
+        ticket = self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        self.client.force_login(self.creator)
+        self.assertEqual(
+            self.client.get(reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_another_tier1_may_also_edit(self):
+        """Not a loophole — SOC members are trusted with each other's tickets
+        and every change is attributed. Asserted so the boundary is explicit."""
+        ticket = self._ticket()
+        self.client.force_login(self.other_t1)
+        self.assertEqual(
+            self.client.get(reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_soc_may_edit_after_the_ticket_has_moved(self):
+        ticket = self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        for user in (self.t2, self.manager):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.assertEqual(
+                    self.client.get(
+                        reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_system_admin_may_not_edit(self):
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('edit_ticket', args=[ticket.pk]))
+        self.assertRedirects(resp, reverse('ticket_detail', args=[ticket.pk]))
+
+    def test_closed_tickets_are_frozen(self):
+        for status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
+            ticket = self._ticket(status=status)
+            for user in (self.creator, self.manager):
+                with self.subTest(status=status, user=user.username):
+                    self.client.force_login(user)
+                    resp = self.client.post(
+                        reverse('edit_ticket', args=[ticket.pk]),
+                        self._payload(ticket, device_name='HACKED'))
+                    self.assertRedirects(
+                        resp, reverse('ticket_detail', args=[ticket.pk]))
+                    ticket.refresh_from_db()
+                    self.assertEqual(ticket.device_name, 'ORIGINAL-HOST')
+
+    # ── Behaviour ────────────────────────────────────────────────────── #
+
+    def test_edit_saves_and_records_the_change(self):
+        ticket = self._ticket()
+        self.client.force_login(self.creator)
+        self.client.post(
+            reverse('edit_ticket', args=[ticket.pk]),
+            self._payload(ticket, device_name='FIXED-HOST'))
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.device_name, 'FIXED-HOST')
+        change = ticket.field_changes.get(field_name='device_name')
+        self.assertEqual(change.old_value, 'ORIGINAL-HOST')
+        self.assertEqual(change.source, 'edit')
+
+    def test_edit_requires_a_reason(self):
+        ticket = self._ticket()
+        self.client.force_login(self.creator)
+        self.client.post(
+            reverse('edit_ticket', args=[ticket.pk]),
+            self._payload(ticket, device_name='NO-REASON', reason=''))
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.device_name, 'ORIGINAL-HOST')
+
+    def test_edit_writes_a_timeline_entry_naming_the_fields(self):
+        ticket = self._ticket()
+        self.client.force_login(self.creator)
+        self.client.post(
+            reverse('edit_ticket', args=[ticket.pk]),
+            self._payload(ticket, device_name='LOGGED-HOST', reason='ระบุชื่อเครื่องผิด'))
+        log = TicketLog.objects.filter(ticket=ticket).latest('created_at')
+        self.assertIn('แก้ไขข้อมูลเคส', log.note)
+        self.assertIn('ระบุชื่อเครื่องผิด', log.note)
+
+    def test_edit_cannot_move_the_ticket_through_the_workflow(self):
+        """It is a correction surface, not a workflow one."""
+        ticket = self._ticket()
+        self.client.force_login(self.creator)
+        self.client.post(
+            reverse('edit_ticket', args=[ticket.pk]),
+            self._payload(ticket, status=Ticket.STATUS_APPROVED,
+                          t1_route=Ticket.T1_ROUTE_OWNER))
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_NEW)
+
+    def test_edit_button_visibility_follows_permission(self):
+        ticket = self._ticket()
+        edit_url = reverse('edit_ticket', args=[ticket.pk])
+
+        self.client.force_login(self.creator)
+        self.assertIn(edit_url, self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode())
+
+        self.client.force_login(self.admin)
+        self.assertNotIn(edit_url, self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode())
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 34. Manager step-back (Phase 4)                                               #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ManagerStepBackTest(TestCase):
+    """The manager's own forward at PENDING_MGR_TRIAGE had no way back, and
+    approval was approve-or-nothing. Closure stays terminal."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('back_t1')
+        cls.t2 = _make_t2('back_t2')
+        cls.manager = _make_user('back_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('back_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def _ticket(self, status, route=Ticket.T1_ROUTE_ADMIN):
+        return _make_ticket(
+            status=status, created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT, t1_route=route,
+        )
+
+    def _step_back(self, user, ticket, reason='มอบหมายผิดผู้ดูแลระบบ'):
+        self.client.force_login(user)
+        return self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
+            'action': 'step_back', 'step_back_reason': reason,
+        })
+
+    def test_manager_can_pull_a_forwarded_ticket_back_to_triage(self):
+        for status in (Ticket.STATUS_AWAITING_CONTAINMENT, Ticket.STATUS_AWAITING_OWNER):
+            with self.subTest(status=status):
+                ticket = self._ticket(status)
+                self._step_back(self.manager, ticket)
+                ticket.refresh_from_db()
+                self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_pending_manager_steps_back_along_the_lane_it_came_from(self):
+        admin_lane = self._ticket(Ticket.STATUS_PENDING_MANAGER,
+                                  route=Ticket.T1_ROUTE_ADMIN)
+        self._step_back(self.manager, admin_lane)
+        admin_lane.refresh_from_db()
+        self.assertEqual(admin_lane.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+
+        owner_lane = self._ticket(Ticket.STATUS_PENDING_MANAGER,
+                                  route=Ticket.T1_ROUTE_OWNER)
+        self._step_back(self.manager, owner_lane)
+        owner_lane.refresh_from_db()
+        self.assertEqual(owner_lane.status, Ticket.STATUS_PENDING_T2_REVIEW)
+
+    def test_closed_tickets_stay_closed(self):
+        """The guarantee the whole feature is designed around."""
+        for status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
+            with self.subTest(status=status):
+                ticket = self._ticket(status)
+                self._step_back(self.manager, ticket)
+                ticket.refresh_from_db()
+                self.assertEqual(ticket.status, status)
+
+    def test_only_a_soc_manager_may_step_back(self):
+        for user in (self.t1, self.t2, self.admin):
+            with self.subTest(user=user.username):
+                ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+                self._step_back(user, ticket)
+                ticket.refresh_from_db()
+                self.assertEqual(ticket.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_a_reason_is_required(self):
+        ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        self._step_back(self.manager, ticket, reason='   ')
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_step_back_is_logged_with_both_statuses_and_the_reason(self):
+        ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        self._step_back(self.manager, ticket, reason='ต้องประเมินความรุนแรงใหม่')
+        log = TicketLog.objects.filter(ticket=ticket).latest('created_at')
+        self.assertIn('ย้อนขั้นตอน', log.note)
+        self.assertIn('ต้องประเมินความรุนแรงใหม่', log.note)
+        self.assertEqual(log.author, self.manager)
+
+    def test_step_back_does_not_rewrite_who_decided_what(self):
+        """Sign-off and emergency stamps name the first decider forever."""
+        ticket = self._ticket(Ticket.STATUS_PENDING_MANAGER)
+        ticket.verified_by = self.t2
+        ticket.verified_at = timezone.now()
+        ticket.emergency_decided_by = self.manager
+        ticket.emergency_decided_at = timezone.now()
+        ticket.save()
+
+        self._step_back(self.manager, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.verified_by, self.t2)
+        self.assertEqual(ticket.emergency_decided_by, self.manager)
+
+    def test_statuses_without_a_defined_target_are_refused(self):
+        ticket = self._ticket(Ticket.STATUS_NEW)
+        self.assertIsNone(ticket.step_back_target())
+        self.assertFalse(ticket.can_step_back(self.manager))
+        self._step_back(self.manager, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_NEW)
+
+    def test_project_members_must_use_the_project_page(self):
+        project = ProjectIncident.objects.create(
+            title='bundle', created_by=self.t1)
+        ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        ticket.project_incident = project
+        ticket.save(update_fields=['project_incident'])
+        self.assertFalse(ticket.can_step_back(self.manager))
+
+    def test_control_is_only_offered_to_managers(self):
+        ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.client.force_login(self.manager)
+        self.assertIn('ย้อนขั้นตอน', self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode())
+
+        self.client.force_login(self.t2)
+        self.assertNotIn('ย้อนขั้นตอน', self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).content.decode())

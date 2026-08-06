@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block title %}แก้ไขข้อมูลเคส #{{ ticket.ticket_id }} — SOC Support System{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h1 class="h4 mb-1">แก้ไขข้อมูลเคส <span class="font-monospace">#{{ ticket.ticket_id }}</span></h1>
+      <div class="text-muted small">
+        สถานะปัจจุบัน: <span class="badge bg-light text-dark border">{{ ticket.get_status_display }}</span>
+      </div>
+    </div>
+    <a href="{% url 'ticket_detail' ticket.pk %}" class="btn btn-light border btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>กลับไปหน้าเคส
+    </a>
+  </div>
+
+  <div class="alert alert-info d-flex gap-2">
+    <i class="bi bi-info-circle-fill"></i>
+    <div class="small">
+      หน้านี้แก้ไขได้เฉพาะ<strong>เนื้อหาของเคส</strong> — ไม่เปลี่ยนสถานะ ไม่เปลี่ยนเส้นทางการมอบหมาย
+      และไม่แตะลายเซ็นผู้ตรวจ/ผู้อนุมัติ ทุกฟิลด์ที่เปลี่ยนจะถูกบันทึกไว้พร้อมค่าเดิม ผู้แก้ไข และเวลา
+    </div>
+  </div>
+
+  {% if form.errors %}
+  <div class="alert alert-danger">
+    <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วน</div>
+    {% if form.non_field_errors %}<div>{{ form.non_field_errors }}</div>{% endif %}
+  </div>
+  {% endif %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="card section-card mb-3">
+      <div class="card-header"><h2 class="section-title h6 mb-0">ข้อมูลเคส</h2></div>
+      <div class="card-body">
+        <div class="row g-3">
+          {% for field in form %}
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="field-hint">{{ field.help_text }}</div>{% endif %}
+            {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card section-card mb-3">
+      <div class="card-header"><h2 class="section-title h6 mb-0">เหตุผลในการแก้ไข</h2></div>
+      <div class="card-body">
+        <label class="form-label" for="edit-reason">
+          ระบุเหตุผล <span class="text-danger">*</span>
+        </label>
+        <textarea class="form-control" id="edit-reason" name="reason" rows="2" required
+                  placeholder="เช่น พิมพ์ IP ผิด / ได้รับข้อมูลเพิ่มเติมจากผู้ดูแลระบบ"></textarea>
+        <div class="field-hint">บันทึกลงไทม์ไลน์ของเคสพร้อมรายการฟิลด์ที่เปลี่ยน</div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mb-4">
+      <button type="submit" class="btn btn-primary px-4 fw-semibold">
+        <i class="bi bi-save me-1"></i>บันทึกการแก้ไข
+      </button>
+      <a href="{% url 'ticket_detail' ticket.pk %}" class="btn btn-light border px-4">ยกเลิก</a>
+    </div>
+  </form>
+</div>
+
+{% include 'incidents/_detailed_issue_cascade.html' %}
+{% endblock %}
