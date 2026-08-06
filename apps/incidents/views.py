@@ -149,6 +149,28 @@ def _can_upload_subtask_result(subtask, user):
     return profile is not None and profile.is_soc_manager
 
 
+def _can_access_ticket_report(user):
+    """Whether user may preview or export the incident report.
+
+    The report is a SOC deliverable, not a per-party document: it carries NT
+    branding and the verified/approved sign-off block, and it is aimed outward
+    (ปปกก., executives). The roles that merely appear *in* a case — the assigned
+    admin, the system owner, a response-team member holding a subtask — are
+    subjects of the report rather than its authors, and everything they need
+    operationally is already on ticket_detail.
+
+    Deliberately a role test with no ticket argument: exporting writes the
+    report_* provenance fields (see reports._record_export_metadata), so letting
+    a party to the incident regenerate the report would overwrite who produced
+    it and reset the stale-report badge. Keeping that SOC-only is what keeps the
+    provenance authoritative.
+    """
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc)
+
+
 def _valid_soc_status_choices(ticket, user):
     """Status options to offer this user in the detail-page dropdown, honoring
     the state machine, the Event/Incident + manager-routing gates, and the
@@ -1393,6 +1415,7 @@ def ticket_detail(request, pk):
         'attachments': attachments,
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
+        'can_access_report': _can_access_ticket_report(request.user),
         'profile': profile,
         'is_terminal': is_terminal,
         'can_upload_attachment': can_upload_attachment,
@@ -1429,6 +1452,8 @@ def ticket_detail(request, pk):
 @login_required
 @require_POST
 def ticket_report_docx(request, pk):
+    if not _can_access_ticket_report(request.user):
+        raise Http404
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     try:
         report = generate_ticket_report(pk, generated_by=request.user)
@@ -1447,6 +1472,8 @@ def ticket_report_docx(request, pk):
 @login_required
 @require_POST
 def ticket_report_pdf(request, pk):
+    if not _can_access_ticket_report(request.user):
+        raise Http404
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     try:
         report = generate_ticket_report_pdf(
@@ -1468,6 +1495,8 @@ def ticket_report_pdf(request, pk):
 
 @login_required
 def ticket_report_preview(request, pk):
+    if not _can_access_ticket_report(request.user):
+        raise Http404
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     return render(
         request,

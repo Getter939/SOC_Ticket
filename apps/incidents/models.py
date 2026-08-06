@@ -849,6 +849,12 @@ class Ticket(models.Model):
         blank=True, default='',
         verbose_name='Indicators of Compromise (IoC)',
     )
+    # Its own field rather than a line inside ioc_details, because the NT
+    # incident-report form gives the account its own row in section 4.
+    ioc_user = models.CharField(
+        max_length=150, blank=True, default='',
+        verbose_name='บัญชีผู้ใช้ที่เกี่ยวข้อง (User)',
+    )
 
     # ── Section 6: MITRE ATT&CK ─────────────────────────────────────── #
     MITRE_PHASE_CHOICES = [

@@ -22,7 +22,6 @@ from .report_content import (
     APPENDIX_INTRO,
     FOOTER_LEFT,
     FOOTER_RIGHT,
-    REMEDIATION_CHECKLIST,
 )
 
 
@@ -145,7 +144,8 @@ def build_ticket_report_context(ticket, generated_at=None):
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
     return {
         'ticket_id': _value(ticket.ticket_id),
-        'incident_datetime': _format_dt(ticket.incident_datetime),
+        # Section 1 prints this in the Thai style used on the paper form.
+        'incident_datetime': _format_dt_thai(ticket.incident_datetime),
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),
         'reporter': _user_label(ticket.created_by, include_phone=True),
@@ -165,6 +165,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'ioc_command': '-',
         'ioc_hash': '-',
         'ioc_ip': _value(ticket.destination_ip),
+        'ioc_user': _value(ticket.ioc_user),
         'evidence_log': _evidence_log(ticket),
         'action_required': _containment_checklist_flat(ticket),
         'action_precautions': _value(ticket.action_precautions),
@@ -202,7 +203,6 @@ def build_ticket_report_sections(report, ticket):
       {'type': 'kv', 'label', 'value'}
       {'type': 'checks', 'label', 'options': [{'label', 'checked'}, ...]}
       {'type': 'text', 'value'}                     — full-width free-text box
-      {'type': 'checklist', 'items': [str, ...]}    — static, hand-ticked
     """
     asset = ticket.asset_type
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
@@ -228,38 +228,41 @@ def build_ticket_report_sections(report, ticket):
     ]
 
     return [
+        # Rows are numbered 1.N to match the paper form's style. The numbers are
+        # sequential over OUR row set, which is wider than the NT form's — so
+        # they intentionally do not line up one-for-one with that document.
         {'number': '1', 'title': 'ข้อมูลทั่วไป (General Information)', 'rows': [
-            kv('หมายเลข Incident', report['ticket_id']),
-            kv('วันที่ เวลา ที่พบเหตุ', report['incident_datetime']),
-            kv('วันที่ เวลา ที่เกิดเหตุ', report['incident_datetime']),
-            kv('ชื่อ incident/event', report['incident_name']),
-            checks('ประเภท: event หรือ incident', [
-                ('Event', ticket.classification == Ticket.CLASSIFICATION_EVENT),
-                ('Incident', ticket.classification == Ticket.CLASSIFICATION_INCIDENT)]),
-            checks('ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
-                ('Critical', ticket.severity == 'Critical'),
-                ('High', ticket.severity == 'High'),
+            kv('1.1 หมายเลข Incident', report['ticket_id']),
+            kv('1.2 วันที่ เวลา ที่พบเหตุ', report['incident_datetime']),
+            kv('1.3 วันที่ เวลา ที่เกิดเหตุ', report['incident_datetime']),
+            kv('1.4 ชื่อ incident/event', report['incident_name']),
+            checks('1.5 ประเภท: event หรือ incident', [
+                ('Incident', ticket.classification == Ticket.CLASSIFICATION_INCIDENT),
+                ('Event', ticket.classification == Ticket.CLASSIFICATION_EVENT)]),
+            checks('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
+                ('Low', ticket.severity == 'Low'),
                 ('Medium', ticket.severity == 'Medium'),
-                ('Low', ticket.severity == 'Low')]),
-            checks('ระดับความสำคัญ', [
+                ('High', ticket.severity == 'High'),
+                ('Critical', ticket.severity == 'Critical')]),
+            checks('1.7 ระดับความสำคัญ', [
                 ('สำคัญ', not ticket.is_emergency),
                 ('สำคัญมาก', ticket.is_emergency)]),
-            checks('มีการกระจายไปยังจุดอื่น', spread_options),
-            checks('ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
-                ('วิกฤต', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),
+            checks('1.8 มีการกระจายไปยังจุดอื่น', spread_options),
+            checks('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
+                ('ไม่ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE),
                 ('ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_SEVERE),
-                ('ไม่ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE)]),
-            kv('*หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', report['category']),
-            kv('ทรัพย์สินที่ได้รับผลกระทบ', report['host_ip']),
-            checks('ประเภททรัพย์สินที่ได้รับผลกระทบ', asset_options),
-            kv('ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', report['asset_owner']),
-            kv('ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
-            kv('ระบบที่ได้รับผลกระทบ', report['system_name']),
-            kv('สถานะปัจจุบัน', report['status']),
-            kv('เรื่องที่ดำเนินการแล้ว', report['actions_taken_summary']),
-            kv('การที่จะดำเนินการลำดับถัดไป', report['next_steps_summary']),
-            kv('ผู้รายงาน', report['reporter']),
-            kv('แหล่งข้อมูล', report['log_source']),
+                ('วิกฤต', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL)]),
+            kv('1.10 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', report['category']),
+            kv('1.11 ทรัพย์สินที่ได้รับผลกระทบ', report['host_ip']),
+            checks('1.12 ประเภททรัพย์สินที่ได้รับผลกระทบ', asset_options),
+            kv('1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', report['asset_owner']),
+            kv('1.14 ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
+            kv('1.15 ระบบที่ได้รับผลกระทบ', report['system_name']),
+            kv('1.16 สถานะปัจจุบัน', report['status']),
+            kv('1.17 เรื่องที่ดำเนินการแล้ว', report['actions_taken_summary']),
+            kv('1.18 การที่จะดำเนินการลำดับถัดไป', report['next_steps_summary']),
+            kv('1.19 ผู้รายงาน', report['reporter']),
+            kv('1.20 แหล่งข้อมูล', report['log_source']),
         ]},
         {'number': '2', 'title': 'รายละเอียดเหตุการณ์ (Incident Description)', 'rows': [
             text(report['incident_description'])]},
@@ -278,6 +281,7 @@ def build_ticket_report_sections(report, ticket):
             kv('คำสั่ง', report['ioc_command']),
             kv('Hash', report['ioc_hash']),
             kv('IP', report['ioc_ip']),
+            kv('User', report['ioc_user']),
         ]},
         {'number': '5', 'title': 'Evidence / Log', 'rows': [text(report['evidence_log'])]},
         {'number': '6', 'title': 'สิ่งที่ต้องดำเนินการ (Containment)', 'rows': [
@@ -285,7 +289,6 @@ def build_ticket_report_sections(report, ticket):
         {'number': '7', 'title': 'ข้อควรระวังในการดำเนินการ', 'rows': [
             text(report['action_precautions'])]},
         {'number': '8', 'title': 'สรุปผลการดำเนินการแก้ไข', 'rows': [
-            {'type': 'checklist', 'items': REMEDIATION_CHECKLIST},
             kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
             kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
         ]},
@@ -557,6 +560,32 @@ def _format_dt(value):
     if timezone.is_aware(value):
         value = timezone.localtime(value)
     return value.strftime('%d/%m/%Y %H:%M')
+
+
+# Abbreviated Thai months, index 1-12, as written on the NT incident-report form.
+_THAI_MONTHS_ABBR = (
+    None, 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+)
+
+
+def _format_dt_thai(value):
+    """Section 1's date style: ``2 / ก.ค. / 69  11:00 น.``
+
+    Thai Buddhist year, abbreviated Thai month, two-digit year — matching the
+    paper form the report is filed alongside. Deliberately limited to the
+    section 1 date rows; the 'generated at' meta line and the report filename
+    stay Gregorian so exports remain sortable and unambiguous.
+    """
+    if not value:
+        return '-'
+    if timezone.is_aware(value):
+        value = timezone.localtime(value)
+    buddhist_year = (value.year + 543) % 100
+    return (
+        f'{value.day} / {_THAI_MONTHS_ABBR[value.month]} / '
+        f'{buddhist_year:02d}  {value:%H:%M} น.'
+    )
 
 
 def _value(value):

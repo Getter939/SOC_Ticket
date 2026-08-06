@@ -579,11 +579,16 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(rebuilt, self._docx_placeholders(REPORT_TEMPLATE_PATH))
 
     def _checkbox_options(self, ticket, label):
-        """Return the {label: checked} options for a named checkbox row."""
+        """Return the {label: checked} options for a named checkbox row.
+
+        Matched on containment, not equality: section 1 labels carry a "1.N "
+        prefix to mirror the paper form, and these tests care about the row's
+        identity rather than its position in the numbering.
+        """
         report = build_ticket_report_context(ticket)
         for section in build_ticket_report_sections(report, ticket):
             for row in section['rows']:
-                if row.get('type') == 'checks' and row['label'] == label:
+                if row.get('type') == 'checks' and label in row['label']:
                     return {opt['label']: opt['checked'] for opt in row['options']}
         raise AssertionError(f'checkbox row {label!r} not found')
 
@@ -4169,3 +4174,379 @@ class MultiFileAttachmentUploadTest(TestCase):
         )
         self.assertTrue(form.is_valid(), msg=form.errors)
         self.assertEqual(len(form.cleaned_data['file']), 2)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 26. Incident report is a SOC deliverable — role access matrix                  #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ReportAccessRoleTest(TestCase):
+    """The report carries NT branding and the sign-off block and is aimed
+    outward, so the parties named *in* a case must not be able to mint one."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('rpt_t1')
+        cls.t2 = _make_t2('rpt_t2')
+        cls.manager = _make_user('rpt_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('rpt_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.owner = _make_user('rpt_owner', UserProfile.ROLE_SYSTEM_OWNER)
+        cls.forensic = _make_forensic('rpt_forensic')
+        cls.redteam = _make_redteam_manager('rpt_redteam')
+        cls.root = User.objects.create_superuser('rpt_root', password='testpass123')
+
+        cls.ticket = _make_ticket(
+            created_by=cls.t1,
+            assigned_admin=cls.admin,
+            system_owner=cls.owner,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            remediation_summary='Unauthorized service removed.',
+            containment_report='Host isolated.',
+        )
+        # Give the response-team roles a real reason to see this ticket, so the
+        # refusal below is about the report and not about visibility.
+        TicketSubtask.objects.create(
+            ticket=cls.ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=cls.forensic,
+        )
+        TicketSubtask.objects.create(
+            ticket=cls.ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=cls.redteam,
+        )
+
+    def _try_all_three(self, user):
+        """(preview, docx, pdf) status codes for this user."""
+        self.client.force_login(user)
+        preview = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk])).status_code
+        docx = self.client.post(
+            reverse('ticket_report_docx', args=[self.ticket.pk])).status_code
+        pdf = self.client.post(
+            reverse('ticket_report_pdf', args=[self.ticket.pk])).status_code
+        return preview, docx, pdf
+
+    def test_soc_tier1_can_reach_the_report(self):
+        preview, docx, _pdf = self._try_all_three(self.t1)
+        self.assertEqual(preview, 200)
+        self.assertEqual(docx, 200)
+
+    def test_soc_tier2_can_reach_the_report(self):
+        preview, docx, _pdf = self._try_all_three(self.t2)
+        self.assertEqual(preview, 200)
+        self.assertEqual(docx, 200)
+
+    def test_soc_manager_can_reach_the_report(self):
+        preview, docx, _pdf = self._try_all_three(self.manager)
+        self.assertEqual(preview, 200)
+        self.assertEqual(docx, 200)
+
+    def test_superuser_can_reach_the_report(self):
+        preview, docx, _pdf = self._try_all_three(self.root)
+        self.assertEqual(preview, 200)
+        self.assertEqual(docx, 200)
+
+    def test_assigned_system_admin_is_refused(self):
+        """The regression for this item: the admin can see the ticket in full,
+        and previously could export its report."""
+        self.assertIn(
+            self.ticket, Ticket.objects.visible_to(self.admin),
+            'fixture broken — the admin should still see the ticket itself',
+        )
+        self.assertEqual(self._try_all_three(self.admin), (404, 404, 404))
+
+    def test_system_owner_is_refused(self):
+        self.assertIn(self.ticket, Ticket.objects.visible_to(self.owner))
+        self.assertEqual(self._try_all_three(self.owner), (404, 404, 404))
+
+    def test_forensic_analyst_is_refused(self):
+        self.assertIn(self.ticket, Ticket.objects.visible_to(self.forensic))
+        self.assertEqual(self._try_all_three(self.forensic), (404, 404, 404))
+
+    def test_redteam_manager_is_refused(self):
+        self.assertIn(self.ticket, Ticket.objects.visible_to(self.redteam))
+        self.assertEqual(self._try_all_three(self.redteam), (404, 404, 404))
+
+    def test_refused_export_leaves_report_provenance_untouched(self):
+        """Export writes report_generated_by / sha256 / the stale-report
+        watermark. A blocked role must not be able to move any of it."""
+        self.client.force_login(self.t1)
+        self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        self.ticket.refresh_from_db()
+        soc_generator = self.ticket.report_generated_by
+        soc_digest = self.ticket.report_sha256
+        soc_watermark = self.ticket.report_ticket_updated_at
+        self.assertEqual(soc_generator, self.t1)
+
+        self.client.force_login(self.admin)
+        self.client.post(reverse('ticket_report_docx', args=[self.ticket.pk]))
+        self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.report_generated_by, soc_generator)
+        self.assertEqual(self.ticket.report_sha256, soc_digest)
+        self.assertEqual(self.ticket.report_ticket_updated_at, soc_watermark)
+
+    def test_report_buttons_hidden_from_the_assigned_admin(self):
+        self.client.force_login(self.admin)
+        html = self.client.get(
+            reverse('ticket_detail', args=[self.ticket.pk])).content.decode()
+        self.assertNotIn('Report Preview', html)
+        self.assertNotIn('Report DOCX', html)
+        self.assertNotIn('Report PDF', html)
+        # The admin still has their own ticket page.
+        self.assertIn('กลับรายการ Ticket', html)
+
+    def test_report_buttons_shown_to_soc(self):
+        self.client.force_login(self.t1)
+        html = self.client.get(
+            reverse('ticket_detail', args=[self.ticket.pk])).content.decode()
+        self.assertIn('Report Preview', html)
+        self.assertIn('Report DOCX', html)
+        self.assertIn('Report PDF', html)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 27. Section 8 no longer prints the static remediation checklist               #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ReportSectionEightTest(TestCase):
+    """The 15 boilerplate items were never ticked by anything; section 6 holds
+    the real, data-driven containment checklist."""
+
+    # A sample of the removed items, in both scripts used by the form.
+    REMOVED = [
+        'ติดตั้ง Sysmon',
+        'ติดตั้ง Agent Wazuh',
+        'Dump memory ของเครื่อง Server',
+        'Harden Configuration',
+        'รวบรวม Event Logs เพื่อส่งต่อ ปปกก.',
+    ]
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('sec8_t1')
+        cls.ticket = _make_ticket(
+            created_by=cls.t1,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            action_required='1) Block IoC\n2) Isolate the host',
+            remediation_summary='Unauthorized service removed.',
+            containment_report='Host isolated and C2 destination blocked.',
+        )
+
+    def test_section_eight_keeps_its_title_and_data_rows(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(response, 'สรุปผลการดำเนินการแก้ไข')
+        self.assertContains(response, 'ผลการตรวจสอบ / Investigation Findings')
+        self.assertContains(response, 'มาตรการควบคุม / Countermeasure')
+        self.assertContains(response, 'Unauthorized service removed.')
+        self.assertContains(response, 'Host isolated and C2 destination blocked.')
+
+    def test_preview_no_longer_prints_the_boilerplate(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        for item in self.REMOVED:
+            self.assertNotContains(response, item)
+
+    def test_committed_docx_template_no_longer_carries_the_boilerplate(self):
+        """Guards a forgotten template rebuild. The checklist lived in the .docx
+        as literal text, not as a {{placeholder}}, so
+        test_build_script_matches_committed_template — which compares only
+        placeholder sets — would never notice a stale file."""
+        doc = Document(str(REPORT_TEMPLATE_PATH))
+        text = '\n'.join(p.text for p in _iter_paragraphs(doc))
+        for item in self.REMOVED:
+            self.assertNotIn(item, text)
+
+    def test_generated_docx_no_longer_carries_the_boilerplate(self):
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        text = _docx_text(report.content)
+        for item in self.REMOVED:
+            self.assertNotIn(item, text)
+        # Section 8's real content is still rendered.
+        self.assertIn('Unauthorized service removed.', text)
+        self.assertIn('Host isolated and C2 destination blocked.', text)
+
+    def test_section_six_dynamic_checklist_still_works(self):
+        """The removal must not touch the checklist that is actually driven by
+        ticket data."""
+        sections = build_ticket_report_sections(
+            build_ticket_report_context(self.ticket), self.ticket)
+        section_six = next(s for s in sections if s['number'] == '6')
+        self.assertEqual(section_six['rows'][0]['type'], 'containment_checklist')
+        self.assertEqual(
+            [i['text'] for i in section_six['rows'][0]['items']],
+            ['1) Block IoC', '2) Isolate the host'],
+        )
+
+    def test_no_section_uses_the_removed_static_checklist_row(self):
+        sections = build_ticket_report_sections(
+            build_ticket_report_context(self.ticket), self.ticket)
+        types = {row.get('type') for s in sections for row in s['rows']}
+        self.assertNotIn('checklist', types)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 28. Report matches the NT paper form's layout                                 #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ReportNTFormLayoutTest(TestCase):
+    """Alignment with the official NT incident-report form the SOC files
+    alongside this report."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('ntform_t1')
+        cls.ticket = _make_ticket(
+            created_by=cls.t1,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            severity='High',
+            ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            # 2 July 2026 = 2 ก.ค. 2569 → "2 / ก.ค. / 69"
+            incident_datetime=timezone.make_aware(datetime(2026, 7, 2, 11, 0)),
+            ioc_user='DOMAIN\\svc_backup',
+            destination_ip='203.0.113.50',
+        )
+
+    def _sections(self):
+        return build_ticket_report_sections(
+            build_ticket_report_context(self.ticket), self.ticket)
+
+    def _section(self, number):
+        return next(s for s in self._sections() if s['number'] == number)
+
+    # ── Thai Buddhist dates, section 1 only ──────────────────────────── #
+
+    def test_section_one_dates_use_the_thai_form_style(self):
+        rows = {r['label']: r['value'] for r in self._section('1')['rows']
+                if r.get('type') == 'kv'}
+        self.assertEqual(rows['1.2 วันที่ เวลา ที่พบเหตุ'], '2 / ก.ค. / 69  11:00 น.')
+        # Still the same single field in both rows — unchanged by design.
+        self.assertEqual(rows['1.3 วันที่ เวลา ที่เกิดเหตุ'],
+                         rows['1.2 วันที่ เวลา ที่พบเหตุ'])
+
+    def test_generated_at_stays_gregorian(self):
+        """Only the section 1 date rows switched; the meta line must stay
+        sortable and unambiguous."""
+        ctx = build_ticket_report_context(self.ticket)
+        self.assertRegex(ctx['generated_at'], r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}$')
+
+    def test_thai_date_helper_handles_every_month_and_blank(self):
+        from apps.incidents.reports import _format_dt_thai
+        self.assertEqual(_format_dt_thai(None), '-')
+        expected = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
+        for month, abbr in enumerate(expected, start=1):
+            rendered = _format_dt_thai(
+                timezone.make_aware(datetime(2026, month, 5, 9, 30)))
+            self.assertEqual(rendered, f'5 / {abbr} / 69  09:30 น.')
+
+    def test_buddhist_year_rolls_over_correctly(self):
+        from apps.incidents.reports import _format_dt_thai
+        # 2057 CE = 2600 BE → two-digit year "00", not "600".
+        self.assertEqual(
+            _format_dt_thai(timezone.make_aware(datetime(2057, 1, 1, 0, 0))),
+            '1 / ม.ค. / 00  00:00 น.',
+        )
+
+    # ── Section 1 numbering ──────────────────────────────────────────── #
+
+    def test_section_one_rows_are_numbered_sequentially(self):
+        labels = [r['label'] for r in self._section('1')['rows']]
+        self.assertEqual(len(labels), 20)
+        for index, label in enumerate(labels, start=1):
+            self.assertTrue(
+                label.startswith(f'1.{index} '),
+                f'row {index} is {label!r}, expected a "1.{index} " prefix',
+            )
+
+    def test_only_section_one_is_numbered(self):
+        """The paper form numbers section 1 only — sections 3 and 4 are plain."""
+        for number in ('3', '4'):
+            for row in self._section(number)['rows']:
+                if row.get('type') in ('kv', 'checks'):
+                    self.assertFalse(
+                        re.match(r'^\d+\.\d+ ', row['label']),
+                        f'section {number} row {row["label"]!r} should not be numbered',
+                    )
+
+    # ── Checkbox ordering ────────────────────────────────────────────── #
+
+    def test_checkbox_options_run_low_to_high(self):
+        rows = {r['label']: r for r in self._section('1')['rows']
+                if r.get('type') == 'checks'}
+        sev = [o['label'] for o in rows['1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)']['options']]
+        self.assertEqual(sev, ['Low', 'Medium', 'High', 'Critical'])
+
+        ncsa = [o['label'] for o in rows['1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)']['options']]
+        self.assertEqual(ncsa, ['ไม่ร้ายแรง', 'ร้ายแรง', 'วิกฤต'])
+
+        kind = [o['label'] for o in rows['1.5 ประเภท: event หรือ incident']['options']]
+        self.assertEqual(kind, ['Incident', 'Event'])
+
+    def test_reordering_did_not_change_which_option_is_ticked(self):
+        rows = {r['label']: r for r in self._section('1')['rows']
+                if r.get('type') == 'checks'}
+        ticked = lambda label: [  # noqa: E731
+            o['label'] for o in rows[label]['options'] if o['checked']]
+        self.assertEqual(ticked('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)'), ['High'])
+        self.assertEqual(ticked('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)'), ['ร้ายแรง'])
+        self.assertEqual(ticked('1.5 ประเภท: event หรือ incident'), ['Incident'])
+
+    # ── Section 4 User row ───────────────────────────────────────────── #
+
+    def test_section_four_carries_the_user_row(self):
+        rows = {r['label']: r['value'] for r in self._section('4')['rows']}
+        self.assertEqual(rows['User'], 'DOMAIN\\svc_backup')
+        # Placed after IP, as on the paper form.
+        labels = [r['label'] for r in self._section('4')['rows']]
+        self.assertEqual(labels[-2:], ['IP', 'User'])
+
+    def test_blank_user_renders_as_a_dash_not_an_empty_cell(self):
+        self.ticket.ioc_user = ''
+        rows = {r['label']: r['value'] for r in self._section('4')['rows']}
+        self.assertEqual(rows['User'], '-')
+
+    def test_user_reaches_the_generated_docx(self):
+        report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
+        text = _docx_text(report.content)
+        self.assertIn('DOMAIN\\svc_backup', text)
+        self.assertNotIn('{{ioc_user}}', text)
+
+    def test_ioc_user_is_editable_on_the_create_form(self):
+        self.client.force_login(self.t1)
+        html = self.client.get(reverse('create_ticket')).content.decode()
+        self.assertIn('name="ioc_user"', html)
+
+    # ── Banner, appendix clause, coordination note ───────────────────── #
+
+    def test_banner_names_the_containment_form(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(response, 'INCIDENT REPORT: Containment')
+
+        doc = Document(str(REPORT_TEMPLATE_PATH))
+        text = '\n'.join(p.text for p in _iter_paragraphs(doc))
+        self.assertIn('INCIDENT REPORT: Containment', text)
+
+    def test_appendix_clause_heading_appears_in_both_outputs(self):
+        """It was in the DOCX but missing from HTML/PDF, so the two disagreed."""
+        clause = 'ข้อ ๑ การจำแนกหมวดหมู่ของภัยคุกคามทางไซเบอร์'
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(response, clause)
+
+        doc = Document(str(REPORT_TEMPLATE_PATH))
+        text = '\n'.join(p.text for p in _iter_paragraphs(doc))
+        self.assertIn(clause, text)
+
+    def test_coordination_note_lists_the_hardening_contact(self):
+        from apps.incidents.report_content import GUIDANCE_COORDINATION_NOTE
+        self.assertIn('Hardening', GUIDANCE_COORDINATION_NOTE)
+        self.assertIn('02-575-6883', GUIDANCE_COORDINATION_NOTE)
+        # The pre-existing วปกก. contact must survive the addition.
+        self.assertIn('02-574-8186', GUIDANCE_COORDINATION_NOTE)

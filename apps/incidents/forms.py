@@ -213,6 +213,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             # Section 5
             'destination_ip',
             'ioc_details',
+            'ioc_user',
             # Section 6
             'mitre_phase',
             # Section 7
@@ -250,6 +251,10 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'ioc_details':        forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
+            }),
+            'ioc_user':           forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'เช่น administrator หรือ DOMAIN\\svc_backup',
             }),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -355,7 +360,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
-            'destination_ip', 'ioc_details', 'mitre_phase',
+            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_phase',
             'spread_to_others',
             'action_required', 'action_precautions',
             'actions_taken_summary', 'next_steps_summary',
@@ -377,6 +382,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             }),
             'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
             'ioc_details':        forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ'}),
+            'ioc_user':           forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'บัญชีผู้ใช้ที่เกี่ยวข้อง'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ขั้นตอน/มาตรการที่ผู้ดูแลระบบต้องดำเนินการ — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
@@ -498,7 +504,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'spread_to_others',
-            'destination_ip', 'ioc_details', 'mitre_phase', 'action_required',
+            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_phase', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
         ]
         widgets = {

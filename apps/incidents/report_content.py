@@ -17,27 +17,15 @@ GUIDANCE_COORDINATION_NOTE = (
     'เรื่องการเฝ้าระวัง: 02-574-8209-10 (ปปกก.)\n'
     'เรื่องการส่ง log เพื่อให้ตรวจหาต้นเหตุของเหตุละเมิด: 02-574-8209-10 (ปปกก.)\n'
     'เรื่องการตรวจประเมินช่องโหว่ (VA) และการทดสอบเจาะระบบ (PT): 02-575-6883 (มปกก.)\n'
+    'เรื่องขอคำแนะนำ การทำให้เซิร์ฟเวอร์แข็งแกร่ง (Hardening): 02-575-6883 (มปกก.)\n'
     'เรื่องขอคำแนะนำ Network Security และ Infrastructure Security: 02-574-8186 (วปกก.)'
 )
 
-# Section 8's fixed remediation checklist — ticked by hand on the printed form.
-REMEDIATION_CHECKLIST = [
-    'Isolate เครื่อง – แยกเครื่องที่ได้รับผลกระทบออกจากเครือข่าย',
-    'Close Service ที่ไม่จำเป็น – ปิดบริการหรือพอร์ตที่เปิดเผยและมีความเสี่ยง',
-    'Block IoC – บล็อกตัวบ่งชี้การโจมตี (IP, Domain, URL, Hash)',
-    'Dump memory ของเครื่อง Server',
-    'รวบรวม Event Logs เพื่อส่งต่อ ปปกก.',
-    'Disable/Reset Account – ปิดการใช้งานหรือรีเซ็ตรหัสผ่านบัญชีที่ได้รับผลกระทบ',
-    'เปลี่ยนรหัสผ่าน',
-    'Remove Malware – กำจัดมัลแวร์ออกจากระบบ',
-    'ลบไฟล์ และ Path ที่ต้องสงสัย',
-    'Patch Vulnerability – ติดตั้งแพตช์แก้ไขช่องโหว่ที่เกี่ยวข้อง',
-    'Update Software/OS – อัปเดตซอฟต์แวร์หรือระบบปฏิบัติการให้เป็นเวอร์ชันล่าสุด',
-    'Harden Configuration – ปรับแต่งการตั้งค่าความปลอดภัยของระบบให้รัดกุมมากขึ้น',
-    'ตรวจสอบการทำงานของภัยคุกคามยังทำงานอยู่หรือไม่',
-    'ติดตั้ง Sysmon',
-    'ติดตั้ง Agent Wazuh',
-]
+# Section 8 used to carry a fixed 15-item remediation checklist, ticked by hand
+# on the printed form. It was removed: it was static boilerplate that no ticket
+# field ever drove, always rendered unticked, and section 6 already carries a
+# real containment checklist whose done-state comes from `action_required`
+# (Ticket.containment_checklist). Section 8 now shows only its two data rows.
 
 APPENDIX_INTRO = (
     'อ้างอิงตาม ภาคผนวก ท้ายประกาศคณะกรรมการการรักษาความมั่นคงปลอดภัยไซเบอร์แห่งชาติ '

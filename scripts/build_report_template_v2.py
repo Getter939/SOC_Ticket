@@ -32,7 +32,6 @@ from apps.incidents.report_content import (  # noqa: E402
     APPENDIX_INTRO,
     FOOTER_LEFT,
     FOOTER_RIGHT,
-    REMEDIATION_CHECKLIST,
 )
 TEMPLATES_DIR = BASE_DIR / 'apps' / 'incidents' / 'report_templates'
 OUTPUT_PATH = TEMPLATES_DIR / 'report_template_v2.docx'
@@ -225,7 +224,7 @@ def add_title_banner(doc):
     set_cell_margins(cell, top=140, bottom=140)
     p = _first_paragraph(cell)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    add_runs(p, [('INCIDENT REPORT', BODY_FONT, 22, '1F2933', True)])
+    add_runs(p, [('INCIDENT REPORT: Containment', BODY_FONT, 22, '1F2933', True)])
     p2 = cell.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p2.paragraph_format.space_after = Pt(0)
@@ -283,18 +282,11 @@ def add_remediation_section(doc):
     set_table_borders(table)
     cell = table.rows[0].cells[0]
     set_cell_margins(cell, top=90, bottom=90)
-    first = True
-    for item in REMEDIATION_CHECKLIST:
-        p = _first_paragraph(cell) if first else cell.add_paragraph()
-        first = False
-        p.paragraph_format.space_after = Pt(2)
-        add_runs(p, [
-            ('☐', SYMBOL_FONT, 14, TEXT, False),
-            (f' {item}', BODY_FONT, 14, TEXT, False),
-        ])
-    # Free-text remediation data below the standard checklist.
-    gap = cell.add_paragraph()
-    gap.paragraph_format.space_before = Pt(6)
+    # A fixed 15-item remediation checklist used to be printed here. It was
+    # removed — it was never ticked by the system and section 6 already carries
+    # the real, data-driven containment checklist. Section 8 is now just the
+    # two free-text results below.
+    gap = _first_paragraph(cell)
     add_runs(gap, [('ผลการตรวจสอบ / Investigation Findings:', BODY_FONT, 14, TEXT, True)])
     p = cell.add_paragraph()
     add_runs(p, [('{{remediation_summary}}', BODY_FONT, 14, TEXT, False)])
@@ -373,36 +365,40 @@ def build(output_path=OUTPUT_PATH):
                      BODY_FONT, 10, MUTED, False)])
 
     add_section_band(doc, '1. ข้อมูลทั่วไป (General Information)')
+    # Numbered 1.N like the paper form. Sequential over our own row set, which
+    # is wider than the NT form's — so these deliberately do not correspond
+    # one-for-one with the numbers on that document. Keep in step with
+    # reports.build_ticket_report_sections, which repeats these labels.
     add_kv_table(doc, [
-        ('หมายเลข Incident', '{{ticket_id}}'),
-        ('วันที่ เวลา ที่พบเหตุ', '{{incident_datetime}}'),
-        ('วันที่ เวลา ที่เกิดเหตุ', '{{incident_datetime}}'),
-        ('ชื่อ incident/event', '{{incident_name}}'),
-        ('ประเภท: event หรือ incident', checkbox_segments([
-            ('chk_class_event', 'Event'), ('chk_class_incident', 'Incident')])),
-        ('ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', checkbox_segments([
-            ('chk_sev_critical', 'Critical'), ('chk_sev_high', 'High'),
-            ('chk_sev_medium', 'Medium'), ('chk_sev_low', 'Low')])),
-        ('ระดับความสำคัญ', checkbox_segments([
+        ('1.1 หมายเลข Incident', '{{ticket_id}}'),
+        ('1.2 วันที่ เวลา ที่พบเหตุ', '{{incident_datetime}}'),
+        ('1.3 วันที่ เวลา ที่เกิดเหตุ', '{{incident_datetime}}'),
+        ('1.4 ชื่อ incident/event', '{{incident_name}}'),
+        ('1.5 ประเภท: event หรือ incident', checkbox_segments([
+            ('chk_class_incident', 'Incident'), ('chk_class_event', 'Event')])),
+        ('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', checkbox_segments([
+            ('chk_sev_low', 'Low'), ('chk_sev_medium', 'Medium'),
+            ('chk_sev_high', 'High'), ('chk_sev_critical', 'Critical')])),
+        ('1.7 ระดับความสำคัญ', checkbox_segments([
             ('chk_imp_normal', 'สำคัญ'), ('chk_imp_high', 'สำคัญมาก')])),
-        ('มีการกระจายไปยังจุดอื่น', checkbox_segments([
+        ('1.8 มีการกระจายไปยังจุดอื่น', checkbox_segments([
             ('chk_spread_yes', 'ใช่'), ('chk_spread_no', 'ไม่ใช่')])),
-        ('ระดับความรุนแรง (อ้างอิงตาม สกมช.)', checkbox_segments([
-            ('chk_ncsa_critical', 'วิกฤต'), ('chk_ncsa_severe', 'ร้ายแรง'),
-            ('chk_ncsa_nonsevere', 'ไม่ร้ายแรง')])),
-        ('*หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', '{{category}}'),
-        ('ทรัพย์สินที่ได้รับผลกระทบ', '{{host_ip}}'),
-        ('ประเภททรัพย์สินที่ได้รับผลกระทบ', checkbox_segments([
+        ('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', checkbox_segments([
+            ('chk_ncsa_nonsevere', 'ไม่ร้ายแรง'), ('chk_ncsa_severe', 'ร้ายแรง'),
+            ('chk_ncsa_critical', 'วิกฤต')])),
+        ('1.10 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', '{{category}}'),
+        ('1.11 ทรัพย์สินที่ได้รับผลกระทบ', '{{host_ip}}'),
+        ('1.12 ประเภททรัพย์สินที่ได้รับผลกระทบ', checkbox_segments([
             ('chk_asset_computer', 'Computer'), ('chk_asset_server', 'Server'),
             ('chk_asset_network', 'Network Device')])),
-        ('ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', '{{asset_owner}}'),
-        ('ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
-        ('ระบบที่ได้รับผลกระทบ', '{{system_name}}'),
-        ('สถานะปัจจุบัน', '{{status}}'),
-        ('เรื่องที่ดำเนินการแล้ว', '{{actions_taken_summary}}'),
-        ('การที่จะดำเนินการลำดับถัดไป', '{{next_steps_summary}}'),
-        ('ผู้รายงาน', '{{reporter}}'),
-        ('แหล่งข้อมูล', '{{log_source}}'),
+        ('1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', '{{asset_owner}}'),
+        ('1.14 ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
+        ('1.15 ระบบที่ได้รับผลกระทบ', '{{system_name}}'),
+        ('1.16 สถานะปัจจุบัน', '{{status}}'),
+        ('1.17 เรื่องที่ดำเนินการแล้ว', '{{actions_taken_summary}}'),
+        ('1.18 การที่จะดำเนินการลำดับถัดไป', '{{next_steps_summary}}'),
+        ('1.19 ผู้รายงาน', '{{reporter}}'),
+        ('1.20 แหล่งข้อมูล', '{{log_source}}'),
     ])
 
     add_section_band(doc, '2. รายละเอียดเหตุการณ์ (Incident Description)')
@@ -429,6 +425,7 @@ def build(output_path=OUTPUT_PATH):
         ('คำสั่ง', '{{ioc_command}}'),
         ('Hash', '{{ioc_hash}}'),
         ('IP', '{{ioc_ip}}'),
+        ('User', '{{ioc_user}}'),
     ])
 
     add_section_band(doc, '5. Evidence / Log')

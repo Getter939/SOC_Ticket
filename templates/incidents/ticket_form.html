@@ -315,6 +315,13 @@
         </div>
 
         <div class="col-12">
+          <label class="form-label fw-semibold" for="{{ form.ioc_user.id_for_label }}">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</label>
+          {{ form.ioc_user }}
+          <div class="field-hint">บัญชีที่ถูกใช้โจมตีหรือถูกเจาะ — แสดงเป็นแถว "User" ในหมวด 4 ของรายงาน</div>
+          {% if form.ioc_user.errors %}<div class="text-danger small">{{ form.ioc_user.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-12">
           {% include 'incidents/_evidence_picker.html' with picker_label='แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)' %}
         </div>
 
