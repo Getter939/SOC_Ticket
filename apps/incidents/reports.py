@@ -22,6 +22,10 @@ from .report_content import (
     APPENDIX_INTRO,
     FOOTER_LEFT,
     FOOTER_RIGHT,
+    SECTION1_ROWS,
+    SECTION3_ROWS,
+    SECTION4_ROWS,
+    SECTION_TITLES,
 )
 
 
@@ -227,68 +231,41 @@ def build_ticket_report_sections(report, ticket):
         ('ไม่ใช่', ticket.spread_to_others is False),
     ]
 
+    def rows_from(table):
+        """Render a shared row table (report_content) into preview rows.
+
+        Checkbox state is read back out of the ``chk_*`` keys the context
+        already carries, rather than recomputing the same comparisons here —
+        one source for the ticked state, and the DOCX builder walks the same
+        table with the same keys.
+        """
+        built = []
+        for kind, label, spec in table:
+            if kind == 'kv':
+                built.append(kv(label, report[spec]))
+            else:
+                built.append(checks(label, [
+                    (option_label, report[chk_key] == CHECKED)
+                    for chk_key, option_label in spec
+                ]))
+        return built
+
     return [
-        # Rows are numbered 1.N to match the paper form's style. The numbers are
-        # sequential over OUR row set, which is wider than the NT form's — so
-        # they intentionally do not line up one-for-one with that document.
-        {'number': '1', 'title': 'ข้อมูลทั่วไป (General Information)', 'rows': [
-            kv('1.1 หมายเลข Incident', report['ticket_id']),
-            kv('1.2 วันที่ เวลา ที่พบเหตุ', report['incident_datetime']),
-            kv('1.3 วันที่ เวลา ที่เกิดเหตุ', report['incident_datetime']),
-            kv('1.4 ชื่อ incident/event', report['incident_name']),
-            checks('1.5 ประเภท: event หรือ incident', [
-                ('Incident', ticket.classification == Ticket.CLASSIFICATION_INCIDENT),
-                ('Event', ticket.classification == Ticket.CLASSIFICATION_EVENT)]),
-            checks('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
-                ('Low', ticket.severity == 'Low'),
-                ('Medium', ticket.severity == 'Medium'),
-                ('High', ticket.severity == 'High'),
-                ('Critical', ticket.severity == 'Critical')]),
-            checks('1.7 ระดับความสำคัญ', [
-                ('สำคัญ', not ticket.is_emergency),
-                ('สำคัญมาก', ticket.is_emergency)]),
-            checks('1.8 มีการกระจายไปยังจุดอื่น', spread_options),
-            checks('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
-                ('ไม่ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE),
-                ('ร้ายแรง', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_SEVERE),
-                ('วิกฤต', ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL)]),
-            kv('1.10 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', report['category']),
-            kv('1.11 ทรัพย์สินที่ได้รับผลกระทบ', report['host_ip']),
-            checks('1.12 ประเภททรัพย์สินที่ได้รับผลกระทบ', asset_options),
-            kv('1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', report['asset_owner']),
-            kv('1.14 ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
-            kv('1.15 ระบบที่ได้รับผลกระทบ', report['system_name']),
-            kv('1.16 สถานะปัจจุบัน', report['status']),
-            kv('1.17 เรื่องที่ดำเนินการแล้ว', report['actions_taken_summary']),
-            kv('1.18 การที่จะดำเนินการลำดับถัดไป', report['next_steps_summary']),
-            kv('1.19 ผู้รายงาน', report['reporter']),
-            kv('1.20 แหล่งข้อมูล', report['log_source']),
-        ]},
-        {'number': '2', 'title': 'รายละเอียดเหตุการณ์ (Incident Description)', 'rows': [
+        {'number': '1', 'title': SECTION_TITLES['1'],
+         'rows': rows_from(SECTION1_ROWS)},
+        {'number': '2', 'title': SECTION_TITLES['2'], 'rows': [
             text(report['incident_description'])]},
-        {'number': '3', 'title': 'Scope ทรัพย์สินที่ได้รับผลกระทบ', 'rows': [
-            kv('ระบบ/บริการ', report['system_name']),
-            kv('หน่วยงานเจ้าของทรัพย์สิน', report['asset_owner']),
-            kv('ชื่อเจ้าของทรัพย์สิน', report['asset_owner_name']),
-            kv('Host Name', report['host_name']),
-            kv('IP Address', report['ip_address']),
-            kv('Operating System', report['operating_system']),
-            checks('ประเภทของทรัพย์สิน', asset_options + [('ไม่ทราบ', not asset_known)]),
-            checks('มีการกระจายไปยังจุดอื่น', spread_options),
-        ]},
-        {'number': '4', 'title': 'Indicators of Compromise หรือหลักฐานที่พบ', 'rows': [
-            kv('Process/File Path', report['ioc_process']),
-            kv('คำสั่ง', report['ioc_command']),
-            kv('Hash', report['ioc_hash']),
-            kv('IP', report['ioc_ip']),
-            kv('User', report['ioc_user']),
-        ]},
-        {'number': '5', 'title': 'Evidence / Log', 'rows': [text(report['evidence_log'])]},
-        {'number': '6', 'title': 'สิ่งที่ต้องดำเนินการ (Containment)', 'rows': [
+        {'number': '3', 'title': SECTION_TITLES['3'],
+         'rows': rows_from(SECTION3_ROWS)},
+        {'number': '4', 'title': SECTION_TITLES['4'],
+         'rows': rows_from(SECTION4_ROWS)},
+        {'number': '5', 'title': SECTION_TITLES['5'],
+         'rows': [text(report['evidence_log'])]},
+        {'number': '6', 'title': SECTION_TITLES['6'], 'rows': [
             _containment_checklist_row(ticket) or text(report['action_required'])]},
-        {'number': '7', 'title': 'ข้อควรระวังในการดำเนินการ', 'rows': [
+        {'number': '7', 'title': SECTION_TITLES['7'], 'rows': [
             text(report['action_precautions'])]},
-        {'number': '8', 'title': 'สรุปผลการดำเนินการแก้ไข', 'rows': [
+        {'number': '8', 'title': SECTION_TITLES['8'], 'rows': [
             kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
             kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
         ]},

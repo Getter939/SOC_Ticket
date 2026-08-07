@@ -32,6 +32,10 @@ from apps.incidents.report_content import (  # noqa: E402
     APPENDIX_INTRO,
     FOOTER_LEFT,
     FOOTER_RIGHT,
+    SECTION1_ROWS,
+    SECTION3_ROWS,
+    SECTION4_ROWS,
+    SECTION_TITLES,
 )
 TEMPLATES_DIR = BASE_DIR / 'apps' / 'incidents' / 'report_templates'
 OUTPUT_PATH = TEMPLATES_DIR / 'report_template_v2.docx'
@@ -154,6 +158,23 @@ def checkbox_segments(options):
         segments.append((f'{{{{{key}}}}}', SYMBOL_FONT, 14, TEXT, False))
         segments.append((f' {label}', BODY_FONT, 14, TEXT, False))
     return segments
+
+
+def docx_rows(table):
+    """Render a shared row table (report_content) into add_kv_table() input.
+
+    The same tables drive apps.incidents.reports for the HTML/PDF preview, so a
+    label or an option order is written once and both outputs stay in step.
+    Here a 'kv' row becomes a {{placeholder}} and a 'checks' row becomes
+    checkbox runs; there they become values and booleans.
+    """
+    rendered = []
+    for kind, label, spec in table:
+        if kind == 'kv':
+            rendered.append((label, f'{{{{{spec}}}}}'))
+        else:
+            rendered.append((label, checkbox_segments(spec)))
+    return rendered
 
 
 # ── page furniture ─────────────────────────────────────────────────────── #
@@ -364,71 +385,19 @@ def build(output_path=OUTPUT_PATH):
     add_runs(meta, [('Template {{template_version}} | จัดทำเมื่อ {{generated_at}}',
                      BODY_FONT, 10, MUTED, False)])
 
-    add_section_band(doc, '1. ข้อมูลทั่วไป (General Information)')
-    # Numbered 1.N like the paper form. Sequential over our own row set, which
-    # is wider than the NT form's — so these deliberately do not correspond
-    # one-for-one with the numbers on that document. Keep in step with
-    # reports.build_ticket_report_sections, which repeats these labels.
-    add_kv_table(doc, [
-        ('1.1 หมายเลข Incident', '{{ticket_id}}'),
-        ('1.2 วันที่ เวลา ที่พบเหตุ', '{{incident_datetime}}'),
-        ('1.3 วันที่ เวลา ที่เกิดเหตุ', '{{incident_datetime}}'),
-        ('1.4 ชื่อ incident/event', '{{incident_name}}'),
-        ('1.5 ประเภท: event หรือ incident', checkbox_segments([
-            ('chk_class_incident', 'Incident'), ('chk_class_event', 'Event')])),
-        ('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', checkbox_segments([
-            ('chk_sev_low', 'Low'), ('chk_sev_medium', 'Medium'),
-            ('chk_sev_high', 'High'), ('chk_sev_critical', 'Critical')])),
-        ('1.7 ระดับความสำคัญ', checkbox_segments([
-            ('chk_imp_normal', 'สำคัญ'), ('chk_imp_high', 'สำคัญมาก')])),
-        ('1.8 มีการกระจายไปยังจุดอื่น', checkbox_segments([
-            ('chk_spread_yes', 'ใช่'), ('chk_spread_no', 'ไม่ใช่')])),
-        ('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', checkbox_segments([
-            ('chk_ncsa_nonsevere', 'ไม่ร้ายแรง'), ('chk_ncsa_severe', 'ร้ายแรง'),
-            ('chk_ncsa_critical', 'วิกฤต')])),
-        ('1.10 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', '{{category}}'),
-        ('1.11 ทรัพย์สินที่ได้รับผลกระทบ', '{{host_ip}}'),
-        ('1.12 ประเภททรัพย์สินที่ได้รับผลกระทบ', checkbox_segments([
-            ('chk_asset_computer', 'Computer'), ('chk_asset_server', 'Server'),
-            ('chk_asset_network', 'Network Device')])),
-        ('1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', '{{asset_owner}}'),
-        ('1.14 ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
-        ('1.15 ระบบที่ได้รับผลกระทบ', '{{system_name}}'),
-        ('1.16 สถานะปัจจุบัน', '{{status}}'),
-        ('1.17 เรื่องที่ดำเนินการแล้ว', '{{actions_taken_summary}}'),
-        ('1.18 การที่จะดำเนินการลำดับถัดไป', '{{next_steps_summary}}'),
-        ('1.19 ผู้รายงาน', '{{reporter}}'),
-        ('1.20 แหล่งข้อมูล', '{{log_source}}'),
-    ])
+    add_section_band(doc, f'1. {SECTION_TITLES["1"]}')
+    add_kv_table(doc, docx_rows(SECTION1_ROWS))
 
-    add_section_band(doc, '2. รายละเอียดเหตุการณ์ (Incident Description)')
+    add_section_band(doc, f'2. {SECTION_TITLES["2"]}')
     add_freetext_box(doc, '{{incident_description}}')
 
-    add_section_band(doc, '3. Scope ทรัพย์สินที่ได้รับผลกระทบ')
-    add_kv_table(doc, [
-        ('ระบบ/บริการ', '{{system_name}}'),
-        ('หน่วยงานเจ้าของทรัพย์สิน', '{{asset_owner}}'),
-        ('ชื่อเจ้าของทรัพย์สิน', '{{asset_owner_name}}'),
-        ('Host Name', '{{host_name}}'),
-        ('IP Address', '{{ip_address}}'),
-        ('Operating System', '{{operating_system}}'),
-        ('ประเภทของทรัพย์สิน', checkbox_segments([
-            ('chk_asset_computer', 'Computer'), ('chk_asset_server', 'Server'),
-            ('chk_asset_network', 'Network Device'), ('chk_asset_unknown', 'ไม่ทราบ')])),
-        ('มีการกระจายไปยังจุดอื่น', checkbox_segments([
-            ('chk_spread_yes', 'ใช่'), ('chk_spread_no', 'ไม่ใช่')])),
-    ])
+    add_section_band(doc, f'3. {SECTION_TITLES["3"]}')
+    add_kv_table(doc, docx_rows(SECTION3_ROWS))
 
-    add_section_band(doc, '4. Indicators of Compromise หรือหลักฐานที่พบ')
-    add_kv_table(doc, [
-        ('Process/File Path', '{{ioc_process}}'),
-        ('คำสั่ง', '{{ioc_command}}'),
-        ('Hash', '{{ioc_hash}}'),
-        ('IP', '{{ioc_ip}}'),
-        ('User', '{{ioc_user}}'),
-    ])
+    add_section_band(doc, f'4. {SECTION_TITLES["4"]}')
+    add_kv_table(doc, docx_rows(SECTION4_ROWS))
 
-    add_section_band(doc, '5. Evidence / Log')
+    add_section_band(doc, f'5. {SECTION_TITLES["5"]}')
     add_freetext_box(doc, '{{evidence_log}}')
 
     add_section_band(doc, '6. สิ่งที่ต้องดำเนินการ (Containment)')

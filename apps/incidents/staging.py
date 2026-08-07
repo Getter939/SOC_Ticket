@@ -97,9 +97,11 @@ def stage_uploads(request, field_name='evidence_files'):
     if not uploads:
         return token, errors
 
-    existing = staged_for(request.user, token)
-    running_total = staged_total_size(request.user, token)
-    running_count = existing.count()
+    # One query, then derive both figures from it — staged_total_size() would
+    # otherwise re-run the same lookup just to sum it.
+    existing = list(staged_for(request.user, token))
+    running_total = sum(f.file.size for f in existing)
+    running_count = len(existing)
 
     for upload in uploads:
         if running_count >= MAX_ATTACHMENT_COUNT:

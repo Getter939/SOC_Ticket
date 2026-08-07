@@ -13,7 +13,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import F, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -125,6 +125,27 @@ def _can_upload_ticket_attachment(ticket, user):
     return False
 
 
+def _is_soc(user):
+    """Superuser, or a SOC analyst/manager — the "sees and drives everything" set."""
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc)
+
+
+def _is_soc_manager(user):
+    """Superuser, or a SOC Manager — the privileged-override set.
+
+    Mirrors Ticket._is_emergency_manager, which is the same rule expressed on
+    the model for emergency reassessment. Kept as a plain predicate here because
+    the checks below are about a person, not about a particular ticket.
+    """
+    if user.is_superuser:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc_manager)
+
+
 def _can_delete_ticket_attachment(ticket, attachment, user):
     """Whether user may remove this piece of evidence.
 
@@ -140,12 +161,9 @@ def _can_delete_ticket_attachment(ticket, attachment, user):
     """
     if ticket.status in Ticket.TERMINAL_STATUSES:
         return False
-    if user.is_superuser:
-        return True
     if attachment.uploaded_by_id == user.pk:
         return True
-    profile = getattr(user, 'profile', None)
-    return bool(profile and profile.is_soc_manager)
+    return _is_soc_manager(user)
 
 
 def _can_edit_ticket(ticket, user):
@@ -175,7 +193,7 @@ def _can_edit_ticket(ticket, user):
         return False
     if ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == user.pk:
         return profile.is_tier1
-    return profile.is_soc
+    return _is_soc(user)
 
 
 def _can_restore_ticket_attachment(user):
@@ -185,10 +203,7 @@ def _can_restore_ticket_attachment(user):
     case protects the evidence set; refusing *recovery* would only make a
     mistake permanent, so restore stays available after closure.
     """
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    return bool(profile and profile.is_soc_manager)
+    return _is_soc_manager(user)
 
 
 def _can_upload_subtask_result(subtask, user):
@@ -232,10 +247,7 @@ def _can_access_ticket_report(user):
     it and reset the stale-report badge. Keeping that SOC-only is what keeps the
     provenance authoritative.
     """
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    return bool(profile and profile.is_soc)
+    return _is_soc(user)
 
 
 def _valid_soc_status_choices(ticket, user):
@@ -1477,8 +1489,23 @@ def ticket_detail(request, pk):
 
         return redirect('ticket_detail', pk=pk)
 
-    logs = ticket.logs.all()
-    attachments = ticket.attachments.all()
+    # The timeline renders each entry's author, its edited badge, and any
+    # revisions. Without prefetching, was_edited/.count()/.all() fire per entry
+    # — a 15-entry ticket cost ~37 queries for the badge alone.
+    logs = ticket.logs.select_related('author').prefetch_related(
+        Prefetch(
+            'revisions',
+            queryset=TicketLogRevision.objects.select_related('edited_by'),
+        )
+    )
+    # Decide deletability once, in Python. The rule is per-attachment (it turns
+    # on who uploaded it), and a template cannot call a helper with arguments —
+    # so without this the template has to restate _can_delete_ticket_attachment
+    # in tag syntax and the two copies drift.
+    attachments = list(ticket.attachments.select_related('uploaded_by'))
+    for attachment in attachments:
+        attachment.can_delete = _can_delete_ticket_attachment(
+            ticket, attachment, request.user)
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
 
@@ -1504,6 +1531,8 @@ def ticket_detail(request, pk):
             ).values_list('pk', 'profile__role')
         }
 
+    can_restore_attachment = _can_restore_ticket_attachment(request.user)
+
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         'logs': logs,
@@ -1517,13 +1546,13 @@ def ticket_detail(request, pk):
             ticket.step_back_target(), ''),
         'field_changes': ticket.field_changes.select_related(
             'changed_by', 'subtask')[:50],
-        'can_restore_attachment': _can_restore_ticket_attachment(request.user),
+        'can_restore_attachment': can_restore_attachment,
         # Removed evidence, shown only to the roles that can bring it back.
         'deleted_attachments': (
             TicketAttachment.all_objects
             .filter(ticket=ticket, deleted_at__isnull=False)
             .select_related('deleted_by').order_by('-deleted_at')
-            if _can_restore_ticket_attachment(request.user) else []
+            if can_restore_attachment else []
         ),
         'profile': profile,
         'is_terminal': is_terminal,

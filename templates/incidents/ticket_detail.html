@@ -273,10 +273,9 @@
       <div class="card-header"><h2 class="section-title"><i class="bi bi-paperclip me-2"></i>ไฟล์แนบ</h2></div>
       <div class="card-body">
         {% for att in attachments %}<div class="d-flex justify-content-between gap-3 border-bottom py-2"><div><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>{% if att.description %}<div class="small">{{ att.description }}</div>{% endif %}<div class="small text-muted">Uploaded by {% if att.uploaded_by %}{{ att.uploaded_by.get_full_name|default:att.uploaded_by.username }}{% else %}Unknown user{% endif %} · {{ att.uploaded_at|date:"d M Y H:i" }}</div></div>
-          {# Mirrors _can_delete_ticket_attachment: frozen once the case closes, #}
-          {# then uploader or SOC Manager only. Deleting needs a written reason, #}
-          {# so the modal doubles as the confirmation step. #}
-          {% if not is_terminal %}{% if request.user.is_superuser or att.uploaded_by == request.user or profile and profile.is_soc_manager %}
+          {# Decided by _can_delete_ticket_attachment in the view. Deleting needs #}
+          {# a written reason, so the modal doubles as the confirmation step. #}
+          {% if att.can_delete %}
           <div>
             <button type="button" class="btn btn-sm btn-link text-danger" data-bs-toggle="modal" data-bs-target="#delete-att-{{ att.pk }}">ลบ</button>
           </div>
@@ -301,7 +300,7 @@
               </form>
             </div>
           </div>
-          {% endif %}{% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีไฟล์แนบ</p>{% endfor %}
+          {% endif %}</div>{% empty %}<p class="text-muted small">ยังไม่มีไฟล์แนบ</p>{% endfor %}
 
         {% if deleted_attachments %}
         <div class="mt-3">

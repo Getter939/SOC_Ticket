@@ -1873,7 +1873,20 @@ class Ticket(models.Model):
         labels = dict(self.STATUS_CHOICES)
         previous = self.status
         self.status = target
-        self.save(update_fields=['status', 'updated_at'])
+        # Same stamp transition_to keeps (see its comment there): every queue
+        # surface sorts and ages tickets on this. Without it a stepped-back
+        # ticket re-enters the Tier 2 queue showing when it FIRST reached that
+        # status — days stale — and sorts to the wrong end.
+        self.status_changed_at = timezone.now()
+        # A claim covers one stage only; re-entering the queue must put the
+        # ticket up for grabs again rather than leaving it locked to whoever
+        # handled the stage it just came back from.
+        self.t2_claimed_by = None
+        self.t2_claimed_at = None
+        self.save(update_fields=[
+            'status', 'status_changed_at', 't2_claimed_by', 't2_claimed_at',
+            'updated_at',
+        ])
         TicketLog.objects.create(
             ticket=self,
             note=(f'↩ ย้อนขั้นตอนโดยผู้จัดการ SOC: '
@@ -2467,10 +2480,7 @@ def validate_attachment_type(uploaded_file):
     if uploaded_file is None:
         return
 
-    allowed = getattr(
-        settings, 'ATTACHMENT_ALLOWED_EXTENSIONS',
-        DEFAULT_ALLOWED_ATTACHMENT_EXTENSIONS,
-    )
+    allowed = allowed_attachment_extensions()
     ext = _attachment_extension(uploaded_file.name)
     if not ext:
         raise ValidationError('ไฟล์ต้องมีนามสกุล (extension) ที่ชัดเจน')
