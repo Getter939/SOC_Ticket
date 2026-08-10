@@ -422,9 +422,11 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     const guidance = selectedGuidance();
     if (!guidance) return;
     appendText(actionField, guidance.action_required);
-    if (guidanceNote && !actionField.value.includes('หมายเหตุ: สามารถประสานงาน')) {
-      appendText(actionField, guidanceNote);
-    }
+    // appendText already skips text that is present, and it compares against
+    // the real note. The previous guard hard-coded a prefix of the Python
+    // GUIDANCE_COORDINATION_NOTE, so rewording that constant would have made
+    // the check silently stop matching and the note double-insert.
+    appendText(actionField, guidanceNote);
     appendText(precautionField, guidance.action_precautions);
   });
 

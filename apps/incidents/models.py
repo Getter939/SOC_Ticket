@@ -1948,10 +1948,48 @@ class TicketAlertLink(models.Model):
                 name='one_primary_alert_per_ticket',
             ),
         ]
-        ordering = ['role', 'alert__timestamp', 'alert_id']
+        # Explicit weight, NOT ordering on ``role`` itself: role is a CharField,
+        # so ordering on it is alphabetical and only puts PRIMARY first because
+        # 'PRIMARY' < 'SUPPORTING' happens to be true. A third role would break
+        # that silently — the same trap the Tier 2 queue's severity sort fell
+        # into. Ordering on the weight says what is meant.
+        # 'PRIMARY' spelled out, not ROLE_PRIMARY: a nested Meta cannot see the
+        # enclosing class's attributes. Same reason the UniqueConstraint above
+        # uses the literal.
+        ordering = [
+            models.Case(
+                models.When(role='PRIMARY', then=models.Value(0)),
+                default=models.Value(1),
+                output_field=models.IntegerField(),
+            ),
+            'alert__timestamp',
+            'alert_id',
+        ]
 
     def __str__(self):
         return f'{self.ticket.ticket_id} ← alert #{self.alert_id} ({self.role})'
+
+    def clean(self):
+        """Keep the PRIMARY link and ``Ticket.wazuh_alert`` from drifting apart.
+
+        The primary alert is recorded twice — once as the ticket's own
+        ``wazuh_alert`` pointer (which single-alert code still reads) and once as
+        the PRIMARY link. Nothing at the database level can tie the two together,
+        so a write that sets only one leaves the ticket claiming two different
+        primary alerts. Rejecting the mismatch here is the write-time half; the
+        creation path in ``create_ticket`` derives the role from
+        ``ticket.wazuh_alert_id`` so it cannot produce one.
+        """
+        super().clean()
+        if self.role != self.ROLE_PRIMARY or self.ticket_id is None:
+            return
+        if self.alert_id != self.ticket.wazuh_alert_id:
+            raise ValidationError({
+                'alert': (
+                    'Primary alert link must match the ticket\'s wazuh_alert '
+                    f'(link #{self.alert_id} vs ticket #{self.ticket.wazuh_alert_id}).'
+                ),
+            })
 
 
 class TicketLog(models.Model):
@@ -2279,16 +2317,42 @@ class TicketSubtask(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-    def save(self, *args, **kwargs):
-        """Seed the clock for a task's initial OPEN status.
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        """Remember the stored status so ``save`` can spot a real transition.
 
-        Later status changes are stamped in ``update_subtask`` alongside their
-        audit row. Keeping the creation case here also covers admin and seed
-        writes, which do not pass through that view.
+        Cheaper than re-reading the row in save(), and it makes the stamp a
+        property of the model rather than of one view.
         """
-        if not self.pk and self.status_changed_at is None:
+        instance = super().from_db(db, field_names, values)
+        if 'status' in field_names:
+            instance._loaded_status = instance.status
+        return instance
+
+    def save(self, *args, **kwargs):
+        """Stamp ``status_changed_at`` whenever the status actually moves.
+
+        This lives in save(), not in ``update_subtask``, so admin edits, seeds,
+        data migrations and any future write path stamp it too — a view-only
+        stamp silently skips all of them and leaves the per-task age wrong.
+        Notes and attachment updates deliberately do NOT bump it; that is the
+        whole reason this field exists alongside ``updated_at``.
+        """
+        loaded_status = getattr(self, '_loaded_status', None)
+        is_new = not self.pk
+        if is_new:
+            if self.status_changed_at is None:
+                self.status_changed_at = timezone.now()
+        elif loaded_status is not None and loaded_status != self.status:
             self.status_changed_at = timezone.now()
-        return super().save(*args, **kwargs)
+            # An update_fields save must be told about the extra column or the
+            # stamp is computed and then silently dropped.
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None:
+                kwargs['update_fields'] = set(update_fields) | {'status_changed_at'}
+        result = super().save(*args, **kwargs)
+        self._loaded_status = self.status
+        return result
 
     def __str__(self):
         return f'[{self.get_subtask_type_display()}] {self.title} ({self.ticket.ticket_id})'

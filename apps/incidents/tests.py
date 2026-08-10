@@ -1887,6 +1887,88 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertRedirects(response, reverse('triage_queue'))
         self.assertFalse(Ticket.objects.exists())
 
+    def test_failed_submit_keeps_the_alert_on_the_case_mode_switch(self):
+        # Regression: alert_pk was only assigned on the GET branch, so a POST
+        # that came back with errors rendered the single↔multi switch link
+        # without the alert and stranded it.
+        alert = WazuhAlert.objects.create(
+            opensearch_id='ticket-switch-keeps-alert', timestamp=timezone.now(),
+            rule_level=12, triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+
+        data = _ticket_post_data(wazuh_alert=alert.pk)
+        data['device_name'] = ''          # force a validation error
+        response = self.client.post(reverse('create_ticket'), data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Ticket.objects.exists())
+        self.assertIn(
+            f'wazuh_alert={alert.pk}', response.context['case_switch_qs'])
+
+    def test_primary_alert_link_must_match_the_ticket_wazuh_alert(self):
+        # The primary alert is stored twice (Ticket.wazuh_alert + the PRIMARY
+        # link). Nothing in the database can tie them together, so clean() is
+        # what stops a ticket from claiming two different primary alerts.
+        primary = WazuhAlert.objects.create(
+            opensearch_id='link-clean-primary', timestamp=timezone.now(),
+            rule_level=12, triage_status=WazuhAlert.TRIAGE_TRIAGING,
+        )
+        other = WazuhAlert.objects.create(
+            opensearch_id='link-clean-other', timestamp=timezone.now(),
+            rule_level=12, triage_status=WazuhAlert.TRIAGE_TRIAGING,
+        )
+        ticket = _make_ticket(created_by=self.t1)
+        ticket.wazuh_alert = primary
+        ticket.save(update_fields=['wazuh_alert'])
+
+        with self.assertRaises(ValidationError) as ctx:
+            TicketAlertLink(
+                ticket=ticket, alert=other,
+                role=TicketAlertLink.ROLE_PRIMARY,
+            ).full_clean()
+        self.assertIn('alert', ctx.exception.error_dict)
+
+        # The matching primary, and any supporting alert, validate fine.
+        TicketAlertLink(
+            ticket=ticket, alert=primary,
+            role=TicketAlertLink.ROLE_PRIMARY,
+        ).full_clean()
+        TicketAlertLink(
+            ticket=ticket, alert=other,
+            role=TicketAlertLink.ROLE_SUPPORTING,
+        ).full_clean()
+
+    def test_alert_links_order_primary_first_regardless_of_role_spelling(self):
+        # Ordering must come from an explicit weight, not the alphabetical
+        # accident that 'PRIMARY' < 'SUPPORTING'.
+        primary = WazuhAlert.objects.create(
+            opensearch_id='link-order-primary',
+            timestamp=timezone.now(), rule_level=12,
+        )
+        supporting = WazuhAlert.objects.create(
+            opensearch_id='link-order-supporting',
+            # Earlier timestamp: it would sort first on any tie-breaker alone.
+            timestamp=timezone.now() - timedelta(hours=3), rule_level=12,
+        )
+        ticket = _make_ticket(created_by=self.t1)
+        ticket.wazuh_alert = primary
+        ticket.save(update_fields=['wazuh_alert'])
+        TicketAlertLink.objects.create(
+            ticket=ticket, alert=supporting,
+            role=TicketAlertLink.ROLE_SUPPORTING,
+        )
+        TicketAlertLink.objects.create(
+            ticket=ticket, alert=primary, role=TicketAlertLink.ROLE_PRIMARY,
+        )
+
+        roles = [link.role for link in ticket.alert_links.all()]
+        self.assertEqual(
+            roles,
+            [TicketAlertLink.ROLE_PRIMARY, TicketAlertLink.ROLE_SUPPORTING],
+        )
+
     def test_wazuh_event_ticket_is_recorded_as_event_history(self):
         alert = WazuhAlert.objects.create(
             opensearch_id='ticket-event-alert', timestamp=timezone.now(),
@@ -5300,6 +5382,75 @@ class TicketFieldHistoryTest(TestCase):
             [change.field_name for change in rendered_redteam_task.field_changes.all()],
             ['status'],
         )
+
+    def test_model_stamps_status_changed_at_outside_the_update_view(self):
+        # The stamp belongs to the model, not to update_subtask: admin edits,
+        # seeds and data migrations move a subtask's status too, and a
+        # view-only stamp leaves every one of them with a stale per-task age.
+        ticket = _make_ticket(created_by=self.t1)
+        task = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Collect logs',
+        )
+        seeded = task.status_changed_at
+        self.assertIsNotNone(seeded)
+
+        # Reload so the instance carries its stored status, as any other write
+        # path would.
+        task = TicketSubtask.objects.get(pk=task.pk)
+        task.result_notes = 'partial findings'
+        task.save()
+        task.refresh_from_db()
+        self.assertEqual(
+            task.status_changed_at, seeded, 'a note edit must not bump it')
+
+        task = TicketSubtask.objects.get(pk=task.pk)
+        task.status = TicketSubtask.STATUS_DONE
+        task.save()
+        task.refresh_from_db()
+        self.assertGreater(task.status_changed_at, seeded)
+
+    def test_status_stamp_survives_an_update_fields_save(self):
+        # update_fields would otherwise drop the freshly computed column.
+        ticket = _make_ticket(created_by=self.t1)
+        task = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_COUNTERMEASURE,
+            title='Block IP',
+        )
+        seeded = task.status_changed_at
+
+        task = TicketSubtask.objects.get(pk=task.pk)
+        task.status = TicketSubtask.STATUS_IN_PROGRESS
+        task.save(update_fields=['status'])
+        task.refresh_from_db()
+        self.assertGreater(task.status_changed_at, seeded)
+
+    def test_subtask_status_rows_stay_out_of_the_ticket_change_table(self):
+        # They have their own per-task history; repeating them here only burns
+        # the 50-row cap and pushes real ticket edits out of view. Subtask NOTE
+        # changes have no other home, so those stay.
+        ticket = _make_ticket(created_by=self.t1, device_name='DILUTE-HOST')
+        task = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
+            title='Collect logs', assigned_to=self.t1,
+        )
+        history.record_subtask_status_change(
+            task, TicketSubtask.STATUS_OPEN,
+            TicketSubtask.STATUS_DONE, self.t1)
+        history.record_subtask_change(task, '', 'findings attached', self.t1)
+        before = history.snapshot(ticket)
+        ticket.device_name = 'DILUTE-HOST-2'
+        ticket.save()
+        history.record_changes(ticket, before, self.t1, source='edit')
+
+        self.client.force_login(self.t1)
+        rows = self.client.get(
+            reverse('ticket_detail', args=[ticket.pk])).context['field_changes']
+
+        pairs = {(row.field_name, row.subtask_id) for row in rows}
+        self.assertIn(('device_name', None), pairs)
+        self.assertIn(('result_notes', task.pk), pairs)
+        self.assertNotIn(('status', task.pk), pairs)
 
     def test_history_is_shown_on_the_ticket_page(self):
         ticket = _make_ticket(created_by=self.t1, device_name='SHOWN-HOST')

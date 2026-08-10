@@ -743,7 +743,11 @@ def create_ticket(request):
     # Pre-fill from triage if coming from a TP triage decision
     triage = None
     triage_id = request.GET.get('triage_id') or request.POST.get('triage_id')
-    alert_pk = None
+    # Seeded from the request so the single ↔ multi switch link keeps the alert
+    # on EVERY render, including a POST that comes back with validation errors.
+    # The GET branch below refines it to the bundle's primary alert; leaving it
+    # None here would strand the analyst's alert on the first failed submit.
+    alert_pk = request.POST.get('wazuh_alert') or request.GET.get('wazuh_alert')
     if triage_id:
         triage = get_object_or_404(TriageRecord, pk=triage_id)
         if triage.ticket_id:
@@ -815,7 +819,7 @@ def create_ticket(request):
                         [locked_alert] if locked_alert else []
                     )
                     for source_alert in source_alerts:
-                        TicketAlertLink.objects.create(
+                        link = TicketAlertLink(
                             ticket=ticket,
                             alert=source_alert,
                             role=(
@@ -825,6 +829,13 @@ def create_ticket(request):
                             ),
                             linked_by=request.user,
                         )
+                        # full_clean, not objects.create: TicketAlertLink.clean()
+                        # is what stops a PRIMARY link from disagreeing with
+                        # ticket.wazuh_alert. The role above is derived from that
+                        # same field, so this can only fire if the derivation
+                        # itself regresses — which is exactly when we want it to.
+                        link.full_clean()
+                        link.save()
 
                     # T1 disposition is part of the create flow: the
                     # Event/Incident classification (set on the ticket by the
@@ -1714,8 +1725,14 @@ def ticket_detail(request, pk):
         'can_step_back': ticket.can_step_back(request.user),
         'step_back_target_label': dict(Ticket.STATUS_CHOICES).get(
             ticket.step_back_target(), ''),
-        'field_changes': ticket.field_changes.select_related(
-            'changed_by', 'subtask')[:50],
+        # Subtask STATUS transitions have their own per-task history rendered in
+        # the subtask card, so repeating them here only burns the 50-row cap and
+        # pushes real ticket edits out of view. Subtask *note* changes stay —
+        # they have no other home. Keep this exclusion in step with the
+        # field_name='status' Prefetch on `subtasks` above.
+        'field_changes': ticket.field_changes.exclude(
+            subtask__isnull=False, field_name='status',
+        ).select_related('changed_by', 'subtask')[:50],
         'can_restore_attachment': can_restore_attachment,
         # Removed evidence, shown only to the roles that can bring it back.
         'deleted_attachments': (
@@ -2365,11 +2382,9 @@ def update_subtask(request, subtask_id):
         previous_notes = subtask.result_notes
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
-            # ModelForm validation has copied the submitted status onto the
-            # instance. Stamp only a real transition: updating result notes or
-            # adding a deliverable must not make the status look newer.
-            if subtask.status != previous_status:
-                subtask.status_changed_at = timezone.now()
+            # status_changed_at is stamped by TicketSubtask.save() on a real
+            # transition, so admin and seed writes get it too. Only the audit
+            # row is this view's job.
             subtask = form.save()
             history.record_subtask_status_change(
                 subtask, previous_status, subtask.status, request.user)
