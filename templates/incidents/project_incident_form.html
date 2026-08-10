@@ -68,6 +68,8 @@
 
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
+    {{ threat_guidance|json_script:"threat-guidance-data" }}
+    {{ guidance_note|json_script:"guidance-note-data" }}
     {% if source_alert %}<input type="hidden" name="wazuh_alert" value="{{ source_alert.pk }}">{% endif %}
     {% if source_triage %}<input type="hidden" name="triage_id" value="{{ source_triage.pk }}">{% endif %}
     {# Ties this submit to evidence already staged server-side — see ticket_form. #}
@@ -185,6 +187,12 @@
           <label class="form-label fw-semibold">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
           {{ form.ioc_details }}
           {% if form.ioc_details.errors %}<div class="text-danger small">{{ form.ioc_details.errors }}</div>{% endif %}
+        </div>
+        <div class="col-12 d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-outline-primary btn-sm" id="insert-guidance-btn" disabled>
+            <i class="bi bi-lightbulb me-1"></i>แทรกแนวทางมาตรฐาน
+          </button>
+          <span id="insert-guidance-hint" class="text-muted small"></span>
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">สิ่งที่ต้องดำเนินการ (Containment)</label>
@@ -364,6 +372,71 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
 });
+
+// ── Insert standard containment guidance ─────────────────────────────────
+// Appends the selected category's shared guidance without replacing the
+// analyst's notes. These shared fields are copied to each member ticket.
+(function () {
+  const guidanceBtn = document.getElementById('insert-guidance-btn');
+  if (!guidanceBtn) return;
+
+  const guidanceData = JSON.parse(document.getElementById('threat-guidance-data').textContent);
+  const guidanceNote = JSON.parse(document.getElementById('guidance-note-data').textContent);
+  const guidanceHint = document.getElementById('insert-guidance-hint');
+  const categorySelect = document.getElementById('id_detailed_issue');
+  const actionField = document.getElementById('id_action_required');
+  const precautionField = document.getElementById('id_action_precautions');
+
+  function selectedGuidance() {
+    const category = categorySelect ? categorySelect.value : '';
+    return category && guidanceData[category] ? guidanceData[category] : null;
+  }
+
+  function refreshGuidanceButton() {
+    const category = categorySelect ? categorySelect.value : '';
+    const available = !!selectedGuidance();
+    guidanceBtn.disabled = !available;
+    guidanceHint.textContent = !category
+      ? 'เลือกหมวดหมู่ภัยคุกคามก่อน'
+      : (available ? '' : 'ไม่มีแนวทางมาตรฐานสำหรับหมวดหมู่นี้');
+  }
+
+  function autoGrow(field) {
+    if (!field) return;
+    field.style.overflowY = 'hidden';
+    field.style.height = 'auto';
+    field.style.height = Math.max(field.scrollHeight, 110) + 'px';
+  }
+
+  function appendText(field, text) {
+    if (!field || !text) return;
+    const existing = field.value.trim();
+    if (existing.includes(text.trim())) return;
+    field.value = existing ? existing + '\n\n' + text : text;
+    autoGrow(field);
+    // The synthetic input event lets the existing draft autosave capture this.
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  guidanceBtn.addEventListener('click', function () {
+    const guidance = selectedGuidance();
+    if (!guidance) return;
+    appendText(actionField, guidance.action_required);
+    if (guidanceNote && !actionField.value.includes('หมายเหตุ: สามารถประสานงาน')) {
+      appendText(actionField, guidanceNote);
+    }
+    appendText(precautionField, guidance.action_precautions);
+  });
+
+  [actionField, precautionField].forEach(function (field) {
+    if (!field) return;
+    field.addEventListener('input', function () { autoGrow(field); });
+    autoGrow(field);
+  });
+
+  categorySelect?.addEventListener('change', refreshGuidanceButton);
+  refreshGuidanceButton();
+})();
 
 // ── Dynamic target rows (Django formset) ──
 (function () {

@@ -3177,6 +3177,22 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertContains(resp, 'Coordinated intrusion across core systems')
         self.assertContains(resp, f'name="wazuh_alert" value="{alert.pk}"')
 
+    def test_create_form_embeds_shared_containment_guidance(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        response = self.client.get(reverse('create_project_incident'))
+
+        self.assertContains(response, 'id="insert-guidance-btn"')
+        match = re.search(
+            r'<script id="threat-guidance-data"[^>]*>(.*?)</script>',
+            response.content.decode(), re.S,
+        )
+        self.assertIsNotNone(match)
+        guidance = json.loads(match.group(1))
+        self.assertIn('Malicious Logic', guidance)
+        self.assertTrue(guidance['Malicious Logic']['action_required'].strip())
+        self.assertTrue(guidance['Malicious Logic']['action_precautions'].strip())
+        self.assertContains(response, 'id="guidance-note-data"')
+
     def test_get_rejects_alert_not_claimed_by_user(self):
         alert = self._claimed_alert(self.t2)  # claimed by someone else
         self.client.login(username='pi_t1', password='testpass123')

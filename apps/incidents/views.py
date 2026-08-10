@@ -69,6 +69,17 @@ _JSON_SCRIPT_ESCAPES = {
 
 # ── Private helpers ──────────────────────────────────────────────────── #
 
+def _active_threat_guidance():
+    """Return the client-side containment guidance keyed by threat category."""
+    return {
+        guidance.detailed_issue: {
+            'action_required': guidance.action_required,
+            'action_precautions': guidance.action_precautions,
+        }
+        for guidance in ThreatGuidance.objects.filter(is_active=True)
+    }
+
+
 def _user_can_drive(ticket, user, perm):
     """Whether ``user`` satisfies a SOC-side transition permission token.
 
@@ -822,13 +833,7 @@ def create_ticket(request):
 
     # Standard containment guidance per threat category (admin-editable) for
     # the "แทรกแนวทางมาตรฐาน" button — inserted client-side, never auto-applied.
-    threat_guidance = {
-        g.detailed_issue: {
-            'action_required': g.action_required,
-            'action_precautions': g.action_precautions,
-        }
-        for g in ThreatGuidance.objects.filter(is_active=True)
-    }
+    threat_guidance = _active_threat_guidance()
 
     return render(request, 'incidents/ticket_form.html', {
         'form': form,
@@ -1050,6 +1055,8 @@ def create_project_incident(request):
             source_alert.pk if source_alert else None,
             evidence_token,
         ),
+        'threat_guidance': _active_threat_guidance(),
+        'guidance_note': GUIDANCE_COORDINATION_NOTE,
         'evidence_token': evidence_token,
         'staged_files': staged_for(request.user, evidence_token),
         'attachment_limits': _attachment_limits(),
