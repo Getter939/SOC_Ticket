@@ -65,7 +65,8 @@ from apps.incidents.notifications import (
     notify_response_request_completed,
 )
 from apps.incidents.views import (
-    _can_create_ticket_from_triage, _can_upload_ticket_attachment,
+    _can_create_ticket_from_triage, _can_delete_ticket_attachment,
+    _can_upload_ticket_attachment,
 )
 from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
@@ -2414,6 +2415,103 @@ class AttachmentWorkflowPermissionTest(TestCase):
         self._update_subtask(mgr, subtask)
         self.assertTrue(TicketAttachment.objects.filter(
             ticket=ticket, uploaded_by=mgr).exists())
+
+    def test_response_assignee_can_delete_a_response_request_deliverable(self):
+        forensic = _make_forensic('delete_response_forensic')
+        ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=forensic,
+        )
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket, subtask=subtask,
+            file=SimpleUploadedFile('rca.log', b'findings'),
+            original_name='rca.log', uploaded_by=self.creator,
+        )
+
+        self.assertTrue(_can_delete_ticket_attachment(ticket, attachment, forensic))
+        self.client.force_login(forensic)
+        detail = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertContains(detail, f'data-bs-target="#delete-att-{attachment.pk}"')
+        response = self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]),
+            {'reason': 'Superseded by the corrected RCA report'},
+        )
+
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        self.assertFalse(TicketAttachment.objects.filter(pk=attachment.pk).exists())
+        retained = TicketAttachment.all_objects.get(pk=attachment.pk)
+        self.assertEqual(retained.deleted_by, forensic)
+
+    def test_soc_manager_can_delete_a_response_request_deliverable(self):
+        forensic = _make_forensic('delete_response_manager_forensic')
+        manager = _make_user(
+            'delete_response_manager', UserProfile.ROLE_SOC_MANAGER)
+        ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=forensic,
+        )
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket, subtask=subtask,
+            file=SimpleUploadedFile('rca.log', b'findings'),
+            original_name='rca.log', uploaded_by=self.creator,
+        )
+
+        self.client.force_login(manager)
+        response = self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]),
+            {'reason': 'Replaced with a redacted report'},
+        )
+
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        self.assertFalse(TicketAttachment.objects.filter(pk=attachment.pk).exists())
+
+    def test_unassigned_responder_cannot_delete_a_response_request_deliverable(self):
+        assignee = _make_forensic('delete_response_assignee')
+        other_responder = _make_forensic('delete_response_other')
+        ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=assignee,
+        )
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket, subtask=subtask,
+            file=SimpleUploadedFile('rca.log', b'findings'),
+            original_name='rca.log', uploaded_by=self.creator,
+        )
+
+        self.assertFalse(
+            _can_delete_ticket_attachment(ticket, attachment, other_responder))
+        self.client.force_login(other_responder)
+        self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]),
+            {'reason': 'Should not be accepted'},
+        )
+
+        self.assertTrue(TicketAttachment.objects.filter(pk=attachment.pk).exists())
+
+    def test_closed_ticket_rejects_response_assignee_deletion(self):
+        forensic = _make_forensic('delete_response_closed_forensic')
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=forensic,
+        )
+        attachment = TicketAttachment.objects.create(
+            ticket=ticket, subtask=subtask,
+            file=SimpleUploadedFile('rca.log', b'findings'),
+            original_name='rca.log', uploaded_by=self.creator,
+        )
+
+        self.assertFalse(_can_delete_ticket_attachment(ticket, attachment, forensic))
+        self.client.force_login(forensic)
+        self.client.post(
+            reverse('delete_attachment', args=[attachment.pk]),
+            {'reason': 'Should not be accepted'},
+        )
+
+        self.assertTrue(TicketAttachment.objects.filter(pk=attachment.pk).exists())
 
     def test_delete_retains_attachment_and_records_ticket_audit(self):
         ticket = self._ticket()

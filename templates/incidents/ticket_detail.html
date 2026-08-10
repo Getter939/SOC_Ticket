@@ -238,7 +238,34 @@
             <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}</div>
             <div class="small text-muted mb-1">{{ subtask.description }}</div>
             {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
-            {% for att in subtask.attachments.all %}<div class="small"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a></div>{% endfor %}
+            {% for att in subtask.attachments.all %}
+            <div class="small d-flex align-items-center gap-1"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>
+              {% if att.can_delete %}<button type="button" class="btn btn-sm btn-link text-danger p-0" data-bs-toggle="modal" data-bs-target="#delete-att-{{ att.pk }}">ลบ</button>{% endif %}
+            </div>
+            {% if att.can_delete %}
+            <div class="modal fade" id="delete-att-{{ att.pk }}" tabindex="-1" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered">
+                <form method="post" action="{% url 'delete_attachment' att.pk %}" class="modal-content">
+                  {% csrf_token %}
+                  <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>ลบไฟล์หลักฐาน</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button>
+                  </div>
+                  <div class="modal-body">
+                    <p class="mb-2">กำลังจะลบ <strong>{{ att.original_name }}</strong> ออกจากเคสนี้</p>
+                    <p class="small text-muted">ไฟล์จะถูกซ่อนจากเคส แต่ยังเก็บไว้ในระบบ — ผู้จัดการ SOC สามารถกู้คืนได้</p>
+                    <label class="form-label fw-semibold" for="reason-att-{{ att.pk }}">เหตุผลในการลบ <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="reason-att-{{ att.pk }}" name="reason" rows="2" required maxlength="255" placeholder="เช่น แนบไฟล์ผิดเคส / ไฟล์ซ้ำ"></textarea>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-light border" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="submit" class="btn btn-danger">ยืนยันการลบ</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            {% endif %}
+            {% endfor %}
           </div>
           <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-2">{{ subtask.get_status_display }}</span>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
         </div>

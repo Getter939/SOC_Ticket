@@ -157,11 +157,19 @@ def _can_delete_ticket_attachment(ticket, attachment, user):
 
     "Any SOC member" is not enough: SOC can see every ticket, so that rule let
     an uninvolved analyst remove another team's evidence. The uploader may undo
-    their own mistake, and a SOC Manager may act on anything still open.
+    their own mistake, the responder assigned to a response request may manage
+    that request's deliverables, and a SOC Manager may act on anything still
+    open.
     """
     if ticket.status in Ticket.TERMINAL_STATUSES:
         return False
     if attachment.uploaded_by_id == user.pk:
+        return True
+    if (
+        attachment.subtask_id
+        and attachment.subtask.is_response_request
+        and attachment.subtask.assigned_to_id == user.pk
+    ):
         return True
     return _is_soc_manager(user)
 
@@ -1499,17 +1507,32 @@ def ticket_detail(request, pk):
         )
     )
     # Decide deletability once, in Python. The rule is per-attachment (it turns
-    # on who uploaded it), and a template cannot call a helper with arguments —
-    # so without this the template has to restate _can_delete_ticket_attachment
-    # in tag syntax and the two copies drift.
-    attachments = list(ticket.attachments.select_related('uploaded_by'))
+    # on its uploader and, for response deliverables, its assigned responder),
+    # and a template cannot call a helper with arguments — so without this the
+    # template has to restate _can_delete_ticket_attachment in tag syntax and
+    # the two copies drift.
+    # Subtask deliverables are rendered in their owning subtask below. Keep the
+    # ticket-level evidence panel to standalone attachments so a delete modal
+    # never appears twice with the same DOM id.
+    attachments = list(
+        ticket.attachments.filter(subtask__isnull=True).select_related('uploaded_by')
+    )
     for attachment in attachments:
         attachment.can_delete = _can_delete_ticket_attachment(
             ticket, attachment, request.user)
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
 
-    subtasks = ticket.subtasks.select_related('assigned_to').prefetch_related('attachments')
+    subtasks = ticket.subtasks.select_related('assigned_to').prefetch_related(
+        Prefetch(
+            'attachments',
+            queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
+        )
+    )
+    for subtask in subtasks:
+        for attachment in subtask.attachments.all():
+            attachment.can_delete = _can_delete_ticket_attachment(
+                ticket, attachment, request.user)
     subtask_form = SubtaskForm()
     subtask_update_form = SubtaskUpdateForm()
     response_request_form = ResponseRequestForm()
