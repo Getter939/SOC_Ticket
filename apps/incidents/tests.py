@@ -3355,7 +3355,8 @@ class UserDropdownLabelTest(TestCase):
             TicketForm().fields['assigned_admin'],
             ProjectIncidentTargetForm().fields['assigned_admin'],
             AdminAssignmentForm().fields['assigned_admin'],
-            SubtaskForm().fields['assigned_to'],
+            # SubtaskForm has no user dropdown — legacy subtasks are unassigned
+            # working notes (see test_legacy_subtask_form_has_no_assignee_field).
             ResponseRequestForm().fields['assigned_to'],
         ]
 
@@ -3382,14 +3383,18 @@ class ResponseRequestRoutingTest(TestCase):
             UserProfile.ROLE_REDTEAM_MANAGER,
         )
 
-    def test_legacy_subtask_form_excludes_response_team_users(self):
-        # Response-team accounts must not be assignable to legacy subtasks — that
-        # is the UI vector that would breach response-only visibility.
-        soc = _make_t1('rt_form_soc')
-        assignable = list(SubtaskForm().fields['assigned_to'].queryset)
-        self.assertIn(soc, assignable)
-        self.assertNotIn(self.forensic, assignable)
-        self.assertNotIn(self.redteam, assignable)
+    def test_legacy_subtask_form_has_no_assignee_field(self):
+        # A legacy subtask notifies nobody, gates nothing and never reaches the
+        # report, so an assignee could not summon anyone — it only looked like it
+        # did. Removing the field also closes the old response-team leak (an
+        # ordinary subtask assigned to a responder would have exposed the whole
+        # ticket through visible_to) without relying on the picker's filtering.
+        # Work that must actually reach a person goes through ResponseRequestForm.
+        self.assertNotIn('assigned_to', SubtaskForm().fields)
+        self.assertEqual(
+            list(SubtaskForm().fields),
+            ['subtask_type', 'title', 'description'],
+        )
 
     def test_response_request_form_choices_derive_from_model(self):
         # DRY: form response-type choices must exactly mirror the model's

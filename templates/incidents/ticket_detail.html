@@ -35,6 +35,8 @@
   .response-panel .panel-copy p:last-child { margin-bottom:0; }
   .subtask-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.75rem; padding:.85rem 0; border-bottom:1px solid #edf0f4; }
   .subtask-row:last-child { border-bottom:0; }
+  .subtask-new { background:#f6f8fb; border:1px dashed #c3d0e0; border-radius:.75rem; padding:.9rem 1rem 1rem; margin:0; }
+  .subtask-empty { text-align:center; color:#8a93a2; font-size:.84rem; padding:1.4rem .5rem; }
   .timeline { position:relative; margin-left:.45rem; padding-left:1.25rem; border-left:2px solid #dce3ec; }
   .timeline-entry { position:relative; margin-bottom:.8rem; border:1px solid #e4e8ee; border-radius:.75rem; background:#fff; }
   .timeline-entry::before { content:''; position:absolute; left:-1.72rem; top:1rem; width:.78rem; height:.78rem; border-radius:50%; background:#2f6fb2; border:3px solid #fff; box-shadow:0 0 0 1px #b8c7da; }
@@ -184,8 +186,51 @@
     {% endif %}
 
     <section id="tasks" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย & คำขอทีมตอบสนอง</h2><div class="section-hint">งานคู่ขนาน (Investigation / Countermeasure) และคำขอทีมตอบสนอง (Forensic Analyst / Red Team Manager)</div></div>
+      <div class="card-header">
+        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+          <div>
+            <h2 class="section-title"><i class="bi bi-list-task me-2"></i>งานย่อย &amp; คำขอทีมตอบสนอง{% if subtasks %} <span class="badge rounded-pill bg-light text-dark border fw-semibold align-middle">{{ subtasks|length }}</span>{% endif %}</h2>
+            <div class="section-hint">งานคู่ขนานภายในทีม SOC (Investigation / Countermeasure) และคำขอทีมตอบสนอง (Forensic Analyst / Red Team Manager)</div>
+          </div>
+          {# The add form used to sit below the whole list, so on a busy ticket it #}
+          {# was buried behind every existing row. The trigger lives in the header #}
+          {# and the form opens at the top of the section instead. #}
+          {% if can_create_subtask and not is_terminal %}
+          <button class="btn btn-sm btn-primary flex-shrink-0" type="button" data-bs-toggle="collapse"
+                  data-bs-target="#new-subtask" aria-expanded="false" aria-controls="new-subtask">
+            <i class="bi bi-plus-lg me-1"></i>เพิ่มงานย่อย
+          </button>
+          {% endif %}
+        </div>
+      </div>
       <div class="card-body">
+        {% if can_create_subtask and not is_terminal %}
+        <div class="collapse mb-3" id="new-subtask">
+          <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="subtask-new">{% csrf_token %}
+            <div class="row g-2">
+            <div class="col-12">
+              <p class="small text-muted mb-0">บันทึกภายในทีม SOC — ไม่ส่งอีเมลแจ้งเตือน ไม่เปลี่ยนสถานะ Ticket และไม่ปรากฏในรายงาน หากต้องการมอบหมายงานให้ผู้อื่นจริง ให้ใช้ "ส่งทีมตอบสนอง"</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-1" for="{{ subtask_form.subtask_type.id_for_label }}">{{ subtask_form.subtask_type.label }}</label>
+              {{ subtask_form.subtask_type }}
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-1" for="{{ subtask_form.title.id_for_label }}">{{ subtask_form.title.label }}</label>
+              {{ subtask_form.title }}
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1" for="{{ subtask_form.description.id_for_label }}">{{ subtask_form.description.label }}</label>
+              {{ subtask_form.description }}
+            </div>
+            <div class="col-12 d-flex justify-content-end gap-2">
+              <button class="btn btn-sm btn-light border" type="button" data-bs-toggle="collapse" data-bs-target="#new-subtask">ยกเลิก</button>
+              <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-save me-1"></i>บันทึก</button>
+            </div>
+            </div>
+          </form>
+        </div>
+        {% endif %}
         {% for subtask in subtasks %}
         {% with is_resp=subtask.is_response_request %}
         <div class="subtask-row">
@@ -207,8 +252,12 @@
         </form>
         {% endif %}
         {% endwith %}
-        {% empty %}<p class="text-muted small mb-0">ยังไม่มีงานย่อยหรือคำขอ</p>{% endfor %}
-        {% if can_create_subtask and not is_terminal %}<form method="post" action="{% url 'create_subtask' ticket.pk %}" class="row g-2 mt-3">{% csrf_token %}<div class="col-md-3">{{ subtask_form.subtask_type }}</div><div class="col-md-4">{{ subtask_form.title }}</div><div class="col-md-3">{{ subtask_form.assigned_to }}</div><div class="col-md-2"><button class="btn btn-secondary w-100" type="submit">เพิ่ม</button></div><div class="col-12">{{ subtask_form.description }}</div></form>{% endif %}
+        {% empty %}
+        <div class="subtask-empty">
+          <i class="bi bi-list-task d-block mb-2" style="font-size:1.4rem;opacity:.45;"></i>
+          <p class="mb-0">ยังไม่มีงานย่อยหรือคำขอ</p>
+        </div>
+        {% endfor %}
       </div>
     </section>
 
