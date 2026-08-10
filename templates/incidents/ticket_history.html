@@ -125,6 +125,9 @@
                     <tr class="{% if ticket.is_emergency %}is-emergency{% endif %}">
                         <td>
                             <strong>{{ ticket.ticket_id }}</strong>
+                            {% if ticket.project_incident_id %}
+                            <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
+                            {% endif %}
                             {% if ticket.is_emergency %}
                             <div class="mt-1"><span class="emg-flag"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>EMERGENCY</span></div>
                             {% endif %}

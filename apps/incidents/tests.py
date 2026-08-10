@@ -3118,6 +3118,28 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertContains(resp, 'HR Portal')      # assigned to admin_a
         self.assertNotContains(resp, 'AD Server')   # assigned to admin_b
 
+    def test_ticket_lists_link_project_members_to_their_overview(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        member = project.members.first()
+        overview_url = reverse('project_incident_detail', args=[project.pk])
+
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        active = self.client.get(reverse('ticket_list'))
+        self.assertContains(active, f'Project · {member.bundle_ref}')
+        self.assertContains(active, overview_url)
+
+        member.status = Ticket.STATUS_APPROVED
+        member.save(update_fields=('status', 'updated_at'))
+        history = self.client.get(reverse('ticket_history'), {'all_time': '1'})
+        self.assertContains(history, f'Project · {member.bundle_ref}')
+        self.assertContains(history, overview_url)
+
     # ── Origin from a Wazuh alert (analyst-initiated, pre-filled) ──────── #
 
     def _claimed_alert(self, claimer):

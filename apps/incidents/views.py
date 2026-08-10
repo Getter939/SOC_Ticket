@@ -568,7 +568,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     """Render a filtered, non-terminal ticket list with shared list controls."""
     tickets_qs = visible.exclude(
         status__in=list(Ticket.TERMINAL_STATUSES)
-    ).select_related('assigned_admin', 'created_by')
+    ).select_related('assigned_admin', 'created_by', 'project_incident')
 
     search = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
@@ -1767,7 +1767,9 @@ def ticket_history(request):
     }
     if sort not in sort_map:
         sort = 'newest'
-    tickets_qs = query_set.prefetch_related('logs').order_by(*sort_map[sort])
+    tickets_qs = query_set.select_related('project_incident').prefetch_related(
+        'logs'
+    ).order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
