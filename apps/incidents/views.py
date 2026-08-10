@@ -100,22 +100,18 @@ def _user_can_drive(ticket, user, perm):
     return False
 
 
-def _can_upload_ticket_attachment(ticket, user):
-    """Whether user currently owns this ticket's attachment action.
+def _holds_ticket_court(ticket, user):
+    """Whether user is the party this ticket is currently waiting on.
 
-    Seeing a ticket is deliberately broader than acting on it. Attachments
-    therefore follow the same "whose court is it?" rule as the workflow, and
-    are never accepted after a ticket has reached a terminal state.
+    The "whose court is it?" rule on its own, so the surfaces that care about
+    it cannot drift apart: the attachment gate enforces it, and the edit form
+    warns on it (see ``edit_ticket``).
 
-    This gates ``upload_attachment``. There is exactly one documented exception:
-    a response-request deliverable uploaded through ``update_subtask``, which
-    runs on _can_upload_subtask_result() instead — see the reasoning there.
+    Deliberately pure court logic — no terminal-status refusal and no
+    superuser bypass. Callers layer those on, which is what lets the edit
+    warning treat a superuser as out-of-court (they never hold one) while
+    _can_upload_ticket_attachment still lets them through.
     """
-    if ticket.status in Ticket.TERMINAL_STATUSES:
-        return False
-    if user.is_superuser:
-        return True
-
     profile = getattr(user, 'profile', None)
     if profile is None:
         return False
@@ -135,6 +131,25 @@ def _can_upload_ticket_attachment(ticket, user):
     if ticket.status == Ticket.STATUS_AWAITING_OWNER:
         return profile.is_system_owner and ticket.system_owner_id == user.pk
     return False
+
+
+def _can_upload_ticket_attachment(ticket, user):
+    """Whether user currently owns this ticket's attachment action.
+
+    Seeing a ticket is deliberately broader than acting on it. Attachments
+    therefore follow the same "whose court is it?" rule as the workflow
+    (_holds_ticket_court), and are never accepted after a ticket has reached a
+    terminal state.
+
+    This gates ``upload_attachment``. There is exactly one documented exception:
+    a response-request deliverable uploaded through ``update_subtask``, which
+    runs on _can_upload_subtask_result() instead — see the reasoning there.
+    """
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        return False
+    if user.is_superuser:
+        return True
+    return _holds_ticket_court(ticket, user)
 
 
 def _is_soc(user):
@@ -203,6 +218,18 @@ def _can_edit_ticket(ticket, user):
     ticket, and Tier 1 is SOC, so the final line already covers them. It is
     written out anyway so that narrowing SOC's edit rights later cannot silently
     take away the author's right to correct their own untouched ticket.
+
+    A Tier 2 claim covers the ticket's CONTENT as well as its status.
+    transition_to refuses a second Tier 2 at its step 3b; without the same
+    check here that analyst could still rewrite the description the claimer is
+    working from, so the two surfaces would answer differently about the same
+    ticket at the same moment.
+
+    Otherwise this stays deliberately broader than _holds_ticket_court: a
+    correction is not a workflow move, and refusing an analyst the right to fix
+    their own earlier mistake once the ticket moved on would cost more than it
+    protects. ``edit_ticket`` warns when the ticket is in someone else's court
+    instead, and every edit is attributed and diffed either way.
     """
     if ticket.status in Ticket.TERMINAL_STATUSES:
         return False
@@ -213,6 +240,8 @@ def _can_edit_ticket(ticket, user):
         return False
     if ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == user.pk:
         return profile.is_tier1
+    if ticket.t2_claim_blocks(user):
+        return False
     return _is_soc(user)
 
 
@@ -2631,6 +2660,11 @@ def edit_ticket(request, pk):
         'ticket': ticket,
         'form': form,
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
+        # Correcting a ticket that is waiting on someone else is allowed but
+        # worth flagging — the holder may be acting on what you are about to
+        # change. A warning, not a block: see _can_edit_ticket.
+        'out_of_court': not _holds_ticket_court(ticket, request.user),
+        'court_holder': ticket.court_holder_label,
     })
 
 

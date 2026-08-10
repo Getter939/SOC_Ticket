@@ -24,6 +24,24 @@
     </div>
   </div>
 
+  {% comment %}
+  Editing a ticket parked in someone else's court is allowed on purpose — an
+  analyst must be able to fix their own earlier mistake after the ticket moves
+  on. It is worth flagging though, because the holder may be acting right now
+  on what is about to change. Warning only; the block that does exist is the
+  Tier 2 claim, enforced in _can_edit_ticket.
+  {% endcomment %}
+  {% if out_of_court %}
+  <div class="alert alert-warning d-flex gap-2">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <div class="small">
+      เคสนี้กำลังรอ{% if court_holder %} <strong>{{ court_holder }}</strong>{% else %}ผู้รับผิดชอบรายอื่น{% endif %}ดำเนินการ
+      — คุณยังแก้ไขได้ แต่ผู้รับผิดชอบอาจกำลังทำงานอยู่บนข้อมูลชุดนี้
+      กรุณาแจ้งผู้เกี่ยวข้องหลังบันทึก และระบุเหตุผลให้ชัดเจน
+    </div>
+  </div>
+  {% endif %}
+
   {% if form.errors %}
   <div class="alert alert-danger">
     <div class="fw-semibold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>กรุณาแก้ไขข้อมูลให้ครบถ้วน</div>

@@ -1502,6 +1502,41 @@ class Ticket(models.Model):
             return False
         return self.t2_claimed_by_id != user.pk
 
+    @staticmethod
+    def _person_label(user):
+        return (user.get_full_name() or user.username) if user else None
+
+    @property
+    def court_holder_label(self):
+        """Who this ticket is currently waiting on, for display.
+
+        The readable counterpart to views._holds_ticket_court: that answers
+        "is it me?", this answers "then who?". Names the individual where the
+        workflow gates on one (the creator, the assigned admin, the owner, a
+        Tier 2 who has claimed it) and falls back to the role otherwise, since
+        an unclaimed Tier 2 or manager queue really is the whole role's court.
+        Returns None for terminal tickets — nobody is waiting on a closed case.
+        """
+        if self.status in self.TERMINAL_STATUSES:
+            return None
+        if self.status in (
+            self.STATUS_NEW, self.STATUS_T1_REVIEW, self.STATUS_OWNER_REMEDIATED,
+        ):
+            who = self._person_label(self.created_by)
+            return f'Tier 1 ผู้เปิดเคส ({who})' if who else 'Tier 1 ผู้เปิดเคส'
+        if self.status in self.TIER2_QUEUE_STATUSES:
+            who = self._person_label(self.t2_claimed_by)
+            return f'Tier 2 ({who})' if who else 'Tier 2'
+        if self.status in self.MANAGER_QUEUE_STATUSES:
+            return 'ผู้จัดการ SOC'
+        if self.status == self.STATUS_AWAITING_CONTAINMENT:
+            who = self._person_label(self.assigned_admin)
+            return f'System Admin ({who})' if who else 'System Admin'
+        if self.status == self.STATUS_AWAITING_OWNER:
+            who = self._person_label(self.system_owner)
+            return f'หน่วยงานเจ้าของระบบ ({who})' if who else 'หน่วยงานเจ้าของระบบ'
+        return None
+
     def transition_to(self, new_status, user, note=''):
         status_map = dict(self.STATUS_CHOICES)
 

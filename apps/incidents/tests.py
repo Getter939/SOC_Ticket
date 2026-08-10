@@ -5480,6 +5480,7 @@ class TicketEditViewTest(TestCase):
         cls.creator = _make_t1('edit_creator')
         cls.other_t1 = _make_t1('edit_other_t1')
         cls.t2 = _make_t2('edit_t2')
+        cls.t2_other = _make_t2('edit_t2_other')
         cls.manager = _make_user('edit_mgr', UserProfile.ROLE_SOC_MANAGER)
         cls.admin = _make_user('edit_admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
@@ -5553,6 +5554,74 @@ class TicketEditViewTest(TestCase):
         self.client.force_login(self.admin)
         resp = self.client.get(reverse('edit_ticket', args=[ticket.pk]))
         self.assertRedirects(resp, reverse('ticket_detail', args=[ticket.pk]))
+
+    # ── Tier 2 claim ─────────────────────────────────────────────────── #
+
+    def _claimed_ticket(self, claimer):
+        ticket = self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        ticket.t2_claimed_by = claimer
+        ticket.t2_claimed_at = timezone.now()
+        ticket.save(update_fields=['t2_claimed_by', 't2_claimed_at'])
+        return ticket
+
+    def test_a_claim_blocks_a_second_tier2_from_editing(self):
+        """The claim covers content, not just the status move. transition_to
+        already refuses this analyst; the edit surface must agree, or they can
+        rewrite what the claimer is reading."""
+        ticket = self._claimed_ticket(self.t2)
+        self.client.force_login(self.t2_other)
+        resp = self.client.get(reverse('edit_ticket', args=[ticket.pk]))
+        self.assertRedirects(resp, reverse('ticket_detail', args=[ticket.pk]))
+
+    def test_a_claim_does_not_block_the_claimer(self):
+        ticket = self._claimed_ticket(self.t2)
+        self.client.force_login(self.t2)
+        self.assertEqual(
+            self.client.get(reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_a_claim_does_not_block_other_roles(self):
+        """Only Tier 2 queues on the Tier 2 claim — a manager or the opening
+        analyst still corrects content while a Tier 2 holds it."""
+        ticket = self._claimed_ticket(self.t2)
+        for user in (self.manager, self.creator):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                self.assertEqual(
+                    self.client.get(
+                        reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    def test_an_unclaimed_ticket_stays_open_to_any_tier2(self):
+        ticket = self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        self.client.force_login(self.t2_other)
+        self.assertEqual(
+            self.client.get(reverse('edit_ticket', args=[ticket.pk])).status_code, 200)
+
+    # ── Out-of-court warning ─────────────────────────────────────────── #
+
+    def test_no_warning_when_the_editor_holds_the_court(self):
+        ticket = self._ticket()  # NEW → the creator's court
+        self.client.force_login(self.creator)
+        resp = self.client.get(reverse('edit_ticket', args=[ticket.pk]))
+        self.assertFalse(resp.context['out_of_court'])
+
+    def test_warning_names_the_holder_when_out_of_court(self):
+        """Editing a ticket parked with someone else is allowed but flagged."""
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.client.force_login(self.creator)
+        resp = self.client.get(reverse('edit_ticket', args=[ticket.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['out_of_court'])
+        self.assertIn('System Admin', resp.context['court_holder'])
+        self.assertIn(self.admin.username, resp.context['court_holder'])
+        # And it actually reaches the page — a context flag the template never
+        # reads would warn nobody.
+        body = resp.content.decode()
+        self.assertIn('alert-warning', body)
+        self.assertIn(self.admin.username, body)
+
+    def test_court_holder_is_none_for_a_terminal_ticket(self):
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        self.assertIsNone(ticket.court_holder_label)
 
     def test_closed_tickets_are_frozen(self):
         for status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
