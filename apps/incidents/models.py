@@ -2228,9 +2228,25 @@ class TicketSubtask(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Unlike updated_at (which also changes for notes and attachments), this
+    # identifies exactly when the task entered its current status.
+    status_changed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่อัปเดตสถานะ',
+    )
 
     class Meta:
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        """Seed the clock for a task's initial OPEN status.
+
+        Later status changes are stamped in ``update_subtask`` alongside their
+        audit row. Keeping the creation case here also covers admin and seed
+        writes, which do not pass through that view.
+        """
+        if not self.pk and self.status_changed_at is None:
+            self.status_changed_at = timezone.now()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f'[{self.get_subtask_type_display()}] {self.title} ({self.ticket.ticket_id})'

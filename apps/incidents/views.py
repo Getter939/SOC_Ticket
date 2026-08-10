@@ -33,7 +33,8 @@ from .forms import (
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
     ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
-    TicketAttachment, TicketLog, TicketLogRevision, TicketSubtask, TriageRecord,
+    TicketAttachment, TicketFieldChange, TicketLog, TicketLogRevision,
+    TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
     validate_attachment,
 )
@@ -1523,11 +1524,18 @@ def ticket_detail(request, pk):
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
 
-    subtasks = ticket.subtasks.select_related('assigned_to').prefetch_related(
+    subtasks = ticket.subtasks.select_related('assigned_to', 'created_by').prefetch_related(
         Prefetch(
             'attachments',
             queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
-        )
+        ),
+        # A per-task history should contain only state transitions, never the
+        # result-note/file edits that share the generic TicketFieldChange table.
+        Prefetch(
+            'field_changes',
+            queryset=TicketFieldChange.objects.filter(field_name='status')
+            .select_related('changed_by').order_by('changed_at'),
+        ),
     )
     for subtask in subtasks:
         for attachment in subtask.attachments.all():
@@ -2209,13 +2217,21 @@ def update_subtask(request, subtask_id):
 
     if request.method == 'POST':
         was_done = subtask.is_done
+        previous_status = subtask.status
         # Result notes are freely overwritable by any SOC member and previously
         # left no audit at all, so a forensic analyst's findings could be
         # replaced silently. Capture what was there first.
         previous_notes = subtask.result_notes
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
+            # ModelForm validation has copied the submitted status onto the
+            # instance. Stamp only a real transition: updating result notes or
+            # adding a deliverable must not make the status look newer.
+            if subtask.status != previous_status:
+                subtask.status_changed_at = timezone.now()
             subtask = form.save()
+            history.record_subtask_status_change(
+                subtask, previous_status, subtask.status, request.user)
             history.record_subtask_change(
                 subtask, previous_notes, subtask.result_notes, request.user)
 

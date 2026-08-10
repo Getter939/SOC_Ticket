@@ -5116,6 +5116,87 @@ class TicketFieldHistoryTest(TestCase):
         self.assertEqual(change.new_value, 'overwritten findings')
         self.assertEqual(change.changed_by, self.manager)
 
+    def test_response_tasks_track_each_status_change_per_responder(self):
+        """Forensic and Red Team work streams keep independent status clocks
+        and audit records; a note-only edit must not reset either clock."""
+        ticket = _make_ticket(created_by=self.t1)
+        forensic = _make_forensic('status_forensic')
+        redteam = _make_redteam_manager('status_redteam')
+        forensic_task = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Forensic RCA', assigned_to=forensic,
+        )
+        redteam_task = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='VA assessment', assigned_to=redteam,
+        )
+        forensic_initial_stamp = forensic_task.status_changed_at
+        redteam_initial_stamp = redteam_task.status_changed_at
+        self.assertIsNotNone(forensic_initial_stamp)
+        self.assertIsNotNone(redteam_initial_stamp)
+
+        self.client.force_login(forensic)
+        self.client.post(reverse('update_subtask', args=[forensic_task.pk]), {
+            'status': TicketSubtask.STATUS_IN_PROGRESS,
+            'result_notes': '',
+        })
+        forensic_task.refresh_from_db()
+        redteam_task.refresh_from_db()
+        forensic_status_change = ticket.field_changes.get(
+            subtask=forensic_task, field_name='status')
+        self.assertGreater(forensic_task.status_changed_at, forensic_initial_stamp)
+        self.assertEqual(redteam_task.status_changed_at, redteam_initial_stamp)
+        self.assertEqual(forensic_status_change.changed_by, forensic)
+        self.assertEqual(forensic_status_change.old_value, dict(
+            TicketSubtask.STATUS_CHOICES)[TicketSubtask.STATUS_OPEN])
+        self.assertEqual(forensic_status_change.new_value, dict(
+            TicketSubtask.STATUS_CHOICES)[TicketSubtask.STATUS_IN_PROGRESS])
+
+        # A result-note correction leaves the current-status timestamp intact.
+        forensic_status_stamp = forensic_task.status_changed_at
+        self.client.post(reverse('update_subtask', args=[forensic_task.pk]), {
+            'status': TicketSubtask.STATUS_IN_PROGRESS,
+            'result_notes': 'Initial triage complete',
+        })
+        forensic_task.refresh_from_db()
+        self.assertEqual(forensic_task.status_changed_at, forensic_status_stamp)
+        self.assertEqual(ticket.field_changes.filter(
+            subtask=forensic_task, field_name='status').count(), 1)
+
+        self.client.force_login(redteam)
+        self.client.post(reverse('update_subtask', args=[redteam_task.pk]), {
+            'status': TicketSubtask.STATUS_DONE,
+            'result_notes': 'Assessment delivered',
+        })
+        redteam_task.refresh_from_db()
+        redteam_status_change = ticket.field_changes.get(
+            subtask=redteam_task, field_name='status')
+        self.assertGreater(redteam_task.status_changed_at, redteam_initial_stamp)
+        self.assertEqual(redteam_status_change.changed_by, redteam)
+
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        html = response.content.decode()
+        self.assertIn('สร้างเมื่อ', html)
+        self.assertIn('สถานะตั้งแต่', html)
+        self.assertIn('ประวัติสถานะ', html)
+        # The compact history is opt-in and excludes result-note edits.
+        self.assertNotIn('class="subtask-status-history" open', html)
+        rendered_forensic_task = next(
+            task for task in response.context['subtasks']
+            if task.pk == forensic_task.pk)
+        rendered_redteam_task = next(
+            task for task in response.context['subtasks']
+            if task.pk == redteam_task.pk)
+        self.assertEqual(
+            [change.field_name for change in rendered_forensic_task.field_changes.all()],
+            ['status'],
+        )
+        self.assertEqual(
+            [change.field_name for change in rendered_redteam_task.field_changes.all()],
+            ['status'],
+        )
+
     def test_history_is_shown_on_the_ticket_page(self):
         ticket = _make_ticket(created_by=self.t1, device_name='SHOWN-HOST')
         before = history.snapshot(ticket)

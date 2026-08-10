@@ -141,3 +141,22 @@ def record_subtask_change(subtask, old_notes, new_notes, user, source='subtask')
         changed_by=user,
         source=source,
     )
+
+
+def record_subtask_status_change(
+    subtask, old_status, new_status, user, source='subtask',
+):
+    """Audit every real subtask status transition with its responsible actor."""
+    if old_status == new_status:
+        return None
+    labels = dict(subtask.STATUS_CHOICES)
+    return TicketFieldChange.objects.create(
+        ticket_id=subtask.ticket_id,
+        subtask=subtask,
+        field_name='status',
+        field_label=f'สถานะงานย่อย — {subtask.title}',
+        old_value=labels.get(old_status, old_status),
+        new_value=labels.get(new_status, new_status),
+        changed_by=user,
+        source=source,
+    )

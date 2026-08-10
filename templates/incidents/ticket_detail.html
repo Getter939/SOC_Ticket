@@ -35,6 +35,9 @@
   .response-panel .panel-copy p:last-child { margin-bottom:0; }
   .subtask-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.75rem; padding:.85rem 0; border-bottom:1px solid #edf0f4; }
   .subtask-row:last-child { border-bottom:0; }
+  .subtask-status-history { margin-top:.45rem; }
+  .subtask-status-history summary { cursor:pointer; color:#64748b; font-size:.75rem; }
+  .subtask-status-event { display:flex; align-items:center; gap:.35rem; flex-wrap:wrap; padding:.3rem 0; border-top:1px solid #edf0f4; font-size:.72rem; }
   .subtask-new { background:#f6f8fb; border:1px dashed #c3d0e0; border-radius:.75rem; padding:.9rem 1rem 1rem; margin:0; }
   .subtask-empty { text-align:center; color:#8a93a2; font-size:.84rem; padding:1.4rem .5rem; }
   .timeline { position:relative; margin-left:.45rem; padding-left:1.25rem; border-left:2px solid #dce3ec; }
@@ -237,7 +240,27 @@
           <div>
             <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}</div>
             <div class="small text-muted mb-1">{{ subtask.description }}</div>
+            <div class="small text-muted mb-1"><i class="bi bi-calendar-plus me-1"></i>สร้างเมื่อ {{ subtask.created_at|date:"d/m/Y H:i" }}</div>
             {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
+            <details class="subtask-status-history">
+              <summary><i class="bi bi-clock-history me-1"></i>ประวัติสถานะ ({{ subtask.field_changes|length|add:1 }})</summary>
+              <div class="mt-1">
+                <div class="subtask-status-event">
+                  <span class="badge bg-light text-dark border">สร้างงาน</span>
+                  <span>{% if subtask.created_by %}{{ subtask.created_by.get_full_name|default:subtask.created_by.username }}{% else %}ไม่ทราบผู้สร้าง{% endif %}</span>
+                  <span class="text-muted ms-auto">{{ subtask.created_at|date:"d/m/Y H:i" }}</span>
+                </div>
+                {% for change in subtask.field_changes.all %}
+                <div class="subtask-status-event">
+                  <span class="badge bg-light text-dark border">{{ change.old_value }}</span>
+                  <i class="bi bi-arrow-right text-muted"></i>
+                  <span class="badge bg-primary">{{ change.new_value }}</span>
+                  <span>{% if change.changed_by %}{{ change.changed_by.get_full_name|default:change.changed_by.username }}{% else %}ไม่ทราบผู้แก้ไข{% endif %}</span>
+                  <span class="text-muted ms-auto">{{ change.changed_at|date:"d/m/Y H:i" }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
             {% for att in subtask.attachments.all %}
             <div class="small d-flex align-items-center gap-1"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>
               {% if att.can_delete %}<button type="button" class="btn btn-sm btn-link text-danger p-0" data-bs-toggle="modal" data-bs-target="#delete-att-{{ att.pk }}">ลบ</button>{% endif %}
@@ -267,7 +290,7 @@
             {% endif %}
             {% endfor %}
           </div>
-          <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-2">{{ subtask.get_status_display }}</span>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
+          <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span><div class="text-muted mb-2" style="font-size:.68rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
         </div>
         {% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
         <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="row g-2 mb-3 px-1 py-2" style="background:#f6f8fb;border-radius:.5rem;">{% csrf_token %}
