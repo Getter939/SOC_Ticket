@@ -13,23 +13,12 @@ from apps.incidents.models import Ticket, TicketLog
 from .models import WazuhAlert
 
 ESCALATE_TIER_CHOICES = dict(WazuhAlert.TIER_CHOICES)
-CATEGORY_CHOICES = dict(WazuhAlert.CATEGORY_CHOICES)
 
-# Best-effort mapping from a WazuhAlert incident category to the closest
-# Ticket.DETAILED_ISSUE_CHOICES2 value, used to pre-fill the ticket form.
-# Maps a Wazuh alert category to a detailed_issue2 code within the clean threat
-# hierarchy (Ticket.DETAILED_ISSUE_HIERARCHY). create_ticket derives the parent
-# detailed_issue from this, so every code here must be a selectable child.
-CATEGORY_TO_DETAILED_ISSUE2 = {
-    WazuhAlert.CATEGORY_MALWARE: 'Malware EDR',
-    WazuhAlert.CATEGORY_PHISHING: 'Malicious Other',
-    WazuhAlert.CATEGORY_UNAUTHORIZED_ACCESS: 'Unauthorized Admin',
-    WazuhAlert.CATEGORY_DATA_EXFILTRATION: 'Data Exfiltration',
-    WazuhAlert.CATEGORY_DOS: 'DDoS',
-    WazuhAlert.CATEGORY_RECONNAISSANCE: 'Recon Other',
-    WazuhAlert.CATEGORY_POLICY_VIOLATION: 'Compliance Other',
-    WazuhAlert.CATEGORY_OTHER: 'Investigating Other',
-}
+# Triage no longer collects an incident category — the ticket form owns the
+# threat taxonomy (Ticket.DETAILED_ISSUE_HIERARCHY), so the coarse alert-side
+# mapping that used to pre-fill detailed_issue2 from it is gone. The
+# WazuhAlert.incident_category column stays for the alerts that already carry
+# a value; nothing writes it now.
 
 
 def _severity_for_rule_level(rule_level):
@@ -124,7 +113,6 @@ def triage_queue(request):
         'rule_level_filter': rule_level_filter,
         'sort': sort,
         'tier_choices': _allowed_escalation_tiers(profile, request.user),
-        'category_choices': WazuhAlert.CATEGORY_CHOICES,
     })
 
 
@@ -360,6 +348,14 @@ def triage_action(request):
 
     The old triage-level Close (FP) and Escalate actions are gone — the
     Event/Incident and escalation decisions now live on the ticket.
+
+    Because creating a ticket is the only forward move, this step asks the
+    analyst for nothing: there is no alternative to justify. It only records
+    which destination they picked. The threat taxonomy is captured on the
+    ticket form, which owns it properly (a validated detailed_issue →
+    detailed_issue2 cascade), and the Critical triage OLA runs from incident
+    time (Ticket.OLA_TARGETS), so anything asked for here is spent from that
+    30-minute budget before the ticket even exists.
     """
     if request.method != 'POST':
         return redirect('triage_queue')
@@ -369,8 +365,6 @@ def triage_action(request):
         return redirect('triage_queue')
 
     action = request.POST.get('action', '')
-    note = request.POST.get('note', '').strip()
-    category = request.POST.get('category', '').strip()
 
     if action not in ('create_ticket', 'create_project_incident'):
         messages.error(
@@ -379,45 +373,26 @@ def triage_action(request):
         )
         return redirect('triage_queue')
 
-    if not note:
-        messages.error(request, 'กรุณาระบุหมายเหตุประกอบการตัดสินใจ')
+    # Read-only ownership gate: nothing is written here, so no row lock is
+    # needed. The alert deliberately stays claimed and TRIAGING until the
+    # Ticket is saved — a cancelled ticket form must not lose the claim.
+    alert = get_object_or_404(WazuhAlert, pk=request.POST.get('alert_id'))
+    owns_triage = (
+        alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
+        and alert.claimed_by_id == request.user.id
+    )
+    if not (owns_triage or (
+        request.user.is_superuser
+        and alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
+    )):
+        messages.error(request, f'Alert #{alert.pk} ไม่ได้อยู่ในความรับผิดชอบของคุณ หรือถูกดำเนินการไปแล้ว')
         return redirect('triage_queue')
-
-    if category not in CATEGORY_CHOICES:
-        messages.error(request, 'กรุณาเลือกประเภทของเหตุการณ์ (Incident Category)')
-        return redirect('triage_queue')
-
-    with transaction.atomic():
-        alert = get_object_or_404(
-            WazuhAlert.objects.select_for_update(),
-            pk=request.POST.get('alert_id'),
-        )
-        owns_triage = (
-            alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
-            and alert.claimed_by_id == request.user.id
-        )
-        if not (owns_triage or (
-            request.user.is_superuser
-            and alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
-        )):
-            messages.error(request, f'Alert #{alert.pk} ไม่ได้อยู่ในความรับผิดชอบของคุณ หรือถูกดำเนินการไปแล้ว')
-            return redirect('triage_queue')
-
-        # Keep the alert claimed and in TRIAGING until the Ticket is saved —
-        # a cancelled ticket form must not lose the claim.
-        alert.triage_note = note
-        if category:
-            alert.incident_category = category
-        alert.save(update_fields=['triage_note', 'incident_category'])
 
     params = {
         'wazuh_alert': alert.pk,
         'issue_description': alert.rule_description,
         'severity': _severity_for_rule_level(alert.rule_level),
     }
-    detailed_issue2 = CATEGORY_TO_DETAILED_ISSUE2.get(category)
-    if detailed_issue2:
-        params['detailed_issue2'] = detailed_issue2
 
     # Same claimed-alert intake, two destinations: a single ticket or a
     # multi-system Project Incident (case bundle). Both pre-fill from the alert;

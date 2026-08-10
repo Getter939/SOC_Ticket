@@ -454,16 +454,17 @@ class TriageQueueTest(TestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)  # unchanged
 
-    def test_create_ticket_requires_category(self):
+    def test_create_ticket_asks_the_analyst_for_nothing(self):
+        """Creating a ticket is the only forward move, so it needs no category
+        and no justification note — a bare action reaches the ticket form."""
         self._claim('triage_soc')
 
         response = self.client.post(reverse('triage_action'), {
             'alert_id': self.alert.pk,
             'action': 'create_ticket',
-            'note': 'Confirmed malicious — escalating to ticket.',
         })
 
-        self.assertRedirects(response, reverse('triage_queue'))
+        self.assertTrue(response.url.startswith(reverse('create_ticket') + '?'))
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
 
@@ -473,20 +474,19 @@ class TriageQueueTest(TestCase):
         response = self.client.post(reverse('triage_action'), {
             'alert_id': self.alert.pk,
             'action': 'create_ticket',
-            'category': WazuhAlert.CATEGORY_MALWARE,
-            'note': 'Confirmed malicious — escalating to ticket.',
         })
 
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
         self.assertEqual(self.alert.claimed_by, self.soc_staff)
-        self.assertEqual(self.alert.incident_category, WazuhAlert.CATEGORY_MALWARE)
 
         expected_url = reverse('create_ticket')
         self.assertTrue(response.url.startswith(expected_url + '?'))
         self.assertIn(f'wazuh_alert={self.alert.pk}', response.url)
         self.assertIn('severity=High', response.url)
-        self.assertIn('detailed_issue2=Malware', response.url)
+        # The threat taxonomy now belongs to the ticket form, so triage no
+        # longer pre-fills it from a coarse alert-side category.
+        self.assertNotIn('detailed_issue2=', response.url)
 
     def test_escalate_action_is_removed(self):
         """The old triage-level Escalate action no longer exists — rejected."""
@@ -520,19 +520,22 @@ class TriageQueueTest(TestCase):
         self.alert.refresh_from_db()
         self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_PENDING)
 
-    def test_empty_note_is_rejected(self):
+    def test_triage_does_not_write_a_note_or_category(self):
+        """Triage records no analyst prose. A stray note/category in the POST
+        is ignored rather than persisted, so nothing clobbers release_reason's
+        shared triage_note column."""
         self._claim('triage_soc')
 
-        response = self.client.post(reverse('triage_action'), {
+        self.client.post(reverse('triage_action'), {
             'alert_id': self.alert.pk,
             'action': 'create_ticket',
             'category': WazuhAlert.CATEGORY_MALWARE,
-            'note': '',
+            'note': 'Leftover field from an older client.',
         })
 
-        self.assertRedirects(response, reverse('triage_queue'))
         self.alert.refresh_from_db()
-        self.assertEqual(self.alert.triage_status, WazuhAlert.TRIAGE_TRIAGING)
+        self.assertEqual(self.alert.triage_note, '')
+        self.assertIsNone(self.alert.incident_category)
 
     def test_tier2_cannot_claim_for_triage(self):
         """Triage is Tier-1-only — a Tier 2 analyst cannot claim from the queue."""

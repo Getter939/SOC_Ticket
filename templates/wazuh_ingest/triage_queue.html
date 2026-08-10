@@ -77,8 +77,14 @@
             <label class="form-check form-check-inline mb-0 d-none bundle-alert-choice" title="รวมเป็น Ticket เดียว">
               <input class="form-check-input bundle-alert-input" type="checkbox" name="alert_bundle" value="{{ alert.pk }}" form="alert-bundle-form">
             </label>
-            <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createTicket{{ alert.pk }}"><i class="bi bi-ticket-perforated me-1"></i>สร้าง Ticket (Create Ticket)</button>
-            <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseAlert{{ alert.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว (Release)</button>
+            {# Straight to the ticket form — the only thing triage needs from the #}
+            {# analyst is which destination, so both routes submit directly.      #}
+            <form method="post" action="{% url 'triage_action' %}" class="d-inline">
+              {% csrf_token %}<input type="hidden" name="alert_id" value="{{ alert.pk }}">
+              <button class="btn btn-sm btn-success" type="submit" name="action" value="create_ticket"><i class="bi bi-ticket-perforated me-1"></i>สร้าง Ticket</button>
+              <button class="btn btn-sm btn-primary" type="submit" name="action" value="create_project_incident" title="เหตุการณ์เดียวกระทบหลายระบบ — สร้าง Ticket แยกตามระบบ"><i class="bi bi-diagram-3 me-1"></i>Project Incident</button>
+            </form>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="modal" data-bs-target="#releaseAlert{{ alert.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว (Release)</button>
             {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
           </td>
         </tr>
@@ -88,26 +94,12 @@
   </div>
 </div>
 
+{% comment %}
+Release keeps its modal: handing an alert back to the queue is the one triage
+decision with an alternative, so the reason is worth asking for. Creating a
+ticket has no alternative and asks for nothing — see triage_action.
+{% endcomment %}
 {% for alert in alerts %}{% if alert.triage_status == 'TRIAGING' and alert.claimed_by_id == request.user.id %}
-<div class="modal fade" id="createTicket{{ alert.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
-  <form method="post" action="{% url 'triage_action' %}">{% csrf_token %}
-    <input type="hidden" name="alert_id" value="{{ alert.pk }}">
-    <div class="modal-header"><h5 class="modal-title">สร้าง Ticket / Project Incident</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
-    <div class="modal-body">
-      <p class="small text-muted">{{ alert.rule_description }}</p>
-      <label class="form-label fw-semibold">ประเภทเหตุการณ์ <span class="text-danger">*</span></label>
-      <select name="category" class="form-select mb-3" required><option value="">-- เลือก --</option>{% for value, label in category_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
-      <label class="form-label fw-semibold">บันทึกการ Triage <span class="text-danger">*</span></label>
-      <textarea name="note" class="form-control" rows="3" required></textarea>
-      <div class="form-text mt-2"><i class="bi bi-info-circle me-1"></i>เลือก <strong>Project Incident</strong> เมื่อเหตุการณ์เดียวกระทบหลายระบบ (สร้าง Ticket แยกตามระบบ)</div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button>
-      <button class="btn btn-success" type="submit" name="action" value="create_ticket">ไปหน้าสร้าง Ticket</button>
-      <button class="btn btn-primary" type="submit" name="action" value="create_project_incident"><i class="bi bi-diagram-3 me-1"></i>Project Incident (หลายระบบ)</button>
-    </div>
-  </form>
-</div></div></div>
 <div class="modal fade" id="releaseAlert{{ alert.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
   <form method="post" action="{% url 'release_alert' %}">{% csrf_token %}<input type="hidden" name="alert_id" value="{{ alert.pk }}">
     <div class="modal-header"><h5 class="modal-title">คืน Alert กลับเข้าคิว</h5><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
