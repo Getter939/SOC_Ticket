@@ -33,7 +33,7 @@ from .forms import (
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
     ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
-    TicketAttachment, TicketFieldChange, TicketLog, TicketLogRevision,
+    TicketAlertLink, TicketAttachment, TicketFieldChange, TicketLog, TicketLogRevision,
     TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
     validate_attachment,
@@ -454,7 +454,12 @@ def _can_create_ticket_from_triage(triage, user):
 
 def _can_create_ticket_from_wazuh(alert, user):
     profile = getattr(user, 'profile', None)
-    if alert.claimed_by_id != user.id or hasattr(alert, 'ticket'):
+    if (
+        alert.claimed_by_id != user.id
+        or hasattr(alert, 'ticket')
+        or hasattr(alert, 'ticket_alert_link')
+        or alert.project_incident_id
+    ):
         return False
     if user.is_superuser:
         return alert.triage_status in (
@@ -469,8 +474,56 @@ def _can_create_ticket_from_wazuh(alert, user):
     return alert.escalated_to_tier == user_tier
 
 
+MAX_ALERT_BUNDLE_SIZE = 25
+
+
+def _alert_bundle_ids(request):
+    """Return distinct selected Wazuh alert ids, preserving form order."""
+    values = request.POST.getlist('alert_bundle') or request.GET.getlist('alert_bundle')
+    ids = []
+    for value in values:
+        try:
+            alert_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if alert_id > 0 and alert_id not in ids:
+            ids.append(alert_id)
+    return ids
+
+
+def _load_alert_bundle(alert_ids, user, *, lock=False):
+    """Load and validate an opt-in Alert Bundle for this analyst.
+
+    Selection is a convenience supplied by the browser, never authority. The
+    claimed, actionable and unconsumed checks are repeated here and, for the
+    save path, under row locks in the same transaction as ticket creation.
+    """
+    if len(alert_ids) < 2:
+        raise ValidationError('กรุณาเลือก Alert ที่เกี่ยวข้องอย่างน้อย 2 รายการ')
+    if len(alert_ids) > MAX_ALERT_BUNDLE_SIZE:
+        raise ValidationError(
+            f'เลือก Alert ได้ไม่เกิน {MAX_ALERT_BUNDLE_SIZE} รายการต่อ Ticket'
+        )
+    query = WazuhAlert.objects.filter(pk__in=alert_ids).order_by('pk')
+    if lock:
+        query = query.select_for_update()
+    alerts = list(query)
+    if len(alerts) != len(alert_ids):
+        raise ValidationError('มี Alert ที่เลือกไว้ไม่พบในระบบ')
+    unavailable = [
+        str(alert.pk) for alert in alerts
+        if not _can_create_ticket_from_wazuh(alert, user)
+    ]
+    if unavailable:
+        raise ValidationError(
+            'Alert ต่อไปนี้ไม่อยู่ในความรับผิดชอบของคุณหรือถูกดำเนินการแล้ว: '
+            + ', '.join(unavailable)
+        )
+    return alerts
+
+
 def _consume_source_alert(alert, user, *, classification, link_ticket,
-                          project_incident=None):
+                          project_incident=None, stamp_conversion=True):
     """Mark a claimed Wazuh alert handled once it has become a ticket (or a
     case bundle) and stamp the analyst response time on ``link_ticket``.
 
@@ -504,7 +557,7 @@ def _consume_source_alert(alert, user, *, classification, link_ticket,
     # now() is within sub-second of the ticket's auto_now_add created_at; guard
     # against clock skew that would otherwise yield a negative duration.
     delta = now - alert.ingested_at
-    if delta.total_seconds() >= 0:
+    if stamp_conversion and delta.total_seconds() >= 0:
         link_ticket.alert_conversion_duration = delta
         link_ticket.save(update_fields=['alert_conversion_duration'])
 
@@ -678,9 +731,19 @@ def create_ticket(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเปิดเคสใหม่ได้')
         return redirect('ticket_list')
 
+    alert_bundle_ids = _alert_bundle_ids(request)
+    alert_bundle = []
+    if alert_bundle_ids:
+        try:
+            alert_bundle = _load_alert_bundle(alert_bundle_ids, request.user)
+        except ValidationError as exc:
+            messages.error(request, exc.message)
+            return redirect('triage_queue')
+
     # Pre-fill from triage if coming from a TP triage decision
     triage = None
     triage_id = request.GET.get('triage_id') or request.POST.get('triage_id')
+    alert_pk = None
     if triage_id:
         triage = get_object_or_404(TriageRecord, pk=triage_id)
         if triage.ticket_id:
@@ -692,12 +755,24 @@ def create_ticket(request):
 
     if request.method == 'POST':
         form = TicketForm(request.POST, request.FILES, user=request.user)
+        if alert_bundle_ids:
+            # Keep the existing primary-alert selector inside the submitted
+            # bundle rather than exposing every alert claimed by the analyst.
+            form.fields['wazuh_alert'].queryset = WazuhAlert.objects.filter(
+                pk__in=alert_bundle_ids
+            ).order_by('timestamp', 'pk')
         # Stage evidence BEFORE validating. A browser cannot repopulate a file
         # input after a page load, so anything not persisted here is lost the
         # moment the form comes back with an error.
         evidence_token, staged_errors = stage_uploads(request)
         for staged_error in staged_errors:
             form.add_error(None, staged_error)
+        if form.is_valid() and alert_bundle_ids:
+            if form.cleaned_data['classification'] != Ticket.CLASSIFICATION_INCIDENT:
+                form.add_error(
+                    'classification',
+                    'Alert Bundle ต้องเปิดเป็น Incident เดียว ไม่สามารถจัดเป็น Event ได้',
+                )
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -714,7 +789,18 @@ def create_ticket(request):
                     ticket.assigned_to = request.user
 
                     locked_alert = None
-                    if ticket.wazuh_alert_id:
+                    locked_alerts = []
+                    if alert_bundle_ids:
+                        locked_alerts = _load_alert_bundle(
+                            alert_bundle_ids, request.user, lock=True,
+                        )
+                        if ticket.wazuh_alert_id not in {
+                            alert.pk for alert in locked_alerts
+                        }:
+                            raise ValidationError(
+                                'กรุณาเลือก Primary Alert จาก Alert ที่รวมไว้เท่านั้น'
+                            )
+                    elif ticket.wazuh_alert_id:
                         locked_alert = WazuhAlert.objects.select_for_update().get(
                             pk=ticket.wazuh_alert_id
                         )
@@ -724,6 +810,21 @@ def create_ticket(request):
                             )
 
                     ticket.save()
+
+                    source_alerts = locked_alerts or (
+                        [locked_alert] if locked_alert else []
+                    )
+                    for source_alert in source_alerts:
+                        TicketAlertLink.objects.create(
+                            ticket=ticket,
+                            alert=source_alert,
+                            role=(
+                                TicketAlertLink.ROLE_PRIMARY
+                                if source_alert.pk == ticket.wazuh_alert_id
+                                else TicketAlertLink.ROLE_SUPPORTING
+                            ),
+                            linked_by=request.user,
+                        )
 
                     # T1 disposition is part of the create flow: the
                     # Event/Incident classification (set on the ticket by the
@@ -766,11 +867,29 @@ def create_ticket(request):
                             ticket=ticket,
                         )
 
-                    if locked_alert:
+                    for source_alert in source_alerts:
                         _consume_source_alert(
-                            locked_alert, request.user,
+                            source_alert, request.user,
                             classification=ticket.classification,
                             link_ticket=ticket,
+                            stamp_conversion=(
+                                source_alert.pk == ticket.wazuh_alert_id
+                            ),
+                        )
+
+                    if len(source_alerts) > 1:
+                        supporting_ids = [
+                            str(alert.pk) for alert in source_alerts
+                            if alert.pk != ticket.wazuh_alert_id
+                        ]
+                        TicketLog.objects.create(
+                            ticket=ticket,
+                            note=(
+                                f'สร้าง Alert Bundle: Primary Alert #{ticket.wazuh_alert_id}; '
+                                f'Supporting Alerts #{", #".join(supporting_ids)}'
+                            ),
+                            status_at_time=ticket.status,
+                            author=request.user,
                         )
 
                     adopt_staged(evidence_token, request.user, ticket=ticket)
@@ -800,7 +919,11 @@ def create_ticket(request):
             # Source channel carries straight over — issue_type and triage
             # source now share the SOURCE_CHOICES vocabulary, so it maps 1:1.
             initial['issue_type'] = triage.source
-        alert_pk = request.GET.get('wazuh_alert')
+        primary_alert = (
+            min(alert_bundle, key=lambda alert: (alert.timestamp, alert.pk))
+            if alert_bundle else None
+        )
+        alert_pk = primary_alert.pk if primary_alert else request.GET.get('wazuh_alert')
         if alert_pk:
             initial['wazuh_alert'] = alert_pk
             # The alert's own detection time is authoritative for
@@ -827,6 +950,10 @@ def create_ticket(request):
             if parent:
                 initial['detailed_issue'] = parent
         form = TicketForm(initial=initial, user=request.user)
+        if alert_bundle_ids:
+            form.fields['wazuh_alert'].queryset = WazuhAlert.objects.filter(
+                pk__in=alert_bundle_ids
+            ).order_by('timestamp', 'pk')
         # Carried by the single ↔ multi toggle so switching mode does not
         # strand evidence the analyst already uploaded.
         evidence_token = request.GET.get('evidence_token', '')
@@ -840,10 +967,11 @@ def create_ticket(request):
         'triage_id': triage_id or '',
         'case_mode': 'single',
         'case_switch_qs': _case_switch_qs(
-            triage_id, request.GET.get('wazuh_alert'), evidence_token),
+            triage_id, alert_pk, evidence_token),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'threat_guidance': threat_guidance,
         'guidance_note': GUIDANCE_COORDINATION_NOTE,
+        'alert_bundle': alert_bundle,
         'evidence_token': evidence_token,
         'staged_files': staged_for(request.user, evidence_token),
         'attachment_limits': _attachment_limits(),
@@ -1570,9 +1698,13 @@ def ticket_detail(request, pk):
         }
 
     can_restore_attachment = _can_restore_ticket_attachment(request.user)
+    alert_links = list(
+        ticket.alert_links.select_related('alert', 'linked_by')
+    )
 
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
+        'alert_links': alert_links,
         'logs': logs,
         'attachments': attachments,
         'attachment_form': attachment_form,

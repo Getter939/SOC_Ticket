@@ -54,6 +54,18 @@ _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, reso
 One real-world Incident that hit multiple systems, worked as several linked Tickets — one per affected system. The grouping and rollup unit. It has one group coordination gate, Project Review, but Containment and closure remain on each Member Ticket.
 _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Incident" in prose
 
+**Alert Bundle**:
+Several related Alerts judged to be evidence of one real-world Incident, worked as one Ticket. One Primary Alert supplies the Incident's authoritative detection time; the remaining alerts are Supporting Alerts.
+_Avoid_: Project Incident (that is one incident across multiple Tickets), alert batch, merged ticket
+
+**Primary Alert**:
+The Alert in an Alert Bundle that represents the Incident's detection time and is the anchor for its OLA. It is chosen deliberately by the Tier 1 analyst.
+_Avoid_: First alert (chronology alone does not establish relevance), main ticket
+
+**Supporting Alert**:
+An Alert in an Alert Bundle that supplies corroborating evidence but does not set the Ticket's OLA clock.
+_Avoid_: Duplicate alert, secondary ticket
+
 **Project Review**:
 The SOC Manager's one-time, group-level Manager Triage Review for a Project Incident. It records one Normal/Emergency assessment and forwards every waiting Member Ticket to its already-selected handling route. A later reassessment changes the Emergency state of all active members together.
 _Avoid_: member review, group approval

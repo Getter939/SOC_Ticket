@@ -57,7 +57,7 @@ from apps.incidents.forms import (
 from apps.incidents.models import (
     ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
     StagedAttachment, ThreatGuidance, Ticket, TicketAttachment, TicketLog,
-    TicketSubtask, TriageRecord, bundle_suffix_for_index,
+    TicketAlertLink, TicketSubtask, TriageRecord, bundle_suffix_for_index,
 )
 from apps.incidents.notifications import (
     notify_containment_required,
@@ -1820,6 +1820,72 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(ticket.created_by, self.t1)
         self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
         self.assertIsNone(alert.claimed_by)
+        self.assertEqual(ticket.alert_links.get().role, TicketAlertLink.ROLE_PRIMARY)
+
+    def test_alert_bundle_creates_one_incident_with_supporting_alerts(self):
+        primary = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-primary',
+            timestamp=timezone.now() - timedelta(minutes=8), rule_level=14,
+            rule_description='Ransomware activity on file server',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        supporting = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-supporting',
+            timestamp=timezone.now() - timedelta(minutes=4), rule_level=12,
+            rule_description='Lateral movement from file server',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+
+        form_response = self.client.get(reverse('create_ticket'), {
+            'alert_bundle': [primary.pk, supporting.pk],
+        })
+        self.assertEqual(form_response.status_code, 200)
+        self.assertContains(form_response, 'Alert Bundle (2 Alerts)')
+        self.assertEqual(
+            form_response.context['form'].initial['wazuh_alert'], primary.pk
+        )
+
+        data = _ticket_post_data(
+            wazuh_alert=primary.pk,
+            alert_bundle=[str(primary.pk), str(supporting.pk)],
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=TicketForm.ROUTE_ESCALATE_T2,
+        )
+        response = self.client.post(reverse('create_ticket'), data)
+        self.assertEqual(response.status_code, 302)
+
+        ticket = Ticket.objects.get(wazuh_alert=primary)
+        links = {link.alert_id: link.role for link in ticket.alert_links.all()}
+        self.assertEqual(links, {
+            primary.pk: TicketAlertLink.ROLE_PRIMARY,
+            supporting.pk: TicketAlertLink.ROLE_SUPPORTING,
+        })
+        primary.refresh_from_db()
+        supporting.refresh_from_db()
+        self.assertEqual(primary.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
+        self.assertEqual(supporting.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
+        self.assertTrue(ticket.logs.filter(note__contains='Alert Bundle').exists())
+
+    def test_alert_bundle_rejects_alert_claimed_by_another_analyst(self):
+        other_alert = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-other-owner', timestamp=timezone.now(),
+            rule_level=12, triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.other_t1, claimed_at=timezone.now(),
+        )
+        owned_alert = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-owned', timestamp=timezone.now(),
+            rule_level=12, triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('create_ticket'), {
+            'alert_bundle': [owned_alert.pk, other_alert.pk],
+        })
+        self.assertRedirects(response, reverse('triage_queue'))
+        self.assertFalse(Ticket.objects.exists())
 
     def test_wazuh_event_ticket_is_recorded_as_event_history(self):
         alert = WazuhAlert.objects.create(

@@ -288,6 +288,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
                         WazuhAlert.TRIAGE_ESCALATED,
                     ],
                     ticket__isnull=True,
+                    ticket_alert_link__isnull=True,
                 )
                 .order_by('-timestamp')
                 .values_list('pk', flat=True)[:100]

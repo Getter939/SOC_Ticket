@@ -82,13 +82,16 @@
     <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
   </div>
 
-  {% include 'incidents/_case_mode_switch.html' %}
+  {% if not alert_bundle %}
+    {% include 'incidents/_case_mode_switch.html' %}
+  {% endif %}
 
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
     {{ threat_guidance|json_script:"threat-guidance-data" }}
     {{ guidance_note|json_script:"guidance-note-data" }}
     {% if triage_id %}<input type="hidden" name="triage_id" value="{{ triage_id }}">{% endif %}
+    {% for alert in alert_bundle %}<input type="hidden" name="alert_bundle" value="{{ alert.pk }}">{% endfor %}
     {# Ties this submit to the evidence already staged server-side, so a #}
     {# validation error does not lose the analyst's attachments. #}
     <input type="hidden" name="evidence_token" value="{{ evidence_token }}">
@@ -110,6 +113,12 @@
       <div class="row g-3">
 
         <div class="col-12">
+          {% if alert_bundle %}
+          <div class="alert alert-primary py-2 small mb-2">
+            <i class="bi bi-collection me-1"></i><strong>Alert Bundle ({{ alert_bundle|length }} Alerts)</strong>
+            — เลือก Primary Alert ด้านล่างเพื่อกำหนดเวลาตรวจพบและ OLA; Alert อื่นจะถูกเก็บเป็นหลักฐานประกอบใน Ticket เดียวกัน
+          </div>
+          {% endif %}
           <label class="form-label fw-semibold" for="id_wazuh_alert">{{ form.wazuh_alert.label }}</label>
           <select name="wazuh_alert" id="id_wazuh_alert" class="form-select">
             <option value="">{{ form.fields.wazuh_alert.empty_label }}</option>
@@ -125,7 +134,7 @@
               </option>
             {% endfor %}
           </select>
-          <div class="field-hint">เลือก Alert จาก Wazuh เพื่อดึงข้อมูลมาเติมในฟอร์มอัตโนมัติ (ถ้าช่องยังว่างอยู่)</div>
+          <div class="field-hint">{% if alert_bundle %}เลือก Primary Alert จากรายการที่รวมไว้ — ข้อมูลจะเติมในฟอร์มอัตโนมัติเมื่อช่องยังว่าง{% else %}เลือก Alert จาก Wazuh เพื่อดึงข้อมูลมาเติมในฟอร์มอัตโนมัติ (ถ้าช่องยังว่างอยู่){% endif %}</div>
           {% if form.wazuh_alert.errors %}<div class="text-danger small">{{ form.wazuh_alert.errors }}</div>{% endif %}
         </div>
 

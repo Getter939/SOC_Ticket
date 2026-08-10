@@ -1912,6 +1912,48 @@ class Ticket(models.Model):
         return target
 
 
+class TicketAlertLink(models.Model):
+    """One Wazuh alert retained as evidence for a ticket.
+
+    ``Ticket.wazuh_alert`` remains the primary-alert compatibility pointer for
+    existing single-alert code. Every alert, including that primary one, also
+    has exactly one link so supporting alerts cannot be attached elsewhere.
+    """
+
+    ROLE_PRIMARY = 'PRIMARY'
+    ROLE_SUPPORTING = 'SUPPORTING'
+    ROLE_CHOICES = [
+        (ROLE_PRIMARY, 'Primary alert'),
+        (ROLE_SUPPORTING, 'Supporting alert'),
+    ]
+
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name='alert_links',
+    )
+    alert = models.OneToOneField(
+        'wazuh_ingest.WazuhAlert', on_delete=models.CASCADE,
+        related_name='ticket_alert_link',
+    )
+    role = models.CharField(max_length=12, choices=ROLE_CHOICES)
+    linked_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='ticket_alert_links',
+    )
+    linked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['ticket'], condition=models.Q(role='PRIMARY'),
+                name='one_primary_alert_per_ticket',
+            ),
+        ]
+        ordering = ['role', 'alert__timestamp', 'alert_id']
+
+    def __str__(self):
+        return f'{self.ticket.ticket_id} ← alert #{self.alert_id} ({self.role})'
+
+
 class TicketLog(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='logs')
     note = models.TextField(verbose_name='บันทึกรายละเอียด')

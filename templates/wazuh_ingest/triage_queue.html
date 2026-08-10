@@ -8,8 +8,24 @@
     <h4 class="mb-1 fw-bold"><i class="bi bi-shield-fill-exclamation text-danger me-2"></i>Wazuh Triage</h4>
     <p class="text-muted small mb-0">รับ Alert แล้วสร้าง Ticket เพื่อจัดประเภท Event/Incident และเลือกเส้นทางในหน้าถัดไป</p>
   </div>
-  <span class="badge bg-danger">{{ pending_count }} pending</span>
+  <div class="d-flex align-items-center gap-2">
+    <span class="badge bg-danger">{{ pending_count }} pending</span>
+    <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-alert-bundle">
+      <i class="bi bi-collection me-1"></i>รวม Alert ที่เกี่ยวข้อง
+    </button>
+  </div>
 </div>
+
+<form method="get" action="{% url 'create_ticket' %}" id="alert-bundle-form" class="alert alert-primary d-none py-2 mb-3">
+  <div class="d-flex align-items-center flex-wrap gap-2">
+    <span class="small"><strong>โหมดรวม Alert</strong> — เลือก Alert ที่คุณ Claim ไว้อย่างน้อย 2 รายการ แล้วสร้าง Ticket เดียว</span>
+    <span class="badge bg-primary" id="alert-bundle-count">เลือกแล้ว 0</span>
+    <button type="submit" class="btn btn-sm btn-primary ms-auto" id="create-alert-bundle" disabled>
+      สร้าง Ticket จาก Alert ที่เลือก
+    </button>
+    <button type="button" class="btn btn-sm btn-light border" id="cancel-alert-bundle">ยกเลิก</button>
+  </div>
+</form>
 
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body py-3">
@@ -58,6 +74,9 @@
               <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-hand-index-thumb me-1"></i>รับรายการ (Claim)</button>
             </form>
             {% elif alert.triage_status == 'TRIAGING' and alert.claimed_by_id == request.user.id %}
+            <label class="form-check form-check-inline mb-0 d-none bundle-alert-choice" title="รวมเป็น Ticket เดียว">
+              <input class="form-check-input bundle-alert-input" type="checkbox" name="alert_bundle" value="{{ alert.pk }}" form="alert-bundle-form">
+            </label>
             <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createTicket{{ alert.pk }}"><i class="bi bi-ticket-perforated me-1"></i>สร้าง Ticket (Create Ticket)</button>
             <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseAlert{{ alert.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว (Release)</button>
             {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
@@ -99,4 +118,35 @@
 {% endif %}{% endfor %}
 
 {% if page_obj.paginator.num_pages > 1 %}<nav class="mt-3"><ul class="pagination pagination-sm justify-content-center"><li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li></ul></nav>{% endif %}
+<script nonce="{{ request.csp_nonce }}">
+(() => {
+  const toggle = document.getElementById('toggle-alert-bundle');
+  const form = document.getElementById('alert-bundle-form');
+  const cancel = document.getElementById('cancel-alert-bundle');
+  const choices = Array.from(document.querySelectorAll('.bundle-alert-choice'));
+  const inputs = Array.from(document.querySelectorAll('.bundle-alert-input'));
+  const count = document.getElementById('alert-bundle-count');
+  const submit = document.getElementById('create-alert-bundle');
+  if (!toggle || !form) return;
+
+  function refresh() {
+    const selected = inputs.filter(input => input.checked).length;
+    count.textContent = `เลือกแล้ว ${selected}`;
+    submit.disabled = selected < 2;
+  }
+  function close() {
+    form.classList.add('d-none');
+    choices.forEach(choice => choice.classList.add('d-none'));
+    inputs.forEach(input => { input.checked = false; });
+    refresh();
+  }
+  toggle.addEventListener('click', () => {
+    form.classList.remove('d-none');
+    choices.forEach(choice => choice.classList.remove('d-none'));
+    refresh();
+  });
+  cancel.addEventListener('click', close);
+  inputs.forEach(input => input.addEventListener('change', refresh));
+})();
+</script>
 {% endblock %}

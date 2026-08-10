@@ -109,6 +109,28 @@
   <div class="snapshot-card"><div class="snapshot-label"><i class="bi bi-building me-1"></i>หน่วยงานเจ้าของ</div><div class="snapshot-value">{% if ticket.asset_owner %}{{ ticket.asset_owner }}{% elif ticket.system_owner %}{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% else %}ไม่ระบุ{% endif %}</div></div>
 </div>
 
+{% if alert_links|length > 1 %}
+<details class="card section-card mb-3">
+  <summary class="card-header d-flex align-items-center gap-2">
+    <i class="bi bi-collection text-primary"></i>
+    <span class="section-title">Related Wazuh Alerts ({{ alert_links|length }})</span>
+    <span class="section-hint">Primary alert sets the detection time and OLA; the rest are supporting evidence.</span>
+  </summary>
+  <div class="card-body py-2">
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Role</th><th>Detected</th><th>Agent</th><th>Level</th><th>Rule</th></tr></thead>
+      <tbody>{% for link in alert_links %}<tr>
+        <td>{% if link.role == 'PRIMARY' %}<span class="badge bg-primary">Primary</span>{% else %}<span class="badge bg-light text-dark border">Supporting</span>{% endif %}</td>
+        <td class="small font-monospace">{{ link.alert.timestamp|date:"Y-m-d H:i" }}</td>
+        <td>{{ link.alert.agent_name|default:"-" }}</td>
+        <td>{{ link.alert.rule_level }}</td>
+        <td>{{ link.alert.rule_description|truncatechars:120 }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+</details>
+{% endif %}
+
 <nav class="quick-nav mb-3" aria-label="Ticket sections">
   <a href="#overview"><i class="bi bi-card-text me-1"></i>ภาพรวม</a>
   <a href="#technical"><i class="bi bi-pc-display me-1"></i>ข้อมูลทางเทคนิค</a>
