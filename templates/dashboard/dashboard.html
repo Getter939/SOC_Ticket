@@ -496,7 +496,7 @@
                             <th class="sortable" data-key="sev" data-num="1" role="button" tabindex="0">Severity<span class="sort-ind"></span></th>
                             <th class="sortable" data-key="created" data-num="1" role="button" tabindex="0">Created (ICT)<span class="sort-ind"></span></th>
                             <th class="sortable" data-key="type" role="button" tabindex="0">Type<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="assignee" role="button" tabindex="0">Assignee<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="openedBy" role="button" tabindex="0">ผู้เปิดเคส / Opened by<span class="sort-ind"></span></th>
                             <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-ind"></span></th>
                             <th class="sortable" data-key="sc" data-num="1" role="button" tabindex="0">Status Updated (ICT)<span class="sort-ind"></span></th>
                         </tr>
@@ -508,7 +508,7 @@
                             data-sev="{{ ticket.sev_rank }}"
                             data-created="{{ ticket.created_at|date:'U' }}"
                             data-type="{{ ticket.get_detailed_issue_display }}"
-                            data-assignee="{% if ticket.assigned_to %}{{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}{% endif %}"
+                            data-opened-by="{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% endif %}"
                             data-status="{{ ticket.get_status_display }}"
                             data-sc="{% if ticket.status_changed_at %}{{ ticket.status_changed_at|date:'U' }}{% else %}0{% endif %}">
                             <td class="text-muted" data-role="num"></td>
@@ -527,8 +527,8 @@
                             <td class="text-nowrap">{{ ticket.created_at|date:"d M Y H:i" }}</td>
                             <td>{{ ticket.get_detailed_issue_display }}</td>
                             <td>
-                                {% if ticket.assigned_to %}
-                                    {{ ticket.assigned_to.get_full_name|default:ticket.assigned_to.username }}
+                                {% if ticket.created_by %}
+                                    {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}
                                 {% else %}
                                     <span class="text-muted">—</span>
                                 {% endif %}

@@ -266,7 +266,7 @@ def dashboard(request):
     # weight (shared with the Tier 2 queue's severity sort); the weight is also
     # emitted as a data-attribute for the JS.
     recent_tickets = list(
-        active_qs.select_related('assigned_to')
+        active_qs.select_related('created_by')
         .with_severity_rank()
         .order_by('-sev_rank', '-created_at')
     )

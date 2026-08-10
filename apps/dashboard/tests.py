@@ -322,6 +322,26 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('ข้อมูล ณ เวลา:', html)
         self.assertIn('date_range=today', html)
 
+    def test_recent_cases_labels_and_sorts_the_ticket_opener(self):
+        opener = _make_user('case_opener', UserProfile.ROLE_SOC_STAFF)
+        opener.first_name = 'Case'
+        opener.last_name = 'Opener'
+        opener.save(update_fields=('first_name', 'last_name'))
+        ticket = _make_ticket(status=Ticket.STATUS_NEW)
+        # The two fields deliberately differ: the table must describe the
+        # opener, not present assigned_to as the current handler.
+        Ticket.objects.filter(pk=ticket.pk).update(
+            created_by=opener,
+            assigned_to=self.soc,
+        )
+
+        html = self._get().content.decode()
+
+        self.assertIn('ผู้เปิดเคส / Opened by', html)
+        self.assertIn('data-key="openedBy"', html)
+        self.assertIn('data-opened-by="Case Opener"', html)
+        self.assertNotIn('>Assignee<span', html)
+
     # ── Removed sections must be gone ──────────────────────────────────── #
 
     def test_removed_sections_absent(self):
