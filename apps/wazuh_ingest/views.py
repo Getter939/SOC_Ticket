@@ -283,7 +283,7 @@ def escalation_queue(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถเข้าถึง Escalation Queue ได้')
         return redirect('ticket_list')
 
-    emergency_filter = request.GET.get('emergency', '').strip()
+    claim_filter = request.GET.get('claim', '').strip()
     stage_filter = request.GET.get('stage', '').strip()
     sort = request.GET.get('sort', 'emergency').strip()
 
@@ -299,21 +299,39 @@ def escalation_queue(request):
     else:
         stage_filter = ''
         tickets_qs = Ticket.objects.filter(status__in=Ticket.TIER2_QUEUE_STATUSES)
-    tickets_qs = tickets_qs.select_related('created_by', 'assigned_admin', 't2_claimed_by')
+    tickets_qs = tickets_qs.select_related(
+        'created_by', 'assigned_admin', 't2_claimed_by').with_severity_rank()
 
-    if emergency_filter in ('1', '0'):
-        tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')
+    # Claim state — the discipline this whole page is built around. "Unclaimed"
+    # is what an analyst can pick up; "mine" is what they are already holding.
+    # Both claim fields reset on every transition (Ticket.transition_to), so this
+    # tracks the current stage only. request.user is safe here: @login_required
+    # and the Tier 2 gate above have both already run.
+    #
+    # Deliberately no "claimed by others" value — it is derivable, and the
+    # ผู้รับเรื่อง column already names the holder.
+    if claim_filter == 'unclaimed':
+        tickets_qs = tickets_qs.filter(t2_claimed_by__isnull=True)
+    elif claim_filter == 'mine':
+        tickets_qs = tickets_qs.filter(t2_claimed_by=request.user)
     else:
-        emergency_filter = ''
+        claim_filter = ''
     # status_changed_at = when the ticket entered its current (queue) status —
     # meaningful for all three stages, unlike escalated_to_t2_at.
+    #
+    # Only the default sort floats emergencies. The other three are deliberately
+    # left alone: `ola` answers "what breaches next", and an emergency with 4h of
+    # slack outranking an already-overdue ticket would defeat that. The red row
+    # tint and EMERGENCY badge carry the signal under every sort.
     sort_map = {
         'emergency': ('-is_emergency', '-status_changed_at'),
         # Nulls last: Medium/Low have no contain deadline, so they belong below
         # everything that is actually on a clock.
         'ola': (F('ola_contain_deadline').asc(nulls_last=True), '-status_changed_at'),
         'newest': ('-status_changed_at',),
-        'severity': ('severity', '-status_changed_at'),
+        # -sev_rank, NOT 'severity': the raw CharField sorts alphabetically,
+        # which ranks Low above Medium. See TicketQuerySet.with_severity_rank.
+        'severity': ('-sev_rank', '-status_changed_at'),
     }
     if sort not in sort_map:
         sort = 'emergency'
@@ -325,8 +343,11 @@ def escalation_queue(request):
     return render(request, 'wazuh_ingest/escalation_queue.html', {
         'page_obj': page_obj,
         'tickets': page_obj,
-        'escalated_count': tickets_qs.count(),
-        'emergency_filter': emergency_filter,
+        # paginator.count is the same post-filter total the second count() query
+        # produced, minus the query. Note this is the FILTERED count, unlike the
+        # sidebar badge (wazuh_ingest/context_processors.py), which is unfiltered.
+        'escalated_count': paginator.count,
+        'claim_filter': claim_filter,
         'stage_filter': stage_filter,
         'sort': sort,
     })

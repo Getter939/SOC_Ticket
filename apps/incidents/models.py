@@ -79,6 +79,20 @@ class TicketQuerySet(models.QuerySet):
             ).distinct()
         return self.none()
 
+    def with_severity_rank(self):
+        """Annotate ``sev_rank`` from ``Ticket.SEVERITY_RANK`` for severity ordering.
+
+        ``severity`` is a CharField, so ordering on it directly is alphabetical —
+        Critical, High, **Low, Medium**, Unknown — which ranks Low above Medium.
+        Order on ``-sev_rank`` instead to get Critical first and Unknown last.
+        """
+        return self.annotate(sev_rank=models.Case(
+            *[models.When(severity=slug, then=models.Value(rank))
+              for slug, rank in Ticket.SEVERITY_RANK.items()],
+            default=models.Value(0),
+            output_field=models.IntegerField(),
+        ))
+
 
 def bundle_suffix_for_index(index):
     """Excel-style column label for a member's position in a bundle.

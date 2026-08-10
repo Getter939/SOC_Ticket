@@ -4,9 +4,7 @@ from statistics import mean as _mean, median as _median
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
-from django.db.models import (
-    Case, Count, F, IntegerField, OuterRef, Q, Subquery, Value, When,
-)
+from django.db.models import Count, F, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce, TruncDate, TruncHour
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -264,16 +262,12 @@ def dashboard(request):
     # is also the table's initial order and the no-JS fallback.
     #
     # severity is a CharField, so ordering on it alphabetically would be wrong
-    # (Critical < High < Low …). Annotate the SEVERITY_RANK weight and sort on
-    # that instead; the weight is also emitted as a data-attribute for the JS.
-    sev_rank_whens = [
-        When(severity=slug, then=Value(rank))
-        for slug, rank in Ticket.SEVERITY_RANK.items()
-    ]
+    # (Critical < High < Low …). with_severity_rank() annotates the SEVERITY_RANK
+    # weight (shared with the Tier 2 queue's severity sort); the weight is also
+    # emitted as a data-attribute for the JS.
     recent_tickets = list(
         active_qs.select_related('assigned_to')
-        .annotate(sev_rank=Case(
-            *sev_rank_whens, default=Value(0), output_field=IntegerField()))
+        .with_severity_rank()
         .order_by('-sev_rank', '-created_at')
     )
 
