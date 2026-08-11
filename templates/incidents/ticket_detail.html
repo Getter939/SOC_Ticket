@@ -566,6 +566,39 @@ onto its own wrapped row, which space-between then left-aligned.
       </div>
       {% endif %}
 
+      {% comment %}
+      Tier 2 claim state — visible whenever the ticket sits in the Tier 2
+      queue and the viewer is Tier 2 (or superuser), ahead of whichever action
+      card renders below. Claiming stays optional (t2_claim_blocks still only
+      bites once someone else holds it); this just makes the state visible
+      instead of a surprise on submit, and gives a one-click Claim button with
+      no detour to the Escalation Queue.
+      {% endcomment %}
+      {% if t2_claim_visible %}
+      {% if t2_claim_state == 'unclaimed' %}
+      <div class="alert alert-info d-flex justify-content-between align-items-center gap-2 mb-3">
+        <div class="small">
+          <i class="bi bi-inbox me-1"></i>Ticket นี้ยังไม่มีผู้รับ — รับไว้ก่อนดำเนินการเพื่อกันไม่ให้ Tier 2 คนอื่นชนกัน
+        </div>
+        <form method="post" class="flex-shrink-0">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="claim_t2">
+          <button class="btn btn-sm btn-primary" type="submit">
+            <i class="bi bi-hand-index-thumb me-1"></i>รับเรื่อง (Claim)
+          </button>
+        </form>
+      </div>
+      {% elif t2_claim_state == 'mine' %}
+      <div class="alert alert-success small mb-3">
+        <i class="bi bi-check-circle-fill me-1"></i>คุณรับ Ticket นี้ไว้แล้ว — ดำเนินการได้เลย
+      </div>
+      {% elif t2_claim_state == 'other' %}
+      <div class="alert alert-warning small mb-3">
+        <i class="bi bi-lock-fill me-1"></i>Ticket นี้ถูก <strong>{{ ticket.court_holder_label }}</strong> รับไปดำเนินการแล้ว
+      </div>
+      {% endif %}
+      {% endif %}
+
       {% if is_terminal %}
       <div class="alert alert-light border text-center text-muted small">ไม่มี action เพิ่มเติมสำหรับ workflow นี้ แต่ยังเปลี่ยนสถานะ Emergency ได้ตามสิทธิ์</div>
       {% elif can_t2_review %}

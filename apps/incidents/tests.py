@@ -5696,6 +5696,124 @@ class TicketEditViewTest(TestCase):
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 35. Tier 2 claim on ticket detail (Phase 5)                                   #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class TicketDetailT2ClaimTest(TestCase):
+    """Claiming was invisible on ticket_detail — a Tier 2 analyst had no way
+    to see who (if anyone) held a ticket, or claim it, without a detour
+    through the Escalation Queue. This adds a visible, one-click claim right
+    on the ticket page. Claiming stays optional; t2_claim_blocks is unchanged."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('claim_t1')
+        cls.t2 = _make_t2('claim_t2')
+        cls.t2_other = _make_t2('claim_t2_other')
+        cls.manager = _make_user('claim_mgr', UserProfile.ROLE_SOC_MANAGER)
+        cls.admin = _make_user('claim_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.superuser = User.objects.create_superuser(
+            'claim_super', 'claim_super@x.com', 'testpass123')
+
+    def _ticket(self, status=Ticket.STATUS_ESCALATED_T2):
+        return _make_ticket(
+            status=status, created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+
+    def _claim(self, user, ticket):
+        self.client.force_login(user)
+        return self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
+            'action': 'claim_t2',
+        })
+
+    # ── Claim action ─────────────────────────────────────────────────── #
+
+    def test_claiming_an_unclaimed_ticket_sets_claim_and_redirects_to_detail(self):
+        ticket = self._ticket()
+        response = self._claim(self.t2, ticket)
+        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.t2_claimed_by, self.t2)
+        self.assertIsNotNone(ticket.t2_claimed_at)
+
+    def test_second_analyst_cannot_claim_an_already_claimed_ticket(self):
+        ticket = self._ticket()
+        self._claim(self.t2, ticket)
+        self._claim(self.t2_other, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.t2_claimed_by, self.t2)
+
+    def test_non_tier2_roles_cannot_claim(self):
+        ticket = self._ticket()
+        for user in (self.t1, self.manager, self.admin):
+            with self.subTest(user=user.username):
+                self._claim(user, ticket)
+                ticket.refresh_from_db()
+                self.assertIsNone(ticket.t2_claimed_by)
+
+    def test_superuser_without_profile_can_claim(self):
+        ticket = self._ticket()
+        self._claim(self.superuser, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.t2_claimed_by, self.superuser)
+
+    def test_claim_is_rejected_outside_the_tier2_queue(self):
+        for status in (Ticket.STATUS_NEW, Ticket.STATUS_AWAITING_CONTAINMENT):
+            with self.subTest(status=status):
+                ticket = self._ticket(status=status)
+                self._claim(self.t2, ticket)
+                ticket.refresh_from_db()
+                self.assertIsNone(ticket.t2_claimed_by)
+
+    # ── Banner context, all states ──────────────────────────────────── #
+
+    def test_unclaimed_ticket_shows_claim_button_to_tier2(self):
+        ticket = self._ticket()
+        self.client.force_login(self.t2)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertEqual(response.context['t2_claim_state'], 'unclaimed')
+        self.assertContains(response, 'value="claim_t2"')
+
+    def test_claimed_by_self_shows_mine_state_no_button(self):
+        ticket = self._ticket()
+        self._claim(self.t2, ticket)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertEqual(response.context['t2_claim_state'], 'mine')
+        self.assertNotContains(response, 'value="claim_t2"')
+
+    def test_claimed_by_other_shows_holder_label_no_button(self):
+        ticket = self._ticket()
+        self._claim(self.t2_other, ticket)
+        self.client.force_login(self.t2)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertEqual(response.context['t2_claim_state'], 'other')
+        ticket.refresh_from_db()
+        self.assertContains(response, ticket.court_holder_label)
+        self.assertNotContains(response, 'value="claim_t2"')
+
+    def test_non_tier2_viewer_sees_no_banner(self):
+        ticket = self._ticket()
+        for user in (self.t1, self.manager, self.admin):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+                self.assertFalse(response.context['t2_claim_visible'])
+
+    def test_terminal_ticket_shows_no_claim_banner(self):
+        ticket = self._ticket(status=Ticket.STATUS_APPROVED)
+        self.client.force_login(self.t2)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertFalse(response.context['t2_claim_visible'])
+
+    def test_active_non_queue_ticket_shows_no_claim_banner(self):
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        self.client.force_login(self.t2)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertFalse(response.context['t2_claim_visible'])
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 34. Manager step-back (Phase 4)                                               #
 # ──────────────────────────────────────────────────────────────────────────── #
 

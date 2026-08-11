@@ -1433,6 +1433,24 @@ def ticket_detail(request, pk):
         and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
     )
 
+    # Tier 2 claim banner: visible whenever the ticket sits in the Tier 2 queue
+    # and the viewer is Tier 2 (or superuser) — regardless of which action card
+    # renders below it. Other roles never see it: they can't claim, and
+    # t2_claim_blocks never applies to them either.
+    is_t2_viewer = (
+        request.user.is_superuser
+        or (profile is not None and profile.is_tier2)
+    )
+    t2_claim_visible = ticket.status in Ticket.TIER2_QUEUE_STATUSES and is_t2_viewer
+    if not t2_claim_visible:
+        t2_claim_state = None
+    elif ticket.t2_claimed_by_id is None:
+        t2_claim_state = 'unclaimed'
+    elif ticket.t2_claimed_by_id == request.user.pk:
+        t2_claim_state = 'mine'
+    else:
+        t2_claim_state = 'other'
+
     if request.method == 'POST':
         action = request.POST.get('action')
 
@@ -1671,6 +1689,27 @@ def ticket_detail(request, pk):
                 except ValidationError as e:
                     messages.error(request, e.message)
 
+        elif action == 'claim_t2':
+            # Mirrors claim_escalation (apps/wazuh_ingest/views.py): one
+            # conditional UPDATE so two analysts pressing Claim at the same
+            # moment can't both win. Redirects back to this ticket instead of
+            # the queue, since the button lives on the detail page now.
+            if not is_t2_viewer:
+                messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถรับ Ticket ได้')
+            else:
+                updated = Ticket.objects.filter(
+                    pk=ticket.pk,
+                    status__in=Ticket.TIER2_QUEUE_STATUSES,
+                    t2_claimed_by__isnull=True,
+                ).update(t2_claimed_by=request.user, t2_claimed_at=timezone.now())
+                if not updated:
+                    messages.error(
+                        request,
+                        'Ticket นี้ถูกเจ้าหน้าที่คนอื่นรับไปแล้ว หรือไม่ได้อยู่ในคิว Tier 2',
+                    )
+                else:
+                    messages.success(request, 'คุณรับ Ticket นี้มาดำเนินการแล้ว')
+
         return redirect('ticket_detail', pk=pk)
 
     # The timeline renders each entry's author, its edited badge, and any
@@ -1780,6 +1819,8 @@ def ticket_detail(request, pk):
         'valid_status_choices': valid_status_choices,
         'transition_actions': transition_actions,
         'can_t2_review': can_t2_review,
+        't2_claim_visible': t2_claim_visible,
+        't2_claim_state': t2_claim_state,   # None | 'unclaimed' | 'mine' | 'other'
         't2_review_form': TicketReviewForm(instance=ticket),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         'can_assign_admin': can_assign_admin,
