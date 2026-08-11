@@ -2072,13 +2072,18 @@ def ticket_history(request):
 def triage_list(request):
     """Tier 1's single work queue ("My Queue" / คิวงานของฉัน).
 
-    Two sections on one page:
-      1. Manual-intake reports awaiting triage (TriageRecord) — the former
-         Manual Triage page, with the same claim / convert / release actions.
-      2. The analyst's own-court tickets (TIER1_QUEUE_STATUSES, created by
+    Three sections on one page, in render order:
+      1. The analyst's own-court tickets (TIER1_QUEUE_STATUSES, created by
          them) — above all T1_REVIEW, where Tier 2 returned the case and only
          the creator may act. Before this page there was no surface telling
          the creator a case had come back.
+      2. Manual-intake reports awaiting triage (TriageRecord) — the former
+         Manual Triage page, with the same claim / convert / release /
+         dismiss actions.
+      3. The analyst's own recent dispositions. This is the only trail a
+         DISMISSED report leaves: dismiss_manual_triage stamps decision=FP
+         with no ticket, so the record surfaces in no ticket list and no
+         dashboard.
 
     Keeps the historical `triage_list` URL name: every redirect and deep link
     from the manual-triage flow lands here, where the manual queue still lives.
@@ -2087,6 +2092,13 @@ def triage_list(request):
     if not request.user.is_superuser and (profile is None or not profile.is_tier1):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่เข้าถึงหน้านี้ได้')
         return redirect('home')
+
+    # Which tab opens. The manual-triage actions redirect back with
+    # ?tab=manual so a claim/release/dismiss doesn't bounce the analyst out of
+    # the queue they were working in.
+    active_tab = request.GET.get('tab', 'tickets')
+    if active_tab not in ('tickets', 'manual', 'history'):
+        active_tab = 'tickets'
 
     queue = TriageRecord.objects.filter(decision='', ticket__isnull=True).select_related(
         'analyst', 'claimed_by',
@@ -2111,12 +2123,24 @@ def triage_list(request):
             '-status_changed_at',
         )
     )
+    # Counted before paging — these drive the tab badges and the returned-cases
+    # alert, which describe the whole queue, not the page being viewed.
+    my_tickets_total = my_tickets.count()
+    returned_count = my_tickets.filter(status=Ticket.STATUS_T1_REVIEW).count()
+    # This page was the only queue in the app without a Paginator; an unbounded
+    # ticket table is what pushed the manual-intake queue below the fold.
+    page_obj = Paginator(my_tickets, 10).get_page(request.GET.get('page'))
 
     return render(request, 'incidents/my_queue.html', {
         'manual_queue': queue,
         'manual_history': history,
-        'my_tickets': my_tickets,
-        'returned_count': my_tickets.filter(status=Ticket.STATUS_T1_REVIEW).count(),
+        'my_tickets': page_obj,
+        'page_obj': page_obj,
+        'my_tickets_total': my_tickets_total,
+        'manual_queue_count': queue.count(),
+        'manual_history_count': len(history),
+        'returned_count': returned_count,
+        'active_tab': active_tab,
     })
 
 
@@ -2139,11 +2163,20 @@ def create_triage(request):
             triage.save()
 
             messages.success(request, 'เพิ่มรายการ Manual Triage เข้าคิวแล้ว')
-            return redirect('triage_list')
+            return _manual_queue_redirect()
     else:
         form = TriageForm()
 
     return render(request, 'incidents/triage_form.html', {'form': form})
+
+
+def _manual_queue_redirect():
+    """Back to My Queue with the manual-intake tab open.
+
+    Every action below belongs to that tab, so landing on the default
+    (tickets) tab afterwards would lose the analyst's place mid-triage.
+    """
+    return redirect(f"{reverse('triage_list')}?tab=manual")
 
 
 @login_required
@@ -2152,13 +2185,13 @@ def claim_manual_triage(request, triage_id):
     if request.method != 'POST' or (
         not request.user.is_superuser and (profile is None or not profile.is_tier1)
     ):
-        return redirect('triage_list')
+        return _manual_queue_redirect()
     updated = TriageRecord.objects.filter(
         pk=triage_id, decision='', ticket__isnull=True, claimed_by__isnull=True,
     ).update(claimed_by=request.user, claimed_at=timezone.now())
     if not updated:
         messages.error(request, 'รายการนี้ถูกผู้อื่นรับไปแล้วหรือดำเนินการเสร็จแล้ว')
-    return redirect('triage_list')
+    return _manual_queue_redirect()
 
 
 @login_required
@@ -2167,11 +2200,11 @@ def release_manual_triage(request, triage_id):
     if request.method != 'POST' or (
         not request.user.is_superuser and (profile is None or not profile.is_tier1)
     ):
-        return redirect('triage_list')
+        return _manual_queue_redirect()
     reason = request.POST.get('release_reason', '').strip()
     if not reason:
         messages.error(request, 'กรุณาระบุเหตุผลในการคืนรายการกลับเข้าคิว')
-        return redirect('triage_list')
+        return _manual_queue_redirect()
     releasable = TriageRecord.objects.filter(
         pk=triage_id, decision='', ticket__isnull=True, claimed_by=request.user,
     )
@@ -2184,7 +2217,7 @@ def release_manual_triage(request, triage_id):
     )
     if not updated:
         messages.error(request, 'รายการนี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
-    return redirect('triage_list')
+    return _manual_queue_redirect()
 
 
 @login_required
@@ -2204,12 +2237,12 @@ def dismiss_manual_triage(request, triage_id):
     if request.method != 'POST' or (
         not request.user.is_superuser and (profile is None or not profile.is_tier1)
     ):
-        return redirect('triage_list')
+        return _manual_queue_redirect()
 
     reason = request.POST.get('dismiss_reason', '').strip()
     if not reason:
         messages.error(request, 'กรุณาระบุเหตุผลในการปิดรายการโดยไม่เปิดเคส')
-        return redirect('triage_list')
+        return _manual_queue_redirect()
 
     # Claimer-only, like release — dismissal is a triage decision, so it
     # belongs to whoever holds the item. Superuser may clear any pending row.
@@ -2223,7 +2256,7 @@ def dismiss_manual_triage(request, triage_id):
     triage = dismissable.first()
     if triage is None:
         messages.error(request, 'รายการนี้ไม่ได้อยู่ในความรับผิดชอบของคุณ')
-        return redirect('triage_list')
+        return _manual_queue_redirect()
 
     triage.decision = TriageRecord.DECISION_FP
     note = f'ปิดโดยไม่เปิดเคส: {reason}'
@@ -2238,7 +2271,7 @@ def dismiss_manual_triage(request, triage_id):
     ])
 
     messages.success(request, 'ปิดรายการโดยไม่เปิดเคสแล้ว')
-    return redirect('triage_list')
+    return _manual_queue_redirect()
 
 
 # ── Full-text search across tickets and triage records ─────────────────── #

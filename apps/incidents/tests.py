@@ -2043,6 +2043,71 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(my_ids, {returned.pk})
         self.assertEqual(response.context['returned_count'], 1)
 
+    # ── Tabs + pagination (the manual queue used to sit below the fold) ── #
+
+    def test_ticket_table_is_paginated_at_ten(self):
+        """An unbounded ticket table is what pushed the manual-intake queue
+        off-screen; this page was the only queue in the app without a
+        Paginator."""
+        for _ in range(12):
+            _make_ticket(created_by=self.t1, status=Ticket.STATUS_NEW,
+                         classification=Ticket.CLASSIFICATION_INCIDENT)
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('my_queue'))
+        self.assertEqual(len(response.context['my_tickets']), 10)
+        self.assertEqual(response.context['my_tickets_total'], 12)
+        self.assertEqual(response.context['page_obj'].paginator.num_pages, 2)
+
+        page2 = self.client.get(reverse('my_queue'), {'tab': 'tickets', 'page': 2})
+        self.assertEqual(len(page2.context['my_tickets']), 2)
+
+    def test_counts_describe_the_whole_queue_not_the_current_page(self):
+        """The tab badges and the returned-cases alert must not shrink to the
+        size of page 1."""
+        for _ in range(11):
+            _make_ticket(created_by=self.t1, status=Ticket.STATUS_T1_REVIEW,
+                         classification=Ticket.CLASSIFICATION_INCIDENT)
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('my_queue'))
+        self.assertEqual(len(response.context['my_tickets']), 10)   # page
+        self.assertEqual(response.context['my_tickets_total'], 11)  # whole queue
+        self.assertEqual(response.context['returned_count'], 11)
+
+    def test_tab_query_param_selects_the_open_tab(self):
+        self.client.force_login(self.t1)
+        for value, expected in (
+            (None, 'tickets'), ('tickets', 'tickets'),
+            ('manual', 'manual'), ('history', 'history'),
+            ('bogus', 'tickets'),   # unknown value falls back, never 500s
+        ):
+            with self.subTest(tab=value):
+                params = {'tab': value} if value else {}
+                response = self.client.get(reverse('my_queue'), params)
+                self.assertEqual(response.context['active_tab'], expected)
+
+    def test_manual_triage_actions_return_to_the_manual_tab(self):
+        """A claim/release/dismiss must not bounce the analyst back to the
+        default tickets tab mid-triage."""
+        report = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Caller reported odd VPN logins.', notes='n',
+        )
+        self.client.force_login(self.t1)
+        expected = f"{reverse('triage_list')}?tab=manual"
+
+        claim = self.client.post(reverse('claim_manual_triage', args=[report.pk]))
+        self.assertEqual(claim.url, expected)
+        release = self.client.post(
+            reverse('release_manual_triage', args=[report.pk]),
+            {'release_reason': 'not mine'})
+        self.assertEqual(release.url, expected)
+
+        self.client.post(reverse('claim_manual_triage', args=[report.pk]))
+        dismiss = self.client.post(
+            reverse('dismiss_manual_triage', args=[report.pk]),
+            {'dismiss_reason': 'spam'})
+        self.assertEqual(dismiss.url, expected)
+
     def test_my_queue_and_triage_list_are_the_same_page(self):
         """The historical URL name must keep landing on the merged page, so
         every manual-triage redirect and deep link still works."""
