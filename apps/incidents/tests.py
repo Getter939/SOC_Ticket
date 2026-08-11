@@ -2073,6 +2073,33 @@ class TriageWorkflowIntegrityTest(TestCase):
         self.assertEqual(response.context['my_tickets_total'], 11)  # whole queue
         self.assertEqual(response.context['returned_count'], 11)
 
+    def test_manual_tab_badge_matches_the_sidebar_badge_rule(self):
+        """Both badges must mean the same thing — reports this analyst can pick
+        up or already holds. The table still lists a peer's claimed row, but
+        counting it made the nav and the tab disagree about one queue."""
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL, analyst=self.t1,
+            alert_description='Unclaimed — pickable.', notes='n',
+        )
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL, analyst=self.t1,
+            alert_description='Mine already.', notes='n',
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL, analyst=self.other_t1,
+            alert_description='Claimed by a peer.', notes='n',
+            claimed_by=self.other_t1, claimed_at=timezone.now(),
+        )
+
+        self.client.force_login(self.t1)
+        response = self.client.get(reverse('my_queue'))
+        # Badge counts the 2 actionable ones, not the peer's.
+        self.assertEqual(response.context['manual_queue_count'], 2)
+        # But the peer's row is still rendered, for shift awareness.
+        self.assertEqual(len(response.context['manual_queue']), 3)
+        self.assertContains(response, 'Claimed by a peer.')
+
     def test_tab_query_param_selects_the_open_tab(self):
         self.client.force_login(self.t1)
         for value, expected in (

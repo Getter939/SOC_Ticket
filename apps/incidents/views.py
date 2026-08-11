@@ -2137,7 +2137,15 @@ def triage_list(request):
         'my_tickets': page_obj,
         'page_obj': page_obj,
         'my_tickets_total': my_tickets_total,
-        'manual_queue_count': queue.count(),
+        # Actionable count, matching the sidebar badge's rule exactly
+        # (wazuh_ingest.context_processors.pending_triage_count): reports this
+        # analyst can pick up or already holds. The table below still lists a
+        # peer's claimed rows for shift awareness, but a badge is a call to
+        # action — counting another analyst's work would make the nav badge
+        # and this one disagree about the same queue.
+        'manual_queue_count': queue.filter(
+            Q(claimed_by__isnull=True) | Q(claimed_by=request.user)
+        ).count(),
         'manual_history_count': len(history),
         'returned_count': returned_count,
         'active_tab': active_tab,
