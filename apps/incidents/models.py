@@ -1300,6 +1300,25 @@ class Ticket(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # Queue/list filters and the executive dashboard filter on status,
+            # often together with severity; the composite also serves status-only
+            # queries via its leftmost prefix.
+            models.Index(fields=['status', 'severity'], name='ix_ticket_status_severity'),
+            # List ordering (-created_at) and date-range dashboard windows.
+            models.Index(fields=['created_at'], name='ix_ticket_created_at'),
+            # Closed-date reporting / filtering.
+            models.Index(fields=['closed_at'], name='ix_ticket_closed_at'),
+            # OLA-pressure bucketing (apps/incidents/ola.py) only ever touches
+            # OPEN tickets, so a PARTIAL index keeps it small and hot. The
+            # condition mirrors TERMINAL_STATUSES (literals — Meta can't see the
+            # class constants at definition time).
+            models.Index(
+                fields=['ola_contain_deadline'],
+                condition=~models.Q(status__in=['APPROVED', 'CLOSED_EVENT']),
+                name='ix_ticket_open_contain_ola',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.ticket_id} - {self.device_name}'
