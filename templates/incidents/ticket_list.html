@@ -149,6 +149,9 @@
                         {% if ticket.is_emergency %}
                         <div class="mt-1"><span class="emg-flag"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>EMERGENCY</span></div>
                         {% endif %}
+                        {% if show_returned_to_admin_indicator and ticket.status == 'AWAITING_CONTAINMENT' and ticket.is_returned_to_admin %}
+                        <div class="mt-1"><span class="badge text-dark border border-warning-subtle" style="background:#fff3cd;"><i class="bi bi-arrow-return-left me-1" aria-hidden="true"></i>Tier 2 ส่งกลับ</span></div>
+                        {% endif %}
                     </td>
                     <td>
                         <div class="fw-semibold small">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
@@ -180,6 +183,9 @@
                         <span class="status-soft" style="{{ ticket.status_pill_soft_css }}">
                             <span class="dot" style="background:{{ ticket.status_color }};"></span>{{ ticket.get_status_display }}
                         </span>
+                        {% if show_returned_to_admin_indicator and ticket.status == 'AWAITING_CONTAINMENT' and ticket.is_returned_to_admin %}
+                        <div class="small text-warning-emphasis mt-1">แก้ไขมาตรการควบคุมและส่งตรวจอีกครั้ง</div>
+                        {% endif %}
                     </td>
                     <td class="pe-3">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3 text-nowrap">ดูรายละเอียด</a>

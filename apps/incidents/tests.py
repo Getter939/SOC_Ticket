@@ -2929,6 +2929,77 @@ class TicketListOlaFilterTest(TestCase):
         self.assertEqual(len(ids), 4)
 
 
+class SystemAdminReturnIndicatorTest(TestCase):
+    """Tier-2 rework must not look like a first-time admin assignment."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = _make_user('return_indicator_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.t2 = _make_t2('return_indicator_t2')
+
+    def _ticket(self, status=Ticket.STATUS_AWAITING_CONTAINMENT):
+        return _make_ticket(
+            status=status,
+            assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=Ticket.T1_ROUTE_ADMIN,
+            device_name='Return-indicator host',
+        )
+
+    def _returned_ticket(self):
+        ticket = self._ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+        TicketLog.objects.create(
+            ticket=ticket,
+            status_at_time=Ticket.STATUS_CONTAINMENT_REPORTED,
+            author=self.admin,
+            note='Initial containment submitted',
+        )
+        ticket.transition_to(
+            Ticket.STATUS_AWAITING_CONTAINMENT,
+            self.t2,
+            'Please include the firewall rule and validation evidence.',
+        )
+        return ticket
+
+    def test_list_marks_tier2_return_but_not_first_assignment(self):
+        returned = self._returned_ticket()
+        first_assignment = self._ticket()
+
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse('ticket_list'))
+
+        tickets = {ticket.pk: ticket for ticket in response.context['page_obj']}
+        self.assertTrue(tickets[returned.pk].is_returned_to_admin)
+        self.assertFalse(tickets[first_assignment.pk].is_returned_to_admin)
+        self.assertContains(response, 'Tier 2 ส่งกลับ', count=1)
+        self.assertContains(response, 'แก้ไขมาตรการควบคุมและส่งตรวจอีกครั้ง', count=1)
+
+    def test_detail_shows_latest_tier2_return_note_to_assigned_admin(self):
+        ticket = self._returned_ticket()
+
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+
+        self.assertContains(response, 'Tier 2 ส่งกลับ — กรุณาแก้ไขมาตรการควบคุม')
+        self.assertContains(response, 'Please include the firewall rule and validation evidence.')
+        self.assertContains(response, self.t2.username)
+
+    def test_indicator_clears_once_admin_resubmits_for_review(self):
+        ticket = self._returned_ticket()
+        ticket.transition_to(
+            Ticket.STATUS_CONTAINMENT_REPORTED,
+            self.admin,
+            'Resubmitted with firewall rule and validation evidence.',
+        )
+
+        self.client.force_login(self.admin)
+        list_response = self.client.get(reverse('ticket_list'))
+        detail_response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+
+        self.assertNotContains(list_response, 'Tier 2 ส่งกลับ')
+        self.assertNotContains(detail_response, 'Tier 2 ส่งกลับ — กรุณาแก้ไขมาตรการควบคุม')
+
+
 class OlaBadgeTest(TestCase):
     """The shared queue OLA pill (incidents/_ola_badge.html via ola.badge_for).
 

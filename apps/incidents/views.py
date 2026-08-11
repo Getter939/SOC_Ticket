@@ -13,7 +13,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F, Prefetch, Q
+from django.db.models import Exists, F, OuterRef, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -663,6 +663,28 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         status__in=list(Ticket.TERMINAL_STATUSES)
     ).select_related('assigned_admin', 'created_by', 'project_incident')
 
+    # A return from Tier 2 lands back in the same AWAITING_CONTAINMENT state as
+    # a first assignment. Preserve that intentionally simple workflow state,
+    # but annotate the System Admin's queue from its audit trail so rework is
+    # impossible to mistake for brand-new work. The annotation avoids one log
+    # query per queue row and also works for tickets returned before this UI
+    # signal existed.
+    profile = getattr(request.user, 'profile', None)
+    is_system_admin_viewer = (
+        not request.user.is_superuser
+        and profile is not None
+        and profile.is_system_admin
+    )
+    if is_system_admin_viewer:
+        tickets_qs = tickets_qs.annotate(
+            is_returned_to_admin=Exists(
+                TicketLog.objects.filter(
+                    ticket_id=OuterRef('pk'),
+                    status_at_time=Ticket.STATUS_CONTAINMENT_REPORTED,
+                )
+            )
+        )
+
     search = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
@@ -718,6 +740,13 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'newest':    ('-created_at',),
         'oldest':    ('created_at',),
     }
+    if is_system_admin_viewer:
+        # The OLA deadline remains the primary work-ordering rule. Within the
+        # same urgency band, returned work comes first because it already had a
+        # failed verification pass and needs a concrete correction.
+        sort_map['ola'] = (
+            'ola_contain_deadline', '-is_returned_to_admin', '-status_changed_at',
+        )
     if sort not in sort_map:
         sort = 'ola'
     tickets_qs = tickets_qs.order_by(*sort_map[sort])
@@ -736,6 +765,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'heading': heading,
         'description': description,
         'is_manager_queue': is_manager_queue,
+        'show_returned_to_admin_indicator': is_system_admin_viewer,
         'tickets': page_obj,
         'page_obj': page_obj,
         'result_count': paginator.count,
@@ -1721,6 +1751,16 @@ def ticket_detail(request, pk):
             queryset=TicketLogRevision.objects.select_related('edited_by'),
         )
     )
+    # A prior CONTAINMENT_REPORTED entry proves this is a Tier-2 return rather
+    # than the System Admin's first assignment. At AWAITING_CONTAINMENT, the
+    # latest entry into that status is necessarily the Tier-2 return note.
+    containment_return_log = None
+    if can_submit_containment and ticket.logs.filter(
+        status_at_time=Ticket.STATUS_CONTAINMENT_REPORTED,
+    ).exists():
+        containment_return_log = ticket.logs.filter(
+            status_at_time=Ticket.STATUS_AWAITING_CONTAINMENT,
+        ).select_related('author').first()
     # Decide deletability once, in Python. The rule is per-attachment (it turns
     # on its uploader and, for response deliverables, its assigned responder),
     # and a template cannot call a helper with arguments — so without this the
@@ -1785,6 +1825,7 @@ def ticket_detail(request, pk):
         'ticket': ticket,
         'alert_links': alert_links,
         'logs': logs,
+        'containment_return_log': containment_return_log,
         'attachments': attachments,
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
