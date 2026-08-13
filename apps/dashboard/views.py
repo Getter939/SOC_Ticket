@@ -490,6 +490,29 @@ def dashboard(request):
 # transition out of it. The analyst heatmap on the monitoring dashboard groups
 # the same status the other way, under the analyst, because it asks a different
 # question: "what must this analyst chase?".
+def _incident_count(qs):
+    """Count real-world incidents, not ticket rows.
+
+    A Project Incident fans one incident out into N member tickets — one per
+    affected system — so a raw .count() reports a 5-system bundle as 5
+    incidents. Members of the same bundle collapse to one; unbundled tickets
+    stay 1:1 because their own pk is the distinct key.
+
+    Used ONLY for "how many incidents" figures. Status-grain counts (whose
+    court, OLA pressure, the pipeline matrix) deliberately keep ticket grain:
+    a bundle spans several statuses at once, so collapsing it there is
+    meaningless — and five systems really are five units of work.
+    """
+    return (
+        qs.annotate(
+            _incident_key=Coalesce('project_incident_id', F('pk') * -1),
+        )
+        .values('_incident_key')
+        .distinct()
+        .count()
+    )
+
+
 _EXEC_COURT_GROUPS = {
     'COURT_SOC': [
         Ticket.STATUS_NEW,
@@ -627,22 +650,26 @@ def executive_dashboard(request):
     range_active_qs = range_tickets.exclude(status__in=terminal)
 
     # ── KPI 1: total High/Critical cases + delta vs start of this month ─── #
-    total_hc = all_tickets.filter(severity__in=HIGH_CRIT).count()
+    # Incident grain, not ticket grain — see _incident_count. The executive
+    # view answers "how many incidents", so a multi-system bundle counts once.
+    total_hc = _incident_count(all_tickets.filter(severity__in=HIGH_CRIT))
 
     this_month_start = now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
-    prev_total_hc = (
+    prev_total_hc = _incident_count(
         all_tickets
         .filter(severity__in=HIGH_CRIT, created_at__lt=this_month_start)
-        .count()
     )
     total_hc_delta = total_hc - prev_total_hc
 
     # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
-    hc_total = range_tickets.filter(severity__in=HIGH_CRIT).count()
-    hc_closed = range_tickets.filter(
-        severity__in=HIGH_CRIT, status__in=terminal).count()
-    hc_open = hc_total - hc_closed
+    hc_range = range_tickets.filter(severity__in=HIGH_CRIT)
+    hc_total = _incident_count(hc_range)
+    # A bundle counts as closed only when EVERY member is (matches
+    # ProjectIncident.all_closed) — otherwise a partly-contained bundle would
+    # be both open and closed, and the two would not sum to hc_total.
+    hc_open = _incident_count(hc_range.exclude(status__in=terminal))
+    hc_closed = hc_total - hc_open
     hc_progress_pct = round(hc_closed / hc_total * 100) if hc_total else 0
 
     # ── Executive summary — 6 criteria, priority Warning > Waiting > Good ─ #
@@ -655,7 +682,10 @@ def executive_dashboard(request):
     # answer "is anything on fire?", the court rows "who is holding it?".
     COURT_GROUPS = _EXEC_COURT_GROUPS
 
-    emergency_active = active_qs.filter(is_emergency=True).count()
+    # Incident grain: the Emergency verdict is decided ONCE at Project Review
+    # and inherited by every member, so a single emergency call must not read
+    # as N emergencies here.
+    emergency_active = _incident_count(active_qs.filter(is_emergency=True))
     # Live contain-OLA breach (mirrors Ticket.is_ola_contain_breached). Medium/
     # Low have no contain deadline, so they never count here.
     ola_overdue = active_qs.filter(
@@ -811,7 +841,10 @@ def executive_dashboard(request):
         f = ''
         table_qs = range_active_qs
     table_qs = (
-        table_qs.select_related('assigned_to', 'assigned_admin')
+        # project_incident is needed for the bundle badge — Ticket.bundle_ref
+        # dereferences it, so without this the table costs a query per row.
+        table_qs.select_related(
+            'assigned_to', 'assigned_admin', 'project_incident')
         .order_by('-updated_at')
     )
     paginator = Paginator(table_qs, 10)

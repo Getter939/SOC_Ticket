@@ -28,7 +28,11 @@ class FactTicket(models.Model):
     t1_route = models.CharField(max_length=10)
     is_emergency = models.BooleanField()
     direct_owner_remediation = models.BooleanField()
+    project_incident_id = models.IntegerField(null=True)
     is_bundled = models.BooleanField()
+    # Stable identity of the real-world incident: the bundle for a member, the
+    # ticket itself otherwise. Lets aggregates count incidents rather than rows.
+    incident_key = models.IntegerField(null=True)
     is_closed = models.BooleanField()
     contain_ola_applicable = models.BooleanField()
     contain_ola_met = models.BooleanField()

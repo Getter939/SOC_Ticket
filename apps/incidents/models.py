@@ -253,8 +253,31 @@ def project_attachment_upload_path(instance, filename):
     return f'project_attachments/{instance.project.project_code}/{filename}'
 
 
+class ProjectIncidentAttachmentQuerySet(models.QuerySet):
+    def active(self):
+        return self.filter(deleted_at__isnull=True)
+
+
+class ProjectIncidentAttachmentManager(
+    models.Manager.from_queryset(ProjectIncidentAttachmentQuerySet)
+):
+    """Default manager: operational views never expose removed evidence."""
+
+    def get_queryset(self):
+        return super().get_queryset().active()
+
+
 class ProjectIncidentAttachment(models.Model):
-    """Evidence shared by every member of a Project Incident."""
+    """Evidence shared by every member of a Project Incident.
+
+    Same lifecycle as TicketAttachment — including the soft delete, so group
+    evidence removed by mistake is recoverable by a SOC Manager rather than
+    gone. The two are kept deliberately symmetrical; see the ticket model
+    below for the reasoning behind each field.
+    """
+
+    objects = ProjectIncidentAttachmentManager()
+    all_objects = models.Manager()
 
     project = models.ForeignKey(
         ProjectIncident, on_delete=models.CASCADE, related_name='attachments',
@@ -267,6 +290,14 @@ class ProjectIncidentAttachment(models.Model):
         related_name='uploaded_project_attachments',
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='deleted_project_attachments',
+    )
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    # Mandatory at the view layer, not the model — same as TicketAttachment, so
+    # rows created before this field existed stay valid.
+    deleted_reason = models.CharField(max_length=255, blank=True, default='')
 
     class Meta:
         ordering = ['uploaded_at']
@@ -1903,12 +1934,17 @@ class Ticket(models.Model):
         return self.STEP_BACK_TARGETS.get(self.status)
 
     def can_step_back(self, user):
-        """SOC Manager only, never out of a terminal state."""
+        """SOC Manager only, never out of a terminal state.
+
+        Bundle members are allowed. Step-back is a per-system correction, not a
+        group decision: after Project Review each member runs its own lane with
+        its own admin/owner and OLA clock. A member still awaiting that review
+        is excluded for free — PENDING_MGR_TRIAGE has no STEP_BACK_TARGETS
+        entry, so step_back_target() is None above.
+        """
         if self.status in self.TERMINAL_STATUSES:
             return False
         if self.step_back_target() is None:
-            return False
-        if self.project_incident_id:
             return False
         return self._is_emergency_manager(user)
 
@@ -1926,10 +1962,6 @@ class Ticket(models.Model):
         if self.status in self.TERMINAL_STATUSES:
             raise ValidationError(
                 'เคสที่ปิดแล้วไม่สามารถย้อนขั้นตอนได้ — ต้องเปิดเคสใหม่'
-            )
-        if self.project_incident_id:
-            raise ValidationError(
-                'Member Ticket ของ Project Incident ต้องย้อนขั้นตอนจากหน้า Project Incident'
             )
         target = self.step_back_target()
         if target is None:

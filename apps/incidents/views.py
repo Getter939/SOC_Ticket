@@ -201,6 +201,44 @@ def _can_delete_ticket_attachment(ticket, attachment, user):
     return _is_soc_manager(user)
 
 
+def _can_upload_project_attachment(project, user):
+    """Whether user may add shared evidence to a case bundle.
+
+    The bundle has no single "court" of its own — it is a grouping, and each
+    member sits in its own. So the rule is: hold the court on ANY member, or be
+    a SOC Manager. That admits exactly the people already working the incident
+    (the assigned admin of one affected system, the owner of another) without
+    opening group evidence to every SOC account.
+
+    Frozen once every member is closed, mirroring the terminal-status refusal
+    in _can_upload_ticket_attachment — a finished case's evidence set is fixed.
+    """
+    if project.all_closed:
+        return False
+    if user.is_superuser:
+        return True
+    if _is_soc_manager(user):
+        return True
+    return any(
+        _holds_ticket_court(member, user)
+        for member in project.member_tickets.all()
+    )
+
+
+def _can_delete_project_attachment(project, attachment, user):
+    """Whether user may remove shared bundle evidence.
+
+    Same shape as _can_delete_ticket_attachment: narrower than adding, frozen
+    on a finished bundle, uploader may undo their own mistake, SOC Manager may
+    act on anything still open.
+    """
+    if project.all_closed:
+        return False
+    if attachment.uploaded_by_id == user.pk:
+        return True
+    return _is_soc_manager(user)
+
+
 def _can_edit_ticket(ticket, user):
     """Whether user may correct this ticket's content.
 
@@ -1371,11 +1409,40 @@ def project_incident_detail(request, pk):
     # A user who can see none of the members has no business on the bundle page.
     if not members and not request.user.is_superuser:
         raise Http404('ไม่พบ Project Incident')
+    # Shared incident facts (NCSA severity, log source, MITRE) are copied to
+    # every member at creation, so the page reads them off one "lead" member.
+    # Deliberately taken from the UNSCOPED set: `members` above is filtered by
+    # what the viewer may see, so using it made a System Admin who can see only
+    # member C read C's values while SOC read A's — the same bundle reporting
+    # different severity to different people.
+    lead = project.members.first()
+    # Soonest contain deadline still running, so the page that exists to
+    # coordinate members shows the group's time pressure without opening each
+    # ticket. Members deliberately keep independent OLA clocks.
+    next_ola_member = (
+        project.member_tickets
+        .exclude(status__in=Ticket.TERMINAL_STATUSES)
+        .filter(ola_contain_deadline__isnull=False)
+        .order_by('ola_contain_deadline')
+        .first()
+    )
     return render(request, 'incidents/project_incident_detail.html', {
         'project': project,
         'members': members,
+        'lead': lead,
+        'next_ola_member': next_ola_member,
+        'source_triage': project.source_triages.first(),
         'project_logs': project.logs.select_related('author'),
         'can_manage_project': can_manage_project,
+        'can_upload_project_attachment': _can_upload_project_attachment(
+            project, request.user),
+        'can_restore_project_attachment': _can_restore_ticket_attachment(
+            request.user),
+        'deleted_attachments': (
+            project.attachments.model.all_objects
+            .filter(project=project, deleted_at__isnull=False)
+            .select_related('deleted_by')
+        ),
         'pending_member_count': project.member_tickets.filter(
             status=Ticket.STATUS_PENDING_MGR_TRIAGE,
         ).count(),
@@ -1384,7 +1451,13 @@ def project_incident_detail(request, pk):
 
 @login_required
 def download_project_attachment(request, attachment_id):
-    """Serve shared Project Incident evidence to any authorized member viewer."""
+    """Serve shared Project Incident evidence to any authorized member viewer.
+
+    Same hardening as download_attachment: forced download plus nosniff so an
+    uploaded .html/.svg can never execute same-origin, and 404 rather than 403
+    so the id space isn't enumerable. The default manager is active-only, so a
+    soft-deleted file 404s here exactly like a removed ticket attachment.
+    """
     attachment = get_object_or_404(ProjectIncidentAttachment, pk=attachment_id)
     if not attachment.project.member_tickets.visible_to(request.user).exists():
         raise Http404('ไม่พบไฟล์แนบ')
@@ -1395,6 +1468,144 @@ def download_project_attachment(request, attachment_id):
     )
     response['X-Content-Type-Options'] = 'nosniff'
     return response
+
+
+@login_required
+def upload_project_attachment(request, pk):
+    """Add shared evidence to a bundle after it was opened.
+
+    Mirrors upload_attachment: same AttachmentForm, so the batch multi-file
+    handling and per-file validation are literally the same code path.
+    """
+    project = get_object_or_404(ProjectIncident, pk=pk)
+    if not project.member_tickets.visible_to(request.user).exists():
+        raise Http404('ไม่พบ Project Incident')
+
+    if not _can_upload_project_attachment(project, request.user):
+        messages.error(
+            request,
+            'คุณไม่มีสิทธิ์แนบไฟล์ในกลุ่มนี้ หรือทุกระบบถูกปิดแล้ว',
+        )
+        return redirect('project_incident_detail', pk=project.pk)
+
+    if request.method == 'POST':
+        form = AttachmentForm(request.POST, request.FILES)
+        if form.is_valid():
+            description = form.cleaned_data.get('description', '')
+            uploads = form.cleaned_data['file']
+            for upload in uploads:
+                ProjectIncidentAttachment.objects.create(
+                    project=project,
+                    file=upload,
+                    original_name=upload.name,
+                    description=description,
+                    uploaded_by=request.user,
+                )
+            ProjectIncidentLog.objects.create(
+                project=project,
+                author=request.user,
+                note=(
+                    'แนบหลักฐานส่วนกลาง: '
+                    + ', '.join(u.name for u in uploads)
+                ),
+            )
+            if len(uploads) == 1:
+                messages.success(request, f'อัพโหลด "{uploads[0].name}" เรียบร้อยแล้ว')
+            else:
+                messages.success(request, f'อัพโหลด {len(uploads)} ไฟล์เรียบร้อยแล้ว')
+        else:
+            detail = '; '.join(
+                msg for errors in form.errors.values() for msg in errors
+            )
+            messages.error(
+                request,
+                f'ไม่สามารถอัพโหลดไฟล์ได้ — {detail}' if detail
+                else 'ไม่สามารถอัพโหลดไฟล์ได้ — กรุณาตรวจสอบไฟล์อีกครั้ง',
+            )
+    return redirect('project_incident_detail', pk=project.pk)
+
+
+@login_required
+@require_POST
+def delete_project_attachment(request, attachment_id):
+    """Soft-delete shared bundle evidence, with a required reason."""
+    att = get_object_or_404(ProjectIncidentAttachment, pk=attachment_id)
+    project = att.project
+    if not project.member_tickets.visible_to(request.user).exists():
+        raise Http404('ไม่พบไฟล์แนบ')
+
+    if not _can_delete_project_attachment(project, att, request.user):
+        # Logged, not written to the project timeline: anyone who can see the
+        # bundle could otherwise flood it by probing. Same call as the ticket
+        # attachment path.
+        logger.warning(
+            'Refused project attachment delete: user=%s attachment=%s project=%s',
+            request.user.pk, att.pk, project.project_code,
+        )
+        messages.error(
+            request,
+            'คุณไม่มีสิทธิ์ลบไฟล์นี้ หรือทุกระบบในกลุ่มถูกปิดแล้ว — '
+            'หลักฐานของเคสที่ปิดแล้วจะถูกล็อกไว้',
+        )
+        return redirect('project_incident_detail', pk=project.pk)
+
+    reason = (request.POST.get('reason') or '').strip()
+    if not reason:
+        messages.error(request, 'กรุณาระบุเหตุผลในการลบไฟล์')
+        return redirect('project_incident_detail', pk=project.pk)
+
+    att.deleted_by = request.user
+    att.deleted_at = timezone.now()
+    att.deleted_reason = reason[:255]
+    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
+    ProjectIncidentLog.objects.create(
+        project=project,
+        author=request.user,
+        note=f'ลบหลักฐานส่วนกลาง: {att.original_name} — เหตุผล: {reason}',
+    )
+    messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว — ผู้จัดการ SOC สามารถกู้คืนได้')
+    return redirect('project_incident_detail', pk=project.pk)
+
+
+@login_required
+@require_POST
+def restore_project_attachment(request, attachment_id):
+    """Bring back group evidence removed by mistake. SOC Manager only.
+
+    Not gated on all_closed, unlike deletion: refusing removal on a finished
+    bundle protects the evidence set, but refusing recovery would only make a
+    mistake permanent. Same reasoning as restore_attachment.
+    """
+    att = get_object_or_404(
+        ProjectIncidentAttachment.all_objects,
+        pk=attachment_id, deleted_at__isnull=False,
+    )
+    project = att.project
+    if not project.member_tickets.visible_to(request.user).exists():
+        raise Http404('ไม่พบไฟล์แนบ')
+
+    if not _can_restore_ticket_attachment(request.user):
+        logger.warning(
+            'Refused project attachment restore: user=%s attachment=%s project=%s',
+            request.user.pk, att.pk, project.project_code,
+        )
+        messages.error(request, 'กู้คืนไฟล์ได้เฉพาะผู้จัดการ SOC เท่านั้น')
+        return redirect('project_incident_detail', pk=project.pk)
+
+    removed_by = (
+        att.deleted_by.get_full_name() or att.deleted_by.username
+    ) if att.deleted_by else 'ไม่ทราบผู้ลบ'
+    att.deleted_by = None
+    att.deleted_at = None
+    att.deleted_reason = ''
+    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
+    ProjectIncidentLog.objects.create(
+        project=project,
+        author=request.user,
+        note=f'กู้คืนหลักฐานส่วนกลาง: {att.original_name} (ลบโดย {removed_by})',
+    )
+    messages.success(request, 'กู้คืนไฟล์เรียบร้อยแล้ว')
+    return redirect('project_incident_detail', pk=project.pk)
 
 
 @login_required
@@ -1435,10 +1646,19 @@ def ticket_detail(request, pk):
     )
     # SOC Manager pre-containment review: flag Emergency + forward to the lane
     # Tier 1 already chose (t1_route). The manager cannot change the lane.
+    # A bundle member is forwardable individually only AFTER its Project Review
+    # has recorded the group verdict — before that the group forwards them all
+    # at once. Mirrors the model gate in transition_to (step 5) exactly, so the
+    # button is never offered for a move the model would refuse. Without the
+    # post-review half, a member stepped back out of its lane would strand at
+    # PENDING_MGR_TRIAGE with no forward path from either page.
     can_mgr_forward = (
         not is_terminal
         and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
-        and not ticket.project_incident_id
+        and (
+            not ticket.project_incident_id
+            or ticket.project_incident.emergency_decided_at is not None
+        )
         and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
     )
     mgr_forward_target = (

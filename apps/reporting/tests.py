@@ -170,6 +170,58 @@ class AggTicketDailyTests(TestCase):
         self.assertEqual(evt.closed_count, 1)
         self.assertEqual(evt.event_count, 1)
 
+    def test_bundle_members_count_as_one_incident(self):
+        """A Project Incident is ONE real-world incident fanned out across N
+        systems, so incident_count must not scale with member size.
+        closed_count stays at ticket grain — that is a workload figure."""
+        from apps.incidents.models import ProjectIncident
+
+        project = ProjectIncident.objects.create(title='multi-system breach')
+        for _ in range(3):
+            t = _make_ticket(
+                severity='Critical', classification=Ticket.CLASSIFICATION_INCIDENT,
+                issue_type='SIEM', status=Ticket.STATUS_APPROVED,
+                closed_at=datetime(2026, 6, 2, 5, 0, tzinfo=UTC))
+            t.project_incident = project
+            t.save(update_fields=['project_incident'])
+        # A standalone incident closed the same day stays 1:1.
+        _make_ticket(
+            severity='Critical', classification=Ticket.CLASSIFICATION_INCIDENT,
+            issue_type='SIEM', status=Ticket.STATUS_APPROVED,
+            closed_at=datetime(2026, 6, 2, 6, 0, tzinfo=UTC))
+
+        call_command('refresh_reporting', '--no-concurrently',
+                     '--skip-snapshot', '--skip-detection')
+
+        row = AggTicketDaily.objects.get(
+            day='2026-06-02', severity='Critical', classification='INCIDENT')
+        self.assertEqual(row.closed_count, 4)    # ticket grain
+        self.assertEqual(row.incident_count, 2)  # bundle + standalone
+
+    def test_fact_ticket_exposes_bundle_identity(self):
+        """is_bundled alone was a dangling flag — nothing downstream could tell
+        WHICH bundle a member belonged to, so no aggregate could dedupe."""
+        from apps.incidents.models import ProjectIncident
+
+        project = ProjectIncident.objects.create(title='bundle')
+        member = _make_ticket(
+            severity='High', classification=Ticket.CLASSIFICATION_INCIDENT)
+        member.project_incident = project
+        member.save(update_fields=['project_incident'])
+        solo = _make_ticket(
+            severity='High', classification=Ticket.CLASSIFICATION_INCIDENT)
+
+        fact_member = _fact(member)
+        self.assertTrue(fact_member.is_bundled)
+        self.assertEqual(fact_member.project_incident_id, project.pk)
+        self.assertEqual(fact_member.incident_key, project.pk)
+
+        fact_solo = _fact(solo)
+        self.assertFalse(fact_solo.is_bundled)
+        self.assertIsNone(fact_solo.project_incident_id)
+        # Negated pk keeps ticket keys out of the project key space.
+        self.assertEqual(fact_solo.incident_key, -solo.pk)
+
 
 class RefreshConcurrentlyTests(TransactionTestCase):
     """The default CONCURRENTLY path needs committed data and no surrounding

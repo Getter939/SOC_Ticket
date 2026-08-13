@@ -642,6 +642,97 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'dashboard/executive.html')
 
+    # ── Project Incident rollup ──────────────────────────────────────── #
+
+    def _bundle(self, size=3, severity='Critical',
+                status=Ticket.STATUS_AWAITING_CONTAINMENT,
+                ola_offset_hours=None, **extra):
+        """One real-world incident fanned out across `size` systems."""
+        from apps.incidents.models import ProjectIncident
+        project = ProjectIncident.objects.create(title='multi-system event')
+        members = []
+        for _ in range(size):
+            ticket = _make_ticket(
+                status=status, ola_offset_hours=ola_offset_hours)
+            ticket.severity = severity
+            ticket.project_incident = project
+            for field, value in extra.items():
+                setattr(ticket, field, value)
+            ticket.save()
+            members.append(ticket)
+        return project, members
+
+    @staticmethod
+    def _criterion(ctx, filter_key):
+        return next(
+            row for row in ctx['summary_criteria']
+            if row['filter'] == filter_key
+        )
+
+    def test_bundle_counts_once_in_headline_incident_figures(self):
+        """A 5-system bundle is ONE incident. Before this it inflated every
+        executive count by its member size."""
+        self._bundle(size=3)
+        ctx = self._get().context
+
+        self.assertEqual(ctx['total_hc'], 1)
+        self.assertEqual(ctx['hc_total'], 1)
+        self.assertEqual(ctx['hc_open'], 1)
+        self.assertEqual(ctx['hc_closed'], 0)
+
+    def test_bundle_and_standalone_tickets_sum_correctly(self):
+        """Unbundled tickets must stay 1:1 — the distinct key is their own pk."""
+        self._bundle(size=3)
+        solo = _make_ticket(status=Ticket.STATUS_NEW)
+        solo.severity = 'High'
+        solo.save()
+
+        self.assertEqual(self._get().context['total_hc'], 2)
+
+    def test_bundle_emergency_verdict_counts_once(self):
+        """Emergency is decided once at Project Review and inherited by every
+        member, so N members must not read as N emergencies."""
+        self._bundle(size=4, is_emergency=True)
+        ctx = self._get().context
+
+        self.assertEqual(self._criterion(ctx, 'EMERGENCY')['count'], 1)
+
+    def test_status_grain_criteria_stay_per_ticket(self):
+        """Whose-court and OLA rows are work counts, not incident counts — a
+        bundle spans several statuses at once, so collapsing them is
+        meaningless and five systems really are five units of work."""
+        self._bundle(size=3, ola_offset_hours=-1)
+        ctx = self._get().context
+
+        # Ticket grain: all three systems are overdue and all three are
+        # parked with an external party.
+        self.assertEqual(self._criterion(ctx, 'OLA_OVERDUE')['count'], 3)
+        self.assertEqual(self._criterion(ctx, 'COURT_EXTERNAL')['count'], 3)
+        # …while the incident-grain headline still reads one.
+        self.assertEqual(ctx['total_hc'], 1)
+
+    def test_closed_bundle_counts_once_as_closed(self):
+        """A bundle is closed only when every member is."""
+        project, members = self._bundle(size=3)
+        for ticket in members:
+            ticket.status = Ticket.STATUS_APPROVED
+            ticket.save(update_fields=['status'])
+
+        ctx = self._get().context
+        self.assertEqual(ctx['hc_total'], 1)
+        self.assertEqual(ctx['hc_closed'], 1)
+        self.assertEqual(ctx['hc_open'], 0)
+
+    def test_partly_closed_bundle_still_reads_as_one_open_incident(self):
+        project, members = self._bundle(size=3)
+        members[0].status = Ticket.STATUS_APPROVED
+        members[0].save(update_fields=['status'])
+
+        ctx = self._get().context
+        self.assertEqual(ctx['hc_total'], 1)
+        self.assertEqual(ctx['hc_open'], 1)
+        self.assertEqual(ctx['hc_closed'], 0)
+
     def test_superuser_can_view_dashboard(self):
         from django.contrib.auth.models import User
         superuser = User.objects.create_superuser(

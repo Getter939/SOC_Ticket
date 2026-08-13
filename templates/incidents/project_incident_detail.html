@@ -14,6 +14,15 @@
     {% else %}
       <span class="badge bg-warning text-dark">{{ project.open_member_count }} / {{ project.member_count }} ระบบยังดำเนินการอยู่</span>
     {% endif %}
+    {# Group time pressure: members run independent OLA clocks, so the page #}
+    {# that coordinates them leads with the soonest one still running.      #}
+    {% if next_ola_member and next_ola_member.ola_badge %}
+    <span class="d-inline-flex align-items-center gap-1 small text-muted">
+      <i class="bi bi-alarm"></i>ใกล้ครบกำหนดสุด:
+      {% include 'incidents/_ola_badge.html' with ola=next_ola_member.ola_badge %}
+      <span class="font-monospace">{{ next_ola_member.bundle_ref }}</span>
+    </span>
+    {% endif %}
   </div>
 
   {% if can_manage_project and pending_member_count and not project.emergency_decided_at %}
@@ -45,9 +54,72 @@
   </div>
   {% endif %}
 
-  {% if project.attachments.all %}
-  <div class="card shadow-sm mb-4"><div class="card-header fw-bold">หลักฐานส่วนกลาง</div><div class="list-group list-group-flush">{% for attachment in project.attachments.all %}<a class="list-group-item list-group-item-action" href="{% url 'download_project_attachment' attachment.pk %}"><i class="bi bi-paperclip me-2"></i>{{ attachment.original_name }} <span class="text-muted small">— {{ attachment.uploaded_at|date:"d M Y H:i" }}</span></a>{% endfor %}</div></div>
-  {% endif %}
+  {% comment %}
+  Shared evidence — same lifecycle as ticket attachments: batch upload through
+  the same AttachmentForm, soft delete with a required reason, manager restore.
+  Always rendered (not only when files exist) so the upload control has a home.
+  {% endcomment %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-paperclip me-1"></i>หลักฐานส่วนกลาง</span>
+      <span class="badge bg-light text-dark border">{{ project.attachments.count }}</span>
+    </div>
+    <div class="list-group list-group-flush">
+      {% for attachment in project.attachments.all %}
+      <div class="list-group-item d-flex align-items-center gap-2">
+        <a class="text-decoration-none flex-grow-1" href="{% url 'download_project_attachment' attachment.pk %}">
+          <i class="bi bi-paperclip me-2"></i>{{ attachment.original_name }}
+          <span class="text-muted small">— {{ attachment.uploaded_at|date:"d M Y H:i" }}{% if attachment.uploaded_by %} · {{ attachment.uploaded_by.get_full_name|default:attachment.uploaded_by.username }}{% endif %}</span>
+          {% if attachment.description %}<div class="text-muted small ms-4">{{ attachment.description }}</div>{% endif %}
+        </a>
+        {% if can_upload_project_attachment %}
+        <button class="btn btn-sm btn-outline-danger flex-shrink-0" type="button" data-bs-toggle="modal" data-bs-target="#deleteProjectAtt{{ attachment.pk }}"><i class="bi bi-trash"></i></button>
+        {% endif %}
+      </div>
+      {% empty %}
+      <div class="list-group-item text-muted small text-center py-3">ยังไม่มีหลักฐานส่วนกลาง</div>
+      {% endfor %}
+    </div>
+    {% if can_upload_project_attachment %}
+    <div class="card-body border-top">
+      <form method="post" action="{% url 'upload_project_attachment' project.pk %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="row g-2 align-items-end">
+          <div class="col-md-6"><label class="form-label small fw-semibold">ไฟล์แนบ</label><input class="form-control form-control-sm" type="file" name="file" multiple required></div>
+          <div class="col-md-4"><label class="form-label small fw-semibold">คำอธิบาย (ไม่บังคับ)</label><input class="form-control form-control-sm" type="text" name="description" placeholder="คำอธิบายไฟล์"></div>
+          <div class="col-md-2"><button class="btn btn-sm btn-primary w-100" type="submit"><i class="bi bi-upload me-1"></i>อัพโหลด</button></div>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+    {% if deleted_attachments %}
+    <div class="card-body border-top bg-light">
+      <div class="small fw-semibold text-muted mb-2"><i class="bi bi-trash me-1"></i>ไฟล์ที่ถูกลบ</div>
+      {% for attachment in deleted_attachments %}
+      <div class="d-flex align-items-center gap-2 small text-muted py-1">
+        <span class="flex-grow-1"><s>{{ attachment.original_name }}</s> — ลบโดย {{ attachment.deleted_by.get_full_name|default:attachment.deleted_by.username|default:"ไม่ทราบ" }} · {{ attachment.deleted_reason }}</span>
+        {% if can_restore_project_attachment %}
+        <form method="post" action="{% url 'restore_project_attachment' attachment.pk %}" class="flex-shrink-0">{% csrf_token %}<button class="btn btn-sm btn-outline-secondary" type="submit">กู้คืน</button></form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% for attachment in project.attachments.all %}{% if can_upload_project_attachment %}
+  <div class="modal fade" id="deleteProjectAtt{{ attachment.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+    <form method="post" action="{% url 'delete_project_attachment' attachment.pk %}">{% csrf_token %}
+      <div class="modal-header"><h5 class="modal-title">ลบหลักฐานส่วนกลาง</h5><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="ปิด"></button></div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2">{{ attachment.original_name }} — ผู้จัดการ SOC สามารถกู้คืนได้ภายหลัง</p>
+        <label class="form-label fw-semibold">เหตุผล <span class="text-danger">*</span></label>
+        <textarea class="form-control" name="reason" rows="3" required></textarea>
+      </div>
+      <div class="modal-footer"><button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-danger" type="submit">ลบไฟล์</button></div>
+    </form>
+  </div></div></div>
+  {% endif %}{% endfor %}
 
   <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
@@ -68,7 +140,9 @@
         <div class="col-md-4"><i class="bi bi-clock me-1"></i>เมื่อ: {{ project.created_at|date:"Y-m-d H:i" }}</div>
         <div class="col-md-4"><i class="bi bi-collection me-1"></i>จำนวนระบบ: {{ project.member_count }}</div>
       </div>
-      {% with lead=members.0 %}
+      {# `lead` comes from the view, off the UNSCOPED member set — using the #}
+      {# permission-filtered `members` here made the same bundle report       #}
+      {# different severity depending on who was looking.                     #}
       {% if lead %}
       <div class="row small text-muted g-2 mt-1">
         {% if lead.ncsa_severity %}<div class="col-md-4"><i class="bi bi-shield-exclamation me-1"></i>ความรุนแรง (สกมช.): {{ lead.get_ncsa_severity_display }}</div>{% endif %}
@@ -76,7 +150,6 @@
         {% if lead.mitre_phase_labels %}<div class="col-md-4"><i class="bi bi-diagram-2 me-1"></i>MITRE: {{ lead.mitre_phase_labels|join:", " }}</div>{% endif %}
       </div>
       {% endif %}
-      {% endwith %}
       {% with alert=project.source_alerts.first %}
       {% if alert %}
       <div class="mt-3 pt-2 border-top small">
@@ -87,6 +160,16 @@
       </div>
       {% endif %}
       {% endwith %}
+      {# Symmetric provenance: a bundle opened from the manual-intake queue #}
+      {# showed no origin at all, though the link already exists.           #}
+      {% if source_triage %}
+      <div class="mt-3 pt-2 border-top small">
+        <i class="bi bi-clipboard2-pulse text-primary me-1"></i>ต้นทาง: รับแจ้งด้วยตนเอง
+        <strong>{{ source_triage.get_source_display }}</strong>
+        — {{ source_triage.alert_description|truncatechars:100 }}
+        {% if source_triage.analyst %}<span class="text-muted">— {{ source_triage.analyst.get_full_name|default:source_triage.analyst.username }}</span>{% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -102,6 +185,7 @@
           <th>หน่วยงานเจ้าของ</th>
            <th>เส้นทาง / ผู้รับผิดชอบ</th>
           <th>ความรุนแรง</th>
+          <th>OLA</th>
           <th>สถานะ</th>
           <th class="text-end">การดำเนินการ</th>
         </tr>
@@ -114,11 +198,12 @@
           <td>{{ ticket.asset_owner|default:"—" }}</td>
            <td>{% if ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">Owner</span> {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username|default:"—" }}{% else %}<span class="badge bg-light text-dark border">Admin</span> {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}{% endif %}</td>
           <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+          <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
           <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
           <td class="text-end"><a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3">ดูรายละเอียด</a></td>
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="text-center text-muted py-4">ไม่มี Ticket ที่คุณมีสิทธิ์เข้าถึงในกลุ่มนี้</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">ไม่มี Ticket ที่คุณมีสิทธิ์เข้าถึงในกลุ่มนี้</td></tr>
         {% endfor %}
       </tbody>
     </table>

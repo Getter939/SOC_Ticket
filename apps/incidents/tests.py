@@ -3401,6 +3401,168 @@ class ProjectIncidentFanOutTest(TestCase):
         resp = self.client.get(reverse('create_project_incident'))
         self.assertEqual(resp.status_code, 302)  # Tier 1 only
 
+    # ── Step-back / re-forward ───────────────────────────────────────── #
+
+    def _reviewed_project(self):
+        """A bundle past Project Review, with both members in their lanes."""
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        project = ProjectIncident.objects.get()
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_mgr_forward',
+            'emergency_assessment': 'normal',
+            'decision_note': 'Reviewed once for the group.',
+        })
+        project.refresh_from_db()
+        return project
+
+    def test_stepped_back_member_can_be_forwarded_individually(self):
+        """The stranding regression. Step-back returns a member to
+        PENDING_MGR_TRIAGE; before the fix can_mgr_forward excluded every
+        bundle member and project_mgr_forward refused a second run, so the
+        member had no forward path from either page."""
+        project = self._reviewed_project()
+        member = project.members.first()
+        self.assertEqual(member.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+        self.client.post(reverse('ticket_detail', args=[member.pk]), {
+            'action': 'step_back', 'step_back_reason': 'wrong admin assigned',
+        })
+        member.refresh_from_db()
+        self.assertEqual(member.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+        # The ticket page must now offer the individual forward.
+        page = self.client.get(reverse('ticket_detail', args=[member.pk]))
+        self.assertTrue(page.context['can_mgr_forward'])
+
+        self.client.post(reverse('ticket_detail', args=[member.pk]), {
+            'action': 'mgr_forward',
+            'emergency_assessment': 'normal',
+            'decision_note': 'Re-forwarded to the right admin.',
+        })
+        member.refresh_from_db()
+        self.assertEqual(member.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_member_awaiting_project_review_is_not_offered_forward(self):
+        """Before the group verdict the members are forwarded together, so the
+        per-ticket control must stay hidden — and the model would refuse it."""
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        member = ProjectIncident.objects.get().members.first()
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        page = self.client.get(reverse('ticket_detail', args=[member.pk]))
+        self.assertFalse(page.context['can_mgr_forward'])
+
+    # ── Shared evidence parity with ticket attachments ───────────────── #
+
+    def test_shared_evidence_can_be_added_after_creation(self):
+        project = self._reviewed_project()
+        response = self.client.post(
+            reverse('upload_project_attachment', args=[project.pk]),
+            {
+                'file': SimpleUploadedFile(
+                    'late.txt', b'found later', content_type='text/plain'),
+                'description': 'discovered during containment',
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(project.attachments.count(), 1)
+        self.assertTrue(
+            ProjectIncidentLog.objects.filter(
+                project=project, note__contains='late.txt').exists())
+
+    def test_shared_evidence_delete_requires_a_reason_and_soft_deletes(self):
+        project = self._reviewed_project()
+        self.client.post(
+            reverse('upload_project_attachment', args=[project.pk]),
+            {'file': SimpleUploadedFile('x.txt', b'x', content_type='text/plain')},
+        )
+        att = project.attachments.get()
+
+        # No reason → nothing happens.
+        self.client.post(reverse('delete_project_attachment', args=[att.pk]), {})
+        att.refresh_from_db()
+        self.assertIsNone(att.deleted_at)
+
+        self.client.post(reverse('delete_project_attachment', args=[att.pk]),
+                         {'reason': 'wrong file'})
+        att.refresh_from_db()
+        self.assertIsNotNone(att.deleted_at)
+        self.assertEqual(att.deleted_reason, 'wrong file')
+        # Hidden from the active manager, and no longer downloadable.
+        self.assertEqual(project.attachments.count(), 0)
+        self.assertEqual(
+            self.client.get(
+                reverse('download_project_attachment', args=[att.pk])
+            ).status_code, 404)
+
+    def test_shared_evidence_restore_is_manager_only(self):
+        project = self._reviewed_project()
+        self.client.post(
+            reverse('upload_project_attachment', args=[project.pk]),
+            {'file': SimpleUploadedFile('y.txt', b'y', content_type='text/plain')},
+        )
+        att = project.attachments.get()
+        self.client.post(reverse('delete_project_attachment', args=[att.pk]),
+                         {'reason': 'oops'})
+
+        # A system admin on the bundle cannot restore.
+        self.client.logout()
+        self.client.login(username='pi_admin_a', password='testpass123')
+        self.client.post(reverse('restore_project_attachment', args=[att.pk]))
+        att.refresh_from_db()
+        self.assertIsNotNone(att.deleted_at)
+
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        self.client.post(reverse('restore_project_attachment', args=[att.pk]))
+        att.refresh_from_db()
+        self.assertIsNone(att.deleted_at)
+        self.assertEqual(project.attachments.count(), 1)
+
+    def test_outsider_cannot_upload_shared_evidence(self):
+        project = self._reviewed_project()
+        self.client.logout()
+        self.client.login(username='pi_t2', password='testpass123')
+        self.client.post(
+            reverse('upload_project_attachment', args=[project.pk]),
+            {'file': SimpleUploadedFile('z.txt', b'z', content_type='text/plain')},
+        )
+        self.assertEqual(project.attachments.count(), 0)
+
+    # ── Page fixes ───────────────────────────────────────────────────── #
+
+    def test_lead_facts_are_identical_for_every_viewer(self):
+        """`lead` used to come off the permission-scoped member list, so the
+        same bundle reported different severity depending on who looked."""
+        project = self._reviewed_project()
+        soc_lead = self.client.get(
+            reverse('project_incident_detail', args=[project.pk])
+        ).context['lead']
+
+        self.client.logout()
+        self.client.login(username='pi_admin_b', password='testpass123')
+        admin_lead = self.client.get(
+            reverse('project_incident_detail', args=[project.pk])
+        ).context['lead']
+
+        self.assertEqual(soc_lead.pk, admin_lead.pk)
+
+    def test_members_table_shows_ola(self):
+        project = self._reviewed_project()
+        resp = self.client.get(
+            reverse('project_incident_detail', args=[project.pk]))
+        self.assertContains(resp, '<th>OLA</th>', html=False)
+
     def test_detail_page_lists_members_for_soc(self):
         self.client.login(username='pi_t1', password='testpass123')
         self.client.post(
@@ -6077,12 +6239,31 @@ class ManagerStepBackTest(TestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, Ticket.STATUS_NEW)
 
-    def test_project_members_must_use_the_project_page(self):
+    def test_project_members_can_step_back_once_in_a_lane(self):
+        """Step-back is a per-system correction, not a group decision: after
+        Project Review each member runs its own lane. This used to refuse and
+        point at the Project Incident page, which never implemented it — so a
+        member could never be stepped back at all."""
         project = ProjectIncident.objects.create(
             title='bundle', created_by=self.t1)
         ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
         ticket.project_incident = project
         ticket.save(update_fields=['project_incident'])
+        self.assertTrue(ticket.can_step_back(self.manager))
+
+        self._step_back(self.manager, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_project_member_awaiting_review_has_no_step_back_target(self):
+        """A member still queued for Project Review is excluded for free —
+        PENDING_MGR_TRIAGE has no STEP_BACK_TARGETS entry."""
+        project = ProjectIncident.objects.create(
+            title='bundle', created_by=self.t1)
+        ticket = self._ticket(Ticket.STATUS_PENDING_MGR_TRIAGE)
+        ticket.project_incident = project
+        ticket.save(update_fields=['project_incident'])
+        self.assertIsNone(ticket.step_back_target())
         self.assertFalse(ticket.can_step_back(self.manager))
 
     def test_control_is_only_offered_to_managers(self):

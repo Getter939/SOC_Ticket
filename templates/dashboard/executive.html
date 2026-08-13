@@ -327,6 +327,12 @@
                             <td>
                                 <a href="{% url 'ticket_detail' t.pk %}"
                                    class="font-monospace fw-bold text-decoration-none">#{{ t.ticket_id }}</a>
+                                {# The rows stay ticket-grain, so flag which ones are #}
+                                {# members of one multi-system incident — the KPI     #}
+                                {# counts above collapse them, this table does not.   #}
+                                {% if t.project_incident_id %}
+                                <div class="mt-1"><a href="{% url 'project_incident_detail' t.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ t.bundle_ref }}</a></div>
+                                {% endif %}
                             </td>
                             <td>{{ t.issue_description|truncatechars:70 }}</td>
                             <td>
