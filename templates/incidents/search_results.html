@@ -24,9 +24,14 @@
     </div>
 
     {% if query %}
+    {# ticket_total, not |length: the latter counts the current page, so a #}
+    {# capped result set used to report its own slice size as the total.   #}
     <div class="card shadow-sm mb-4">
-        <div class="card-header bg-dark text-white">
-            <h5 class="mb-0">Tickets ({{ ticket_results|length }})</h5>
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Tickets ({{ ticket_total }})</h5>
+            {% if ticket_results.paginator.num_pages > 1 %}
+            <span class="small">หน้า {{ ticket_results.number }} / {{ ticket_results.paginator.num_pages }}</span>
+            {% endif %}
         </div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
@@ -60,12 +65,33 @@
                 </tbody>
             </table>
         </div>
+        {% if ticket_results.paginator.num_pages > 1 %}
+        <div class="card-body py-2">
+          <nav aria-label="Ticket results pages">
+            <ul class="pagination pagination-sm justify-content-center mb-0">
+              {% if ticket_results.has_previous %}
+              <li class="page-item"><a class="page-link" href="{% querystring tp=ticket_results.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>
+              {% endif %}
+              <li class="page-item disabled"><span class="page-link">{{ ticket_results.number }} / {{ ticket_results.paginator.num_pages }}</span></li>
+              {% if ticket_results.has_next %}
+              <li class="page-item"><a class="page-link" href="{% querystring tp=ticket_results.next_page_number %}" aria-label="หน้าถัดไป">&raquo;</a></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
+        {% endif %}
     </div>
 
-    {% if triage_results is not None %}
+    {# Gated on the role flag, not on `triage_results is not None`: the view #}
+    {# initialised it to [] and never to None, so this card used to render   #}
+    {# empty for every non-SOC role.                                          #}
+    {% if can_search_triage %}
     <div class="card shadow-sm mb-4">
-        <div class="card-header bg-secondary text-white">
-            <h5 class="mb-0">Triage Records ({{ triage_results|length }})</h5>
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Triage Records ({{ triage_total }})</h5>
+            {% if triage_results.paginator.num_pages > 1 %}
+            <span class="small">หน้า {{ triage_results.number }} / {{ triage_results.paginator.num_pages }}</span>
+            {% endif %}
         </div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
@@ -101,6 +127,21 @@
                 </tbody>
             </table>
         </div>
+        {% if triage_results.paginator.num_pages > 1 %}
+        <div class="card-body py-2">
+          <nav aria-label="Triage results pages">
+            <ul class="pagination pagination-sm justify-content-center mb-0">
+              {% if triage_results.has_previous %}
+              <li class="page-item"><a class="page-link" href="{% querystring rp=triage_results.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>
+              {% endif %}
+              <li class="page-item disabled"><span class="page-link">{{ triage_results.number }} / {{ triage_results.paginator.num_pages }}</span></li>
+              {% if triage_results.has_next %}
+              <li class="page-item"><a class="page-link" href="{% querystring rp=triage_results.next_page_number %}" aria-label="หน้าถัดไป">&raquo;</a></li>
+              {% endif %}
+            </ul>
+          </nav>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
     {% else %}

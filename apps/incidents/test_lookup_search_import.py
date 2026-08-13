@@ -217,6 +217,89 @@ class GlobalSearchViewTest(TestCase):
         self.assertEqual(list(resp.context['ticket_results']), [])
         self.assertEqual(list(resp.context['triage_results']), [])
 
+    # ── Substring matching ───────────────────────────────────────────── #
+
+    def _hits(self, term):
+        self.client.login(username='t1', password='testpass123')
+        resp = self.client.get(reverse('global_search'), {'q': term})
+        return list(resp.context['ticket_results'])
+
+    def test_exact_ticket_id_returns_only_that_ticket(self):
+        """The regression that mattered most: ts_rank returns 1e-20 rather than
+        0 for a non-match, so the old `rank__gt=0` predicate was true for every
+        row — searching a ticket number returned the entire table."""
+        for i in range(4):
+            Ticket.objects.create(
+                device_name='other-%d' % i, issue_description='unrelated',
+                created_by=self.t1)
+        hits = self._hits(self.ticket.ticket_id)
+        self.assertEqual(hits, [self.ticket])
+
+    def test_partial_ticket_id_matches(self):
+        """Analysts paste the tail of a ticket number; full-text returned 0."""
+        tail = self.ticket.ticket_id.split('-')[-1]
+        self.assertIn(self.ticket, self._hits(tail))
+
+    def test_subnet_prefix_matches(self):
+        """Hunting a /24 is routine; '10.0.0' previously matched nothing."""
+        self.assertIn(self.ticket, self._hits('10.0.0'))
+
+    def test_partial_hostname_matches(self):
+        self.assertIn(self.ticket, self._hits('malware'))
+
+    def test_thai_substring_matches(self):
+        """Thai has no word spaces, so to_tsvector collapsed a whole Thai
+        description into one lexeme and nothing but an exact full-phrase match
+        could find it."""
+        thai = Ticket.objects.create(
+            device_name='TH-HOST',
+            issue_description='พบการใช้ช่องโหว่ของเว็บแอปพลิเคชัน',
+            created_by=self.t1,
+        )
+        self.assertIn(thai, self._hits('ช่องโหว่'))
+
+    def test_search_is_case_insensitive(self):
+        self.assertIn(self.ticket, self._hits('MALWAREBOX'))
+
+    def test_non_matching_term_returns_nothing(self):
+        self.assertEqual(self._hits('zzzznotpresent'), [])
+
+    # ── Triage card gate + totals ────────────────────────────────────── #
+
+    def test_triage_card_is_hidden_from_non_soc_roles(self):
+        """The card was gated on `triage_results is not None`, but the view
+        initialised it to [] — so every role saw an empty Triage Records
+        panel."""
+        self.client.login(username='sysadm', password='testpass123')
+        resp = self.client.get(reverse('global_search'), {'q': 'malwarebox'})
+        self.assertFalse(resp.context['can_search_triage'])
+        self.assertNotContains(resp, 'Triage Records')
+
+    def test_triage_card_is_shown_to_soc(self):
+        self.client.login(username='t1', password='testpass123')
+        resp = self.client.get(reverse('global_search'), {'q': 'malwarebox'})
+        self.assertTrue(resp.context['can_search_triage'])
+        self.assertContains(resp, 'Triage Records')
+
+    def test_total_counts_the_whole_result_set_not_the_page(self):
+        """The header read `ticket_results|length`, which is the page size —
+        a capped result set reported its own slice as the total."""
+        from apps.incidents.views import SEARCH_PAGE_SIZE
+
+        for i in range(SEARCH_PAGE_SIZE + 5):
+            Ticket.objects.create(
+                device_name='bulkhost-%d' % i,
+                issue_description='bulk fixture', created_by=self.t1)
+
+        self.client.login(username='t1', password='testpass123')
+        resp = self.client.get(reverse('global_search'), {'q': 'bulkhost'})
+        self.assertEqual(resp.context['ticket_total'], SEARCH_PAGE_SIZE + 5)
+        self.assertEqual(len(resp.context['ticket_results']), SEARCH_PAGE_SIZE)
+
+        page2 = self.client.get(
+            reverse('global_search'), {'q': 'bulkhost', 'tp': 2})
+        self.assertEqual(len(page2.context['ticket_results']), 5)
+
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # 3. TrendMicro import — pure parsers                                          #

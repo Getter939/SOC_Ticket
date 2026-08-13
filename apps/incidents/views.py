@@ -8,7 +8,6 @@ import requests
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
@@ -2504,41 +2503,81 @@ def dismiss_manual_triage(request, triage_id):
 
 # ── Full-text search across tickets and triage records ─────────────────── #
 
+# Substring search, deliberately NOT Postgres full-text.
+#
+# Full-text indexes whole tokens, which loses every query an analyst actually
+# types here: a partial ticket id ("0010"), a subnet prefix ("10.0.1"), a
+# partial hostname. Worse, Thai has no word spaces, so `to_tsvector` reduces a
+# whole Thai description to ONE lexeme — making Thai content unsearchable
+# except by exact full-phrase match.
+#
+# The predicate was also wrong: `ts_rank` returns 1e-20 rather than 0 for a
+# non-match, so the old `.filter(rank__gt=0)` was true for every row and a
+# ticket-id search returned the entire table, ranked, sliced to 50.
+TICKET_SEARCH_FIELDS = (
+    'ticket_id', 'device_name', 'ip_address', 'destination_ip',
+    'issue_description', 'ioc_details', 'mitre_phase', 'reference_id',
+)
+TRIAGE_SEARCH_FIELDS = (
+    'source_reference', 'alert_description', 'source_ip', 'notes', 't2_notes',
+)
+SEARCH_PAGE_SIZE = 25
+
+
+def _substring_match(fields, term):
+    """OR ``term`` across ``fields`` as a case-insensitive substring."""
+    match = Q()
+    for field in fields:
+        match |= Q(**{f'{field}__icontains': term})
+    return match
+
+
 @login_required
 def global_search(request):
     query = (request.GET.get('q') or '').strip()
+    profile = getattr(request.user, 'profile', None)
+    # Triage records are SOC-only. Carried into the template as its own flag:
+    # the card used to be gated on `triage_results is not None`, but the list
+    # was initialised to [] and never became None, so every role saw an empty
+    # Triage Records panel.
+    can_search_triage = bool(
+        request.user.is_superuser or (profile and profile.is_soc))
+
+    # Always iterable — callers and tests treat these as sequences. The card
+    # gate is can_search_triage, not "is this None".
     ticket_results = []
     triage_results = []
+    ticket_total = triage_total = 0
 
     if query:
-        ticket_vector = SearchVector(
-            'ticket_id', 'device_name', 'ip_address', 'destination_ip',
-            'issue_description', 'ioc_details', 'mitre_phase', 'reference_id',
-        )
-        search_query = SearchQuery(query)
-        ticket_results = (
+        ticket_qs = (
             Ticket.objects.visible_to(request.user)
-            .annotate(rank=SearchRank(ticket_vector, search_query))
-            .filter(rank__gt=0)
-            .order_by('-rank', '-created_at')[:50]
+            .filter(_substring_match(TICKET_SEARCH_FIELDS, query))
+            .order_by('-created_at')
         )
+        ticket_paginator = Paginator(ticket_qs, SEARCH_PAGE_SIZE)
+        # Separate page params: the two result sets page independently.
+        ticket_results = ticket_paginator.get_page(request.GET.get('tp'))
+        ticket_total = ticket_paginator.count
 
-        profile = getattr(request.user, 'profile', None)
-        if request.user.is_superuser or (profile and profile.is_soc):
-            triage_vector = SearchVector(
-                'source_reference', 'alert_description', 'source_ip', 'notes', 't2_notes',
-            )
-            triage_results = (
+        if can_search_triage:
+            triage_qs = (
                 TriageRecord.objects
-                .annotate(rank=SearchRank(triage_vector, search_query))
-                .filter(rank__gt=0)
-                .order_by('-rank', '-created_at')[:50]
+                .filter(_substring_match(TRIAGE_SEARCH_FIELDS, query))
+                .select_related('ticket')
+                .order_by('-created_at')
             )
+            triage_paginator = Paginator(triage_qs, SEARCH_PAGE_SIZE)
+            triage_results = triage_paginator.get_page(request.GET.get('rp'))
+            triage_total = triage_paginator.count
 
     return render(request, 'incidents/search_results.html', {
         'query': query,
         'ticket_results': ticket_results,
+        'ticket_total': ticket_total,
+        'can_search_triage': can_search_triage,
         'triage_results': triage_results,
+        'triage_total': triage_total,
     })
 
 
