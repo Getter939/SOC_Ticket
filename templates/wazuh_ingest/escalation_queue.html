@@ -5,33 +5,88 @@
   <div><h4 class="mb-1 fw-bold"><i class="bi bi-arrow-up-circle-fill text-warning me-2"></i>Tier 2 Queue</h4><p class="text-muted small mb-0">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
   <span class="badge bg-warning text-dark">{{ escalated_count }} tickets</span>
 </div>
-<div class="card border-0 shadow-sm mb-3"><div class="card-body py-3"><form method="get" class="row g-2 align-items-end">
-  <div class="col-md-3"><label class="form-label small fw-bold">ขั้นตอน</label><select name="stage" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="escalated" {% if stage_filter == 'escalated' %}selected{% endif %}>รอตรวจสอบ (Escalated)</option><option value="containment" {% if stage_filter == 'containment' %}selected{% endif %}>รอยืนยันการควบคุม (Admin)</option><option value="owner" {% if stage_filter == 'owner' %}selected{% endif %}>รอยืนยันการแก้ไข (Owner)</option></select></div>
-  {# Claim state, not Emergency: the default sort already floats emergencies to #}
-  {# the top and every emergency row is red-tinted + badged, so an Emergency    #}
-  {# filter only restated the sort — while its "Normal only" value could hide   #}
-  {# an active emergency from this queue. Claim state is what is actually       #}
-  {# un-answerable from the table: what can I pick up, what am I holding.       #}
-  <div class="col-md-3"><label class="form-label small fw-bold">สถานะการรับเรื่อง</label><select name="claim" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="unclaimed" {% if claim_filter == 'unclaimed' %}selected{% endif %}>ยังไม่มีผู้รับ (Unclaimed)</option><option value="mine" {% if claim_filter == 'mine' %}selected{% endif %}>ที่ฉันรับไว้ (My claims)</option></select></div>
-  <div class="col-md-3"><label class="form-label small fw-bold">เรียงตาม</label><select name="sort" class="form-select form-select-sm"><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option><option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option><option value="severity" {% if sort == 'severity' %}selected{% endif %}>Severity</option></select></div>
-  <div class="col-md-2"><button class="btn btn-dark btn-sm" type="submit">กรอง</button></div>
+{% comment %}
+Pills, not dropdowns: with three low-cardinality scopes a select cost three
+interactions (open → pick → submit) and, worse, hid the distribution — the
+stage split was unknowable without filtering three times. Each pill carries the
+count you would get by clicking it, so the breakdown reads at a glance and the
+old ambiguous "{{ escalated_count }} tickets" header badge is no longer the only
+number on the page.
+
+Claim state rather than an Emergency filter: the default sort already floats
+emergencies and every emergency row is tinted + badged, so an Emergency filter
+only restated the sort — while its "Normal only" value could hide an active
+emergency. Claim state is what the table cannot answer on its own.
+{% endcomment %}
+<div class="card border-0 shadow-sm mb-3"><div class="card-body py-3">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <span class="small fw-bold text-muted" style="min-width:5.5rem;">ขั้นตอน</span>
+    {% for facet in stage_facets %}
+    <a href="{% querystring stage=facet.key page=None %}"
+       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
+      {{ facet.label }}
+      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  <div class="d-flex flex-wrap align-items-center gap-2">
+    <span class="small fw-bold text-muted" style="min-width:5.5rem;">การรับเรื่อง</span>
+    {% for facet in claim_facets %}
+    <a href="{% querystring claim=facet.key page=None %}"
+       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
+      {{ facet.label }}
+      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
+    </a>
+    {% endfor %}
+    {# Sort stays a select — four mutually exclusive options that gain nothing #}
+    {# from counts. Auto-submits via the shared .js-autosubmit handler in      #}
+    {# base.html, so there is no submit button anywhere on this page.          #}
+    <form method="get" class="d-flex align-items-center gap-2 ms-auto">
+      {% if stage_filter %}<input type="hidden" name="stage" value="{{ stage_filter }}">{% endif %}
+      {% if claim_filter %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
+      <label class="form-label small fw-bold mb-0" for="t2-sort">เรียงตาม</label>
+      <select name="sort" id="t2-sort" class="form-select form-select-sm js-autosubmit" style="width:auto;">
+        <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
+        <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
+        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option>
+        <option value="severity" {% if sort == 'severity' %}selected{% endif %}>Severity</option>
+      </select>
+    </form>
+  </div>
   {% if stage_filter or claim_filter %}
-  <div class="col-12"><a href="{% url 'escalation_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a></div>
+  <div class="mt-2"><a href="{% url 'escalation_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a></div>
   {% endif %}
-</form></div></div>
+</div></div>
 <div class="card border-0 shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Emergency</th><th>Severity</th><th>ระบบ / บริการ</th><th>OLA</th><th>เข้าคิวเมื่อ</th><th>Tier 1</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
+  {# Emergency lost its own column: it rendered "-" on ~92% of rows to restate #}
+  {# a signal the red row tint and the default sort already carry. The badge   #}
+  {# moved into the Ticket cell, and Tier 1 into the system cell — together    #}
+  {# ~200px back, which is what kept the table from fitting a 1280px laptop.   #}
+  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Severity</th><th>ระบบ / บริการ</th><th>OLA</th><th>รอมานาน</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
   <tbody>{% for ticket in tickets %}<tr {% if ticket.is_emergency %}class="table-danger"{% endif %}>
-    <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
+    <td>
+      <a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a>
+      {% if ticket.is_emergency %}<div class="mt-1"><span class="badge bg-danger">EMERGENCY</span></div>{% endif %}
+      {# Members of one multi-system incident otherwise read as unrelated rows. #}
+      {% if ticket.project_incident_id %}<div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>{{ ticket.bundle_ref }}</a></div>{% endif %}
+    </td>
     {# Stage labels are queue-specific, but colors come from Ticket.STATUS_PILL_COLORS (single source of truth). #}
-    <td>{% if ticket.status == 'ESCALATED_T2' %}<span class="badge" style="{{ ticket.status_pill_css }}">รอตรวจสอบ</span>{% elif ticket.status == 'CONTAINMENT_REPORTED' %}<span class="badge" style="{{ ticket.status_pill_css }}">ยืนยันการควบคุม (Admin)</span>{% else %}<span class="badge" style="{{ ticket.status_pill_css }}">ยืนยันการแก้ไข (Owner)</span>{% endif %}</td>
-    <td>{% if ticket.is_emergency %}<span class="badge bg-danger">EMERGENCY</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+    {# Short in-row labels — the filter pills above carry the full wording, so #}
+    {# the badge does not need to repeat it on every line.                     #}
+    <td>{% if ticket.status == 'ESCALATED_T2' %}<span class="badge" style="{{ ticket.status_pill_css }}">รอตรวจสอบ</span>{% elif ticket.status == 'CONTAINMENT_REPORTED' %}<span class="badge" style="{{ ticket.status_pill_css }}">ควบคุม (Admin)</span>{% else %}<span class="badge" style="{{ ticket.status_pill_css }}">แก้ไข (Owner)</span>{% endif %}</td>
     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
-    <td><div class="fw-semibold">{{ ticket.device_name }}</div><small class="text-muted">{{ ticket.issue_description|truncatechars:80 }}</small></td>
+    {# max-width, not column count, is what bounds an auto-layout table: the #}
+    {# description's min-content width is otherwise what sets the table's.   #}
+    <td style="max-width:20rem;">
+      <div class="fw-semibold">{{ ticket.device_name }}</div>
+      <small class="text-muted">{{ ticket.issue_description|truncatechars:70 }}</small>
+      {% if ticket.created_by %}<div class="small text-muted"><i class="bi bi-person me-1"></i>Tier 1: {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</div>{% endif %}
+    </td>
     <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
-    <td class="small">{{ ticket.status_changed_at|date:"d/m/Y H:i" }}</td>
-    <td>{% if ticket.created_by %}{{ ticket.created_by.get_full_name|default:ticket.created_by.username }}{% else %}<span class="text-muted">Unknown user</span>{% endif %}</td>
-    <td class="small">{% if ticket.t2_claimed_by %}{{ ticket.t2_claimed_by.get_full_name|default:ticket.t2_claimed_by.username }}<div class="text-muted">{{ ticket.t2_claimed_at|date:"d/m/Y H:i" }}</div>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+    {# Relative, with the exact stamp on hover: this queue ages in weeks, and #}
+    {# "05/07/2026 14:23" made a 27-day-old ticket look like any other row.   #}
+    <td class="small" title="{{ ticket.status_changed_at|date:'d/m/Y H:i' }}">{{ ticket.status_changed_at|timesince }}</td>
+    <td class="small">{% if ticket.t2_claimed_by %}{{ ticket.t2_claimed_by.get_full_name|default:ticket.t2_claimed_by.username }}<div class="text-muted">{{ ticket.t2_claimed_at|timesince }}</div>{% else %}<span class="text-muted">-</span>{% endif %}</td>
     {# Claim discipline mirrors the Tier 1 triage queue: take the ticket first, #}
     {# then act. Only the analyst holding the claim gets the Review button.     #}
     <td class="text-end">
@@ -45,7 +100,7 @@
       <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseTicket{{ ticket.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว</button>
       {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
     </td>
-  </tr>{% empty %}<tr><td colspan="10" class="text-center text-muted py-5">{% if stage_filter or claim_filter %}ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก{% else %}ไม่มี Ticket ที่รอ Tier 2{% endif %}</td></tr>{% endfor %}</tbody>
+  </tr>{% empty %}<tr><td colspan="8" class="text-center text-muted py-5">{% if stage_filter or claim_filter %}ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก{% else %}ไม่มี Ticket ที่รอ Tier 2{% endif %}</td></tr>{% endfor %}</tbody>
 </table></div></div>
 {% for ticket in tickets %}{% if ticket.t2_claimed_by_id == request.user.id %}
 <div class="modal fade" id="releaseTicket{{ ticket.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">

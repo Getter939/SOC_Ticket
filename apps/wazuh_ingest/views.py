@@ -282,14 +282,8 @@ def escalation_queue(request):
         'containment': Ticket.STATUS_CONTAINMENT_REPORTED,
         'owner': Ticket.STATUS_PENDING_T2_REVIEW,
     }
-    if stage_filter in stage_map:
-        tickets_qs = Ticket.objects.filter(status=stage_map[stage_filter])
-    else:
+    if stage_filter not in stage_map:
         stage_filter = ''
-        tickets_qs = Ticket.objects.filter(status__in=Ticket.TIER2_QUEUE_STATUSES)
-    tickets_qs = tickets_qs.select_related(
-        'created_by', 'assigned_admin', 't2_claimed_by').with_severity_rank()
-
     # Claim state — the discipline this whole page is built around. "Unclaimed"
     # is what an analyst can pick up; "mine" is what they are already holding.
     # Both claim fields reset on every transition (Ticket.transition_to), so this
@@ -298,12 +292,62 @@ def escalation_queue(request):
     #
     # Deliberately no "claimed by others" value — it is derivable, and the
     # ผู้รับเรื่อง column already names the holder.
-    if claim_filter == 'unclaimed':
-        tickets_qs = tickets_qs.filter(t2_claimed_by__isnull=True)
-    elif claim_filter == 'mine':
-        tickets_qs = tickets_qs.filter(t2_claimed_by=request.user)
-    else:
+    if claim_filter not in ('unclaimed', 'mine'):
         claim_filter = ''
+
+    base_qs = Ticket.objects.filter(status__in=Ticket.TIER2_QUEUE_STATUSES)
+
+    def _apply_stage(qs):
+        return qs.filter(status=stage_map[stage_filter]) if stage_filter else qs
+
+    def _apply_claim(qs):
+        if claim_filter == 'unclaimed':
+            return qs.filter(t2_claimed_by__isnull=True)
+        if claim_filter == 'mine':
+            return qs.filter(t2_claimed_by=request.user)
+        return qs
+
+    # Facet counts for the pill rows. Each pill counts what you would get by
+    # clicking it — so a row is counted with the OTHER dimension's filter still
+    # applied. This is the point of the pills: the stage split (how much is
+    # escalation triage vs verification) was previously unknowable without
+    # filtering three times and reading the header badge each time.
+    stage_tally = dict(
+        _apply_claim(base_qs).values_list('status')
+        .annotate(n=Count('id')).values_list('status', 'n')
+    )
+    stage_facets = [
+        {'key': None, 'label': 'ทั้งหมด',
+         'count': sum(stage_tally.values()), 'active': not stage_filter},
+    ] + [
+        {'key': key, 'label': label,
+         'count': stage_tally.get(stage_map[key], 0),
+         'active': stage_filter == key}
+        for key, label in (
+            ('escalated', 'รอตรวจสอบ'),
+            ('containment', 'ยืนยันการควบคุม (Admin)'),
+            ('owner', 'ยืนยันการแก้ไข (Owner)'),
+        )
+    ]
+
+    claim_scoped = _apply_stage(base_qs)
+    claim_facets = [
+        {'key': None, 'label': 'ทั้งหมด',
+         'count': claim_scoped.count(), 'active': not claim_filter},
+        {'key': 'unclaimed', 'label': 'ยังไม่มีผู้รับ',
+         'count': claim_scoped.filter(t2_claimed_by__isnull=True).count(),
+         'active': claim_filter == 'unclaimed'},
+        {'key': 'mine', 'label': 'ที่ฉันรับไว้',
+         'count': claim_scoped.filter(t2_claimed_by=request.user).count(),
+         'active': claim_filter == 'mine'},
+    ]
+
+    tickets_qs = _apply_claim(_apply_stage(base_qs)).select_related(
+        'created_by', 'assigned_admin', 't2_claimed_by',
+        # bundle_ref dereferences project_incident — without this the bundle
+        # indicator costs a query per row.
+        'project_incident',
+    ).with_severity_rank()
     # status_changed_at = when the ticket entered its current (queue) status —
     # meaningful for all three stages, unlike escalated_to_t2_at.
     #
@@ -337,6 +381,8 @@ def escalation_queue(request):
         'escalated_count': paginator.count,
         'claim_filter': claim_filter,
         'stage_filter': stage_filter,
+        'stage_facets': stage_facets,
+        'claim_facets': claim_facets,
         'sort': sort,
     })
 

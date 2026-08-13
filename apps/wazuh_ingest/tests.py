@@ -707,6 +707,71 @@ class EscalationQueueFilterTest(TestCase):
     def _rows(self, response):
         return list(response.context['tickets'])
 
+    # ── Filter pills / facet counts ──────────────────────────────────── #
+
+    @staticmethod
+    def _facet(response, group, key):
+        return next(
+            f for f in response.context['%s_facets' % group] if f['key'] == key
+        )
+
+    def test_stage_facets_count_each_stage(self):
+        """The stage split was previously unknowable without filtering three
+        times — the pills carry it on every page load."""
+        self._ticket(status=Ticket.STATUS_ESCALATED_T2)
+        self._ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+        self._ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+        self._ticket(status=Ticket.STATUS_PENDING_T2_REVIEW)
+
+        r = self._get()
+        self.assertEqual(self._facet(r, 'stage', None)['count'], 4)
+        self.assertEqual(self._facet(r, 'stage', 'escalated')['count'], 1)
+        self.assertEqual(self._facet(r, 'stage', 'containment')['count'], 2)
+        self.assertEqual(self._facet(r, 'stage', 'owner')['count'], 1)
+
+    def test_claim_facets_count_pickable_and_mine(self):
+        self._ticket()
+        self._ticket(claimed_by=self.t2)
+        self._ticket(claimed_by=self.t2_other)
+
+        r = self._get()
+        self.assertEqual(self._facet(r, 'claim', None)['count'], 3)
+        self.assertEqual(self._facet(r, 'claim', 'unclaimed')['count'], 1)
+        self.assertEqual(self._facet(r, 'claim', 'mine')['count'], 1)
+
+    def test_facets_are_scoped_by_the_other_filter(self):
+        """Each pill counts what you would get by clicking it, so the claim
+        counts narrow once a stage is selected — and vice versa."""
+        self._ticket(status=Ticket.STATUS_ESCALATED_T2, claimed_by=self.t2)
+        self._ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+        self._ticket(status=Ticket.STATUS_CONTAINMENT_REPORTED)
+
+        scoped = self._get(stage='containment')
+        self.assertEqual(self._facet(scoped, 'claim', None)['count'], 2)
+        self.assertEqual(self._facet(scoped, 'claim', 'mine')['count'], 0)
+        # The stage row itself stays whole-queue, so you can always navigate out.
+        self.assertEqual(self._facet(scoped, 'stage', None)['count'], 3)
+
+        mine = self._get(claim='mine')
+        self.assertEqual(self._facet(mine, 'stage', None)['count'], 1)
+        self.assertEqual(self._facet(mine, 'stage', 'containment')['count'], 0)
+
+    def test_active_facet_is_flagged(self):
+        self._ticket()
+        r = self._get(stage='escalated')
+        self.assertTrue(self._facet(r, 'stage', 'escalated')['active'])
+        self.assertFalse(self._facet(r, 'stage', None)['active'])
+        # Claim untouched, so its "all" pill is the active one.
+        self.assertTrue(self._facet(r, 'claim', None)['active'])
+
+    def test_invalid_filter_values_fall_back_to_all(self):
+        self._ticket()
+        r = self._get(stage='bogus', claim='bogus')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(self._facet(r, 'stage', None)['active'])
+        self.assertTrue(self._facet(r, 'claim', None)['active'])
+        self.assertEqual(len(self._rows(r)), 1)
+
     # ── Severity sort (the CharField-ordering bug) ───────────────────────── #
 
     def test_severity_sort_ranks_medium_above_low(self):
