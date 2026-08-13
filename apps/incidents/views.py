@@ -128,7 +128,15 @@ def _holds_ticket_court(ticket, user):
     if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
         return profile.is_system_admin and ticket.assigned_admin_id == user.pk
     if ticket.status == Ticket.STATUS_AWAITING_OWNER:
-        return profile.is_system_owner and ticket.system_owner_id == user.pk
+        # Both, deliberately. Owners are contacted out of band and in practice
+        # never log in — gating this on the owner alone meant NOBODY could
+        # attach while the ticket sat here, so a screenshot the owner emailed
+        # in had nowhere to go until Tier 1 advanced the ticket just to earn
+        # the right to upload it. The creator is the party actually holding
+        # the case; the owner keeps the right for the day one does log in.
+        if profile.is_system_owner and ticket.system_owner_id == user.pk:
+            return True
+        return profile.is_tier1 and ticket.created_by_id == user.pk
     return False
 
 
@@ -426,7 +434,10 @@ def _transition_actions(ticket, user):
         Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'Mark as Event -> SOC Manager verification',
         Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
         Ticket.STATUS_PENDING_MGR_TRIAGE: 'Route to SOC Manager review',
-        Ticket.STATUS_OWNER_REMEDIATED: 'Owner fixed it -> Confirm',
+        # Records what the owner reported; it does not assert the fix is good.
+        # "Confirm" was what invited Tier 1 to adjudicate a call that belongs
+        # to Tier 2.
+        Ticket.STATUS_OWNER_REMEDIATED: 'บันทึกผลจากเจ้าของระบบ (Record owner report)',
         Ticket.STATUS_PENDING_T2_REVIEW: 'Send to Tier 2 review',
         Ticket.STATUS_PENDING_MANAGER: 'Send to SOC Manager',
         Ticket.STATUS_APPROVED: (
@@ -467,10 +478,16 @@ def _transition_actions(ticket, user):
                 if ticket.status == Ticket.STATUS_CONTAINMENT_REPORTED
                 else 'Send to System Admin'
             )
+        # From AWAITING_OWNER this single action IS the relay, so name what
+        # Tier 1 is asserting. The legacy OWNER_REMEDIATED hop keeps the plain
+        # wording — by then the report was already recorded.
+        if (next_status == Ticket.STATUS_PENDING_T2_REVIEW
+                and ticket.status == Ticket.STATUS_AWAITING_OWNER):
+            label = 'เจ้าของแจ้งแก้ไขแล้ว → ส่ง Tier 2 ตรวจสอบ'
         if next_status == Ticket.STATUS_AWAITING_OWNER:
-            if ticket.status == Ticket.STATUS_OWNER_REMEDIATED:
-                label = 'Return to owner (not fixed)'
-            elif ticket.status == Ticket.STATUS_PENDING_T2_REVIEW:
+            # No OWNER_REMEDIATED branch: that edge is gone. Sending a case
+            # back to the owner is Tier 2's call, made at PENDING_T2_REVIEW.
+            if ticket.status == Ticket.STATUS_PENDING_T2_REVIEW:
                 label = 'Reject -> back to owner'
             else:
                 label = 'Send to owner (direct)'

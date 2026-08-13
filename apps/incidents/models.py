@@ -326,10 +326,14 @@ class Ticket(models.Model):
     # contacts the asset owner directly (e.g. by phone) and the owner remediates
     # it themselves — no admin ticket, no containment email. The case is still
     # tracked (AWAITING_OWNER) and always passes mandatory Tier 2 verification
-    # (OWNER_REMEDIATED → PENDING_T2_REVIEW); emergency tickets additionally
+    # (AWAITING_OWNER → PENDING_T2_REVIEW); emergency tickets additionally
     # pass the SOC manager (PENDING_T2_REVIEW → PENDING_MANAGER). See the
     # deterministic emergency split in can_transition_to / transition_to.
     STATUS_AWAITING_OWNER       = 'AWAITING_OWNER'
+    # LEGACY — nothing transitions INTO this any more. Tier 1 used to stop here
+    # to record the owner's report before forwarding, which cost two clicks for
+    # one act. Retained so tickets already in this status can still finish; see
+    # ALLOWED_TRANSITIONS. Do not add a new edge into it.
     STATUS_OWNER_REMEDIATED     = 'OWNER_REMEDIATED'
     STATUS_PENDING_T2_REVIEW    = 'PENDING_T2_REVIEW'
     STATUS_PENDING_MANAGER      = 'PENDING_MANAGER'
@@ -496,10 +500,17 @@ class Ticket(models.Model):
         ],
         # ── Direct-to-Owner path ─────────────────────────────────────── #
         STATUS_AWAITING_OWNER: [
-            STATUS_OWNER_REMEDIATED,       # T1 records owner-confirmed fix
+            # One action: Tier 1 attaches whatever the owner sent, records what
+            # they reported in the transition note, and hands to Tier 2. This
+            # used to stop at OWNER_REMEDIATED first — two clicks by the same
+            # person for one act, the first of which existed mainly to unlock
+            # Tier 1's own upload permission.
+            STATUS_PENDING_T2_REVIEW,
         ],
+        # LEGACY — no edge leads here any more (AWAITING_OWNER now goes straight
+        # to PENDING_T2_REVIEW). Kept reachable-OUT so tickets already sitting
+        # in this status can still finish; do not wire a new edge back into it.
         STATUS_OWNER_REMEDIATED: [
-            STATUS_AWAITING_OWNER,         # not actually fixed → keep tracking (loop)
             STATUS_PENDING_T2_REVIEW,      # always → Tier 2 verifies (mandatory)
         ],
         STATUS_PENDING_T2_REVIEW: [
@@ -540,9 +551,12 @@ class Ticket(models.Model):
         (STATUS_CONTAINMENT_REPORTED, STATUS_PENDING_MANAGER):      'TIER2',
         (STATUS_CONTAINMENT_REPORTED, STATUS_APPROVED):             'TIER2',
         (STATUS_CONTAINMENT_REPORTED, STATUS_CLOSED_EVENT):         'TIER2',
-        # Direct-to-Owner path
-        (STATUS_AWAITING_OWNER,       STATUS_OWNER_REMEDIATED):     'TIER1_CREATOR',
-        (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER):       'TIER1_CREATOR',
+        # Direct-to-Owner path. Tier 1 is the owner's proxy — owners are
+        # contacted out of band and hold no transition rights of their own —
+        # so this edge is clerical: record what the owner reported, hand it
+        # over. Adequacy is judged once, by Tier 2, below.
+        (STATUS_AWAITING_OWNER,       STATUS_PENDING_T2_REVIEW):    'TIER1_CREATOR',
+        # Legacy: only in-flight OWNER_REMEDIATED tickets still use this.
         (STATUS_OWNER_REMEDIATED,     STATUS_PENDING_T2_REVIEW):    'TIER1_CREATOR',
         (STATUS_PENDING_T2_REVIEW,    STATUS_APPROVED):             'TIER2',
         (STATUS_PENDING_T2_REVIEW,    STATUS_PENDING_MANAGER):      'TIER2',
@@ -1916,6 +1930,11 @@ class Ticket(models.Model):
     STEP_BACK_TARGETS = {
         STATUS_AWAITING_CONTAINMENT: STATUS_PENDING_MGR_TRIAGE,
         STATUS_AWAITING_OWNER:       STATUS_PENDING_MGR_TRIAGE,
+        # Tier 1 records the owner's report but no longer judges it, so it has
+        # no self-service undo for a mis-recorded one. Without this the only
+        # way out is to push it to Tier 2 and ask them to bounce it — spending
+        # the reviewer's queue on a typo.
+        STATUS_OWNER_REMEDIATED:     STATUS_AWAITING_OWNER,
     }
 
     def step_back_target(self):

@@ -1277,8 +1277,8 @@ class DirectToOwnerPathTest(TestCase):
         self.assertTrue(t.direct_owner_remediation)
         self.assertIsNotNone(t.owner_contacted_at)
 
-        t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.t1, 'owner fixed')
-        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'to review')
+        # One Tier 1 action: the owner reported a fix, hand it to Tier 2.
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'owner fixed')
         self.assertIsNone(t.verified_by)           # verification is T2's act now
 
         t.transition_to(Ticket.STATUS_APPROVED, self.t2, 'reviewed & closed')
@@ -1315,11 +1315,110 @@ class DirectToOwnerPathTest(TestCase):
         t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t2, 'not actually fixed')
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
 
+    # ── Recording ≠ verifying: Tier 1 records, Tier 2 judges ───────────── #
+
+    def test_tier1_cannot_send_a_recorded_report_back_to_the_owner(self):
+        """Tier 1 used to get a "not fixed" edge at OWNER_REMEDIATED, which
+        asked the same person the same question they had answered one state
+        earlier — and put adequacy in two places. It is Tier 2's call only."""
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_AWAITING_OWNER))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t1, 'not fixed')
+
+    def test_tier1_is_offered_only_the_handover_at_owner_remediated(self):
+        """Asserts the UI and the FSM together — the workflow card is built
+        from _transition_actions, so a stray edge would show up as a button."""
+        from apps.incidents.views import _transition_actions
+
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        actions = _transition_actions(t, self.t1)
+        self.assertEqual(
+            [a['status'] for a in actions], [Ticket.STATUS_PENDING_T2_REVIEW])
+        self.assertNotIn(
+            'not fixed', ' '.join(a['label'] for a in actions).lower())
+
+    def test_tier2_still_gets_the_reject_option(self):
+        """The point is to move the judgment, not remove it."""
+        from apps.incidents.views import _transition_actions
+
+        t = self._owner_case(status=Ticket.STATUS_PENDING_T2_REVIEW)
+        statuses = {a['status'] for a in _transition_actions(t, self.t2)}
+        self.assertIn(Ticket.STATUS_AWAITING_OWNER, statuses)
+        self.assertIn(Ticket.STATUS_APPROVED, statuses)
+
+    def test_manager_can_step_back_a_misrecorded_report(self):
+        """Tier 1 loses its self-service undo, so a mis-click must still be
+        recoverable without spending Tier 2's queue on it."""
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertTrue(t.can_step_back(self.mgr))
+        t.step_back(self.mgr, 'recorded against the wrong ticket')
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
+
+    def test_tier1_cannot_step_back_a_recorded_report(self):
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        self.assertFalse(t.can_step_back(self.t1))
+        with self.assertRaises(ValidationError):
+            t.step_back(self.t1, 'let me undo that')
+
+    # ── Collapsed lane: one Tier 1 action ─────────────────────────────── #
+
+    def test_awaiting_owner_offers_exactly_one_action(self):
+        """The relay is a single act — attach what the owner sent, say what
+        they reported, hand to Tier 2."""
+        from apps.incidents.views import _transition_actions
+
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        self.assertEqual(
+            [a['status'] for a in _transition_actions(t, self.t1)],
+            [Ticket.STATUS_PENDING_T2_REVIEW],
+        )
+
+    def test_owner_remediated_is_no_longer_reachable(self):
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_OWNER_REMEDIATED))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.t1, 'stop here')
+
+    def test_in_flight_owner_remediated_tickets_can_still_finish(self):
+        """The status is retained, not deleted — tickets already sitting in it
+        when the lane collapsed must still reach Tier 2."""
+        t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'legacy hop')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_T2_REVIEW)
+
+    # ── Evidence can be attached while waiting on the owner ───────────── #
+
+    def test_creator_can_attach_evidence_while_awaiting_owner(self):
+        """Gating this on the owner alone meant nobody could attach: owners are
+        contacted out of band and never log in, so an emailed screenshot had
+        nowhere to go until Tier 1 advanced the ticket to earn the right."""
+        from apps.incidents.views import _can_upload_ticket_attachment
+
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        self.assertTrue(_can_upload_ticket_attachment(t, self.t1))
+
+    def test_system_owner_keeps_its_upload_right(self):
+        from apps.incidents.views import _can_upload_ticket_attachment
+
+        owner = _make_user('do_owner', UserProfile.ROLE_SYSTEM_OWNER)
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        t.system_owner = owner
+        t.save(update_fields=['system_owner'])
+        self.assertTrue(_can_upload_ticket_attachment(t, owner))
+
+    def test_uninvolved_tier1_cannot_attach_while_awaiting_owner(self):
+        from apps.incidents.views import _can_upload_ticket_attachment
+
+        t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
+        self.assertFalse(_can_upload_ticket_attachment(t, self.other))
+
     # ── Permissions: T1 side is creator-gated; review close is Tier 2 ───── #
-    def test_non_creator_t1_cannot_confirm(self):
+    def test_non_creator_t1_cannot_relay_the_owner_report(self):
+        """Creator-gated: another Tier 1 did not take the owner's call."""
         t = self._owner_case(status=Ticket.STATUS_AWAITING_OWNER)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_OWNER_REMEDIATED, self.other, 'nope')
+            t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.other, 'nope')
 
     def test_tier2_review_close_requires_tier2(self):
         t = self._owner_case(status=Ticket.STATUS_PENDING_T2_REVIEW)
