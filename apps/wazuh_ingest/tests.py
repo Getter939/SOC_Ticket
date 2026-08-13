@@ -366,6 +366,68 @@ class TriageQueueTest(TestCase):
 
         self.assertRedirects(response, reverse('ticket_list'))
 
+    # ── Filter pills / facet counts ──────────────────────────────────── #
+
+    @staticmethod
+    def _facet(response, key):
+        return next(
+            f for f in response.context['level_facets'] if f['key'] == key)
+
+    def _get(self, **params):
+        self.client.login(username='triage_soc', password='testpass123')
+        return self.client.get(reverse('triage_queue'), params)
+
+    def test_level_facets_are_cumulative_thresholds(self):
+        """"10+" contains "13+" — the pills are thresholds, not disjoint
+        buckets, which is what the "+" in each label says."""
+        _make_alert(rule_level=14, opensearch_id='facet-crit')
+        _make_alert(rule_level=11, opensearch_id='facet-high')
+        _make_alert(rule_level=8, opensearch_id='facet-med')
+        # setUp already added one level-12 alert.
+
+        r = self._get()
+        self.assertEqual(self._facet(r, None)['count'], 4)
+        self.assertEqual(self._facet(r, '13')['count'], 1)
+        self.assertEqual(self._facet(r, '10')['count'], 3)   # 14, 12, 11
+        self.assertEqual(self._facet(r, '7')['count'], 4)
+
+    def test_level_facets_count_triaging_alerts_too(self):
+        """The filter narrows the whole queue, so the counts must cover both
+        pending and claimed rows or the pills would under-report."""
+        self._claim()
+        r = self._get()
+        self.assertEqual(self._facet(r, None)['count'], 1)
+        self.assertEqual(self._facet(r, '10')['count'], 1)
+
+    def test_active_facet_is_flagged_and_filters(self):
+        _make_alert(rule_level=8, opensearch_id='facet-low')
+        r = self._get(rule_level_filter='13')
+        self.assertTrue(self._facet(r, '13')['active'])
+        self.assertFalse(self._facet(r, None)['active'])
+        self.assertEqual(len(r.context['alerts']), 0)  # nothing is 13+
+
+    def test_invalid_level_falls_back_to_all(self):
+        r = self._get(rule_level_filter='bogus')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(self._facet(r, None)['active'])
+        self.assertEqual(len(r.context['alerts']), 1)
+
+    def test_pagination_offers_links_and_keeps_the_sort(self):
+        """The page counter had no prev/next links at all — beyond 25 alerts
+        pages 2+ were unreachable."""
+        for i in range(30):
+            _make_alert(rule_level=9, opensearch_id='page-%d' % i)
+
+        first = self._get(sort='ola')
+        self.assertTrue(first.context['page_obj'].has_next())
+        body = first.content.decode()
+        self.assertIn('page=2', body)
+        self.assertIn('sort=ola', body)
+
+        second = self._get(sort='ola', page=2)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(second.context['alerts']), 6)  # 31 total - 25
+
     def test_claim_alert_sets_triaging_status(self):
         self.client.login(username='triage_soc', password='testpass123')
 

@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -78,14 +78,14 @@ def triage_queue(request):
     )
     pending = queue.filter(triage_status=WazuhAlert.TRIAGE_PENDING)
 
+    # Whitelist rather than int() + except: the pills offer exactly these three
+    # thresholds, so anything else is not a filter this page has.
     rule_level_filter = request.GET.get('rule_level_filter', '').strip()
+    if rule_level_filter not in ('7', '10', '13'):
+        rule_level_filter = ''
     alerts = queue
     if rule_level_filter:
-        try:
-            min_level = int(rule_level_filter)
-            alerts = alerts.filter(rule_level__gte=min_level)
-        except ValueError:
-            rule_level_filter = ''
+        alerts = alerts.filter(rule_level__gte=int(rule_level_filter))
 
     # ola_deadline is timestamp + a flat OLA_HOURS, so ordering by timestamp
     # ascending is the OLA order — no annotation needed.
@@ -98,21 +98,34 @@ def triage_queue(request):
     paginator = Paginator(alerts, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    level_summary = (
-        pending.values('rule_level')
-        .annotate(count=Count('id'))
-        .order_by('-rule_level')
+    # Facet counts for the filter pills, in ONE query. Cumulative thresholds,
+    # not disjoint buckets — "10+" contains "13+" — which is what the "+" in
+    # each label says. Counted over the whole queue (pending AND triaging),
+    # matching what the filter actually narrows.
+    tally = queue.aggregate(
+        total=Count('id'),
+        lvl13=Count('id', filter=Q(rule_level__gte=13)),
+        lvl10=Count('id', filter=Q(rule_level__gte=10)),
+        lvl7=Count('id', filter=Q(rule_level__gte=7)),
     )
+    level_facets = [
+        {'key': None, 'label': 'ทั้งหมด', 'count': tally['total'],
+         'active': not rule_level_filter},
+        {'key': '13', 'label': '13+ Critical', 'count': tally['lvl13'],
+         'active': rule_level_filter == '13'},
+        {'key': '10', 'label': '10+ High', 'count': tally['lvl10'],
+         'active': rule_level_filter == '10'},
+        {'key': '7', 'label': '7+ Medium', 'count': tally['lvl7'],
+         'active': rule_level_filter == '7'},
+    ]
 
     return render(request, 'wazuh_ingest/triage_queue.html', {
         'page_obj': page_obj,
         'alerts': page_obj,
         'pending_count': pending.count(),
-        'triaging_count': queue.filter(triage_status=WazuhAlert.TRIAGE_TRIAGING).count(),
-        'level_summary': level_summary,
+        'level_facets': level_facets,
         'rule_level_filter': rule_level_filter,
         'sort': sort,
-        'tier_choices': _allowed_escalation_tiers(profile, request.user),
     })
 
 
