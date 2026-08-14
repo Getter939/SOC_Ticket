@@ -1,4 +1,4 @@
-import sys
+import os, sys
 from datetime import timedelta
 from pathlib import Path
 from decouple import config
@@ -296,3 +296,31 @@ OPENSEARCH_VERIFY_SSL  = config('OPENSEARCH_VERIFY_SSL', default=True, cast=bool
 OPENSEARCH_CA_BUNDLE  = config('OPENSEARCH_CA_BUNDLE', default='')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+LOG_DIR = config('LOG_DIR', default=str(BASE_DIR / 'logs'))
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except OSError:
+    pass  # delay=True below keeps a bad LOG_DIR from crashing settings import
+
+_LOG_HANDLERS = ['console'] + ([] if 'test' in sys.argv else ['file'])  # don't log test runs to disk
+
+LOGGING = {
+    'version': 1, 'disable_existing_loggers': False,
+    'formatters': {'verbose': {'format': '{asctime} {levelname} {name} pid={process:d} {message}', 'style': '{'}},
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'level': 'WARNING', 'formatter': 'verbose'},
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'django.log'),
+            'maxBytes': 10*1024*1024, 'backupCount': 10,
+            'encoding': 'utf-8', 'delay': True,
+            'formatter': 'verbose',
+        },
+    },
+    'root': {'handlers': _LOG_HANDLERS, 'level': config('LOG_LEVEL', default='INFO')},
+    'loggers': {
+        'django.request':  {'handlers': _LOG_HANDLERS, 'level': 'ERROR',   'propagate': False},
+        'django.security': {'handlers': _LOG_HANDLERS, 'level': 'WARNING', 'propagate': False},
+    },
+}
