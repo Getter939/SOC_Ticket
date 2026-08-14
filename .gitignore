@@ -67,8 +67,22 @@ desktop.ini
 !docs/operations/production-deployment.md
 !docs/operations/postgresql-standby-handbook.md
 !docs/architecture/workflow-change-log.md
+# Operational runbooks, un-ignored 2026-08-14. These govern the build and the
+# recovery of production, and handbook §2.8 pre-stages the spare VM with
+# `git clone` — an untracked runbook never reaches the machine that needs it
+# during a failover, and is in no backup either (New-SocConfigBundle.ps1
+# captures .env, IIS and the service definition, not docs).
+!docs/operations/production-deployment.windows.md
+!docs/operations/backup-and-standby-handbook.windows.md
+!docs/operations/backup-and-restore.md
+!docs/operations/backup-vm-handbook.md
+!docs/operations/backup-storage-decision-brief.md
+!docs/operations/reporting-layer-operations.md
+!docs/project-roadmap.md
 # Deliberately NOT un-ignored: docs/uat/uat-*.md and
 # docs/operations/grafana-wazuh-wall.md contain a shared UAT password and
-# internal host details. Keep them local unless those are scrubbed first.
+# internal host details. docs/security/ (VA report, credential rotation) stays
+# local because a findings report in a hosted repo is an attacker's checklist.
+# Keep all of these local unless the contents are scrubbed first.
 .claude/skills/03-exploit-development/scripts/payload_generator.py
 .claude/skills/03-exploit-development/SKILL.md
