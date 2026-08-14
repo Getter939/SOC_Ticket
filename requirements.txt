@@ -13,8 +13,11 @@ python-decouple==3.8
 # Static files serving (dev + production)
 whitenoise==6.12.0
 
-# WSGI server (production — Dockerfile CMD). Never run `runserver` in prod.
-gunicorn==23.0.0
+# WSGI server. Production is Windows Server: Waitress runs under NSSM as the
+# SOCTicketWaitress service (see docs/operations/production-deployment.windows.md).
+# gunicorn was pinned here for the superseded Docker/Linux stack and does not run
+# on Windows at all. Never run `runserver` in prod.
+waitress==3.0.2
 
 # Word report export (apps/incidents/reports.py → DOCX incident reports)
 python-docx==1.2.0

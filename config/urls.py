@@ -6,8 +6,12 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
 from apps.accounts import views as account_views
+from config.health import healthz
 
 urlpatterns = [
+    # Unauthenticated on purpose, and listed before the app includes so a
+    # monitoring probe never depends on dashboard routing or login state.
+    path('healthz', healthz, name='healthz'),
     path('admin/', admin.site.urls),
     path('', include('apps.dashboard.urls')),          # Dashboard = home
     path('incidents/', include('apps.incidents.urls')),

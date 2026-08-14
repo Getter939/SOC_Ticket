@@ -1049,3 +1049,105 @@ class SuperuserWazuhAccessTest(TestCase):
         response = self.client.get(reverse('escalation_queue'))
         self.assertEqual(response.status_code, 200)
         self.assertIn(ticket, list(response.context['tickets']))
+
+
+class PurgeWazuhAlertsTest(TestCase):
+    """Retention must never trade away alert-to-incident provenance.
+
+    Ticket.wazuh_alert is SET_NULL and TicketAlertLink.alert is CASCADE, so a
+    purge filtered on age alone would quietly strip tickets of their source
+    alert and delete the link rows. These tests pin the exclusions, not the
+    date arithmetic.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.analyst = _make_user('purge_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+
+    def _aged_alert(self, opensearch_id, days_old=120,
+                    triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE, **kwargs):
+        return WazuhAlert.objects.create(
+            opensearch_id=opensearch_id,
+            timestamp=timezone.now() - timedelta(days=days_old),
+            rule_level=12,
+            rule_description='Aged alert',
+            triage_status=triage_status,
+            **kwargs,
+        )
+
+    def _ticket(self, device_name, **kwargs):
+        return Ticket.objects.create(
+            device_name=device_name,
+            ip_address='192.0.2.10',
+            issue_description='Raised from an alert.',
+            severity='High',
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            created_by=self.analyst,
+            **kwargs,
+        )
+
+    def test_deletes_aged_unlinked_triaged_alert(self):
+        self._aged_alert('purge-old-1')
+        call_command('purge_wazuh_alerts', '--days', '90', stdout=StringIO())
+        self.assertFalse(WazuhAlert.objects.filter(opensearch_id='purge-old-1').exists())
+
+    def test_keeps_alert_inside_the_window(self):
+        self._aged_alert('purge-recent', days_old=10)
+        call_command('purge_wazuh_alerts', '--days', '90', stdout=StringIO())
+        self.assertTrue(WazuhAlert.objects.filter(opensearch_id='purge-recent').exists())
+
+    def test_keeps_alert_referenced_by_a_ticket(self):
+        alert = self._aged_alert('purge-linked')
+        self._ticket('LINKED-HOST', wazuh_alert=alert)
+
+        call_command('purge_wazuh_alerts', '--days', '90', stdout=StringIO())
+
+        self.assertTrue(WazuhAlert.objects.filter(pk=alert.pk).exists())
+
+    def test_keeps_alert_with_a_ticket_alert_link(self):
+        from apps.incidents.models import TicketAlertLink
+
+        alert = self._aged_alert('purge-link-row')
+        ticket = self._ticket('BUNDLED-HOST')
+        TicketAlertLink.objects.create(
+            ticket=ticket, alert=alert, role=TicketAlertLink.ROLE_SUPPORTING,
+        )
+
+        call_command('purge_wazuh_alerts', '--days', '90', stdout=StringIO())
+
+        self.assertTrue(WazuhAlert.objects.filter(pk=alert.pk).exists())
+        self.assertTrue(TicketAlertLink.objects.filter(alert=alert).exists())
+
+    def test_keeps_aged_alert_still_awaiting_triage(self):
+        self._aged_alert('purge-pending', triage_status=WazuhAlert.TRIAGE_PENDING)
+        self._aged_alert('purge-triaging', triage_status=WazuhAlert.TRIAGE_TRIAGING)
+
+        call_command('purge_wazuh_alerts', '--days', '90', stdout=StringIO())
+
+        self.assertTrue(WazuhAlert.objects.filter(opensearch_id='purge-pending').exists())
+        self.assertTrue(WazuhAlert.objects.filter(opensearch_id='purge-triaging').exists())
+
+    def test_dry_run_deletes_nothing_and_reports_counts(self):
+        self._aged_alert('purge-dry-1')
+        self._aged_alert('purge-dry-pending', triage_status=WazuhAlert.TRIAGE_PENDING)
+        out = StringIO()
+
+        call_command('purge_wazuh_alerts', '--days', '90', '--dry-run', stdout=out)
+
+        self.assertEqual(WazuhAlert.objects.count(), 2)
+        output = out.getvalue()
+        self.assertIn('would delete 1', output)
+        self.assertIn('pending / triaging : 1', output)
+
+    def test_batching_deletes_every_eligible_row(self):
+        for index in range(5):
+            self._aged_alert(f'purge-batch-{index}')
+
+        call_command('purge_wazuh_alerts', '--days', '90', '--batch-size', '2',
+                     stdout=StringIO())
+
+        self.assertEqual(WazuhAlert.objects.count(), 0)
+
+    def test_rejects_a_zero_day_window(self):
+        with self.assertRaises(CommandError):
+            call_command('purge_wazuh_alerts', '--days', '0', stdout=StringIO())

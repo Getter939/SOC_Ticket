@@ -13,6 +13,7 @@ does not bleed into another.  Users are created with setUpTestData for
 efficiency — they are shared across tests in the same class.
 """
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -1299,3 +1300,41 @@ class ChartAccessibilityTableMarkupTest(TestCase):
 
     def test_executive_hidden_tables_are_wrapped(self):
         self._assert_no_bare_hidden_table('dashboard/executive.html')
+
+
+class HealthzTest(TestCase):
+    """The probe IIS and monitoring hit before anyone can log in.
+
+    It must answer without a session, report the database honestly, and leak
+    nothing about the deployment beyond an opt-in version string.
+    """
+
+    def test_returns_ok_without_authentication(self):
+        response = self.client.get('/healthz')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['status'], 'ok')
+        self.assertEqual(payload['database'], 'ok')
+        self.assertIn('version', payload)
+
+    def test_response_is_not_cacheable(self):
+        response = self.client.get('/healthz')
+        self.assertIn('no-store', response['Cache-Control'])
+
+    def test_rejects_non_get(self):
+        self.assertEqual(self.client.post('/healthz').status_code, 405)
+
+    def test_reports_503_when_the_database_is_unreachable(self):
+        from django.db import OperationalError
+
+        with patch('config.health.connection') as mock_connection:
+            mock_connection.cursor.side_effect = OperationalError('down')
+            response = self.client.get('/healthz')
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.json()
+        self.assertEqual(payload['status'], 'degraded')
+        self.assertEqual(payload['database'], 'error')
+        # The failure reason belongs in the log, not an unauthenticated body.
+        self.assertNotIn('down', response.content.decode())

@@ -1,6 +1,16 @@
-# Production Deployment
+# Production Deployment (SUPERSEDED — Docker/Linux only)
 
-> **Audience:** whoever deploys and operates the app · **Status:** Current · **Last updated:** 2026-07-21
+> # ⛔ THIS IS NOT THE PRODUCTION PLATFORM
+>
+> Production is **Windows Server + native PostgreSQL + Waitress under NSSM +
+> IIS/ARR**. Nothing in this document — nginx, gunicorn, docker-compose, the
+> Linux paths, the `web` hostname — describes the deployed system.
+>
+> **Use [production-deployment.windows.md](production-deployment.windows.md).**
+>
+> This file is retained only for the Docker development stack and for history.
+
+> **Audience:** whoever deploys and operates the app · **Status:** Superseded · **Last updated:** 2026-07-21
 > **For local dev setup instead, see:** [../../README.md](../../README.md)
 
 Production stack: **nginx → gunicorn → Django**, with **PostgreSQL**, run via
