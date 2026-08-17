@@ -48,6 +48,34 @@ PROTECTED_TRIAGE_STATUSES = (
 )
 
 
+def delete_unlinked_batch(alert_ids):
+    """Delete the given alerts, re-checking every exclusion at delete time.
+
+    Gathering ids and then deleting by primary key alone leaves a window in
+    which an analyst can attach one of those alerts to a ticket as a supporting
+    alert. TicketAlertLink.alert cascades, so the delete would then destroy the
+    link they had just made, with no error and nothing in the log.
+
+    Re-applying the filters here puts the exclusions in the delete's own WHERE
+    clause, so an alert that stopped being eligible between selection and
+    deletion is skipped instead of removed. Returns the number of alerts
+    actually deleted, which is what the caller must count — the batch size is
+    an upper bound, not a result.
+    """
+    _, per_model = (
+        WazuhAlert.objects
+        .filter(pk__in=alert_ids)
+        .filter(
+            ticket__isnull=True,
+            ticket_alert_link__isnull=True,
+            project_incident__isnull=True,
+        )
+        .exclude(triage_status__in=PROTECTED_TRIAGE_STATUSES)
+        .delete()
+    )
+    return per_model.get('wazuh_ingest.WazuhAlert', 0)
+
+
 class Command(BaseCommand):
     help = (
         'Delete raw Wazuh alerts older than --days that were never linked to a '
@@ -123,8 +151,21 @@ class Command(BaseCommand):
             batch_ids = list(deletable.values_list('pk', flat=True)[:batch_size])
             if not batch_ids:
                 break
-            deleted, _ = WazuhAlert.objects.filter(pk__in=batch_ids).delete()
-            deleted_total += len(batch_ids)
+
+            removed = delete_unlinked_batch(batch_ids)
+            deleted_total += removed
+
+            if removed == 0:
+                # Every alert in this batch was linked or reopened between the
+                # select and the delete. Stopping guarantees the loop always
+                # terminates; whatever is still eligible is picked up by the
+                # next scheduled run, and retention is not time-critical.
+                logger.warning(
+                    'wazuh retention: %d alert(s) became protected between '
+                    'selection and deletion; stopping this run.',
+                    len(batch_ids),
+                )
+                break
 
         message = (
             f'Purged {deleted_total} Wazuh alert(s) older than {days} day(s); '

@@ -30,7 +30,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SourceUnc,
 
-    [string]$ArchiveDir     = 'D:\SOCBackup\archive',
+    # The spare VM has a single C: volume.
+    [string]$ArchiveDir     = 'C:\SOCBackup\archive',
     [string]$CredentialPath = 'C:\ProgramData\SOCBackup\prod-cred.xml',
     [string]$Prefix         = 'soc_ticket',
 

@@ -34,7 +34,8 @@ param(
     [string]$EnvPath          = 'C:\SOCTicket\app\.env',
     [string]$BackupRoot       = 'C:\SOCBackup\archive',
     [string]$Prefix           = 'soc_ticket',
-    [string]$GpgExe           = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe',
+    # Gpg4win 4.x/5.x is 64-bit and installs here, not under Program Files (x86).
+    [string]$GpgExe           = 'C:\Program Files\GnuPG\bin\gpg.exe',
     [string]$GpgHome          = 'C:\ProgramData\SOCBackup\gnupg',
 
     # Windows service that runs Waitress, so its definition can be recreated.

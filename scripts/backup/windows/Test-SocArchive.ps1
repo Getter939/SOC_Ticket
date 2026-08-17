@@ -25,7 +25,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ArchiveDir = 'D:\SOCBackup\archive',
+    # The spare VM has a single C: volume.
+    [string]$ArchiveDir = 'C:\SOCBackup\archive',
     [string]$Prefix     = 'soc_ticket',
 
     # tier = maximum age in hours. 26 allows one missed daily run plus slack.
@@ -34,7 +35,7 @@ param(
     [int]$MinFreePercent = 15,
 
     [switch]$CheckStandby,
-    [string]$PgBinPath        = 'C:\Program Files\PostgreSQL\16\bin',
+    [string]$PgBinPath        = 'C:\Program Files\PostgreSQL\18\bin',
     [int]   $StandbyPort      = 5433,
     [string]$StandbyUser      = 'postgres',
     [int]   $MaxReplayLagSec  = 300,

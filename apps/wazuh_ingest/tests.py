@@ -1151,3 +1151,34 @@ class PurgeWazuhAlertsTest(TestCase):
     def test_rejects_a_zero_day_window(self):
         with self.assertRaises(CommandError):
             call_command('purge_wazuh_alerts', '--days', '0', stdout=StringIO())
+
+    def test_delete_batch_rechecks_exclusions_at_delete_time(self):
+        """An alert linked after its id was gathered must survive the delete.
+
+        Selecting eligible ids and then deleting by primary key alone leaves a
+        window in which an analyst can attach one of those alerts to a ticket.
+        TicketAlertLink.alert cascades, so a delete that skipped the re-check
+        would destroy that link silently — the exact loss this command exists
+        to prevent.
+        """
+        from apps.incidents.models import TicketAlertLink
+        from apps.wazuh_ingest.management.commands.purge_wazuh_alerts import (
+            delete_unlinked_batch,
+        )
+
+        safe = self._aged_alert('race-safe')
+        raced = self._aged_alert('race-linked')
+        batch = [safe.pk, raced.pk]   # both eligible when the ids were gathered
+
+        # ... then an analyst attaches one of them to a ticket.
+        ticket = self._ticket('RACE-HOST')
+        TicketAlertLink.objects.create(
+            ticket=ticket, alert=raced, role=TicketAlertLink.ROLE_SUPPORTING,
+        )
+
+        removed = delete_unlinked_batch(batch)
+
+        self.assertEqual(removed, 1)
+        self.assertFalse(WazuhAlert.objects.filter(pk=safe.pk).exists())
+        self.assertTrue(WazuhAlert.objects.filter(pk=raced.pk).exists())
+        self.assertTrue(TicketAlertLink.objects.filter(alert=raced).exists())

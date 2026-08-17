@@ -24,18 +24,23 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ArchiveDir = 'D:\SOCBackup\archive',
+    # The spare VM has a single C: volume; production writes archives to
+    # C:\SOCBackup\archive and the pull copies them to the same path here.
+    [string]$ArchiveDir = 'C:\SOCBackup\archive',
 
     # Defaults to the newest archive present.
     [string]$ArchivePath,
 
-    [string]$PgBinPath  = 'C:\Program Files\PostgreSQL\16\bin',
+    # Must be the same major version as production (18) — a dump taken by
+    # pg_dump 18 will not restore under an older pg_restore.
+    [string]$PgBinPath  = 'C:\Program Files\PostgreSQL\18\bin',
     [string]$VerifyHost = 'localhost',
     [int]   $VerifyPort = 5434,
     [string]$VerifyUser = 'postgres',
     [string]$RestoreDb  = 'ticketdata_restoretest',
 
-    [string]$GpgExe         = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe',
+    # Gpg4win 4.x/5.x is 64-bit and installs here, not under Program Files (x86).
+    [string]$GpgExe         = 'C:\Program Files\GnuPG\bin\gpg.exe',
     [string]$GpgHome        = 'C:\ProgramData\SOCBackup\gnupg',
     [string]$PassphraseFile = 'C:\ProgramData\SOCBackup\gpg-pass.txt',
 

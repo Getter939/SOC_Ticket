@@ -21,7 +21,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ArchiveDir = 'D:\SOCBackup\archive',
+    # The spare VM has a single C: volume.
+    [string]$ArchiveDir = 'C:\SOCBackup\archive',
     [string]$Prefix     = 'soc_ticket',
 
     [int]$RetentionHourlyDays  = 7,

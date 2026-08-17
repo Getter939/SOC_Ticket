@@ -37,15 +37,21 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$GpgRecipient,
 
-    [string]$PgBinPath   = 'C:\Program Files\PostgreSQL\16\bin',
-    [string]$DbName      = 'ticketdata',
-    [string]$DbUser      = 'ticket',
+    # Defaults match the deployed production VM (see
+    # docs/operations/production-deployment.windows.md). The database was
+    # created as ticketdata_prod / ticket_prod, not the canonical names in the
+    # runbook table, and PostgreSQL is 18 — override only if that changes.
+    [string]$PgBinPath   = 'C:\Program Files\PostgreSQL\18\bin',
+    [string]$DbName      = 'ticketdata_prod',
+    # Read-only role used for backups only. See handbook Phase 1.3.
+    [string]$DbUser      = 'soc_backup',
     [string]$DbHost      = 'localhost',
     [int]   $DbPort      = 5432,
     [string]$MediaRoot   = 'C:\SOCTicket\app\media',
     [string]$BackupRoot  = 'C:\SOCBackup\archive',
     [string]$Prefix      = 'soc_ticket',
-    [string]$GpgExe      = 'C:\Program Files (x86)\GnuPG\bin\gpg.exe',
+    # Gpg4win 4.x/5.x is 64-bit and installs here, not under Program Files (x86).
+    [string]$GpgExe      = 'C:\Program Files\GnuPG\bin\gpg.exe',
     [string]$GpgHome     = 'C:\ProgramData\SOCBackup\gnupg',
     [string]$AppVersion  = 'unknown',
 
