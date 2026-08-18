@@ -26,10 +26,14 @@
     %APPDATA%\postgresql\pgpass.conf does not exist and cannot simply be created
     by hand -- Windows would later build a second profile alongside it and
     %APPDATA% would resolve elsewhere. The deployed setup therefore keeps the
-    file outside any profile and points libpq at it with a machine-level
-    environment variable:
-        PGPASSFILE = C:\ProgramData\SOCBackup\pgpass.conf
-    Write it as ASCII with no BOM; libpq will not parse a byte-order mark.
+    file outside any profile, at C:\ProgramData\SOCBackup\pgpass.conf, and this
+    script exports PGPASSFILE itself from the -PgPassFile parameter. Do not rely
+    on a machine-level PGPASSFILE variable instead: the Task Scheduler service
+    caches its environment at service start, so a variable added later is
+    invisible to tasks until reboot, and libpq then prompts on stdin -- which
+    makes a scheduled backup hang indefinitely rather than fail.
+
+    Write the file as ASCII with no BOM; libpq will not parse a byte-order mark.
 
 .EXAMPLE
     .\New-SocBackup.ps1 -Tier daily -GpgRecipient soc-backup@nt.local
@@ -55,6 +59,12 @@ param(
     [string]$DbUser      = 'soc_backup',
     [string]$DbHost      = 'localhost',
     [int]   $DbPort      = 5432,
+    # Set explicitly rather than relying on the machine PGPASSFILE variable:
+    # the Task Scheduler service reads its environment block at service start,
+    # so a variable added afterwards is invisible to tasks until the next
+    # reboot. Without it libpq prompts on stdin and the task hangs forever
+    # instead of failing.
+    [string]$PgPassFile  = 'C:\ProgramData\SOCBackup\pgpass.conf',
     [string]$MediaRoot   = 'C:\SOCTicket\app\media',
     [string]$BackupRoot  = 'C:\SOCBackup\archive',
     [string]$Prefix      = 'soc_ticket',
@@ -107,6 +117,7 @@ $env:PGHOST     = $DbHost
 $env:PGPORT     = "$DbPort"
 $env:PGDATABASE = $DbName
 $env:PGUSER     = $DbUser
+$env:PGPASSFILE = $PgPassFile
 $env:GNUPGHOME  = $GpgHome
 
 # Single-instance guard: a second run while the first is mid-dump would produce
