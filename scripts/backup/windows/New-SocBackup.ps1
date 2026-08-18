@@ -18,10 +18,18 @@
     compromised production host cannot decrypt its own backups, and no
     passphrase ever appears on a command line or in a config file.
 
-    The database password is NOT taken as a parameter. Create a pgpass file for
-    the account that runs this script:
-        %APPDATA%\postgresql\pgpass.conf
+    The database password is NOT taken as a parameter. Authentication comes from
+    a pgpass file holding one line:
         <host>:<port>:<database>:<user>:<password>
+
+    A service account that has never logged on has no profile, so
+    %APPDATA%\postgresql\pgpass.conf does not exist and cannot simply be created
+    by hand -- Windows would later build a second profile alongside it and
+    %APPDATA% would resolve elsewhere. The deployed setup therefore keeps the
+    file outside any profile and points libpq at it with a machine-level
+    environment variable:
+        PGPASSFILE = C:\ProgramData\SOCBackup\pgpass.conf
+    Write it as ASCII with no BOM; libpq will not parse a byte-order mark.
 
 .EXAMPLE
     .\New-SocBackup.ps1 -Tier daily -GpgRecipient soc-backup@nt.local
@@ -123,7 +131,15 @@ try {
     New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 
     Write-Host "backup: dumping $DbName from $DbHost"
-    & $pgDump --format=custom --no-owner --no-acl --file=(Join-Path $packageDir 'database.dump')
+    # --file and its value are passed as two separate arguments on purpose.
+    # PowerShell does not evaluate `--file=(Join-Path ...)` as an expression; it
+    # hands the path to pg_dump as a POSITIONAL argument, which pg_dump reads as
+    # the database name. That fails with 'database "C:\SOCBackup\....staging"
+    # does not exist' (truncated to 63 chars) and, because PGDATABASE is
+    # effectively overridden, also breaks pgpass matching so it prompts for a
+    # password. Do not collapse these back into one token.
+    $dumpPath = Join-Path $packageDir 'database.dump'
+    & $pgDump --format=custom --no-owner --no-acl --file $dumpPath
     if ($LASTEXITCODE -ne 0) { throw "pg_dump failed with exit code $LASTEXITCODE." }
 
     Write-Host "backup: archiving media from $MediaRoot"
