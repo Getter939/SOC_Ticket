@@ -8,5 +8,5 @@ Usage: {% include 'incidents/_status_badge.html' with ticket=ticket %}
 Pass hide_emergency=True where the caller renders its own emergency flag (e.g.
 the ticket-detail hero, whose red gradient needs a light badge instead).
 {% endcomment %}
-<span class="badge rounded-pill" style="{{ ticket.status_pill_css }}">{{ ticket.get_status_display }}</span>
-{% if ticket.is_emergency and not hide_emergency %}<span class="badge rounded-pill bg-danger ms-1">EMERGENCY</span>{% endif %}
+<span class="status-label" style="{{ ticket.status_pill_soft_css }}">{{ ticket.get_status_display }}</span>
+{% if ticket.is_emergency and not hide_emergency %}<span class="signal-badge signal-danger ms-1">EMERGENCY</span>{% endif %}

@@ -16,8 +16,8 @@
 </style>
 <div class="page-header">
     <div>
-        <h1 class="page-header__title"><i class="bi bi-shield-shaded me-2"></i>งานตอบสนอง <span class="text-muted fw-normal">(Response Requests)</span></h1>
-        <p class="page-header__subtitle">{% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA/PT และ Infra Security ที่มอบหมายให้คุณ{% endif %}</p>
+        <h1 class="page-header__title"><i class="bi bi-shield-shaded me-2"></i>งานตอบสนอง</h1>
+        <p class="page-header__subtitle">Response Requests · {% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA/PT และ Infra Security ที่มอบหมายให้คุณ{% endif %}</p>
     </div>
     <div class="page-header__actions"><span class="badge bg-info text-dark" style="font-size:.85rem;">{{ open_count }} ยังไม่เสร็จ</span></div>
 </div>
@@ -59,7 +59,7 @@
                         <td>{% if req.created_by %}{{ req.created_by.get_full_name|default:req.created_by.username }}{% else %}-{% endif %}</td>
                         <td>{{ req.created_at|date:"d/m/Y" }}</td>
                         <td><span class="req-status {% if req.is_done %}bg-success text-white{% else %}bg-light text-dark border{% endif %}">{{ req.get_status_display }}</span></td>
-                        <td class="cell-actions"><a href="{% url 'ticket_detail' req.ticket.id %}#tasks" class="btn btn-sm btn-outline-dark">เปิดงาน</a></td>
+                        <td class="cell-actions"><a href="{% url 'ticket_detail' req.ticket.id %}#tasks" class="btn btn-sm btn-outline-secondary">เปิดคำขอ</a></td>
                     </tr>
                     {% empty %}
                     <tr><td colspan="{% if is_overview %}8{% else %}7{% endif %}">{% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่ตรงกับสถานะที่เลือก' %}</td></tr>

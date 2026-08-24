@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}My Queue — SOC Support System{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1 class="page-header__title"><i class="bi bi-inbox-fill me-2"></i>คิวงานของฉัน <span class="text-muted fw-normal">(My Queue)</span></h1><p class="page-header__subtitle">งานที่รอ Tier 1 ดำเนินการ — รายการรับแจ้งด้วยตนเอง และ Ticket ที่อยู่ในความรับผิดชอบของคุณ</p></div><div class="page-header__actions"><a class="btn btn-dark" href="{% url 'create_triage' %}"><i class="bi bi-plus-lg me-1"></i>เพิ่มรายการรับแจ้ง</a></div></div>
+<div class="page-header"><div><h1 class="page-header__title"><i class="bi bi-inbox-fill me-2"></i>คิวงานของฉัน</h1><p class="page-header__subtitle">My Queue · งานที่รอ Tier 1 ดำเนินการ รายการรับแจ้งด้วยตนเอง และ Ticket ที่อยู่ในความรับผิดชอบของคุณ</p></div><div class="page-header__actions"><a class="btn btn-dark" href="{% url 'create_triage' %}">เพิ่มรายการรับแจ้ง</a></div></div>
 
 {% if returned_count %}
 <div class="alert alert-info d-flex align-items-center mb-3 py-2" role="alert">
@@ -23,7 +23,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     <button class="nav-link {% if active_tab == 'tickets' %}active{% endif %}" id="tab-btn-tickets"
             data-bs-toggle="tab" data-bs-target="#tab-tickets" type="button" role="tab"
             aria-controls="tab-tickets" aria-selected="{% if active_tab == 'tickets' %}true{% else %}false{% endif %}">
-      <i class="bi bi-shield-exclamation me-1"></i>Ticket ของฉัน
+      Ticket ของฉัน
       {% if my_tickets_total %}<span class="badge rounded-pill bg-primary ms-1">{{ my_tickets_total }}</span>{% endif %}
     </button>
   </li>
@@ -31,7 +31,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     <button class="nav-link {% if active_tab == 'manual' %}active{% endif %}" id="tab-btn-manual"
             data-bs-toggle="tab" data-bs-target="#tab-manual" type="button" role="tab"
             aria-controls="tab-manual" aria-selected="{% if active_tab == 'manual' %}true{% else %}false{% endif %}">
-      <i class="bi bi-clipboard2-pulse me-1"></i>รับแจ้งด้วยตนเอง
+      รับแจ้งด้วยตนเอง
       {% if manual_queue_count %}<span class="badge rounded-pill bg-danger ms-1">{{ manual_queue_count }}</span>{% endif %}
     </button>
   </li>
@@ -39,7 +39,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     <button class="nav-link {% if active_tab == 'history' %}active{% endif %}" id="tab-btn-history"
             data-bs-toggle="tab" data-bs-target="#tab-history" type="button" role="tab"
             aria-controls="tab-history" aria-selected="{% if active_tab == 'history' %}true{% else %}false{% endif %}">
-      <i class="bi bi-clock-history me-1"></i>ที่ฉันดำเนินการล่าสุด
+      ที่ฉันดำเนินการล่าสุด
       {% if manual_history_count %}<span class="badge rounded-pill bg-secondary ms-1">{{ manual_history_count }}</span>{% endif %}
     </button>
   </li>
@@ -56,7 +56,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     {# (see Ticket.status_changed_at). Labelling it "last updated" made an        #}
     {# actively-worked case look stale.                                           #}
     <thead class="table-light"><tr><th>Ticket</th><th>สถานะ</th><th>ความรุนแรง</th><th>OLA</th><th>ระบบ / บริการ</th><th>สถานะเปลี่ยนเมื่อ</th><th class="text-end"><span class="visually-hidden">Actions</span></th></tr></thead>
-    <tbody>{% for ticket in my_tickets %}<tr class="clickable-row {% if ticket.is_emergency %}table-danger{% endif %}"
+    <tbody>{% for ticket in my_tickets %}<tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}"
       data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
       <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
@@ -64,7 +64,7 @@ stays above the tabs so the most urgent signal shows on every tab.
       <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
       <td><div class="cell-primary">{{ ticket.device_name|default:"-" }}</div><div class="cell-secondary">{{ ticket.issue_description|truncatechars:70 }}</div></td>
       <td class="cell-secondary text-nowrap" title="{{ ticket.status_changed_at|date:'d/m/Y H:i' }}">{{ ticket.status_changed_at|timesince }} ที่แล้ว</td>
-      <td class="cell-actions"><a class="btn btn-sm btn-primary" href="{% url 'ticket_detail' ticket.pk %}">ดำเนินการ</a></td>
+      <td class="cell-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'ticket_detail' ticket.pk %}">เปิด Ticket</a></td>
     </tr>{% empty %}<tr><td colspan="7">{% include 'includes/_empty_state.html' with icon='bi-check-circle' title='ไม่มี Ticket ที่รอคุณดำเนินการ' description='งานที่อยู่ในความรับผิดชอบของคุณจะปรากฏในแท็บนี้โดยเรียงตาม OLA' %}</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>

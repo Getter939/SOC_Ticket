@@ -8,8 +8,8 @@ None means there is nothing to show: no deadline (Medium/Low are
 notification-only) or the work is already finished.
 {% endcomment %}
 {% if ola %}
-<span class="badge" style="background-color:{{ ola.bg }};color:{{ ola.fg }};"
+<span class="signal-badge" style="background-color:{{ ola.bg }};color:{{ ola.fg }};"
       title="กำหนด {{ ola.deadline|date:'d/m/Y H:i' }}">
-  {% if ola.overdue %}<i class="bi bi-exclamation-triangle-fill me-1"></i>{% endif %}{{ ola.label }}
+  {{ ola.label }}
 </span>
 {% else %}<span class="text-muted">-</span>{% endif %}

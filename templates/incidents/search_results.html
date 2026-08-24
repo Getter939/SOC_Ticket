@@ -60,7 +60,7 @@
                         <td class="text-truncate" style="max-width: 250px;">{{ ticket.issue_description }}</td>
                         <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
                         <td>{{ ticket.created_at|date:"d/m/Y" }}</td>
-                        <td class="cell-actions"><a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark">รายละเอียด</a></td>
+                        <td class="cell-actions"><a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-secondary">เปิด Ticket</a></td>
                     </tr>
                     {% empty %}
                     <tr>

@@ -3,15 +3,15 @@ Severity badge — colors match the severity pills on the ticket form.
 Usage: {% include 'incidents/_severity_badge.html' with severity=ticket.severity %}
 {% endcomment %}
 {% if severity == 'Critical' %}
-    <span class="badge bg-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>Critical</span>
+    <span class="signal-badge signal-critical">Critical</span>
 {% elif severity == 'High' %}
-    <span class="badge" style="background:#fd7e14;"><i class="bi bi-exclamation-triangle-fill me-1"></i>High</span>
+    <span class="signal-badge signal-high">High</span>
 {% elif severity == 'Medium' %}
-    <span class="badge bg-warning text-dark">Medium</span>
+    <span class="signal-badge signal-medium">Medium</span>
 {% elif severity == 'Low' %}
-    <span class="badge bg-success">Low</span>
+    <span class="signal-badge signal-low">Low</span>
 {% elif severity == 'Unknown' %}
-    <span class="badge" style="background:#6f42c1;"><i class="bi bi-question-circle-fill me-1"></i>Unknown</span>
+    <span class="signal-badge signal-neutral">Unknown</span>
 {% elif severity %}
-    <span class="badge bg-light text-dark border">{{ severity }}</span>
+    <span class="signal-badge signal-neutral">{{ severity }}</span>
 {% endif %}

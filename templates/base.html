@@ -150,7 +150,7 @@
             font-weight: 800;
             line-height: 1.2;
         }
-        .page-header__title i { color: #e63946; }
+        .page-header__title i { color: #667386; }
         .page-header__subtitle {
             margin: 0.3rem 0 0;
             color: #6c757d;
@@ -175,14 +175,42 @@
         .ops-card {
             background: var(--ui-surface);
             border: 1px solid var(--ui-border);
-            border-radius: var(--ui-radius-md);
-            box-shadow: var(--ui-shadow-sm);
+            border-radius: var(--ui-radius-sm);
+            box-shadow: none;
         }
         .filter-toolbar {
             background: var(--ui-surface);
             border: 1px solid var(--ui-border) !important;
-            border-radius: var(--ui-radius-md);
-            box-shadow: var(--ui-shadow-sm);
+            border-radius: var(--ui-radius-sm);
+            box-shadow: none;
+        }
+        .signal-badge {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: .18rem .45rem;
+            font-size: .68rem;
+            font-weight: 750;
+            line-height: 1.25;
+            white-space: nowrap;
+        }
+        .signal-critical { color: #a61b2b; background: #fff1f2; border-color: #f3b7bf; }
+        .signal-high { color: #a34a0a; background: #fff6ed; border-color: #f6c79f; }
+        .signal-medium { color: #765a00; background: #fff9db; border-color: #ead98a; }
+        .signal-low { color: #17643f; background: #edf9f2; border-color: #b9dfc9; }
+        .signal-neutral { color: #526071; background: #f5f7f9; border-color: #dce2e9; }
+        .signal-danger { color: #a61b2b; background: #fff1f2; border-color: #f3b7bf; }
+        .status-label {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            padding: .18rem .5rem;
+            font-size: .68rem;
+            font-weight: 700;
+            line-height: 1.25;
+            white-space: nowrap;
         }
         .operational-table {
             margin-bottom: 0;
@@ -214,6 +242,7 @@
             white-space: nowrap;
         }
         .operational-table .cell-actions { white-space: nowrap; text-align: right; }
+        .operational-table tr.is-emergency > td:first-child { box-shadow: inset 3px 0 0 #c82f41; }
         .clickable-row { cursor: pointer; }
         .clickable-row:hover > td { background-color: #f7faff; }
         .clickable-row:focus { outline: 2px solid var(--ui-primary); outline-offset: -2px; }
@@ -315,7 +344,7 @@
         body.no-sidebar #main-content { margin-left: 0; }
 
         /* ── Cards & misc ── */
-        .card { border-radius: 10px; }
+        .card { border-radius: var(--ui-radius-sm); }
         .table thead th { font-size: 0.78rem; font-weight: 700; letter-spacing: .03em; }
         .table thead.thead-brand th { background: var(--sidebar-bg); color: #fff; }
         .font-monospace { font-family: "Cascadia Code", "Courier New", monospace; }

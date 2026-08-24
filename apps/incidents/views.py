@@ -684,9 +684,9 @@ def ticket_list(request):
     return _render_ticket_list(
         request,
         visible,
-        page_title='Active Incidents',
-        heading='Active incidents',
-        description='Monitor every open case you are permitted to view.',
+        page_title='Ticket ที่กำลังดำเนินการ',
+        heading='Ticket ที่กำลังดำเนินการ',
+        description='ติดตามเคสเปิดทั้งหมดที่อยู่ในขอบเขตสิทธิ์ของคุณ',
     )
 
 
@@ -703,9 +703,9 @@ def manager_queue(request):
     return _render_ticket_list(
         request,
         visible,
-        page_title='Manager Reviews',
-        heading='Manager reviews',
-        description='Cases waiting for your routing decision or emergency approval.',
+        page_title='รายการรอตรวจโดยผู้จัดการ SOC',
+        heading='รายการรอตรวจโดยผู้จัดการ SOC',
+        description='เคสที่รอการเลือกเส้นทางหรือการอนุมัติสถานะฉุกเฉิน',
         is_manager_queue=True,
     )
 

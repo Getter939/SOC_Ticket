@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ page_title|default:"Active Incidents" }} — SOC Support System{% endblock %}
+{% block title %}{{ page_title|default:"Ticket ที่กำลังดำเนินการ" }} — SOC Support System{% endblock %}
 
 {% block content %}
 <style>
@@ -31,10 +31,10 @@
 </style>
 <div class="page-header">
     <div>
-        <h1 class="page-header__title"><i class="bi bi-ticket-perforated me-2"></i>{{ heading|default:"Active incidents" }}</h1>
+        <h1 class="page-header__title"><i class="bi bi-ticket-perforated me-2"></i>{{ heading|default:"Ticket ที่กำลังดำเนินการ" }}</h1>
         {% if description %}<p class="page-header__subtitle">{{ description }}</p>{% endif %}
     </div>
-    <span class="page-header__meta">{{ result_count }} cases</span>
+    <span class="page-header__meta">{{ result_count }} เคส</span>
 </div>
 
 {% if ola_breach_count %}
@@ -149,7 +149,7 @@
                         <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
                         {% endif %}
                         {% if ticket.is_emergency %}
-                        <div class="mt-1"><span class="emg-flag"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>EMERGENCY</span></div>
+                        <div class="mt-1"><span class="emg-flag">EMERGENCY</span></div>
                         {% endif %}
                         {% if show_returned_to_admin_indicator and ticket.status == 'AWAITING_CONTAINMENT' and ticket.is_returned_to_admin %}
                         <div class="mt-1"><span class="badge text-dark border border-warning-subtle" style="background:#fff3cd;"><i class="bi bi-arrow-return-left me-1" aria-hidden="true"></i>Tier 2 ส่งกลับ</span></div>
@@ -190,7 +190,7 @@
                         {% endif %}
                     </td>
                     <td class="pe-3 cell-actions">
-                        <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3 text-nowrap">ดูรายละเอียด</a>
+                        <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-secondary px-3 text-nowrap">เปิด Ticket</a>
                     </td>
                 </tr>
                 {% empty %}
