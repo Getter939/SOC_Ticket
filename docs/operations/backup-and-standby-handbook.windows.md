@@ -47,8 +47,129 @@ proceed with an estimate and re-check after go-live.
    Windows**. Those documents and `scripts/backup/*.sh`,
    `docker-compose.backupvm.yml` do **not** apply here. This handbook and
    `scripts/backup/windows/*.ps1` replace them for this deployment.
-2. Nothing is currently backing up production. Until Phase 1 is finished, a
-   single bad migration is unrecoverable.
+2. ~~Nothing is currently backing up production.~~ **Superseded 2026-08-24:**
+   Phases 1 and 2 are built. Production takes an encrypted archive nightly and
+   the spare pulls hourly. What is still unproven is the **restore** - see
+   Phase 2.6. Until a restore drill passes, treat these as archives, not
+   backups.
+
+### Field notes from the first build (2026-08-24)
+
+Everything below was learned the hard way while building this deployment. None
+of it is theoretical.
+
+**Deployed deviations - the script defaults were wrong for this environment and
+have been corrected in-repo. Verify them before trusting any command here:**
+
+| Reality | Script default was |
+|---|---|
+| Database `ticketdata_prod`, role `ticket_prod` | `ticketdata` / `ticket` |
+| PostgreSQL **18** | 16 |
+| `C:\Program Files\GnuPG\bin\gpg.exe` (Gpg4win 5.x is 64-bit) | the `(x86)` path |
+| Spare has one **C:** volume | `D:\SOCBackup\archive` |
+
+**The production hostname ends in a hyphen** (`EXT-TGOO-02924-`), which violates
+RFC 1123 and breaks name resolution. Every cross-host setting - `-SourceUnc`,
+the SMB firewall scope, `primary_conninfo` - must use the IP address, not the
+name. A UNC path by name fails with "the network name cannot be found", which
+looks like a firewall problem and is not.
+
+**The database collation is `Thai_Thailand.874` with UTF8 encoding.** The
+restore-verification instance must match it exactly, and its database must be
+created with `TEMPLATE=template0` - you cannot specify a different collation
+while cloning `template1`. This also makes the dump **Windows-only**:
+`Thai_Thailand.874` does not exist on Linux PostgreSQL. Confirm collation with
+`SELECT datcollate FROM pg_database WHERE datname = ...`; the `lc_collate`
+server GUC was removed in PostgreSQL 16 and querying it errors.
+
+#### Task Scheduler - five ways a task silently does nothing
+
+1. **`Log on as a batch job`** is not granted to a plain local account by
+   default. Without it the task reports `267011` (`0x41303`, "has not run")
+   forever. Creation succeeds, state shows `Ready`, nothing runs.
+2. **`schtasks /ru` without `/rp`** creates a *run only when user is logged on*
+   task. A service account never has a session, so it never runs. Fix with
+   `Set-ScheduledTask -User -Password` and confirm `LogonType` reads
+   **`Password`**.
+3. **`schtasks /create /f` on an existing task resets `LogonType`** back to
+   interactive. Any step that recreates a task must re-apply the principal
+   immediately afterwards. This caused two separate false starts.
+4. **Enable the operational log first** - it is off by default, which is why
+   these failures are silent:
+   `wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true`.
+   Event **332** names the logon-type problem directly.
+5. **Set an `ExecutionTimeLimit`.** With `MultipleInstances: IgnoreNew`, one
+   stuck run blocks every subsequent run indefinitely.
+
+A service account's **first logon builds its Windows profile**, which can take
+minutes. A task that appears hung on its first run may simply be slow.
+
+#### icacls - how to empty a DACL by accident
+
+- **Never use backtick line continuations.** If one breaks, PowerShell runs
+  `icacls <path> /inheritance:r` alone - stripping every ACE and granting
+  nothing. The result is an **empty DACL**: no access for anyone, propagated to
+  every child, with even an elevated Administrator locked out. This happened
+  once and took the application offline.
+- **One target per command, on one line.** Grants before `/inheritance:r`.
+  Read the listing after each. *A listing that prints the path and no ACE lines
+  is an empty DACL - stop immediately.*
+- **`icacls` prints "Successfully processed 1 files" either way.** Its exit
+  message proves nothing.
+- **`/remove:g` cannot remove an inherited ACE.** It reports success and the ACE
+  stays. Removing inherited `BUILTIN\Users` requires `/inheritance:r`.
+- Recovery is `icacls <path> /reset /T /C /Q`. Only run it if the service
+  *actually* fails - running it after a successful change silently undoes the
+  hardening.
+- **Share permissions and NTFS permissions are separate gates.** `svc_socpull`
+  had share-level read and no NTFS grant; the connection authenticated and then
+  denied every file. Grant both.
+
+#### Credentials
+
+- **A profile-less service account has no `%APPDATA%`**, so the documented
+  `pgpass.conf` location cannot exist. Do not create `C:\Users\<account>` by
+  hand - Windows later builds a *second* profile alongside it and `%APPDATA%`
+  resolves elsewhere. Use `PGPASSFILE` pointing outside any profile;
+  `New-SocBackup.ps1` now exports it itself from `-PgPassFile`.
+- **Write `pgpass.conf` as ASCII with no BOM.** PowerShell's
+  `Set-Content -Encoding utf8` writes a BOM and libpq will not parse it. The
+  same trap applies to `.env`: a BOM makes the first key unreadable and Django
+  fails to start with `UndefinedValueError` on `SECRET_KEY`.
+- **`Set-LocalUser` changes a password but does not clear a lockout.**
+- **A locked account rejects every password** with "the specified network
+  password is not correct" - indistinguishable from a wrong password. Check
+  `([ADSI]"WinNT://./<user>,user").IsAccountLocked` *before* concluding the
+  password is wrong. An hourly task holding a bad credential will re-lock the
+  account faster than you can debug it: disable the task first.
+- **A `\password` in a pasted psql block eats the next two lines** as the
+  password and its confirmation. A `GRANT pg_read_all_data` vanished this way
+  with no error, and `pg_dump` then failed on
+  `LOCK TABLE ... permission denied`. Run privilege statements one at a time.
+- **RDP clipboard does not reliably carry text between nested sessions.**
+  Transferring a generated password by copy-paste failed repeatedly and
+  silently. Use a passphrase you can type on both machines, and verify it with
+  a SHA-256 fingerprint *before* spending an authentication attempt - hashing
+  costs nothing and cannot lock an account.
+
+#### These scripts had never been run before this build
+
+Two real bugs were found in `New-SocBackup.ps1`:
+
+- `--file=(Join-Path ...)` - PowerShell does not evaluate a parenthesised
+  expression glued to an argument token. The path was passed as a **positional**
+  argument, which `pg_dump` read as the *database name*, failing with
+  `database "C:\SOCBackup\...staging" does not exist` (truncated at
+  PostgreSQL's 63-character identifier limit). That line could never have
+  produced an archive.
+- The script now exports `PGPASSFILE` itself rather than relying on a
+  machine-level environment variable, which the Task Scheduler service does not
+  see until it restarts.
+
+Assume the remaining scripts are equally unexercised. Run each one manually and
+interactively before scheduling it.
+
+---
 
 ### What this gives you, and what it does not
 

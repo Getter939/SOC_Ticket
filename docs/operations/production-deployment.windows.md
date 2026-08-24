@@ -1,6 +1,6 @@
 # Production Deployment — Windows Server
 
-> **Audience:** whoever builds the production VM · **Status:** Current · **Last updated:** 2026-07-27
+> **Audience:** whoever builds the production VM · **Status:** Current · **Last updated:** 2026-08-24
 > **Applies to:** Windows Server + native PostgreSQL + Waitress + IIS — **the actual production platform**
 > **Supersedes** [production-deployment.md](production-deployment.md) (Docker/nginx/gunicorn — Linux only)
 
@@ -65,6 +65,31 @@ remember to pass as a parameter later.
 > A restore drill that silently targets the wrong database name is the worst
 > possible place to discover this. Either standardise the parameter defaults or
 > keep this note in front of whoever runs Phase 3.
+
+---
+
+## Build status — 2026-08-24
+
+This runbook has been **executed end to end** on the production VM. Every stage
+below is complete and verified: Waitress serves on `127.0.0.1:8000` behind IIS
+on `127.0.0.1:80`, ACLs are hardened, the firewall is closed, and the VM has
+survived a full reboot with both services returning unaided.
+
+The text below has been corrected against what actually happened. The Stage 2.2
+warning about all-users Python and the Stage 3 `icacls` rules in particular were
+written after those exact mistakes cost days — do not treat them as optional
+advice.
+
+**Where the work continues:** recovery is in progress in
+[backup-and-standby-handbook.windows.md](backup-and-standby-handbook.windows.md).
+Its *Field notes from the first build* section carries the Task Scheduler,
+credential and lockout traps found while building the backup chain. Read that
+before scheduling anything.
+
+Deployed deviations worth knowing before you use any command in either
+document: the database is **`ticketdata_prod` / `ticket_prod`**, PostgreSQL is
+**18**, the collation is **`Thai_Thailand.874`** (Windows-only restore), and the
+production hostname **ends in a hyphen** so cross-host settings must use the IP.
 
 ---
 
