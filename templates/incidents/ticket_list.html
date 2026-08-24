@@ -29,12 +29,12 @@
     }
     .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+<div class="page-header">
     <div>
-        <h4 class="mb-0 fw-bold">{{ heading|default:"Active incidents" }}</h4>
-        {% if description %}<p class="text-muted small mb-0">{{ description }}</p>{% endif %}
+        <h1 class="page-header__title"><i class="bi bi-ticket-perforated me-2"></i>{{ heading|default:"Active incidents" }}</h1>
+        {% if description %}<p class="page-header__subtitle">{{ description }}</p>{% endif %}
     </div>
-    <span class="text-muted small">{{ result_count }} cases</span>
+    <span class="page-header__meta">{{ result_count }} cases</span>
 </div>
 
 {% if ola_breach_count %}
@@ -45,9 +45,9 @@
 {% endif %}
 
 {# ── Filter toolbar ── #}
-<div class="card border-0 shadow-sm mb-3">
+<div class="card filter-toolbar mb-3">
     <div class="card-body py-3">
-        <form method="GET" class="row g-2 align-items-end">
+        <form method="GET" class="row g-2 align-items-end js-submit-loading">
             <div class="col-md-3">
                 <label class="form-label small fw-bold mb-1">ค้นหา</label>
                 <div class="input-group input-group-sm">
@@ -114,10 +114,10 @@
     </div>
 </div>
 
-<div class="card border-0 shadow-sm">
+<div class="card ops-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 ticket-table">
-            <thead class="thead-brand">
+        <table class="table table-hover align-middle operational-table ticket-table">
+            <thead>
                 <tr>
                     <th class="ps-4">Ticket ID</th>
                     <th>เรื่องที่แจ้ง</th>
@@ -140,7 +140,9 @@
                 its containment deadline looked fine. The banner above and the
                 OLA sort/filter both measure the live contain deadline.
                 {% endcomment %}
-                <tr class="{% if ticket.is_emergency %}is-emergency{% elif ticket.is_ola_contain_breached %}is-breach{% endif %}">
+                <tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% elif ticket.is_ola_contain_breached %}is-breach{% endif %}"
+                    data-row-href="{% url 'ticket_detail' ticket.id %}" tabindex="0" role="link"
+                    aria-label="เปิด Ticket {{ ticket.ticket_id }}">
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
                         {% if ticket.project_incident_id %}
@@ -154,8 +156,8 @@
                         {% endif %}
                     </td>
                     <td>
-                        <div class="fw-semibold small">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
-                        <div class="text-muted" style="font-size:0.75rem;">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → {{ ticket.ip_address }}{% endif %}</div>
+                        <div class="cell-primary">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
+                        <div class="cell-secondary">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → <span class="cell-technical">{{ ticket.ip_address }}</span>{% endif %}</div>
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
                     <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
@@ -176,7 +178,7 @@
                             <span class="text-muted">ไม่ระบุ</span>
                         {% endif %}
                     </td>
-                    <td class="small text-muted">{{ ticket.created_at|date:"d/m/Y H:i" }}</td>
+                    <td class="cell-secondary text-nowrap" title="{{ ticket.created_at|date:'d/m/Y H:i' }}">{{ ticket.created_at|timesince }} ที่แล้ว</td>
                     <td>
                         {# Soft status pill (color from the model's status map). Emergency #}
                         {# is shown as its own flag by the Ticket ID, not here. #}
@@ -187,18 +189,18 @@
                         <div class="small text-warning-emphasis mt-1">แก้ไขมาตรการควบคุมและส่งตรวจอีกครั้ง</div>
                         {% endif %}
                     </td>
-                    <td class="pe-3">
+                    <td class="pe-3 cell-actions">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-dark px-3 text-nowrap">ดูรายละเอียด</a>
                     </td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="10" class="text-center py-5 text-muted">
-                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                        {% if search or status_filter or severity_filter or emergency_filter %}
-                            ไม่พบรายการที่ตรงกับเงื่อนไขการค้นหา
+                    <td colspan="10">
+                        {% if search or status_filter or severity_filter or emergency_filter or ola_filter %}
+                            {% url 'ticket_list' as empty_action_url %}
+                            {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบรายการที่ตรงกับตัวกรอง' description='ลองปรับเงื่อนไขการค้นหา หรือล้างตัวกรองเพื่อดูเคสทั้งหมดที่คุณเข้าถึงได้' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
                         {% else %}
-                            ไม่มีรายการแจ้งเหตุที่รอดำเนินการ
+                            {% include 'includes/_empty_state.html' with icon='bi-check-circle' title='ไม่มีรายการแจ้งเหตุที่รอดำเนินการ' description='คิวนี้ไม่มีเคสเปิดที่ตรงกับขอบเขตสิทธิ์ของคุณในขณะนี้' %}
                         {% endif %}
                     </td>
                 </tr>

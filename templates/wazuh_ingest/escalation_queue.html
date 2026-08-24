@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
 {% block title %}Tier 2 Queue — SOC Support System{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
-  <div><h4 class="mb-1 fw-bold"><i class="bi bi-arrow-up-circle-fill text-warning me-2"></i>Tier 2 Queue</h4><p class="text-muted small mb-0">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
-  <span class="badge bg-warning text-dark">{{ escalated_count }} tickets</span>
+<div class="page-header">
+  <div><h1 class="page-header__title"><i class="bi bi-arrow-up-circle-fill me-2"></i>Tier 2 Queue</h1><p class="page-header__subtitle">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
+  <div class="page-header__actions"><span class="badge bg-warning text-dark">{{ escalated_count }} tickets</span></div>
 </div>
 {% comment %}
 Pills, not dropdowns: with three low-cardinality scopes a select cost three
@@ -18,7 +18,7 @@ emergencies and every emergency row is tinted + badged, so an Emergency filter
 only restated the sort — while its "Normal only" value could hide an active
 emergency. Claim state is what the table cannot answer on its own.
 {% endcomment %}
-<div class="card border-0 shadow-sm mb-3"><div class="card-body py-3">
+<div class="card filter-toolbar mb-3"><div class="card-body py-3">
   <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
     <span class="small fw-bold text-muted" style="min-width:5.5rem;">ขั้นตอน</span>
     {% for facet in stage_facets %}
@@ -41,7 +41,7 @@ emergency. Claim state is what the table cannot answer on its own.
     {# Sort stays a select — four mutually exclusive options that gain nothing #}
     {# from counts. Auto-submits via the shared .js-autosubmit handler in      #}
     {# base.html, so there is no submit button anywhere on this page.          #}
-    <form method="get" class="d-flex align-items-center gap-2 ms-auto">
+    <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
       {% if stage_filter %}<input type="hidden" name="stage" value="{{ stage_filter }}">{% endif %}
       {% if claim_filter %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
       <label class="form-label small fw-bold mb-0" for="t2-sort">เรียงตาม</label>
@@ -57,13 +57,15 @@ emergency. Claim state is what the table cannot answer on its own.
   <div class="mt-2"><a href="{% url 'escalation_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a></div>
   {% endif %}
 </div></div>
-<div class="card border-0 shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+<div class="card ops-card"><div class="table-responsive"><table class="table table-hover align-middle operational-table">
   {# Emergency lost its own column: it rendered "-" on ~92% of rows to restate #}
   {# a signal the red row tint and the default sort already carry. The badge   #}
   {# moved into the Ticket cell, and Tier 1 into the system cell — together    #}
   {# ~200px back, which is what kept the table from fitting a 1280px laptop.   #}
   <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Severity</th><th>ระบบ / บริการ</th><th>OLA</th><th>รอมานาน</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
-  <tbody>{% for ticket in tickets %}<tr {% if ticket.is_emergency %}class="table-danger"{% endif %}>
+  <tbody>{% for ticket in tickets %}<tr class="clickable-row {% if ticket.is_emergency %}table-danger{% endif %}"
+      data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link"
+      aria-label="เปิด Ticket {{ ticket.ticket_id }}">
     <td>
       <a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a>
       {% if ticket.is_emergency %}<div class="mt-1"><span class="badge bg-danger">EMERGENCY</span></div>{% endif %}
@@ -78,9 +80,9 @@ emergency. Claim state is what the table cannot answer on its own.
     {# max-width, not column count, is what bounds an auto-layout table: the #}
     {# description's min-content width is otherwise what sets the table's.   #}
     <td style="max-width:20rem;">
-      <div class="fw-semibold">{{ ticket.device_name }}</div>
-      <small class="text-muted">{{ ticket.issue_description|truncatechars:70 }}</small>
-      {% if ticket.created_by %}<div class="small text-muted"><i class="bi bi-person me-1"></i>Tier 1: {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</div>{% endif %}
+      <div class="cell-primary">{{ ticket.device_name }}</div>
+      <div class="cell-secondary">{{ ticket.issue_description|truncatechars:70 }}</div>
+      {% if ticket.created_by %}<div class="cell-secondary"><i class="bi bi-person me-1"></i>Tier 1: {{ ticket.created_by.get_full_name|default:ticket.created_by.username }}</div>{% endif %}
     </td>
     <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
     {# Relative, with the exact stamp on hover: this queue ages in weeks, and #}
@@ -89,7 +91,7 @@ emergency. Claim state is what the table cannot answer on its own.
     <td class="small">{% if ticket.t2_claimed_by %}{{ ticket.t2_claimed_by.get_full_name|default:ticket.t2_claimed_by.username }}<div class="text-muted">{{ ticket.t2_claimed_at|timesince }}</div>{% else %}<span class="text-muted">-</span>{% endif %}</td>
     {# Claim discipline mirrors the Tier 1 triage queue: take the ticket first, #}
     {# then act. Only the analyst holding the claim gets the Review button.     #}
-    <td class="text-end">
+    <td class="cell-actions">
       {% if not ticket.t2_claimed_by %}
       <form method="post" action="{% url 'claim_escalation' %}" class="d-inline">
         {% csrf_token %}<input type="hidden" name="ticket_id" value="{{ ticket.pk }}">
@@ -100,7 +102,14 @@ emergency. Claim state is what the table cannot answer on its own.
       <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseTicket{{ ticket.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว</button>
       {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
     </td>
-  </tr>{% empty %}<tr><td colspan="8" class="text-center text-muted py-5">{% if stage_filter or claim_filter %}ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก{% else %}ไม่มี Ticket ที่รอ Tier 2{% endif %}</td></tr>{% endfor %}</tbody>
+  </tr>{% empty %}<tr><td colspan="8">
+    {% if stage_filter or claim_filter %}
+      {% url 'escalation_queue' as empty_action_url %}
+      {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก' description='ลองเปลี่ยนขั้นตอนหรือสถานะการรับเรื่องเพื่อดูรายการอื่นในคิว' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
+    {% else %}
+      {% include 'includes/_empty_state.html' with icon='bi-check-circle' title='ไม่มี Ticket ที่รอ Tier 2' description='คิว Tier 2 ว่างอยู่ในขณะนี้ ไม่มีเคสที่รอรับหรือตรวจสอบ' %}
+    {% endif %}
+  </td></tr>{% endfor %}</tbody>
 </table></div></div>
 {% for ticket in tickets %}{% if ticket.t2_claimed_by_id == request.user.id %}
 <div class="modal fade" id="releaseTicket{{ ticket.pk }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">

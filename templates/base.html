@@ -19,6 +19,19 @@
             --sidebar-text: rgba(255,255,255,0.75);
             --sidebar-text-active: #fff;
             --sidebar-transition: 0.22s ease;
+            --ui-surface: #ffffff;
+            --ui-surface-subtle: #f7f8fa;
+            --ui-border: #e1e6ed;
+            --ui-text: #1f2d3d;
+            --ui-muted: #6c7888;
+            --ui-primary: #245ea8;
+            --ui-radius-sm: 6px;
+            --ui-radius-md: 10px;
+            --ui-shadow-sm: 0 .15rem .55rem rgba(20,33,61,.07);
+            --ui-space-1: .25rem;
+            --ui-space-2: .5rem;
+            --ui-space-3: .75rem;
+            --ui-space-4: 1rem;
         }
         body {
             background: #f4f6f9;
@@ -122,6 +135,144 @@
             transition: margin-left var(--sidebar-transition);
         }
 
+        /* ── Page headers ── */
+        .page-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .page-header__title {
+            margin: 0;
+            color: #1f2d3d;
+            font-size: clamp(1.3rem, 2vw, 1.65rem);
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .page-header__title i { color: #e63946; }
+        .page-header__subtitle {
+            margin: 0.3rem 0 0;
+            color: #6c757d;
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+        .page-header__meta {
+            color: #6c757d;
+            font-size: 0.76rem;
+            line-height: 1.4;
+            text-align: right;
+            white-space: nowrap;
+        }
+        .page-header__actions {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* ── Operational UI patterns ── */
+        .ops-card {
+            background: var(--ui-surface);
+            border: 1px solid var(--ui-border);
+            border-radius: var(--ui-radius-md);
+            box-shadow: var(--ui-shadow-sm);
+        }
+        .filter-toolbar {
+            background: var(--ui-surface);
+            border: 1px solid var(--ui-border) !important;
+            border-radius: var(--ui-radius-md);
+            box-shadow: var(--ui-shadow-sm);
+        }
+        .operational-table {
+            margin-bottom: 0;
+            color: var(--ui-text);
+            font-size: .82rem;
+        }
+        .operational-table > thead > tr > th {
+            background: var(--ui-surface-subtle);
+            border-bottom: 1px solid #d6dce5;
+            color: #526071;
+            font-size: .72rem;
+            font-weight: 800;
+            letter-spacing: .025em;
+            padding: .7rem .75rem;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .operational-table > tbody > tr > td {
+            border-color: #edf0f4;
+            padding: .7rem .75rem;
+            vertical-align: middle;
+        }
+        .operational-table > tbody > tr:last-child > td { border-bottom: 0; }
+        .operational-table .cell-primary { color: var(--ui-text); font-weight: 700; }
+        .operational-table .cell-secondary { color: var(--ui-muted); font-size: .74rem; line-height: 1.35; }
+        .operational-table .cell-technical {
+            font-family: "Cascadia Code", "Courier New", monospace;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .operational-table .cell-actions { white-space: nowrap; text-align: right; }
+        .clickable-row { cursor: pointer; }
+        .clickable-row:hover > td { background-color: #f7faff; }
+        .clickable-row:focus { outline: 2px solid var(--ui-primary); outline-offset: -2px; }
+        .clickable-row:focus:not(:focus-visible) { outline: 0; }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            max-width: 34rem;
+            min-height: 10rem;
+            margin: 0 auto;
+            padding: 1.5rem 1rem;
+            color: var(--ui-muted);
+            text-align: center;
+        }
+        .empty-state__icon {
+            display: grid;
+            width: 3rem;
+            height: 3rem;
+            margin-bottom: .65rem;
+            place-items: center;
+            border-radius: 50%;
+            background: #eef3f8;
+            color: #63758c;
+            font-size: 1.35rem;
+        }
+        .empty-state__title { color: #354356; font-size: .92rem; font-weight: 800; }
+        .empty-state__description { max-width: 30rem; margin: .25rem 0 0; font-size: .78rem; line-height: 1.55; }
+
+        .page-loading-indicator {
+            position: fixed;
+            top: var(--header-height);
+            left: 0;
+            right: 0;
+            z-index: 1100;
+            height: 3px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .12s ease;
+        }
+        .page-loading-indicator::after {
+            content: "";
+            display: block;
+            width: 35%;
+            height: 100%;
+            background: #2f80ed;
+            animation: page-loading 1s ease-in-out infinite;
+        }
+        .page-loading-indicator.is-active { opacity: 1; }
+        @keyframes page-loading {
+            from { transform: translateX(-110%); }
+            to { transform: translateX(390%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .page-loading-indicator::after { animation-duration: 2s; }
+        }
+
         /* ── Collapsed state (desktop) ── */
         body.sidebar-collapsed #sidebar {
             width: var(--sidebar-collapsed-width);
@@ -176,6 +327,8 @@
             #main-content { margin-left: 0 !important; }
             body.sidebar-collapsed #sidebar { transform: translateX(-100%); }
             body.sidebar-collapsed #sidebar.show { transform: translateX(0); width: var(--sidebar-width) !important; }
+            .page-header { align-items: stretch; flex-direction: column; }
+            .page-header__meta { text-align: left; white-space: normal; }
         }
     </style>
     {# Apply saved state before first paint to avoid flash #}
@@ -191,6 +344,8 @@
     </style>
 </head>
 <body{% if not user.is_authenticated %} class="no-sidebar"{% endif %}>
+
+<div class="page-loading-indicator" id="page-loading-indicator" role="status" aria-live="polite" aria-label="กำลังโหลด"></div>
 
 <!-- ── Topbar ── -->
 <div id="topbar">
@@ -415,7 +570,34 @@
     // inline `onchange="this.form.submit()"` handlers, which the CSP nonce
     // policy (no 'unsafe-inline' in script-src) refuses.
     document.querySelectorAll('.js-autosubmit').forEach((el) => {
-        el.addEventListener('change', function () { this.form?.submit(); });
+        el.addEventListener('change', function () {
+            document.getElementById('page-loading-indicator')?.classList.add('is-active');
+            this.form?.submit();
+        });
+    });
+
+    // Give server-rendered filters and workflow forms immediate progress
+    // feedback without changing their submit semantics.
+    document.querySelectorAll('.js-submit-loading').forEach((form) => {
+        form.addEventListener('submit', () => {
+            form.setAttribute('aria-busy', 'true');
+            document.getElementById('page-loading-indicator')?.classList.add('is-active');
+        });
+    });
+
+    // Rows opt in explicitly and retain their real links for accessibility.
+    document.querySelectorAll('[data-row-href]').forEach((row) => {
+        const navigate = () => {
+            document.getElementById('page-loading-indicator')?.classList.add('is-active');
+            window.location.href = row.dataset.rowHref;
+        };
+        row.addEventListener('click', (event) => {
+            if (event.target.closest('a, button, input, select, textarea, form, label')) return;
+            navigate();
+        });
+        row.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.target.closest('a, button, input, select, textarea')) navigate();
+        });
     });
 </script>
 </body>

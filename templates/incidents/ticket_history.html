@@ -33,15 +33,15 @@
   .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>
 <div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h4 class="mb-0 fw-bold"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket (อนุมัติแล้ว / ปิด)</h4>
-        <div>
+    <div class="page-header">
+        <div><h1 class="page-header__title"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket</h1><p class="page-header__subtitle">เคสที่อนุมัติหรือปิดแล้ว พร้อมผู้อนุมัติและผลการแก้ไขล่าสุด</p></div>
+        <div class="page-header__actions">
             <span class="badge bg-success" style="font-size:.85rem;">{{ approved_count }} อนุมัติแล้ว</span>
             <span class="badge bg-secondary" style="font-size:.85rem;">{{ event_count }} Event</span>
         </div>
     </div>
 
-    <div class="card shadow-sm mb-3">
+    <div class="card filter-toolbar mb-3">
         <div class="card-body bg-light">
             <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
@@ -49,7 +49,7 @@
                 <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
                 <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>
             </div>
-            <form method="GET" class="row g-3">
+            <form method="GET" class="row g-3 js-submit-loading">
                 {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                 <div class="col-md-3">
                     <label class="form-label small fw-bold">ค้นหาเลข Ticket</label>
@@ -104,10 +104,10 @@
         </div>
     </div>
 
-    <div class="card shadow-sm">
+    <div class="card ops-card">
         <div class="table-responsive">
-            <table class="table table-hover mb-0 ticket-table">
-                <thead class="thead-brand">
+            <table class="table table-hover operational-table ticket-table">
+                <thead>
                     <tr>
                         <th>เลข Ticket</th>
                         <th>ระบบ / บริการ</th>
@@ -122,9 +122,9 @@
                 </thead>
                 <tbody>
                     {% for ticket in tickets %}
-                    <tr class="{% if ticket.is_emergency %}is-emergency{% endif %}">
+                    <tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}" data-row-href="{% url 'ticket_detail' ticket.id %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
                         <td>
-                            <strong>{{ ticket.ticket_id }}</strong>
+                            <strong class="cell-technical">#{{ ticket.ticket_id }}</strong>
                             {% if ticket.project_incident_id %}
                             <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
                             {% endif %}
@@ -132,7 +132,7 @@
                             <div class="mt-1"><span class="emg-flag"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>EMERGENCY</span></div>
                             {% endif %}
                         </td>
-                        <td>{{ ticket.device_name }}</td>
+                        <td class="cell-primary">{{ ticket.device_name }}</td>
                         {% comment %}
                         text-truncate needs a block box — on a <td> under auto
                         table layout max-width is ignored and the full text
@@ -149,8 +149,8 @@
                                  {% if last_log %}title="{{ last_log.note }}"{% endif %}>{% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}</div>
                             {% endwith %}
                         </td>
-                        <td>{{ ticket.created_at|date:"d/m/Y" }}</td>
-                        <td>
+                        <td class="cell-secondary text-nowrap">{{ ticket.created_at|date:"d/m/Y" }}</td>
+                        <td class="cell-actions">
                             {# Soft status pill (color from the model's status map). Emergency #}
                             {# is shown as its own flag by the Ticket ID, not here. #}
                             <span class="status-soft" style="{{ ticket.status_pill_soft_css }}">
@@ -170,7 +170,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center py-5 text-muted">ไม่พบข้อมูล</td>
+                        <td colspan="9">{% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบข้อมูล' description='ไม่มี Ticket ที่ตรงกับผลลัพธ์ ช่วงเวลา หรือเงื่อนไขที่เลือก' %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

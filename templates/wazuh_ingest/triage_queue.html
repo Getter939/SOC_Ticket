@@ -3,12 +3,12 @@
 {% block title %}Wazuh Triage — SOC Support System{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+<div class="page-header">
   <div>
-    <h4 class="mb-1 fw-bold"><i class="bi bi-shield-fill-exclamation text-danger me-2"></i>Wazuh Triage</h4>
-    <p class="text-muted small mb-0">รับ Alert แล้วสร้าง Ticket เพื่อจัดประเภท Event/Incident และเลือกเส้นทางในหน้าถัดไป</p>
+    <h1 class="page-header__title"><i class="bi bi-shield-fill-exclamation me-2"></i>Wazuh Triage</h1>
+    <p class="page-header__subtitle">รับ Alert แล้วสร้าง Ticket เพื่อจัดประเภท Event/Incident และเลือกเส้นทางในหน้าถัดไป</p>
   </div>
-  <div class="d-flex align-items-center gap-2">
+  <div class="page-header__actions">
     <span class="badge bg-danger">{{ pending_count }} pending</span>
     <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-alert-bundle">
       <i class="bi bi-collection me-1"></i>รวม Alert ที่เกี่ยวข้อง
@@ -34,7 +34,7 @@ are the point — the rule-level distribution was previously unknowable without
 filtering three times. Thresholds are cumulative ("10+" contains "13+"), which
 is what the "+" in each label says.
 {% endcomment %}
-<div class="card border-0 shadow-sm mb-3"><div class="card-body py-3">
+<div class="card filter-toolbar mb-3"><div class="card-body py-3">
   <div class="d-flex flex-wrap align-items-center gap-2">
     <span class="small fw-bold text-muted" style="min-width:6.5rem;">Rule level</span>
     {% for facet in level_facets %}
@@ -44,7 +44,7 @@ is what the "+" in each label says.
       <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
     </a>
     {% endfor %}
-    <form method="get" class="d-flex align-items-center gap-2 ms-auto">
+    <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
       {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
       <label class="form-label small fw-bold mb-0" for="triage-sort">เรียงตาม</label>
       <select name="sort" id="triage-sort" class="form-select form-select-sm js-autosubmit" style="width:auto;">
@@ -58,23 +58,23 @@ is what the "+" in each label says.
   {% endif %}
 </div></div>
 
-<div class="card border-0 shadow-sm">
+<div class="card ops-card">
   <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
+    <table class="table table-hover align-middle operational-table">
       <thead class="table-light">
         <tr><th>เวลา</th><th>OLA</th><th>Agent</th><th>Level</th><th>Rule</th><th>สถานะ</th><th>ผู้รับผิดชอบ</th><th class="text-end">Actions</th></tr>
       </thead>
       <tbody>
         {% for alert in alerts %}
         <tr>
-          <td class="font-monospace small">{{ alert.timestamp|date:"Y-m-d H:i" }}</td>
+          <td class="cell-technical">{{ alert.timestamp|date:"Y-m-d H:i" }}</td>
           <td>{% include 'incidents/_ola_badge.html' with ola=alert.ola_badge %}</td>
           <td>{{ alert.agent_name|default:"-" }}</td>
           <td><span class="badge {% if alert.rule_level >= 13 %}bg-danger{% elif alert.rule_level >= 10 %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ alert.rule_level }}</span></td>
-          <td style="max-width:420px;">{{ alert.rule_description }}</td>
+          <td style="max-width:420px;"><div class="cell-primary">{{ alert.rule_description }}</div><div class="cell-secondary">Rule {{ alert.rule_id|default:"-" }}</div></td>
           <td>{{ alert.get_triage_status_display }}</td>
           <td>{% if alert.claimed_by %}{{ alert.claimed_by.get_full_name|default:alert.claimed_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
-          <td class="text-end">
+          <td class="cell-actions">
             {% if alert.triage_status == 'PENDING' %}
             <form method="post" action="{% url 'claim_alert' %}" class="d-inline">
               {% csrf_token %}<input type="hidden" name="alert_id" value="{{ alert.pk }}">
@@ -95,7 +95,9 @@ is what the "+" in each label says.
             {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
           </td>
         </tr>
-        {% empty %}<tr><td colspan="8" class="text-center text-muted py-5">ไม่มี Alert ที่รอ Triage</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="8">
+          {% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มี Alert ที่รอ Triage' description='ยังไม่มี Wazuh alert ใหม่ที่ต้องรับรายการหรือจัดประเภท' %}
+        </td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

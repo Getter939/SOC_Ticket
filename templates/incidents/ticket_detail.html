@@ -59,7 +59,9 @@
   .timeline-entry summary::-webkit-details-marker { display:none; }
   .timeline-entry[open] summary { border-bottom:1px solid #edf0f4; }
   .timeline-note { padding:.85rem; font-size:.82rem; line-height:1.65; color:#404b59; background:#fafbfd; border-radius:0 0 .75rem .75rem; }
-  .action-stack { position:sticky; top:1rem; }
+  .action-stack { position:sticky; top:1rem; display:flex; flex-direction:column; }
+  .workflow-primary { order:0; }
+  .workflow-secondary { order:2; }
   .emergency-card { border:2px solid #dc3545; background:#fff8f8; }
   .closure-card { border:0; border-left:5px solid #23855b; background:#f0faf5; }
   .closure-grid { display:grid; grid-template-columns:110px 1fr; gap:.45rem .7rem; font-size:.8rem; }
@@ -89,14 +91,20 @@
   <div class="hero-subject mb-2">{{ ticket.device_name }}{% if ticket.incident_name %} <span class="opacity-75">·</span> <i class="bi bi-tag me-1"></i>{{ ticket.incident_name }}{% endif %}</div>
   <div class="hero-summary">{{ ticket.issue_description|truncatechars:180 }}</div>
   <div class="hero-actions">
-    {# The incident report is a SOC deliverable — see _can_access_ticket_report. #}
-    {% if can_access_report %}
-    <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_report_preview' ticket.pk %}"><i class="bi bi-eye me-1"></i>Report Preview</a>
-    <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-file-earmark-word me-1"></i>Report DOCX</button></form>
-    <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="d-inline">{% csrf_token %}<button type="submit" class="btn btn-light btn-sm px-3"><i class="bi bi-filetype-pdf me-1"></i>Report PDF</button></form>
-    {% endif %}
+    {% if can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or transition_actions or t2_claim_visible %}<a class="btn btn-warning btn-sm px-3" href="#workflow-actions"><i class="bi bi-arrow-down-circle me-1"></i>ดำเนินการขั้นถัดไป</a>{% endif %}
     {% if can_edit_ticket %}<a class="btn btn-light btn-sm px-3" href="{% url 'edit_ticket' ticket.pk %}"><i class="bi bi-pencil-square me-1"></i>แก้ไขข้อมูล</a>{% endif %}
-    <a class="btn btn-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
+    {# Reports are useful secondary tools, not competing workflow actions. #}
+    {% if can_access_report %}
+    <div class="dropdown">
+      <button class="btn btn-outline-light btn-sm px-3 dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-file-earmark-text me-1"></i>รายงาน</button>
+      <ul class="dropdown-menu shadow-sm">
+        <li><a class="dropdown-item" href="{% url 'ticket_report_preview' ticket.pk %}"><i class="bi bi-eye me-2"></i>Report Preview</a></li>
+        <li><form method="post" action="{% url 'ticket_report_docx' ticket.pk %}" class="js-submit-loading">{% csrf_token %}<button type="submit" class="dropdown-item"><i class="bi bi-file-earmark-word me-2"></i>Report DOCX</button></form></li>
+        <li><form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}" class="js-submit-loading">{% csrf_token %}<button type="submit" class="dropdown-item"><i class="bi bi-filetype-pdf me-2"></i>Report PDF</button></form></li>
+      </ul>
+    </div>
+    {% endif %}
+    <a class="btn btn-outline-light btn-sm px-3" href="{% url 'ticket_list' %}"><i class="bi bi-arrow-left me-1"></i>กลับรายการ Ticket</a>
   </div>
 </section>
 
@@ -482,7 +490,7 @@ onto its own wrapped row, which space-between then left-aligned.
   </div>
 
   <div class="col-xl-4">
-    <div class="action-stack">
+    <div class="action-stack" id="workflow-actions">
       {% if is_terminal %}
       <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 verify</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
       {% endif %}
@@ -493,7 +501,7 @@ onto its own wrapped row, which space-between then left-aligned.
       go through the auditable "Reassess" action below (manager-only, reason
       required, forbidden at PENDING_MGR_TRIAGE and after closure).
       {% endcomment %}
-      <div class="card shadow-sm mb-3 {% if ticket.is_emergency %}emergency-card{% else %}border-0{% endif %}"><div class="card-header {% if ticket.is_emergency %}bg-danger text-white{% else %}bg-white{% endif %} fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Emergency</div><div class="card-body">
+      <div class="card shadow-sm mb-3 workflow-secondary {% if ticket.is_emergency %}emergency-card{% else %}border-0{% endif %}"><div class="card-header {% if ticket.is_emergency %}bg-danger text-white{% else %}bg-white{% endif %} fw-bold"><i class="bi bi-exclamation-octagon-fill me-1"></i>Emergency</div><div class="card-body">
         <div class="d-flex align-items-center gap-2 mb-2">
           <span class="fw-bold">สถานะ:</span>
           {% if ticket.is_emergency %}<span class="badge bg-danger">Emergency</span>{% else %}<span class="badge bg-secondary">Normal</span>{% endif %}
@@ -520,7 +528,7 @@ onto its own wrapped row, which space-between then left-aligned.
       {% if can_step_back %}
       {# The forward-only state machine has no edge back from a lane to the #}
       {# manager's own triage. Closure stays terminal — this never reopens. #}
-      <div class="card shadow-sm mb-3" style="border:1px solid #f0c987;">
+      <div class="card shadow-sm mb-3 workflow-secondary" style="border:1px solid #f0c987;">
         <div class="card-header fw-bold text-dark" style="background:#fdf0d5;"><i class="bi bi-arrow-counterclockwise me-1"></i>ย้อนขั้นตอน (ผู้จัดการ SOC)</div>
         <div class="card-body">
           <p class="small text-muted mb-2">
@@ -540,7 +548,7 @@ onto its own wrapped row, which space-between then left-aligned.
       {% endif %}
 
       {% if can_request_response %}
-      <div class="card shadow-sm mb-3" style="border:1px solid #b8d4ea;">
+      <div class="card shadow-sm mb-3 workflow-secondary" style="border:1px solid #b8d4ea;">
         <div class="card-header text-white fw-bold" style="background:#2f6fb2;"><i class="bi bi-shield-shaded me-1"></i>ส่งทีมตอบสนอง (Response Team)</div>
         <div class="card-body">
           {% if ticket.has_open_response_requests %}<div class="alert alert-info small py-2"><i class="bi bi-hourglass-split me-1"></i>มีคำขอที่ยังไม่เสร็จ — Ticket จะปิด (อนุมัติ) ไม่ได้จนกว่าจะดำเนินการครบ</div>{% endif %}
@@ -587,7 +595,7 @@ onto its own wrapped row, which space-between then left-aligned.
       {% endcomment %}
       {% if t2_claim_visible %}
       {% if t2_claim_state == 'unclaimed' %}
-      <div class="alert alert-info d-flex justify-content-between align-items-center gap-2 mb-3">
+      <div class="alert alert-info d-flex justify-content-between align-items-center gap-2 mb-3 workflow-primary">
         <div class="small">
           <i class="bi bi-inbox me-1"></i>Ticket นี้ยังไม่มีผู้รับ — รับไว้ก่อนดำเนินการเพื่อกันไม่ให้ Tier 2 คนอื่นชนกัน
         </div>
@@ -600,23 +608,23 @@ onto its own wrapped row, which space-between then left-aligned.
         </form>
       </div>
       {% elif t2_claim_state == 'mine' %}
-      <div class="alert alert-success small mb-3">
+      <div class="alert alert-success small mb-3 workflow-primary">
         <i class="bi bi-check-circle-fill me-1"></i>คุณรับ Ticket นี้ไว้แล้ว — ดำเนินการได้เลย
       </div>
       {% elif t2_claim_state == 'other' %}
-      <div class="alert alert-warning small mb-3">
+      <div class="alert alert-warning small mb-3 workflow-primary">
         <i class="bi bi-lock-fill me-1"></i>Ticket นี้ถูก <strong>{{ ticket.court_holder_label }}</strong> รับไปดำเนินการแล้ว
       </div>
       {% endif %}
       {% endif %}
 
       {% if is_terminal %}
-      <div class="alert alert-light border text-center text-muted small">ไม่มี action เพิ่มเติมสำหรับ workflow นี้ แต่ยังเปลี่ยนสถานะ Emergency ได้ตามสิทธิ์</div>
+      <div class="alert alert-light border text-center text-muted small workflow-primary">ไม่มี action เพิ่มเติมสำหรับ workflow นี้ แต่ยังเปลี่ยนสถานะ Emergency ได้ตามสิทธิ์</div>
       {% elif can_t2_review %}
-      <div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">Tier 2 Review</h5><small>ตรวจสอบ แก้ไขข้อมูลทั่วไป และยืนยัน Classification</small></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><label class="form-label fw-bold">บันทึกการตัดสินใจ</label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">Tier 2 Review</h5><small>ตรวจสอบ แก้ไขข้อมูลทั่วไป และยืนยัน Classification</small></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><label class="form-label fw-bold">บันทึกการตัดสินใจ</label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
       {% include 'incidents/_detailed_issue_cascade.html' %}
       {% elif can_assign_admin %}
-      <div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">Tier 1 Review</h5><small>Tier 2 ยืนยันว่าเป็น Incident — เลือกเส้นทางการจัดการ</small></div><div class="card-body">
+      <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">Tier 1 Review</h5><small>Tier 2 ยืนยันว่าเป็น Incident — เลือกเส้นทางการจัดการ</small></div><div class="card-body">
         <form method="post" id="t1-route-form">{% csrf_token %}<input type="hidden" name="action" value="assign_admin">
           <label class="form-label fw-bold">เส้นทางการจัดการ <span class="text-danger">*</span></label>
           <div class="form-check"><input class="form-check-input" type="radio" name="t1_route" value="{{ T1_ROUTE_ADMIN }}" id="route-admin" checked><label class="form-check-label" for="route-admin">มอบหมายผู้ดูแลระบบ (System Admin)</label></div>
@@ -629,7 +637,7 @@ onto its own wrapped row, which space-between then left-aligned.
       </div></div>
       <script nonce="{{ request.csp_nonce }}">(function(){var f=document.getElementById('t1-route-form');if(!f)return;var b=document.getElementById('t1-admin-block');var s=b.querySelector('select');function sync(){var admin=f.querySelector('input[name=t1_route]:checked').value==='{{ T1_ROUTE_ADMIN }}';b.style.display=admin?'':'none';if(s)s.required=admin;}f.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
       {% elif can_mgr_forward %}
-      <div class="card shadow-sm border-warning"><div class="card-header text-dark" style="background:#d4a017;"><h5 class="mb-0"><i class="bi bi-person-badge-fill me-1"></i>SOC Manager Review</h5><small>ตรวจก่อนมอบหมาย — ตั้งสถานะฉุกเฉินและส่งต่อ</small></div><div class="card-body">
+      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header text-dark" style="background:#d4a017;"><h5 class="mb-0"><i class="bi bi-person-badge-fill me-1"></i>SOC Manager Review</h5><small>ตรวจก่อนมอบหมาย — ตั้งสถานะฉุกเฉินและส่งต่อ</small></div><div class="card-body">
         <dl class="row small mb-3"><dt class="col-5">เส้นทาง (Tier 1 เลือก)</dt><dd class="col-7">{% if ticket.t1_route == T1_ROUTE_OWNER %}เจ้าของระบบแก้ไขเอง{% else %}ผู้ดูแลระบบ{% if ticket.assigned_admin %} — {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% endif %}{% endif %}</dd></dl>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="mgr_forward">
           <label class="form-label fw-bold mb-1">ประเมินสถานะฉุกเฉิน <span class="text-danger">*</span></label>
@@ -646,7 +654,7 @@ onto its own wrapped row, which space-between then left-aligned.
         </form>
       </div></div>
       {% elif can_submit_containment %}
-      <div class="card shadow-sm border-warning"><div class="card-header bg-warning text-dark"><h5 class="mb-0">System Admin Investigation</h5></div><div class="card-body"><form method="post">{% csrf_token %}
+      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">System Admin Investigation</h5></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}
         <input type="hidden" name="action" value="containment">
         {% if checklist_items %}
         <label class="form-label fw-bold mb-1">สิ่งที่ต้องดำเนินการ (เช็กลิสต์)</label>
@@ -663,11 +671,11 @@ onto its own wrapped row, which space-between then left-aligned.
         {% endif %}
         <label class="form-label fw-bold">ผลการตรวจสอบ (Investigation findings)</label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ (Countermeasure) <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit">Submit for Tier 2 review</button></form></div></div>
       {% elif transition_actions %}
-      <div class="card shadow-sm border-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 Verification (การควบคุมของ System Admin){% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% elif ticket.status == 'PENDING_MGR_EVENT_REVIEW' %}SOC Manager — ตรวจสอบการปิดแบบ Event{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 — ส่งผลการแก้ไขให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 Verification (การแก้ไขของเจ้าของระบบ){% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+      <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 Verification (การควบคุมของ System Admin){% elif ticket.status == 'PENDING_MANAGER' %}SOC Manager Verification{% elif ticket.status == 'PENDING_MGR_EVENT_REVIEW' %}SOC Manager — ตรวจสอบการปิดแบบ Event{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 — ส่งผลการแก้ไขให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 Verification (การแก้ไขของเจ้าของระบบ){% else %}Workflow Action{% endif %}</h5></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
       {% if can_t2_reclassify %}
-      <div class="card shadow-sm border-secondary mt-3"><div class="card-header bg-light fw-bold"><i class="bi bi-arrow-repeat me-1"></i>จัดประเภทใหม่เป็น Event</div><div class="card-body"><p class="small text-muted mb-2">หากตรวจสอบแล้วพบว่าไม่ใช่เหตุการณ์จริง — จัดเป็น Event และปิดเคสได้ทันที (ไม่ผ่านผู้จัดการ)</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="t2_reclassify_event"><label class="form-label fw-bold small">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-2" rows="2" required></textarea><button class="btn btn-outline-secondary w-100" type="submit">Mark as Event -&gt; Close</button></form></div></div>
+      <div class="card shadow-sm border-secondary mt-3 workflow-secondary"><div class="card-header bg-light fw-bold"><i class="bi bi-arrow-repeat me-1"></i>จัดประเภทใหม่เป็น Event</div><div class="card-body"><p class="small text-muted mb-2">หากตรวจสอบแล้วพบว่าไม่ใช่เหตุการณ์จริง — จัดเป็น Event และปิดเคสได้ทันที (ไม่ผ่านผู้จัดการ)</p><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_reclassify_event"><label class="form-label fw-bold small">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-2" rows="2" required></textarea><button class="btn btn-outline-secondary w-100" type="submit">Mark as Event -&gt; Close</button></form></div></div>
       {% endif %}
-      {% else %}<div class="alert alert-light border text-center text-muted">ไม่มี action สำหรับบทบาทของคุณในขั้นตอนนี้</div>{% endif %}
+      {% else %}<div class="alert alert-light border text-center text-muted workflow-primary">ไม่มี action สำหรับบทบาทของคุณในขั้นตอนนี้</div>{% endif %}
     </div>
   </div>
 </div>

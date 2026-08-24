@@ -3,13 +3,13 @@
 {% block title %}My Tickets — SOC Support System{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="page-header">
     <div>
-        <h4 class="mb-0 fw-bold"><i class="bi bi-building me-2"></i>{% if is_superuser_view %}System Owner View - All Tickets{% else %}My Tickets{% endif %}</h4>
-        <div class="text-muted small">
+        <h1 class="page-header__title"><i class="bi bi-building me-2"></i>{% if is_superuser_view %}System Owner View - All Tickets{% else %}My Tickets{% endif %}</h1>
+        <p class="page-header__subtitle">
             {{ profile.department }} —
             {{ request.user.get_full_name|default:request.user.username }}
-        </div>
+        </p>
     </div>
 </div>
 
@@ -50,14 +50,14 @@
 <div class="row g-4">
     <!-- Active tickets -->
     <div class="col-md-7">
-        <div class="card shadow-sm border-0">
+        <div class="card ops-card">
             <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
                 <i class="bi bi-shield-exclamation me-1"></i>Tickets ที่กำลังดำเนินการ
             </div>
             {% if recent_tickets %}
             <div class="table-responsive">
-                <table class="table table-hover mb-0 small">
-                    <thead class="table-light">
+                <table class="table table-hover operational-table">
+                    <thead>
                         <tr>
                             <th>Ticket ID</th>
                             <th>เหตุการณ์</th>
@@ -67,7 +67,7 @@
                     </thead>
                     <tbody>
                         {% for t in recent_tickets %}
-                        <tr class="{% if t.is_ola_breached %}table-danger{% endif %}">
+                        <tr class="clickable-row {% if t.is_ola_breached %}table-danger{% endif %}" data-row-href="{% url 'ticket_detail' t.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ t.ticket_id }}">
                             <td>
                                 <a href="{% url 'ticket_detail' t.pk %}" class="font-monospace fw-bold text-primary">
                                     #{{ t.ticket_id }}
@@ -75,24 +75,21 @@
                             </td>
                             <td>{{ t.get_detailed_issue2_display|truncatechars:45 }}</td>
                             <td style="font-size:0.8rem;">{% include 'incidents/_status_badge.html' with ticket=t %}</td>
-                            <td class="text-muted">{{ t.created_at|date:"d M Y" }}</td>
+                            <td class="cell-secondary text-nowrap">{{ t.created_at|date:"d M Y" }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             {% else %}
-            <div class="text-center text-muted py-5 small">
-                <i class="bi bi-check-circle fs-3 d-block mb-2 opacity-50 text-success"></i>
-                ไม่มี Ticket ที่กำลังดำเนินการ
-            </div>
+            {% include 'includes/_empty_state.html' with icon='bi-check-circle' title='ไม่มี Ticket ที่กำลังดำเนินการ' description='ไม่มีเคสเปิดที่อยู่ในขอบเขตระบบของคุณในขณะนี้' %}
             {% endif %}
         </div>
     </div>
 
     <!-- Closed tickets -->
     <div class="col-md-5">
-        <div class="card shadow-sm border-0">
+        <div class="card ops-card">
             <div class="card-header bg-white py-3 fw-bold small text-uppercase text-muted">
                 <i class="bi bi-archive me-1"></i>Tickets ที่ปิดแล้ว (ล่าสุด)
             </div>
@@ -111,10 +108,7 @@
                 {% endfor %}
             </div>
             {% else %}
-            <div class="text-center text-muted py-5 small">
-                <i class="bi bi-inbox fs-3 d-block mb-2 opacity-50"></i>
-                ยังไม่มี Ticket ที่ปิดแล้ว
-            </div>
+            {% include 'includes/_empty_state.html' with icon='bi-archive' title='ยังไม่มี Ticket ที่ปิดแล้ว' description='เคสที่อนุมัติหรือปิดแล้วล่าสุดจะปรากฏในส่วนนี้' %}
             {% endif %}
         </div>
     </div>
