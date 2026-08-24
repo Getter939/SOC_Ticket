@@ -3,21 +3,26 @@
 {% block title %}ค้นหา IOC — SOC Support System{% endblock %}
 
 {% block content %}
-<div class="container">
-    <div class="page-header">
-        <div><h1 class="page-header__title"><i class="bi bi-search me-2"></i>ค้นหา IOC / Ticket</h1><p class="page-header__subtitle">ค้นหาข้าม Ticket, IP, Domain, Hash และประวัติการคัดแยก</p></div>
+<div class="page-header">
+    <div>
+        <h1 class="page-header__title"><i class="bi bi-search me-2"></i>ค้นหา IOC / Ticket</h1>
+        <p class="page-header__subtitle">ค้นหาข้าม Ticket, IP, Domain, Hash และประวัติการคัดแยก</p>
     </div>
+</div>
 
-    <div class="card filter-toolbar mb-4">
-        <div class="card-body bg-light">
-            <form method="GET" class="row g-3 js-submit-loading">
+<div class="card filter-toolbar mb-3">
+        <div class="card-body py-3">
+            <form method="GET" class="row g-2 align-items-center js-submit-loading">
                 <div class="col-md-10">
-                    <input type="text" name="q" class="form-control" autofocus
-                        placeholder="ค้นหา IP, Domain, Hash, เลข Ticket, รายละเอียดเหตุการณ์..."
-                        value="{{ query|default:'' }}">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+                        <input type="text" name="q" class="form-control" autofocus aria-label="ค้นหา IOC หรือ Ticket"
+                            placeholder="ค้นหา IP, Domain, Hash, เลข Ticket, รายละเอียดเหตุการณ์..."
+                            value="{{ query|default:'' }}">
+                    </div>
                 </div>
                 <div class="col-md-2">
-                    <button type="submit" class="btn btn-primary w-100">ค้นหา</button>
+                    <button type="submit" class="btn btn-dark btn-sm w-100">ค้นหา</button>
                 </div>
             </form>
         </div>
@@ -26,15 +31,15 @@
     {% if query %}
     {# ticket_total, not |length: the latter counts the current page, so a #}
     {# capped result set used to report its own slice size as the total.   #}
-    <div class="card ops-card mb-4">
-        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Tickets ({{ ticket_total }})</h5>
+<div class="card ops-card mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+            <h2 class="h6 fw-bold mb-0"><i class="bi bi-ticket-perforated me-2 text-danger"></i>Tickets <span class="badge rounded-pill bg-light text-dark border ms-1">{{ ticket_total }}</span></h2>
             {% if ticket_results.paginator.num_pages > 1 %}
             <span class="small">หน้า {{ ticket_results.number }} / {{ ticket_results.paginator.num_pages }}</span>
             {% endif %}
         </div>
         <div class="table-responsive">
-            <table class="table table-hover operational-table">
+            <table class="table table-hover align-middle operational-table">
                 <thead>
                     <tr>
                         <th>เลข Ticket</th>
@@ -86,15 +91,15 @@
     {# initialised it to [] and never to None, so this card used to render   #}
     {# empty for every non-SOC role.                                          #}
     {% if can_search_triage %}
-    <div class="card ops-card mb-4">
-        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Triage Records ({{ triage_total }})</h5>
+<div class="card ops-card mb-4">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+            <h2 class="h6 fw-bold mb-0"><i class="bi bi-clipboard2-pulse me-2 text-danger"></i>Triage Records <span class="badge rounded-pill bg-light text-dark border ms-1">{{ triage_total }}</span></h2>
             {% if triage_results.paginator.num_pages > 1 %}
             <span class="small">หน้า {{ triage_results.number }} / {{ triage_results.paginator.num_pages }}</span>
             {% endif %}
         </div>
         <div class="table-responsive">
-            <table class="table table-hover operational-table">
+            <table class="table table-hover align-middle operational-table">
                 <thead>
                     <tr>
                         <th>แหล่งที่มา</th>
@@ -145,7 +150,6 @@
     </div>
     {% endif %}
     {% else %}
-    <p class="text-muted">กรอกคำค้นหา เช่น IP Address, Domain, Hash หรือเลข Ticket เพื่อตรวจสอบว่าเคยพบ IOC นี้มาก่อนหรือไม่</p>
+    <div class="ops-card">{% include 'includes/_empty_state.html' with icon='bi-search' title='เริ่มค้นหา IOC หรือ Ticket' description='กรอก IP Address, Domain, Hash หรือเลข Ticket เพื่อตรวจสอบว่าเคยพบข้อมูลนี้มาก่อนหรือไม่' %}</div>
     {% endif %}
-</div>
 {% endblock %}

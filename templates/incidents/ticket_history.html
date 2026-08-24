@@ -32,32 +32,34 @@
   }
   .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>
-<div class="container">
-    <div class="page-header">
-        <div><h1 class="page-header__title"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket</h1><p class="page-header__subtitle">เคสที่อนุมัติหรือปิดแล้ว พร้อมผู้อนุมัติและผลการแก้ไขล่าสุด</p></div>
-        <div class="page-header__actions">
-            <span class="badge bg-success" style="font-size:.85rem;">{{ approved_count }} อนุมัติแล้ว</span>
-            <span class="badge bg-secondary" style="font-size:.85rem;">{{ event_count }} Event</span>
-        </div>
+<div class="page-header">
+    <div>
+        <h1 class="page-header__title"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket</h1>
+        <p class="page-header__subtitle">เคสที่อนุมัติหรือปิดแล้ว พร้อมผู้อนุมัติและผลการแก้ไขล่าสุด</p>
     </div>
+    <div class="page-header__actions">
+        <span class="badge bg-success" style="font-size:.85rem;">{{ approved_count }} อนุมัติแล้ว</span>
+        <span class="badge bg-secondary" style="font-size:.85rem;">{{ event_count }} Event</span>
+    </div>
+</div>
 
-    <div class="card filter-toolbar mb-3">
-        <div class="card-body bg-light">
+<div class="card filter-toolbar mb-3">
+        <div class="card-body py-3">
             <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
                 <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
                 <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
                 <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>
             </div>
-            <form method="GET" class="row g-3 js-submit-loading">
+            <form method="GET" class="row g-2 align-items-end js-submit-loading">
                 {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                 <div class="col-md-3">
-                    <label class="form-label small fw-bold">ค้นหาเลข Ticket</label>
-                    <input type="text" name="search_ticket" class="form-control" placeholder="เช่น SOC-..." value="{{ search_ticket|default:'' }}">
+                    <label class="form-label small fw-bold mb-1">ค้นหาเลข Ticket</label>
+                    <input type="text" name="search_ticket" class="form-control form-control-sm" placeholder="เช่น SOC-..." value="{{ search_ticket|default:'' }}">
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">ความรุนแรง</label>
-                    <select name="severity" class="form-select">
+                    <label class="form-label small fw-bold mb-1">ความรุนแรง</label>
+                    <select name="severity" class="form-select form-select-sm">
                         <option value="">All</option>
                         {% for value, label in severity_choices %}
                             <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
@@ -65,16 +67,16 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">Emergency</label>
-                    <select name="emergency" class="form-select"><option value="">All</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select>
+                    <label class="form-label small fw-bold mb-1">Emergency</label>
+                    <select name="emergency" class="form-select form-select-sm"><option value="">All</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">เรียงตาม</label>
-                    <select name="sort" class="form-select"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>ล่าสุด</option><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option></select>
+                    <label class="form-label small fw-bold mb-1">เรียงตาม</label>
+                    <select name="sort" class="form-select form-select-sm"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>ล่าสุด</option><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option></select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">ผู้อนุมัติ/ปิดเคส</label>
-                    <select name="approved_by" class="form-select">
+                    <label class="form-label small fw-bold mb-1">ผู้อนุมัติ/ปิดเคส</label>
+                    <select name="approved_by" class="form-select form-select-sm">
                         <option value="">All</option>
                         {% for user in approver_choices %}
                             <option value="{{ user.id }}" {% if approved_by_filter == user.id|stringformat:"s" %}selected{% endif %}>
@@ -84,15 +86,15 @@
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">จากวันที่</label>
-                    <input type="date" name="start_date" class="form-control" value="{{ start_date|default:'' }}">
+                    <label class="form-label small fw-bold mb-1">จากวันที่</label>
+                    <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date|default:'' }}">
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold">ถึงวันที่</label>
-                    <input type="date" name="end_date" class="form-control" value="{{ end_date|default:'' }}">
+                    <label class="form-label small fw-bold mb-1">ถึงวันที่</label>
+                    <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date|default:'' }}">
                 </div>
                 <div class="col-md-1 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">ค้นหา</button>
+                    <button type="submit" class="btn btn-dark btn-sm w-100">ค้นหา</button>
                 </div>
                 <div class="col-12">
                     <div class="form-check">
@@ -104,9 +106,9 @@
         </div>
     </div>
 
-    <div class="card ops-card">
+<div class="card ops-card">
         <div class="table-responsive">
-            <table class="table table-hover operational-table ticket-table">
+            <table class="table table-hover align-middle operational-table ticket-table">
                 <thead>
                     <tr>
                         <th>เลข Ticket</th>
@@ -191,8 +193,6 @@
       </ul>
     </nav>
     {% endif %}
-</div>
-
 {# "Show all time" clears the date range and resubmits. Wired here rather than #}
 {# via an inline onchange= so it satisfies the nonce-based CSP (no             #}
 {# 'unsafe-inline' in script-src).                                             #}

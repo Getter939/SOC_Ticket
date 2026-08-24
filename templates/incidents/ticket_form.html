@@ -5,13 +5,19 @@
 {% block content %}
 <style>
   .section-header {
-    background: #1a1a2e; color: #fff;
-    padding: .6rem 1rem; border-radius: 6px;
-    font-size: .82rem; font-weight: 700;
-    letter-spacing: .04em; margin-bottom: 1rem;
+    color: #23395d;
+    padding: 0 0 .75rem;
+    border-bottom: 1px solid var(--ui-border);
+    font-size: .9rem; font-weight: 800;
+    letter-spacing: .025em; margin-bottom: 1rem;
   }
-  .section-header small { color: rgba(255,255,255,.55); font-weight: 400; margin-left: .5rem; }
-  .form-section { background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+  .section-header small { color: var(--ui-muted); font-weight: 400; margin-left: .5rem; }
+  .form-section {
+    background: var(--ui-surface); border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md); box-shadow: var(--ui-shadow-sm);
+    padding: 1.25rem 1.5rem; margin-bottom: 1.25rem;
+  }
+  .incident-form-workspace { max-width: 1200px; margin: 0 auto; }
 
   /* Severity radio pills */
   .severity-radio { display: none; }
@@ -73,20 +79,21 @@
   .conditional-panel.is-visible { display: block; }
 </style>
 
-<div class="row justify-content-center">
-<div class="col-xl-10 col-lg-11">
-
-  <div class="d-flex align-items-center gap-3 mb-3">
-    <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-medical-fill text-danger me-2"></i>EVENT / INCIDENT REPORT</h4>
-    <span class="text-muted" style="font-size:.8rem;">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</span>
-    <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
+<div class="page-header">
+  <div>
+    <h1 class="page-header__title"><i class="bi bi-file-earmark-medical-fill me-2"></i>EVENT / INCIDENT REPORT</h1>
+    <p class="page-header__subtitle">แบบฟอร์มรายงานเหตุการณ์ผิดปกติและเปิด Ticket ใหม่</p>
   </div>
+  <div class="page-header__meta" id="draft-status" aria-live="polite"></div>
+</div>
+
+<div class="incident-form-workspace">
 
   {% if not alert_bundle %}
     {% include 'incidents/_case_mode_switch.html' %}
   {% endif %}
 
-  <form method="post" enctype="multipart/form-data" novalidate>
+  <form method="post" enctype="multipart/form-data" class="js-submit-loading" novalidate>
     {% csrf_token %}
     {{ threat_guidance|json_script:"threat-guidance-data" }}
     {{ guidance_note|json_script:"guidance-note-data" }}
@@ -413,7 +420,6 @@
     </div>
 
   </form>
-</div>
 </div>
 
 {% include 'incidents/_evidence_picker_js.html' %}

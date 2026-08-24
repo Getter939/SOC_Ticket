@@ -14,14 +14,16 @@
   .req-status { display:inline-flex; align-items:center; gap:5px; font-size:.72rem; font-weight:600;
     padding:2px 9px; border-radius:12px; white-space:nowrap; }
 </style>
-<div class="container">
-    <div class="page-header">
-        <div><h1 class="page-header__title"><i class="bi bi-shield-shaded me-2"></i>งานตอบสนอง (Response Requests)</h1><p class="page-header__subtitle">{% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA/PT และ Infra Security ที่มอบหมายให้คุณ{% endif %}</p></div>
-        <div class="page-header__actions"><span class="badge bg-info text-dark" style="font-size:.85rem;">{{ open_count }} ยังไม่เสร็จ</span></div>
+<div class="page-header">
+    <div>
+        <h1 class="page-header__title"><i class="bi bi-shield-shaded me-2"></i>งานตอบสนอง <span class="text-muted fw-normal">(Response Requests)</span></h1>
+        <p class="page-header__subtitle">{% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA/PT และ Infra Security ที่มอบหมายให้คุณ{% endif %}</p>
     </div>
+    <div class="page-header__actions"><span class="badge bg-info text-dark" style="font-size:.85rem;">{{ open_count }} ยังไม่เสร็จ</span></div>
+</div>
 
-    <div class="card filter-toolbar mb-3">
-        <div class="card-body bg-light py-2">
+<div class="card filter-toolbar mb-3">
+        <div class="card-body py-3">
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามสถานะ:</span>
                 <a href="?" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
@@ -32,9 +34,9 @@
         </div>
     </div>
 
-    <div class="card ops-card">
+<div class="card ops-card">
         <div class="table-responsive">
-            <table class="table table-hover operational-table">
+            <table class="table table-hover align-middle operational-table">
                 <thead>
                     <tr>
                         <th>ประเภท</th>
@@ -65,6 +67,5 @@
                 </tbody>
             </table>
         </div>
-    </div>
 </div>
 {% endblock %}
