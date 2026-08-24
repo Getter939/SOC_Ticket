@@ -42,29 +42,32 @@ remember to pass as a parameter later.
 > `C:\SOCTicket\app\scripts\backup\windows`. The script *defaults*
 > (`MediaRoot = C:\SOCTicket\app\media`) assume the layout in this table.
 
-> ### ⚠ Deployed deviation — pass these on every backup command
+> ### ⚠ Deployed deviation — now folded into the script defaults
 >
 > The first production build created the database as **`ticketdata_prod`** owned
-> by **`ticket_prod`**, not the canonical names above. The backup scripts do not
-> know that, and they also default to PostgreSQL **16**:
+> by **`ticket_prod`**, not the canonical names above; PostgreSQL is **18**, not
+> 16; Gpg4win 5.x is 64-bit; and the spare VM has a single **C:** volume.
+>
+> **The script defaults have been corrected in-repo for all of these.** As of
+> this build the deployed values are the defaults:
 >
 > ```
-> New-SocBackup.ps1:  $PgBinPath = 'C:\Program Files\PostgreSQL\16\bin'
->                     $DbName    = 'ticketdata'
->                     $DbUser    = 'ticket'
-> Test-SocRestore.ps1: $PgBinPath = 'C:\Program Files\PostgreSQL\16\bin'
->                      $ArchiveDir = 'D:\SOCBackup\archive'   # backups are written to C:\
+> New-SocBackup.ps1:   $PgBinPath = 'C:\Program Files\PostgreSQL\18\bin'
+>                      $DbName    = 'ticketdata_prod'
+>                      $DbUser    = 'soc_backup'      # read-only backup role
+>                      $GpgExe    = 'C:\Program Files\GnuPG\bin\gpg.exe'
+> Test-SocRestore.ps1: $PgBinPath  = 'C:\Program Files\PostgreSQL\18\bin'
+>                      $ArchiveDir = 'C:\SOCBackup\archive'
+>                      $GpgExe     = 'C:\Program Files\GnuPG\bin\gpg.exe'
 > ```
 >
-> Every backup, restore and drill command must therefore pass:
+> **Do not pass `-DbName` or `-DbUser` to `Test-SocRestore.ps1`.** It has neither
+> parameter — it restores into its own throwaway `ticketdata_restoretest` and
+> connects as `-VerifyUser`. Passing them fails the command outright.
 >
-> ```powershell
-> -PgBinPath 'C:\Program Files\PostgreSQL\18\bin' -DbName ticketdata_prod -DbUser ticket_prod
-> ```
->
-> A restore drill that silently targets the wrong database name is the worst
-> possible place to discover this. Either standardise the parameter defaults or
-> keep this note in front of whoever runs Phase 3.
+> Verify the defaults rather than trusting this table; a restore drill that
+> silently targets the wrong database name is the worst possible place to
+> discover a drift between the two.
 
 ---
 
