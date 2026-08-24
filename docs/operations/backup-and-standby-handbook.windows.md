@@ -676,62 +676,119 @@ A streaming standby is read-only for its entire life and **cannot** accept a
 restore. So the spare VM needs a second, separate PostgreSQL instance for drills.
 Build it now, before the standby exists.
 
-Install the **same PostgreSQL major version as production** on the spare VM, then
-create a scratch cluster on port 5434:
+Install the **same PostgreSQL major version as production** on the spare VM
+(here: **18**), then create a scratch cluster on port 5434. **First read the real
+locale off production** - do not assume it:
 
 ```powershell
-# Match production's encoding and locale - check with SHOW server_encoding on prod
-New-Item -ItemType Directory -Path D:\PostgreSQL\verify -Force | Out-Null
-icacls D:\PostgreSQL\verify /inheritance:r `
-  /grant "NT AUTHORITY\NetworkService:(OI)(CI)F" /grant "Administrators:(OI)(CI)F"
-
-$pwFile = Join-Path $env:TEMP 'pgpw.txt'
-Set-Content $pwFile -Value 'a-local-only-password' -NoNewline -Encoding ASCII
-& 'C:\Program Files\PostgreSQL\16\bin\initdb.exe' -D D:\PostgreSQL\verify `
-  -U postgres -A scram-sha-256 --encoding=UTF8 --pwfile=$pwFile
-Remove-Item $pwFile -Force
+# On PRODUCTION, as the read-only backup role (no superuser password needed)
+$env:PGPASSFILE = 'C:\ProgramData\SOCBackup\pgpass.conf'
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -p 5432 -U soc_backup -d ticketdata_prod -X -x -c `
+  "select pg_encoding_to_char(encoding) enc, datcollate, datctype, datlocprovider from pg_database where datname = 'ticketdata_prod';"
 ```
 
-`initdb` has no way to prompt non-interactively, so the password goes through a
-temporary file that is deleted immediately. This password is local to the drill
-instance only - never reuse production's.
+For this deployment that returns `UTF8 / Thai_Thailand.874 / Thai_Thailand.874 /
+c` (libc provider). **The provider matters**: PostgreSQL 18 changed `initdb`'s
+default locale provider, so an `initdb` that does not name it can silently come up
+`builtin`/`C.UTF-8`, restore every table at the right row count, and still sort
+and case-fold Thai differently from production. State it explicitly.
 
-Register and start it on port 5434:
+Create and lock the data directory (single **C:** volume on this spare; one
+`icacls` target per line, grants first, no backtick continuations - see the empty-DACL
+field note):
 
 ```powershell
-& 'C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe' register -N 'postgresql-verify' `
-  -U 'NT AUTHORITY\NetworkService' -D 'D:\PostgreSQL\verify' -S auto -o '-p 5434'
+New-Item -ItemType Directory -Path 'C:\PostgreSQL\verify' -Force | Out-Null
+icacls 'C:\PostgreSQL' /grant 'NT AUTHORITY\NetworkService:(OI)(CI)(F)' /grant 'Administrators:(OI)(CI)(F)' /grant 'SYSTEM:(OI)(CI)(F)' /inheritance:r
+icacls 'C:\PostgreSQL'   # read it back: path + three ACE lines = good; path with no ACE lines = empty DACL, STOP
+```
+
+**`initdb` refuses an administrative token on Windows, but `pg_ctl register`
+*requires* one** (it creates a service). If your RDP shell runs elevated (the
+built-in Administrator always does), run `initdb` **as the service account** via a
+one-shot scheduled task - which also makes the data directory owned by the exact
+account the service will run under - and keep `register` in the elevated shell:
+
+```powershell
+# De-elevate initdb by running it as NetworkService; -A trust = passphraseless,
+# loopback-only (initdb writes host entries for 127.0.0.1/32 and ::1/128 only).
+# No pwfile, no password on a command line - satisfies the no-plaintext-password rule.
+$bin = 'C:\Program Files\PostgreSQL\18\bin'; $data = 'C:\PostgreSQL\verify'
+$wrapper = 'C:\PostgreSQL\run-initdb.cmd'
+@"
+@echo off
+"$bin\initdb.exe" -D "$data" -U postgres -E UTF8 --lc-collate=Thai_Thailand.874 --lc-ctype=Thai_Thailand.874 --locale-provider=libc -A trust 1> "C:\PostgreSQL\initdb.log" 2>&1
+echo EXITCODE=%ERRORLEVEL%>> "C:\PostgreSQL\initdb.log"
+"@ | Out-File $wrapper -Encoding ascii
+$pr = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\NetworkService' -LogonType ServiceAccount -RunLevel Limited
+Register-ScheduledTask -TaskName 'SOC-VerifyInitdb-TEMP' -Action (New-ScheduledTaskAction -Execute $wrapper) -Principal $pr -Force | Out-Null
+Start-ScheduledTask -TaskName 'SOC-VerifyInitdb-TEMP'
+do { Start-Sleep 2 } while ((Get-ScheduledTask -TaskName 'SOC-VerifyInitdb-TEMP').State -eq 'Running')
+Get-Content 'C:\PostgreSQL\initdb.log'                              # must end EXITCODE=0
+"PG_VERSION: " + (Get-Content "$data\PG_VERSION" -ErrorAction SilentlyContinue)   # the real proof
+Unregister-ScheduledTask -TaskName 'SOC-VerifyInitdb-TEMP' -Confirm:$false; Remove-Item $wrapper -Force
+```
+
+Then register and start it on port 5434, **from the elevated shell**:
+
+```powershell
+& "$bin\pg_ctl.exe" register -N 'postgresql-verify' -U 'NT AUTHORITY\NetworkService' -D "$data" -S demand -o '-p 5434'
 Start-Service postgresql-verify
-& 'C:\Program Files\PostgreSQL\16\bin\psql.exe' -h localhost -p 5434 -U postgres -c "SELECT version();"
+# Prove the cluster's locale matches production BEFORE trusting any drill it runs:
+& "$bin\psql.exe" -h localhost -p 5434 -U postgres -d postgres -X -c `
+  "select datname, pg_encoding_to_char(encoding) enc, datcollate, datctype, datlocprovider from pg_database order by 1;"
 ```
 
-> PostgreSQL will **not** run under an administrator account on Windows. Use the
-> same non-admin service account production uses (recorded in §Phase 0.1).
+All three of `template0` / `template1` / `postgres` must read `UTF8 /
+Thai_Thailand.874 / Thai_Thailand.874 / c`. Because `Test-SocRestore.ps1` builds
+its restore database `TEMPLATE template0` with the locale stated explicitly (and
+reads it back), this is what makes a passing drill *mean* something.
+
+> **Why `-A trust` and not a password.** `initdb` can only take a superuser
+> password interactively or from a plaintext `--pwfile`; a scheduled drill would
+> then also need that secret stored to reconnect. Trust scoped to loopback, on an
+> instance that listens on localhost only, on a host whose firewall blocks
+> inbound, thrown away each drill, is passwordless by construction. `-S demand`
+> (manual start) keeps a cluster holding restored production data from listening
+> 24/7; the weekly task starts it, drills, and stops it.
+>
+> PostgreSQL will **not** run under an administrator account on Windows - which is
+> why `initdb` and the running server are de-elevated to NetworkService above.
 
 ### 2.7 Run the first drill
 
 ```powershell
-cd C:\SOCTicket\scripts\backup\windows
-.\Test-SocRestore.ps1 -ArchiveDir D:\SOCBackup\archive -VerifyPort 5434 `
-  -PassphraseFile C:\ProgramData\SOCBackup\gpg-pass.txt
+# The scripts ship inside the repo checkout, so they live under \app\.
+# Defaults are already correct for this deployment (PG18, C:\SOCBackup\archive,
+# C:\Program Files\GnuPG\bin\gpg.exe, gpg-pass.txt) - do NOT pass -DbName/-DbUser:
+# Test-SocRestore.ps1 has neither and restores into its own throwaway database.
+cd C:\SOCTicket\app\scripts\backup\windows
+.\Test-SocRestore.ps1 -VerifyPort 5434 -PassphraseFile C:\ProgramData\SOCBackup\gpg-pass.txt
 ```
 
-Success ends with `restore-verify: backup is restorable` after listing the row
-counts. A count mismatch or checksum failure is a **real incident**: the backup
-you were relying on is not sound. Investigate before trusting anything else here.
+Success ends with `restore-verify: backup is restorable` after a
+`... - matches production` locale line and the row counts. A count mismatch,
+checksum failure, or a locale that does **not** match production is a **real
+incident**: the backup you were relying on is not sound, or the verify cluster was
+built wrong. Investigate before trusting anything else here.
 
-Schedule it weekly:
+Schedule it weekly - starting the demand-start verify instance first and stopping
+it after, so it is not left listening between drills:
 
 ```powershell
+$drill = 'C:\SOCTicket\app\scripts\backup\windows\Test-SocRestore.ps1'
 Register-ScheduledTask -TaskName 'SOC-Restore-Drill' `
   -Action (New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"C:\SOCTicket\scripts\backup\windows\Test-SocRestore.ps1`" -ArchiveDir D:\SOCBackup\archive -VerifyPort 5434 -PassphraseFile C:\ProgramData\SOCBackup\gpg-pass.txt") `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"Start-Service postgresql-verify; & '$drill' -VerifyPort 5434 -PassphraseFile 'C:\ProgramData\SOCBackup\gpg-pass.txt'; Stop-Service postgresql-verify`"") `
   -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At 04:00) `
   -User $cred.UserName -Password $cred.GetNetworkCredential().Password -RunLevel Highest
 ```
 
 Weekly is the right cadence: often enough that a broken backup is caught inside
-one retention window, rare enough that the cost is negligible.
+one retention window, rare enough that the cost is negligible. **After changing
+the task, confirm `LogonType` reads `Password`** (`schtasks /create /f` and the
+GUI both silently reset it to interactive - see the Task Scheduler field notes),
+or the drill will never run.
 
 > **After the first successful drill, this VM holds real ticket data, personal
 > data, and evidence.** That is why §2.2 restricts the ACLs. Classify and treat
@@ -757,6 +814,48 @@ Two things follow:
 
 **Phase 2 is the stopping point that matters.** If you go no further, you have
 verified off-host backups. Everything after this reduces downtime, not data loss.
+
+#### Field notes from the first drill
+
+Every one of these reported success while doing nothing useful, or failed for a
+reason unrelated to what was being tested. They cost hours on the first build.
+
+- **gpg-agent caches the passphrase and makes a passphrase-file test lie.** After
+  any interactive decrypt, gpg-agent holds the unlocked key (~10 min default), so
+  a `--passphrase-file` test moments later passes *from cache* regardless of the
+  file's contents. **Kill the agent before validating the file** and again before
+  the real drill: `gpgconf --kill gpg-agent`. Only a decrypt against a cold agent
+  proves `gpg-pass.txt`.
+- **`Read-Host -AsSecureString` captured exactly one character on this RDP
+  console** - typed or pasted, every time - because its masked reader takes raw
+  per-keystroke input the console does not deliver reliably. Plain `Read-Host`
+  (line-buffered) worked fine. Fix: read the line with echo suppressed at the API
+  layer (`SetConsoleMode` clearing `ENABLE_ECHO_INPUT`, then `[Console]::ReadLine()`),
+  which uses the line-buffered path. Always print the captured **length** and
+  compare it to the real passphrase before spending it - a length of 1 is the tell.
+- **Write `gpg-pass.txt` with `[IO.File]::WriteAllText(..., ASCIIEncoding)`** - no
+  BOM, no trailing newline. `--passphrase-file` reads the whole first line; a BOM
+  or CR/LF changes the passphrase. Verify the first three bytes are not
+  `239 187 191`.
+- **PostgreSQL 18 changed `initdb`'s default locale provider.** Build the verify
+  cluster with `--locale-provider=libc` explicitly (production here is `datlocprovider
+  = c`). Otherwise it comes up builtin, restores every row correctly, and orders
+  Thai text differently - a silent false pass. The drill now creates its restore DB
+  `TEMPLATE template0` with encoding/collate/ctype/provider stated and **reads them
+  back**, so a wrong cluster fails loudly instead.
+- **`initdb` refuses an admin token; `pg_ctl register` needs one.** Only `initdb`
+  and the running server must be non-admin - run `initdb` as NetworkService (a
+  one-shot ServiceAccount scheduled task), keep `register` in the elevated shell.
+  Prove the cluster by the `PG_VERSION` file and a live `SELECT datcollate`, not by
+  the task's exit code.
+- **Do not drive the spare from two sessions at once.** `gpg-pass.txt` reached an
+  unknown state because two sessions wrote it blind to each other - the same
+  collision class as the `svc_socpull` password resets. One session owns the host
+  through a step.
+
+The rule under all of these: a scheduled backup task inherits every one of these
+silent-success traps. Validate the *artifact* (a decrypt against a cold agent, a
+`PG_VERSION` file, a byte count, a locale readback), never the exit code alone.
 
 ### 2.8 Pre-stage the application stack on the spare VM
 
