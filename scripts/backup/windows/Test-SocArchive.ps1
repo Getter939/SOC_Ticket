@@ -41,7 +41,19 @@ param(
     [int]   $MaxReplayLagSec  = 300,
 
     [string]$AlertEmail,
-    [string]$SmtpServer
+    [string]$SmtpServer,
+
+    # SMTP submission options. Defaults preserve the original behaviour (port 25,
+    # no TLS, no auth, From soc-backup@<host>). A relay that requires authenticated
+    # TLS submission needs -UseSsl, -SmtpPort (e.g. 587 STARTTLS), -MailFrom (a
+    # sender address the relay will accept) and -SmtpCredentialPath: a PSCredential
+    # written with Export-Clixml by the SAME account this task runs as, because
+    # Export/Import-Clixml encrypts with per-account DPAPI (a SYSTEM task cannot
+    # decrypt a file exported by an interactive admin).
+    [int]   $SmtpPort = 25,
+    [switch]$UseSsl,
+    [string]$MailFrom,
+    [string]$SmtpCredentialPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,9 +155,28 @@ if ($problems.Count -gt 0) {
 
     if ($AlertEmail -and $SmtpServer) {
         try {
-            Send-MailMessage -To $AlertEmail -From "soc-backup@$($env:COMPUTERNAME)" `
-                             -Subject "[SOC-BACKUP] FAILED on $($env:COMPUTERNAME)" `
-                             -Body $body -SmtpServer $SmtpServer
+            $from = if ($MailFrom) { $MailFrom } else { "soc-backup@$($env:COMPUTERNAME)" }
+            $mailArgs = @{
+                To          = $AlertEmail
+                From        = $from
+                Subject     = "[SOC-BACKUP] FAILED on $($env:COMPUTERNAME)"
+                Body        = $body
+                SmtpServer  = $SmtpServer
+                Port        = $SmtpPort
+                # Stop makes Send-MailMessage's otherwise NON-terminating SMTP errors
+                # terminating, so the catch below actually runs. Without this a failed
+                # send is silent and the alert path looks healthy when it isn't.
+                ErrorAction = 'Stop'
+            }
+            if ($UseSsl) { $mailArgs.UseSsl = $true }
+            if ($SmtpCredentialPath) {
+                if (-not (Test-Path -LiteralPath $SmtpCredentialPath)) {
+                    throw "SMTP credential file not found: $SmtpCredentialPath"
+                }
+                $mailArgs.Credential = Import-Clixml -LiteralPath $SmtpCredentialPath
+            }
+            Send-MailMessage @mailArgs
+            Write-Host "alert: emailed $AlertEmail via ${SmtpServer}:$SmtpPort"
         }
         catch {
             Write-Warning "Could not send alert email: $($_.Exception.Message)"
