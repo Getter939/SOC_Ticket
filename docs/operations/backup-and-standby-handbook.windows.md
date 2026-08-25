@@ -1142,6 +1142,49 @@ database and is diverging from production - every minute after that widens the
 gap. The `-CheckStandby` health check catches this daily. Treat it as an incident,
 not a warning: the standby must be rebuilt, and you need to know what promoted it.
 
+### 3.7 Field notes from the standby build
+
+More silent-success traps, in the order they bit on the first build:
+
+- **A prior blanket firewall Block rule beats your new Allow rule.** Stage 10's
+  hardening leaves an enabled inbound **Block** on 5432 scoped to `Any`. Windows
+  Firewall evaluates Block before Allow, so adding a narrow "allow the spare"
+  rule does nothing - the spare's connection **times out** (silent drop), not
+  "refused". Fix: `Disable-NetFirewallRule` the blanket 5432 block (default-deny
+  plus your narrow Allow still closes it to everyone else); confirm with
+  `Test-NetConnection <spare> -Port 5432` = `TcpTestSucceeded: True`. A
+  `Get-NetFirewallPortFilter` join can miss program-scoped rules - list
+  `Get-NetFirewallRule -Action Block -Enabled True` and map filters explicitly.
+- **`replication=1` (physical) is mandatory when testing with psql, and it is NOT
+  the same as `replication=database`.** The pg_hba `replication` keyword matches
+  ONLY physical replication. `psql "... dbname=replication"` with no replication
+  parameter opens an ordinary connection; `replication=database` opens a *logical*
+  one. Neither matches a `hostssl replication` rule, and both produce the
+  misleading `no pg_hba.conf entry ... database "replication"` - which looks like a
+  rule or reload problem but is a wrong-connection-type problem. Use
+  `replication=1`. `pg_basebackup` sets physical mode itself, so it always matches.
+- **`pg_hba_file_rules` reads the file, not the running rules.** A rule can show
+  there with `error` empty while the server still rejects it - do not conclude
+  "reload failed, must restart" from a failing *connection test* alone. Confirm
+  the connable path with the correct `replication=1` test before touching the
+  server; the earlier `pg_reload_conf()` was almost certainly fine.
+- **Match the replication password by SHA-256 fingerprint across both hosts.**
+  Echo-suppressed entry hides typos, and the two 13-char values silently diverged
+  once. Print `SHA256(pw)` (first 16 hex) on prod after `ALTER ROLE` and on the
+  spare after writing the passfile; proceed only when they match. Postgres roles do
+  **not** lock on failed auth, so `IDENTIFY_SYSTEM` is a free correctness probe -
+  a `password authentication failed ... retrieved from file` there means pg_hba is
+  already fine and only the passfile value is wrong.
+- **The idle-primary lag false positive.** `-CheckStandby`'s time-based lag
+  (`now() - pg_last_xact_replay_timestamp()`) grows without bound on a primary with
+  no writes, so a perfectly caught-up standby fails the daily check on a not-yet-live
+  system. `Test-SocArchive.ps1` now treats `pg_last_wal_receive_lsn() =
+  pg_last_wal_replay_lsn()` (caught up) as healthy and only applies the time
+  threshold when WAL is genuinely unreplayed.
+- **The standby holds a full copy of production data.** From the first successful
+  base backup, classify and ACL the spare exactly as production - same as the
+  restore-drill note in §2.7.
+
 ---
 
 ## Phase 4 - Failover and disaster recovery
