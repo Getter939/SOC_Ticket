@@ -47,7 +47,7 @@ Standard software-delivery phases, scored against this project.
 | 5 | Reporting / analytics | `mart` schema built; Grafana still reads the Indexer directly | 🟡 60% |
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
 | 7 | **Production build** | Nothing provisioned. Deployment docs target the wrong OS | 🔴 5% |
-| 8 | **Backup & DR** | Backups + off-host pull + **restore drill passed & automated**; streaming standby pending | 🟡 70% |
+| 8 | **Backup & DR** | Backups + off-host pull + restore drill + **streaming standby live (5433)**, monitored; app stack pre-staged on spare | 🟢 90% |
 | 9 | **Security hardening** | Settings are sound; no TLS, no logging, no pre-prod review | 🟡 40% |
 | 10 | **Go-live cutover** | Not planned | 🔴 0% |
 | 11 | **Hypercare & maintenance** | Not planned | 🔴 0% |
@@ -177,9 +177,16 @@ Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
   weekly as `SOC-Restore-Drill`; daily `SOC-Archive-Check`; weekly
   `SOC-Archive-Prune` — all verified `LastTaskResult 0`. Credential-break test:
   pull returns non-zero when creds are broken, `0` when restored.)*
-- [ ] **Phase 3 (handbook) — streaming standby** (port 5433), promoted manually.
-  *(Next — this is the project's Phase 4. Needs a prod `wal_level=replica` restart
-  window first.)*
+- [x] **Phase 3 (handbook) — streaming standby** (port 5433). *(Done — 2026-08-25.
+  Prod `wal_level=replica` + SSL + `max_slot_wal_keep_size=10GB`, `replicator` role
+  over `hostssl` scoped to the spare; standby `postgresql-standby` on the spare
+  streams continuously, `-S auto`. Verified: data propagation, reboot survival,
+  daily `SOC-Archive-Check -CheckStandby` green. App stack pre-staged on the spare
+  (§2.8) — Python 3.14.7, venv, IIS/ARR, `SOCTicketWaitress` Manual/stopped,
+  placeholder `.env`. Promotion/failover NOT yet rehearsed — see below.)*
+- [ ] **Planned failover rehearsal** — promote the standby, repoint the pre-staged
+  app, log in, then rebuild the standby. This is the first test of the roles/grants
+  gap the restore drill cannot reach. Quarterly once live.
 - [ ] **Store the GPG private key offline** and **test the offline copy on a third
   machine.** Lose it and every archive is scrap; an untested copy is not a copy.
 - [ ] **Ask infrastructure whether both VMs share a hypervisor or SAN** — and write
