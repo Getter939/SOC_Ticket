@@ -761,13 +761,43 @@ real rather than aspirational.
 
 ## Stage 13 — HTTPS (deferred until the certificate exists)
 
-Do this only when the DNS hostname resolves and the certificate is installed.
+**Prerequisites (external — get these first; they are the long pole):** a DNS A
+record `<hostname>` -> the production IP, and a TLS certificate for that hostname as
+a **PFX with private key** (corporate PKI or a CA). Nothing below runs until both
+exist. Write `.env` as **ASCII, no BOM** (a BOM makes the first key `\ufeffSECRET_KEY`
+and Django won't start). Use a hidden prompt for the PFX password (on the deployed
+RDP console, `Read-Host -AsSecureString` truncates to one char - use the echo-
+suppressed `[Console]::ReadLine()` helper from the backup handbook's field notes).
 
-1. Import the certificate into `LocalMachine\My`.
-2. Add an HTTPS binding on the real hostname; keep or redirect port 80.
-3. Add the hostname to `ALLOWED_HOSTS`.
-4. Set `SITE_URL=https://<hostname>` — it is baked into every notification link.
-5. Flip the security flags:
+**13.0 Pre-flight (read-only).**
+```powershell
+Resolve-DnsName <hostname>                                   # resolves to the prod IP
+Import-Module WebAdministration; Get-WebBinding -Name 'SOCTicket'   # loopback:80 today
+& C:\SOCTicket\app\venv\Scripts\python.exe C:\SOCTicket\app\manage.py check --deploy   # baseline: 4 HTTPS warnings
+```
+
+**13.1 Import the certificate into `LocalMachine\My`** and record the thumbprint.
+```powershell
+$sec = ConvertTo-SecureString '<pfx-password>' -AsPlainText -Force   # capture via hidden prompt, not inline
+$cert = Import-PfxCertificate -FilePath '<path>\soc.pfx' -CertStoreLocation Cert:\LocalMachine\My -Password $sec
+$cert.Thumbprint
+```
+
+**13.2 HTTPS binding + firewall — the exposure moment.** The site is loopback-only
+until now; this is where it becomes reachable. **Get security sign-off**, and treat
+this as when the WAF / load-test items apply.
+```powershell
+New-WebBinding -Name 'SOCTicket' -Protocol https -Port 443 -HostHeader '<hostname>' -SslFlags 1   # 1 = SNI
+(Get-WebBinding -Name 'SOCTicket' -Protocol https).AddSslCertificate($cert.Thumbprint, 'My')
+New-NetFirewallRule -DisplayName 'SOC HTTPS in' -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -Profile Any
+#   scope with -RemoteAddress <subnet> if the audience is a specific LAN. Keep :80 for the redirect
+#   SECURE_SSL_REDIRECT (below) performs.
+```
+
+**13.3 `.env` flips** (`C:\SOCTicket\app\.env`):
+- Add `<hostname>` to `ALLOWED_HOSTS` (and trim any leftover `web`/LAN entries).
+- `SITE_URL=https://<hostname>` — baked into every notification link, so it must be final.
+- Flip the security flags:
 
 ```ini
 SESSION_COOKIE_SECURE=True
@@ -784,10 +814,39 @@ SECURE_HSTS_SECONDS=300      # start small — see below
 > HSTS state. Start at 300, confirm HTTPS is solid for a few days, then raise
 > it in steps.
 
-6. Restart the service, re-run `manage.py check --deploy` — the HTTPS warnings
-   should now be gone.
-7. **Re-run `New-SocConfigBundle.ps1`** — you just changed `.env` and the IIS
-   configuration, and the bundle captures whatever was true when it last ran.
+`Restart-Service SOCTicketWaitress` (drops pooled connections; `DB_CONN_MAX_AGE=300`).
+
+**13.4 Real SMTP** (`.env`) — the notification + alerting unlock. Do **not**
+half-configure: a reachable-but-wrong host adds a 10s timeout to every ticket write.
+```ini
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=<relay>
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL=SOC Notifications <noreply@<domain>>
+# EMAIL_HOST_USER / EMAIL_HOST_PASSWORD only if the relay requires auth
+```
+Restart, then test a real send (a password reset, or `send_mail` via `manage.py
+shell`) and confirm it **arrives** - not just that the setting is present.
+
+**13.5 Wire backup alerting (on the SPARE)** — this is what finally closes the
+handbook's Phase 2.5 gap. Update the `SOC-Archive-Check` task to add
+`-AlertEmail <addr> -SmtpServer <relay>` so a stale archive, broken pull, or
+non-streaming standby **emails** instead of failing silently. Prove it by inducing a
+failure (rename `prod-cred.xml`, run the pull + check) and confirming the email
+fires, then restore. Until this step, backup freshness is a manual weekly task with a
+named owner.
+
+**13.6 Verify + capture.**
+- `manage.py check --deploy` — the 4 HTTPS warnings should now be gone.
+- Browse `https://<hostname>`: valid cert, log in, confirm a notification email
+  arrives and the induced-failure alert fired.
+- **Re-run `New-SocConfigBundle.ps1`** — you just changed `.env` and the IIS
+  configuration, and the bundle captures whatever was true when it last ran.
+
+**13.7 HSTS ramp (days later).** Once HTTPS is proven solid, raise
+`SECURE_HSTS_SECONDS` in steps (300 -> 3600 -> 86400 -> ... -> 31536000); add preload
+only when you are certain the hostname and certificate are permanent.
 
 ---
 
