@@ -110,12 +110,24 @@ if ($CheckStandby) {
             Add-Problem 'Standby is NOT in recovery - it appears to have been promoted. Investigate immediately.'
         }
         else {
-            $lag = & $psql -X -q -t -A -h localhost -p $StandbyPort -U $StandbyUser -d postgres `
-                   -c "select coalesce(extract(epoch from now() - pg_last_xact_replay_timestamp()), 0)::int;" 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($lag)) {
-                $lagSec = [int]($lag.Trim())
-                if ($lagSec -gt $MaxReplayLagSec) {
-                    Add-Problem "Standby replay lag is ${lagSec}s (limit ${MaxReplayLagSec}s)"
+            # Time-based lag (now - last replayed xact time) grows unbounded on an IDLE
+            # primary - there are simply no new transactions to replay - so it is a false
+            # alarm unless the standby is actually behind. Ask whether the standby has
+            # applied everything it has received (receive_lsn = replay_lsn); if so it is
+            # caught up regardless of how long the primary has been quiet. Only fall back
+            # to the time threshold when there is genuinely unreplayed WAL. All three
+            # functions are executable by any role, so soc_backup needs no extra grant.
+            $row = & $psql -X -q -t -A -F '|' -h localhost -p $StandbyPort -U $StandbyUser -d postgres `
+                   -c "select (pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn()), coalesce(extract(epoch from now() - pg_last_xact_replay_timestamp()), 0)::int;" 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($row)) {
+                $parts    = "$row".Trim() -split '\|'
+                $caughtUp = ($parts[0].Trim() -eq 't')
+                $lagSec   = [int]($parts[1].Trim())
+                if ($caughtUp) {
+                    Write-Host 'check: standby OK (in recovery, caught up with primary)'
+                }
+                elseif ($lagSec -gt $MaxReplayLagSec) {
+                    Add-Problem "Standby is behind: replay lag ${lagSec}s (limit ${MaxReplayLagSec}s) with unreplayed WAL"
                 }
                 else {
                     Write-Host "check: standby OK (in recovery, replay lag ${lagSec}s)"

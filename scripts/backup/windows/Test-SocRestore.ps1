@@ -17,7 +17,7 @@
     production would be destructive.
 
 .EXAMPLE
-    .\Test-SocRestore.ps1 -ArchiveDir D:\SOCBackup\archive -PassphraseFile C:\ProgramData\SOCBackup\gpg-pass.txt
+    .\Test-SocRestore.ps1 -PassphraseFile C:\ProgramData\SOCBackup\gpg-pass.txt
 
 .NOTES
     See docs/operations/backup-and-standby-handbook.windows.md
@@ -39,6 +39,19 @@ param(
     [string]$VerifyUser = 'postgres',
     [string]$RestoreDb  = 'ticketdata_restoretest',
 
+    # Production is UTF8 with the Windows libc locale Thai_Thailand.874, verified
+    # against pg_database on prod (18.4): datcollate = datctype = Thai_Thailand.874,
+    # datlocprovider = 'c'. The drill database is created with these values
+    # explicitly and from TEMPLATE=template0, so a verify cluster built with the
+    # wrong locale fails here instead of producing a database that restores
+    # cleanly, counts correctly, and orders Thai text differently from production.
+    # Windows-only: this locale name has no Linux equivalent.
+    [string]$RestoreEncoding = 'UTF8',
+    [string]$RestoreCollate  = 'Thai_Thailand.874',
+    [string]$RestoreCtype    = 'Thai_Thailand.874',
+    [ValidateSet('libc', 'builtin', 'icu')]
+    [string]$RestoreLocaleProvider = 'libc',
+
     # Gpg4win 4.x/5.x is 64-bit and installs here, not under Program Files (x86).
     [string]$GpgExe         = 'C:\Program Files\GnuPG\bin\gpg.exe',
     [string]$GpgHome        = 'C:\ProgramData\SOCBackup\gnupg',
@@ -54,6 +67,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 if ($RestoreDb -notmatch '^[A-Za-z0-9_]+$') { throw "Unsafe database name: $RestoreDb" }
+foreach ($localeValue in @($RestoreEncoding, $RestoreCollate, $RestoreCtype)) {
+    if ($localeValue -notmatch '^[A-Za-z0-9_.\-]+$') { throw "Unsafe encoding/locale value: $localeValue" }
+}
 
 $psql       = Join-Path $PgBinPath 'psql.exe'
 $pgRestore  = Join-Path $PgBinPath 'pg_restore.exe'
@@ -126,8 +142,37 @@ try {
     & $psql -X -q -v ON_ERROR_STOP=1 -d postgres -c `
         "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$RestoreDb' and pid <> pg_backend_pid();" | Out-Null
     & $psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "drop database if exists ""$RestoreDb"";" | Out-Null
-    & $psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "create database ""$RestoreDb"";" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create the restore target database.' }
+
+    # TEMPLATE=template0 with an explicit locale makes this an assertion rather
+    # than an inheritance. A bare CREATE DATABASE takes whatever template1 has,
+    # which is whatever initdb chose - and PostgreSQL 18 changed initdb's default
+    # locale provider, so "whatever initdb chose" is the easy way to end up with
+    # a cluster that passes every row count while behaving unlike production.
+    $createSql = "create database ""$RestoreDb"" template template0 " +
+                 "encoding '$RestoreEncoding' locale_provider $RestoreLocaleProvider " +
+                 "lc_collate '$RestoreCollate' lc_ctype '$RestoreCtype';"
+    & $psql -X -q -v ON_ERROR_STOP=1 -d postgres -c $createSql | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Could not create $RestoreDb as encoding=$RestoreEncoding, lc_collate=$RestoreCollate, " +
+               "lc_ctype=$RestoreCtype, locale_provider=$RestoreLocaleProvider. The verify cluster was " +
+               "almost certainly not initdb'd with this locale - see handbook 2.6.")
+    }
+
+    # Read the locale back instead of trusting that the CREATE meant what it said.
+    $providerCode = @{ libc = 'c'; builtin = 'b'; icu = 'i' }[$RestoreLocaleProvider]
+    $locRaw = & $psql -X -q -t -A -F '|' -v ON_ERROR_STOP=1 -d postgres -c `
+        "select pg_encoding_to_char(encoding), datcollate, datctype, datlocprovider from pg_database where datname = '$RestoreDb';"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($locRaw)) {
+        throw "Could not read back the locale of $RestoreDb."
+    }
+    $loc = ("$locRaw".Trim()) -split '\|'
+    if ($loc.Count -lt 4) { throw "Unexpected locale readback for ${RestoreDb}: $locRaw" }
+    if ($loc[0] -ne $RestoreEncoding -or $loc[1] -ne $RestoreCollate -or
+        $loc[2] -ne $RestoreCtype    -or $loc[3] -ne $providerCode) {
+        throw ("Restore database locale does not match production: got encoding=$($loc[0]), " +
+               "lc_collate=$($loc[1]), lc_ctype=$($loc[2]), locale_provider=$($loc[3]).")
+    }
+    Write-Host "restore-verify: $RestoreDb is $($loc[0]) / $($loc[1]) / provider '$($loc[3])' - matches production"
 
     Write-Host 'restore-verify: restoring the dump'
     & $pgRestore --no-owner --no-acl --dbname=$RestoreDb (Join-Path $extractDir 'database.dump')

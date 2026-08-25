@@ -47,7 +47,7 @@ Standard software-delivery phases, scored against this project.
 | 5 | Reporting / analytics | `mart` schema built; Grafana still reads the Indexer directly | 🟡 60% |
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
 | 7 | **Production build** | Nothing provisioned. Deployment docs target the wrong OS | 🔴 5% |
-| 8 | **Backup & DR** | Handbook + scripts written; **zero phases executed** | 🔴 10% |
+| 8 | **Backup & DR** | Backups + off-host pull + **restore drill passed & automated**; streaming standby pending | 🟡 70% |
 | 9 | **Security hardening** | Settings are sound; no TLS, no logging, no pre-prod review | 🟡 40% |
 | 10 | **Go-live cutover** | Not planned | 🔴 0% |
 | 11 | **Hypercare & maintenance** | Not planned | 🔴 0% |
@@ -163,25 +163,36 @@ still test destructively.
 
 Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
 
-- [ ] **Phase 1 — backups on production.** GnuPG keypair (generated on the *spare*
+- [x] **Phase 1 — backups on production.** GnuPG keypair (generated on the *spare*
   VM, public key only on prod), backup service account, `New-SocBackup.ps1`,
-  scheduled tiers.
-- [ ] **Phase 2 — off-host pull to the spare VM.** Read-only SMB share, pull
+  scheduled tiers. *(Done — nightly encrypted archives.)*
+- [x] **Phase 2 — off-host pull to the spare VM.** Read-only SMB share, pull
   account, `Copy-SocArchive.ps1` + `Test-SocArchive.ps1` + `Remove-SocArchive.ps1`
-  scheduled, the alert wired to something you actually read.
-- [ ] **Run a real restore drill** against the separate verify instance (port 5434)
-  and time it. An untested backup is not a backup.
-- [ ] **Phase 3 — streaming standby** (port 5433), promoted manually.
-- [ ] **Store the GPG private key offline.** Lose it and every archive is scrap.
+  scheduled. *(Done — hourly pull, SHA-256 verified, quarantine empty.)*
+- [x] **Run a real restore drill** against the separate verify instance (port 5434)
+  and time it. *(Done — 2026-08-24. Drill decrypts, checksums, restores into a
+  throwaway DB built `TEMPLATE template0` with the production locale asserted
+  (`UTF8 / Thai_Thailand.874 / libc`) and read back, and asserts row counts vs the
+  manifest. Counts matched; `restore-verify: backup is restorable`. Scheduled
+  weekly as `SOC-Restore-Drill`; daily `SOC-Archive-Check`; weekly
+  `SOC-Archive-Prune` — all verified `LastTaskResult 0`. Credential-break test:
+  pull returns non-zero when creds are broken, `0` when restored.)*
+- [ ] **Phase 3 (handbook) — streaming standby** (port 5433), promoted manually.
+  *(Next — this is the project's Phase 4. Needs a prod `wal_level=replica` restart
+  window first.)*
+- [ ] **Store the GPG private key offline** and **test the offline copy on a third
+  machine.** Lose it and every archive is scrap; an untested copy is not a copy.
 - [ ] **Ask infrastructure whether both VMs share a hypervisor or SAN** — and write
   the answer down. If they do, this is a warm tier, not real DR, and the CISO
   should know that.
-- [ ] **Commit the backup scripts.** `scripts/backup/windows/*.ps1`,
-  `check_freshness.sh`, `prune_archive.sh`, `pull_archives.sh`, and
-  `docker-compose.backupvm.yml` are currently untracked.
+- [x] **Commit the backup scripts.** `scripts/backup/windows/*.ps1` are tracked.
 
-**Exit criteria:** a restore drill completed and timed; freshness alert proven to
-fire; RPO/RTO written down and agreed.
+**Exit criteria:** ~~a restore drill completed and timed~~ ✅; freshness check
+proven to detect a failure ✅ (email half deferred to Phase 5 SMTP — until then a
+**named owner reviews `SOC-Archive-Check` weekly**); **RPO ≈ 24 h** (nightly daily
+tier) written down; **RTO** = data-restore proven in seconds, end-to-end service
+RTO pending the annual full recovery rehearsal (restore + recreate roles/grants +
+repoint Django + log in).
 
 ---
 
