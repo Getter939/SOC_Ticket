@@ -791,6 +791,28 @@ Rename-Item C:\ProgramData\SOCBackup\prod-cred.xml.bak prod-cred.xml
 Everything else in this system fails loudly. A broken alert path fails silently
 and takes the rest of the system's trustworthiness with it. **Do not skip this.**
 
+> **Field note — NT as-built (Aug 2026).** The generic `-AlertEmail <addr>
+> -SmtpServer <relay>` above assumes an open relay on port 25. The NT relay
+> `mail.ntplc.co.th` requires **authenticated STARTTLS submission** and rejects a
+> non-domain sender, so the live `SOC-Archive-Check` runs with:
+> ```powershell
+> -AlertEmail 'ntsoc@ntplc.co.th' -SmtpServer 'mail.ntplc.co.th' -SmtpPort 25 -UseSsl `
+>   -MailFrom 'ntsoc@ntplc.co.th' -SmtpCredentialPath 'C:\ProgramData\SOCBackup\smtp-cred.xml'
+> ```
+> Three traps this walked into, all now handled by `Test-SocArchive.ps1`:
+> - **`Send-MailMessage` cannot do implicit-TLS 465** — only STARTTLS on 25/587. 587
+>   timed out here; **25 + `-UseSsl` (STARTTLS)** works. (Django's app SMTP uses 465
+>   separately, via Python `smtplib`.)
+> - **The relay rejects a non-`@ntplc.co.th` From** — the old default
+>   `soc-backup@<host>` was refused ("failed to route the address"). Pass a real
+>   mailbox with `-MailFrom` (here the existing SOC central mailbox `ntsoc@ntplc.co.th`,
+>   sender *and* recipient).
+> - **`smtp-cred.xml` must be `Export-Clixml`'d _as SYSTEM_** (a one-off SYSTEM
+>   scheduled task), because DPAPI is per-account — a credential exported by an
+>   interactive admin cannot be decrypted by the SYSTEM task, and `Import-Clixml`
+>   fails. Mirrors the `prod-cred.xml` pattern. The send now uses `-ErrorAction Stop`
+>   so a failed submission throws instead of silently logging "sent".
+
 ### 2.6 The restore-drill instance
 
 A streaming standby is read-only for its entire life and **cannot** accept a

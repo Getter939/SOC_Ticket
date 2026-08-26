@@ -829,13 +829,38 @@ DEFAULT_FROM_EMAIL=SOC Notifications <noreply@<domain>>
 Restart, then test a real send (a password reset, or `send_mail` via `manage.py
 shell`) and confirm it **arrives** - not just that the setting is present.
 
+> **As-built at NT (Aug 2026).** This app-notification path reuses the SOC central
+> mailbox `ntsoc@ntplc.co.th` on **465 + `EMAIL_USE_SSL=True`** (identical to the
+> prototype/dev), `EMAIL_HOST_USER=ntsoc@ntplc.co.th`. Note this is *different* from
+> the backup-alerting path in 13.5, which uses the same mailbox but on **port 25 +
+> STARTTLS** — PowerShell's `Send-MailMessage` cannot do implicit-TLS 465, while
+> Django (Python `smtplib`) can.
+
 **13.5 Wire backup alerting (on the SPARE)** — this is what finally closes the
-handbook's Phase 2.5 gap. Update the `SOC-Archive-Check` task to add
-`-AlertEmail <addr> -SmtpServer <relay>` so a stale archive, broken pull, or
-non-streaming standby **emails** instead of failing silently. Prove it by inducing a
-failure (rename `prod-cred.xml`, run the pull + check) and confirming the email
-fires, then restore. Until this step, backup freshness is a manual weekly task with a
-named owner.
+handbook's Phase 2.5 gap. **✅ Done (Aug 2026) — Track A.** The `SOC-Archive-Check`
+task now alerts over the authenticated `mail.ntplc.co.th` relay, so a stale archive,
+broken pull, full disk, or non-streaming standby **emails** the SOC team instead of
+failing silently. As-built task arguments:
+
+```powershell
+# Appended to SOC-Archive-Check (runs as SYSTEM on the spare)
+-AlertEmail 'ntsoc@ntplc.co.th' -SmtpServer 'mail.ntplc.co.th' -SmtpPort 25 -UseSsl `
+  -MailFrom 'ntsoc@ntplc.co.th' -SmtpCredentialPath 'C:\ProgramData\SOCBackup\smtp-cred.xml'
+```
+
+Three things this had to get right — all now baked into `Test-SocArchive.ps1`:
+- **Port 25 + STARTTLS (`-UseSsl`)**, not 587 (which timed out here) and not 465
+  (implicit-TLS, which `Send-MailMessage` cannot speak).
+- **`-MailFrom ntsoc@ntplc.co.th`** — the relay rejects a non-`@ntplc.co.th` From
+  (the old default `soc-backup@<host>` was refused as "failed to route the address").
+- **`smtp-cred.xml` must be `Export-Clixml`'d _as SYSTEM_** — DPAPI is per-account, so
+  a credential exported by an interactive admin cannot be decrypted by the SYSTEM task.
+  The script's send now runs with `-ErrorAction Stop`, so a failed submission actually
+  throws instead of logging "sent" while nothing left.
+
+Proven by forcing a problem without changing anything (`-MinFreePercent 100`) and
+confirming the `[SOC-BACKUP] FAILED` email arrived. This retires the "backup freshness
+is a manual weekly task with a named owner" stopgap.
 
 **13.6 Verify + capture.**
 - `manage.py check --deploy` — the 4 HTTPS warnings should now be gone.

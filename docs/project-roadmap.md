@@ -195,8 +195,11 @@ Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
 - [x] **Commit the backup scripts.** `scripts/backup/windows/*.ps1` are tracked.
 
 **Exit criteria:** ~~a restore drill completed and timed~~ ✅; freshness check
-proven to detect a failure ✅ (email half deferred to Phase 5 SMTP — until then a
-**named owner reviews `SOC-Archive-Check` weekly**); **RPO ≈ 24 h** (nightly daily
+proven to detect a failure ✅, and the email half is now **live** — Phase 5 Track A
+wired `SOC-Archive-Check` to alert `ntsoc@ntplc.co.th` over the authenticated
+`mail.ntplc.co.th` relay, so a stale archive / broken pull / full disk /
+non-streaming standby emails the SOC team (the manual-weekly-owner stopgap is
+retired); **RPO ≈ 24 h** (nightly daily
 tier) written down; **RTO** = data-restore proven in seconds, end-to-end service
 RTO pending the annual full recovery rehearsal (restore + recreate roles/grants +
 repoint Django + log in).
