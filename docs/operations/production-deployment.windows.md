@@ -667,6 +667,45 @@ New-WebSite -Name 'SOCTicket' -Port 80 -IPAddress 127.0.0.1 `
 </configuration>
 ```
 
+> ### The X-Forwarded-Proto chain has two more links — both fail silently
+>
+> Declaring the server variable in `web.config` is necessary but **not sufficient**.
+> The scheme has to survive two more hops, and each was found the hard way during the
+> first HTTPS go-live (2026-08-26):
+>
+> 1. **Unlock the section at the server level, or every request 500s.**
+>    `allowedServerVariables` is locked in `applicationHost.config` by default
+>    (`overrideModeDefault="Deny"`), so a *site* `web.config` that declares it returns
+>    **HTTP 500.52** (`0x80070021`, "This configuration section cannot be used at this
+>    path") on **every** request — the site is down, not degraded. Unlock it once:
+>    ```powershell
+>    & "$env:windir\system32\inetsrv\appcmd.exe" unlock config `
+>        -section:"system.webServer/rewrite/allowedServerVariables"
+>    ```
+>    (The DR config bundle captures this via `applicationHost.config`.)
+>
+> 2. **Waitress ≥ 2.0 strips `X-Forwarded-*` unless told to trust the proxy.**
+>    `clear_untrusted_proxy_headers` defaults to **True**, so Waitress deletes
+>    `X-Forwarded-Proto` before Django sees it. `SECURE_PROXY_SSL_HEADER` then never
+>    fires and `SECURE_SSL_REDIRECT=True` **301-loops forever** — even though IIS is
+>    sending the header correctly, and even though `manage.py check` shows the setting
+>    present. Launch Waitress trusting the loopback proxy (in `run-prod.cmd`):
+>    ```
+>    waitress-serve.exe --listen=127.0.0.1:8000 --threads=8 ^
+>      --trusted-proxy=127.0.0.1 --trusted-proxy-headers="x-forwarded-for x-forwarded-proto" ^
+>      config.wsgi:application
+>    ```
+>    **Prove it before flipping the redirect** — hit Waitress *directly*, with and
+>    without the header:
+>    ```powershell
+>    curl.exe -s -o NUL -w "%{http_code}" -H "X-Forwarded-Proto: https" http://127.0.0.1:8000/healthz  # want 200
+>    curl.exe -s -o NUL -w "%{http_code}"                               http://127.0.0.1:8000/healthz  # want 301
+>    ```
+>    Both 301 means Waitress is still stripping it. `run-prod.cmd` is **not** in git and
+>    is **not** in the config bundle by default — add it (and `web.config`) to
+>    `New-SocConfigBundle.ps1 -ExtraFiles`, or a rebuild silently loses this flag and the
+>    loop returns.
+
 > ### Do not add a static handler for `/media/`
 >
 > Uploaded evidence is served **only** through the authenticated,
@@ -776,6 +815,52 @@ real rather than aspirational.
 
 ## Stage 13 — HTTPS (deferred until the certificate exists)
 
+> ### ✅ As-built — HTTPS go-live via a self-signed IP bridge (2026-08-26)
+>
+> HTTPS was brought up **ahead of the real certificate** using a **self-signed cert
+> bound to the IP `10.1.220.118`** — a temporary *bridge* to prove the whole stack
+> (TLS + redirect + secure cookies + app SMTP) while the DNS record and CA/PKI cert
+> remain the long pole. The steps below still describe the **real-cert cutover**; the
+> bridge differs as follows:
+>
+> - **No PFX, no import (13.1 skipped).** The cert was generated in place, private key
+>   included, so there is nothing to import and no PFX passphrase:
+>   ```powershell
+>   $cert = New-SelfSignedCertificate -DnsName '10.1.220.118' -CertStoreLocation Cert:\LocalMachine\My `
+>            -FriendlyName 'SOC Ticket self-signed (IP bridge)' -NotAfter (Get-Date).AddYears(2) `
+>            -KeyLength 2048 -HashAlgorithm SHA256
+>   ```
+> - **IP binding — no host header, no SNI** (13.2): `New-WebBinding -Name 'SOCTicket'
+>   -Protocol https -Port 443 -IPAddress '*'` then `AddSslCertificate($cert.Thumbprint,'My')`.
+>   Verify the bind really took with `netsh http show sslcert ipport=0.0.0.0:443`
+>   (`AddSslCertificate` reports success even when it no-ops).
+> - **Firewall reality.** Stage 10 created **two per-port blocks**,
+>   `SOC-Block-Inbound-HTTP-80` and `SOC-Block-Inbound-HTTPS-443` (not the single
+>   `SOC-Block-Inbound-HTTP` named in 13.2), plus an *unscoped* built-in
+>   `World Wide Web Services (HTTPS Traffic-In)` allow. End-state: disable the 443 block
+>   **and** that unscoped WWW allow, then a deny-by-default profile + one scoped rule —
+>   `SOC HTTPS in`, TCP 443, `-RemoteAddress 10.1.220.0/24,10.0.188.0/24`. Port **80 is
+>   left blocked / loopback-only** (users go straight to `https://`).
+> - **`SECURE_HSTS_SECONDS` stays 0 — do NOT set HSTS on a self-signed cert.** HSTS +
+>   an untrusted cert is an unrecoverable lockout. `check --deploy` therefore keeps
+>   **W004** by design (the other three HTTPS warnings clear). HSTS ramp waits for the
+>   real cert.
+> - **The two silent gaps** that cost the most: the `allowedServerVariables` **unlock**
+>   and the **Waitress `--trusted-proxy`** flags — both documented in **Stage 9.3**.
+>   Without the second, the redirect 301-loops.
+> - **App SMTP (13.4)** was completed on the bridge: `ntsoc@ntplc.co.th` on
+>   **465 + `EMAIL_USE_SSL=True` / `EMAIL_USE_TLS=False`**; a real `send_mail`
+>   **arrived**. Watch for a typo'd `EMAIL_HOST_USER` (the deployed `.env` had
+>   `nntsoc@…`, which fails auth silently).
+> - **Cross-VLAN worked** once the server allow included the client subnet — the earlier
+>   TLS reset was purely the missing allow, not TLS inspection. But a wider cross-VLAN
+>   audience is still best served by the **real CA cert** (no browser warning, and it
+>   won't trip an inter-VLAN IPS the way self-signed can).
+>
+> **To cut over to the real cert later:** import the PFX (13.1), re-bind 443 to the new
+> thumbprint, set `SITE_URL`/`ALLOWED_HOSTS` to the hostname, then begin the HSTS ramp
+> (13.7). Tests on the bridge use `curl.exe -k` / click-through the browser warning.
+
 **Prerequisites (external — get these first; they are the long pole):** a DNS A
 record `<hostname>` -> the production IP, and a TLS certificate for that hostname as
 a **PFX with private key** (corporate PKI or a CA). Nothing below runs until both
@@ -824,12 +909,17 @@ Test-NetConnection -ComputerName <hostname> -Port 443   # must now succeed
 **13.3 `.env` flips** (`C:\SOCTicket\app\.env`):
 
 > **Required pre-check — or you get an infinite redirect loop.** Before setting
-> `SECURE_SSL_REDIRECT=True`, confirm the Stage 9.3 web.config forwards
-> `HTTP_X_FORWARDED_PROTO=https` (the `<serverVariables>`/`<allowedServerVariables>`
-> block). The proxy hop to Waitress is plain http, so without that header Django
-> sees every request as insecure and 301-redirects to https endlessly. `USE_PROXY_SSL_HEADER=True`
-> is already set; it is inert until the header actually arrives. Quick check after
-> binding 443: `curl.exe -k https://<hostname>/healthz` returns **200**, not a 301 loop.
+> `SECURE_SSL_REDIRECT=True`, confirm **both** links of the X-Forwarded-Proto chain
+> from Stage 9.3 are in place: (a) the web.config forwards `HTTP_X_FORWARDED_PROTO=https`
+> **and** the `allowedServerVariables` section is **unlocked**; **(b) Waitress is
+> launched with `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="… x-forwarded-proto"`**
+> — Waitress ≥ 2.0 strips the header otherwise. The proxy hop to Waitress is plain http,
+> so without the header surviving both hops Django sees every request as insecure and
+> 301-loops. `USE_PROXY_SSL_HEADER=True` is already set; it is inert until the header
+> actually arrives. Isolate the layers before flipping the redirect: `curl.exe -H
+> "X-Forwarded-Proto: https" http://127.0.0.1:8000/healthz` (direct to Waitress) must
+> return **200** — if it returns 301, Waitress is still stripping it. Then after binding
+> 443, `curl.exe -k https://<hostname>/healthz` returns **200**, not a 301 loop.
 
 - Add `<hostname>` to `ALLOWED_HOSTS` (and trim any leftover `web`/LAN entries).
 - `SITE_URL=https://<hostname>` — baked into every notification link, so it must be final.

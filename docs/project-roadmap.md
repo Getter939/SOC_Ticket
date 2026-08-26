@@ -48,7 +48,7 @@ Standard software-delivery phases, scored against this project.
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
 | 7 | **Production build** | Nothing provisioned. Deployment docs target the wrong OS | 🔴 5% |
 | 8 | **Backup & DR** | Backups + off-host pull + restore drill + **streaming standby live (5433)**, monitored; app stack pre-staged on spare | 🟢 90% |
-| 9 | **Security hardening** | Settings are sound; no TLS, no logging, no pre-prod review | 🟡 40% |
+| 9 | **Security hardening** | Settings sound; **TLS live (self-signed IP bridge; real cert pending)**, secure cookies on; no pre-prod review | 🟡 55% |
 | 10 | **Go-live cutover** | Not planned | 🔴 0% |
 | 11 | **Hypercare & maintenance** | Not planned | 🔴 0% |
 
@@ -138,11 +138,17 @@ generated UAT `.docx`.
   `listen_addresses`, `max_wal_senders`, `max_slot_wal_keep_size`, TLS for
   replication. These need a restart; setting them now saves a maintenance
   window later. See §Phase 0 of the Windows backup handbook.
-- [ ] **HTTPS on production**, with a documented certificate renewal owner and date.
-- [ ] **Harden the deployment env**: `DEBUG=False`, real `SECRET_KEY`, correct
-  `ALLOWED_HOSTS`, and turn on `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`,
-  `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`. All of these already exist as
-  env-driven settings and all default to off.
+- [x] **HTTPS on production** — *live as of 2026-08-26 via a **self-signed IP bridge**
+  (`https://10.1.220.118`)*: 443 bound, redirect works (no loop), secure cookies on,
+  app SMTP sending. Deferred to real-cert cutover: the **CA/PKI cert + DNS record**
+  (clears the browser warning, unlocks HSTS, needed for a wider cross-VLAN audience)
+  and a **documented certificate renewal owner and date**. See deployment runbook
+  Stage 13 (as-built) and the two Stage 9.3 gaps (`allowedServerVariables` unlock,
+  Waitress `--trusted-proxy`).
+- [x] **Harden the deployment env**: `DEBUG=False`, real `SECRET_KEY`, correct
+  `ALLOWED_HOSTS`, and `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE` /
+  `SECURE_SSL_REDIRECT` on. `SECURE_HSTS_SECONDS` intentionally **0** on the
+  self-signed bridge — ramp it at real-cert cutover.
 - [ ] **Run `manage.py check --deploy`** and clear every warning you do not
   consciously accept.
 - [ ] **A pre-production security pass** on the app itself — file upload handling,

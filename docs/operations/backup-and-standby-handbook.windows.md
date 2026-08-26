@@ -621,12 +621,24 @@ kilobyte-sized encrypted bundle that rides along with the archives.
 cd C:\SOCTicket\app\scripts\backup\windows
 .\New-SocConfigBundle.ps1 -GpgRecipient soc-backup@nt.local `
   -EnvPath 'C:\SOCTicket\app\.env' -AppServiceName 'SOCTicketWaitress' `
-  -ExtraFiles @('C:\SOCTicket\certs\opensearch-ca.pem')
+  -ExtraFiles @('C:\SOCTicket\certs\opensearch-ca.pem',
+                'C:\SOCTicket\app\run-prod.cmd',
+                'C:\inetpub\socticket\web.config')
 ```
 
 Inspect the manifest inside the bundle to confirm it actually caught your IIS
 site and the app service - the script warns rather than fails if it cannot find
 them, so a silent miss is possible if your service name differs.
+
+> **Capture `run-prod.cmd` and `web.config` explicitly — the service definition is
+> not enough.** The bundle records the Waitress *service* (its `PathName` is just
+> `cmd /c C:\SOCTicket\app\run-prod.cmd`) but **not the contents of `run-prod.cmd`**,
+> which is where the HTTPS go-live added the mandatory
+> `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="…"` flags (Stage 9.3). That file
+> is **not tracked in git** either, so without it in `-ExtraFiles` a rebuild loses the
+> proxy-trust flags and the site 301-loops. `web.config` (the `X-Forwarded-Proto` rule)
+> is captured via `applicationHost.config` only partially — include it directly to be
+> safe. Both were added to the live `SOC-Config-Bundle-Weekly` task on 2026-08-26.
 
 Schedule it weekly, after the weekly data backup:
 
