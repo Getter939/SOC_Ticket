@@ -634,11 +634,16 @@ them, so a silent miss is possible if your service name differs.
 > not enough.** The bundle records the Waitress *service* (its `PathName` is just
 > `cmd /c C:\SOCTicket\app\run-prod.cmd`) but **not the contents of `run-prod.cmd`**,
 > which is where the HTTPS go-live added the mandatory
-> `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="…"` flags (Stage 9.3). That file
-> is **not tracked in git** either, so without it in `-ExtraFiles` a rebuild loses the
-> proxy-trust flags and the site 301-loops. `web.config` (the `X-Forwarded-Proto` rule)
+> `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="…"` flags (Stage 9.3).
+> `run-prod.cmd` is now **tracked in the repo at the app root**, so a clean clone/rebuild
+> already gets the proxy-trust flags; keeping it in `-ExtraFiles` is belt-and-suspenders
+> for a host that has drifted from the repo. `web.config` (the `X-Forwarded-Proto` rule)
 > is captured via `applicationHost.config` only partially — include it directly to be
 > safe. Both were added to the live `SOC-Config-Bundle-Weekly` task on 2026-08-26.
+>
+> Note: a PROD box built before this file was tracked may hold an *untracked* identical
+> `run-prod.cmd`; `git stash -u` (or delete it) before pulling, or git refuses to
+> overwrite the untracked file.
 
 Schedule it weekly, after the weekly data backup:
 
