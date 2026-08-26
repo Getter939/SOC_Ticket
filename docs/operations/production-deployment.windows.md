@@ -759,9 +759,23 @@ real rather than aspirational.
 
 ---
 
-## Stage 13 — HTTPS (deferred until the certificate exists)
+## Stage 13 — HTTPS + alerting
 
-**Prerequisites (external — get these first; they are the long pole):** a DNS A
+> **This stage splits into two independent tracks.**
+>
+> - **Track A — authenticated SMTP backup alerting (13.5). DONE — as-built below.**
+>   The backup health-check alert runs on the SPARE via PowerShell
+>   `Send-MailMessage`; it needs no DNS record and no web certificate, so it was
+>   completed and proven ahead of go-live. It closes the handbook's Phase 2.5 gap
+>   and retires the weekly manual freshness review. See 13.5 and
+>   [backup-and-standby-handbook.windows.md](backup-and-standby-handbook.windows.md)
+>   §2.4/§2.5.
+> - **Track B — HTTPS go-live (13.0–13.4, 13.6–13.7). BLOCKED.** Everything that
+>   turns the site into an HTTPS host, and the Django *application* SMTP that rides
+>   with it (13.4), waits on the two external prerequisites below (DNS A record +
+>   TLS PFX). Do not start Track B until both exist.
+
+**Prerequisites for Track B (external — get these first; they are the long pole):** a DNS A
 record `<hostname>` -> the production IP, and a TLS certificate for that hostname as
 a **PFX with private key** (corporate PKI or a CA). Nothing below runs until both
 exist. Write `.env` as **ASCII, no BOM** (a BOM makes the first key `\ufeffSECRET_KEY`
@@ -816,8 +830,11 @@ SECURE_HSTS_SECONDS=300      # start small — see below
 
 `Restart-Service SOCTicketWaitress` (drops pooled connections; `DB_CONN_MAX_AGE=300`).
 
-**13.4 Real SMTP** (`.env`) — the notification + alerting unlock. Do **not**
-half-configure: a reachable-but-wrong host adds a 10s timeout to every ticket write.
+**13.4 Real SMTP** (`.env`) — the Django **application** email unlock (Track B).
+This is the *app's* notification path (password resets, ticket emails), not the
+backup alert, which is already live (13.5). It rides with HTTPS because
+`SITE_URL` is baked into every link. Do **not** half-configure: a
+reachable-but-wrong host adds a 10s timeout to every ticket write.
 ```ini
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 EMAIL_HOST=<relay>
@@ -829,18 +846,60 @@ DEFAULT_FROM_EMAIL=SOC Notifications <noreply@<domain>>
 Restart, then test a real send (a password reset, or `send_mail` via `manage.py
 shell`) and confirm it **arrives** - not just that the setting is present.
 
-**13.5 Wire backup alerting (on the SPARE)** — this is what finally closes the
-handbook's Phase 2.5 gap. Update the `SOC-Archive-Check` task to add
-`-AlertEmail <addr> -SmtpServer <relay>` so a stale archive, broken pull, or
-non-streaming standby **emails** instead of failing silently. Prove it by inducing a
-failure (rename `prod-cred.xml`, run the pull + check) and confirming the email
-fires, then restore. Until this step, backup freshness is a manual weekly task with a
-named owner.
+> **Decided NT config (applies when Track B runs).** The app path reuses the SOC
+> central mailbox `ntsoc@ntplc.co.th` on **465 + `EMAIL_USE_SSL=True`**
+> (`EMAIL_HOST_USER=ntsoc@ntplc.co.th`) — dev-identical, and Python's `smtplib` can
+> do implicit-TLS 465. This deliberately differs from the backup-alert path (13.5),
+> which uses the *same* mailbox on port 25 + STARTTLS because PowerShell's
+> `Send-MailMessage` cannot do 465.
 
-**13.6 Verify + capture.**
+**13.5 Backup alerting (on the SPARE) — DONE (Track A, as-built).** This closed the
+handbook's Phase 2.5 gap and retired the named-owner weekly freshness review. It
+was completed independently of HTTPS: the alert is a PowerShell `Send-MailMessage`
+from `Test-SocArchive.ps1`, so it needs no DNS record and no web certificate.
+
+As-built:
+
+- **Relay:** `mail.ntplc.co.th`, **port 25 with STARTTLS** (`-UseSsl`) and
+  **authentication**. Port choice was forced: **587 timed out** on this relay, and
+  **465 is implicit-TLS, which `Send-MailMessage` cannot speak** — so port 25 +
+  STARTTLS is the only combination PowerShell can use here. (The Django *app* path,
+  Track B / 13.4, reuses the same mailbox on 465 because Python's `smtplib` can.)
+- **Sender = recipient = `ntsoc@ntplc.co.th`** (`-MailFrom` = `-AlertEmail`). The
+  relay **rejects any non-`@ntplc.co.th` From** — the script's old default
+  `soc-backup@<hostname>` was refused as "failed to route the address", so `-MailFrom`
+  is mandatory here.
+- **Credential:** a `PSCredential` at `C:\ProgramData\SOCBackup\smtp-cred.xml`,
+  loaded with `Import-Clixml` and passed as `Send-MailMessage -Credential`. The
+  file was written with `Export-Clixml` **under the SYSTEM account**: `Export-Clixml`
+  encrypts with per-account DPAPI, so the ciphertext only decrypts under the *same*
+  account that runs the task. The `SOC-Archive-Check` task must therefore run as
+  that account, or `Import-Clixml` fails with a decryption error. (Stores paths and
+  the role name only — never the password itself in any doc or bundle.)
+- **The bug that hid failed sends:** `Send-MailMessage`'s SMTP errors are
+  *non-terminating*, so a rejected send left the check looking healthy. The fix was
+  `-ErrorAction Stop`, which makes the send terminating so the `try/catch` actually
+  reports the failure.
+- **Proven** by forcing the check to fail with `-MinFreePercent 100` (every drive
+  is "below" a 100% free floor) and confirming a **`[SOC-BACKUP] FAILED`** email
+  arrived at `ntsoc@ntplc.co.th`.
+
+The live `SOC-Archive-Check` task runs with:
+
+```
+-CheckStandby -StandbyUser soc_backup -AlertEmail ntsoc@ntplc.co.th
+-SmtpServer mail.ntplc.co.th -SmtpPort 25 -UseSsl -MailFrom ntsoc@ntplc.co.th
+-SmtpCredentialPath C:\ProgramData\SOCBackup\smtp-cred.xml
+```
+
+(plus the `-ArchiveDir` from §2.4). A stale archive, broken pull, or a standby that
+stops streaming now **emails** instead of failing silently.
+
+**13.6 Verify + capture (Track B).**
 - `manage.py check --deploy` — the 4 HTTPS warnings should now be gone.
-- Browse `https://<hostname>`: valid cert, log in, confirm a notification email
-  arrives and the induced-failure alert fired.
+- Browse `https://<hostname>`: valid cert, log in, confirm a Django *application*
+  notification email arrives. (The backup-alert induced-failure test is Track A and
+  already passed — see 13.5.)
 - **Re-run `New-SocConfigBundle.ps1`** — you just changed `.env` and the IIS
   configuration, and the bundle captures whatever was true when it last ran.
 

@@ -1,6 +1,6 @@
 # SOC Ticket — Progression & Road to Go-Live
 
-> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-07-27
+> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-08-26
 > **Companion to:** [../PROJECT_STATUS.md](../PROJECT_STATUS.md) (this week's lanes) — this file is the *whole* arc
 
 The short answer to "how far am I?": **the software is essentially finished; the
@@ -139,6 +139,10 @@ generated UAT `.docx`.
   replication. These need a restart; setting them now saves a maintenance
   window later. See §Phase 0 of the Windows backup handbook.
 - [ ] **HTTPS on production**, with a documented certificate renewal owner and date.
+  *(Phase 5 Track B — the go-live half. **Blocked** on two external prerequisites:
+  a DNS A record for the hostname and a TLS certificate as a PFX with private key.
+  The app-notification SMTP rides with it — Stage 13.4. Do not start until both
+  exist. Track A backup alerting is already done and does not depend on this.)*
 - [ ] **Harden the deployment env**: `DEBUG=False`, real `SECRET_KEY`, correct
   `ALLOWED_HOSTS`, and turn on `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`,
   `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`. All of these already exist as
@@ -195,8 +199,11 @@ Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
 - [x] **Commit the backup scripts.** `scripts/backup/windows/*.ps1` are tracked.
 
 **Exit criteria:** ~~a restore drill completed and timed~~ ✅; freshness check
-proven to detect a failure ✅ (email half deferred to Phase 5 SMTP — until then a
-**named owner reviews `SOC-Archive-Check` weekly**); **RPO ≈ 24 h** (nightly daily
+proven to detect a failure ✅ **and now to email it** ✅ — Phase 5 Track A
+(authenticated SMTP backup alerting) is **as-built**: `SOC-Archive-Check` sends
+`[SOC-BACKUP] FAILED` over `mail.ntplc.co.th` (STARTTLS + auth), proven with
+`-MinFreePercent 100`, so the interim **weekly named-owner review is retired**
+(deployment runbook Stage 13.5; handbook §2.4/§2.5). **RPO ≈ 24 h** (nightly daily
 tier) written down; **RTO** = data-restore proven in seconds, end-to-end service
 RTO pending the annual full recovery rehearsal (restore + recreate roles/grants +
 repoint Django + log in).
