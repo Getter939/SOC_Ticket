@@ -221,15 +221,15 @@ repoint Django + log in).
 - [ ] **Create the real user accounts** and rotate every dev/UAT password. Several
   are written down in your notes and in `test_accounts.txt` — treat all of them
   as compromised.
-- [ ] **Point the Wazuh ingest at production** and confirm the watermark starts
-  clean.
-- [ ] **Schedule `refresh_reporting` nightly** — ingest first, then refresh. History
-  only starts accruing from the day you schedule it, and snapshot metrics are
-  *unrecoverable* if a day is missed.
-  - ⚠️ **Time-sensitive:** detection capture reads the Wazuh Indexer, whose
-    retention is ~3 months. If go-live is further out than that, start detection
-    capture *now* against production-adjacent data or you permanently lose that
-    window of history.
+- [x] **Point the Wazuh ingest at production** — *done 2026-08-26.* `SOC-Ingest-Wazuh`
+  runs per-minute (SYSTEM, IgnoreNew) against Indexer `10.1.220.32:9200`; first pull
+  4,532 alerts, watermark advancing. **Interim:** `OPENSEARCH_VERIFY_SSL=False`
+  (encrypted, unauthenticated) until the Wazuh admin sends `root-ca.pem` → CA bundle.
+- [x] **Schedule `refresh_reporting` nightly** — *done 2026-08-26.* `SOC-Refresh-Reporting`
+  at 00:20 (per-minute ingest guarantees ingest-before-refresh). Detection capture live
+  (`detection_rows: 31`). Retention scheduled too: `SOC-Purge-Wazuh` daily 04:00, 90-day
+  window (confirm with compliance within the runway). CSV historical import deferred by
+  the owner (idempotent, run any time).
 - [ ] **Reporting Phase 4** — create the `reporting_ro` role
   (`docs/operations/reporting-ro-setup.sql`) and repoint Grafana at `mart`
   instead of the Indexer.
