@@ -627,9 +627,24 @@ New-WebSite -Name 'SOCTicket' -Port 80 -IPAddress 127.0.0.1 `
 <configuration>
   <system.webServer>
     <rewrite>
+      <!-- The proxy hop to Waitress is plain http on loopback, so Django cannot
+           tell an HTTPS request from an HTTP one on its own. Forward the scheme
+           as X-Forwarded-Proto: https and Django trusts it via
+           SECURE_PROXY_SSL_HEADER (settings.py, gated on USE_PROXY_SSL_HEADER).
+           WITHOUT this, flipping SECURE_SSL_REDIRECT=True at Stage 13.3 makes
+           Django see every request as insecure and 301-loop forever.
+           The variable MUST be allow-listed or the rule returns HTTP 500.
+           A static "https" is correct here: once 443 is bound and :80 redirects,
+           all traffic reaching this rule arrived over TLS at IIS. -->
+      <allowedServerVariables>
+        <add name="HTTP_X_FORWARDED_PROTO" />
+      </allowedServerVariables>
       <rules>
         <rule name="ProxyToWaitress" stopProcessing="true">
           <match url="(.*)" />
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:8000/{R:1}" />
         </rule>
       </rules>
@@ -789,12 +804,33 @@ this as when the WAF / load-test items apply.
 ```powershell
 New-WebBinding -Name 'SOCTicket' -Protocol https -Port 443 -HostHeader '<hostname>' -SslFlags 1   # 1 = SNI
 (Get-WebBinding -Name 'SOCTicket' -Protocol https).AddSslCertificate($cert.Thumbprint, 'My')
+
+# Stage 10 created SOC-Block-Inbound-HTTP blocking 80,443. A Windows Firewall BLOCK
+# beats any ALLOW, so the allow rule below does NOTHING until that block is lifted or
+# narrowed (the same trap the 5432 replication build hit). Disable it, or replace it
+# with a block scoped to exclude your intended audience.
+Disable-NetFirewallRule -DisplayName 'SOC-Block-Inbound-HTTP'
 New-NetFirewallRule -DisplayName 'SOC HTTPS in' -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -Profile Any
 #   scope with -RemoteAddress <subnet> if the audience is a specific LAN. Keep :80 for the redirect
 #   SECURE_SSL_REDIRECT (below) performs.
 ```
 
+**Prove 443 is actually open from a THIRD machine** (a rule's existence is not
+evidence it works — Stage 10 discipline):
+```powershell
+Test-NetConnection -ComputerName <hostname> -Port 443   # must now succeed
+```
+
 **13.3 `.env` flips** (`C:\SOCTicket\app\.env`):
+
+> **Required pre-check — or you get an infinite redirect loop.** Before setting
+> `SECURE_SSL_REDIRECT=True`, confirm the Stage 9.3 web.config forwards
+> `HTTP_X_FORWARDED_PROTO=https` (the `<serverVariables>`/`<allowedServerVariables>`
+> block). The proxy hop to Waitress is plain http, so without that header Django
+> sees every request as insecure and 301-redirects to https endlessly. `USE_PROXY_SSL_HEADER=True`
+> is already set; it is inert until the header actually arrives. Quick check after
+> binding 443: `curl.exe -k https://<hostname>/healthz` returns **200**, not a 301 loop.
+
 - Add `<hostname>` to `ALLOWED_HOSTS` (and trim any leftover `web`/LAN entries).
 - `SITE_URL=https://<hostname>` — baked into every notification link, so it must be final.
 - Flip the security flags:
@@ -831,10 +867,13 @@ shell`) and confirm it **arrives** - not just that the setting is present.
 
 > **As-built at NT (Aug 2026).** This app-notification path reuses the SOC central
 > mailbox `ntsoc@ntplc.co.th` on **465 + `EMAIL_USE_SSL=True`** (identical to the
-> prototype/dev), `EMAIL_HOST_USER=ntsoc@ntplc.co.th`. Note this is *different* from
-> the backup-alerting path in 13.5, which uses the same mailbox but on **port 25 +
-> STARTTLS** — PowerShell's `Send-MailMessage` cannot do implicit-TLS 465, while
-> Django (Python `smtplib`) can.
+> prototype/dev), `EMAIL_HOST_USER=ntsoc@ntplc.co.th`. So relative to the generic
+> block above, set `EMAIL_PORT=465`, `EMAIL_USE_SSL=True`, and **`EMAIL_USE_TLS=False`**
+> — 465 (implicit SSL) and STARTTLS are **mutually exclusive**; leaving the base
+> `.env`'s `EMAIL_USE_TLS=True` in place raises `ImproperlyConfigured` and no mail
+> sends. Note this is *different* from the backup-alerting path in 13.5, which uses the
+> same mailbox but on **port 25 + STARTTLS** — PowerShell's `Send-MailMessage` cannot
+> do implicit-TLS 465, while Django (Python `smtplib`) can.
 
 **13.5 Wire backup alerting (on the SPARE)** — this is what finally closes the
 handbook's Phase 2.5 gap. **✅ Done (Aug 2026) — Track A.** The `SOC-Archive-Check`
