@@ -841,6 +841,7 @@ CSRF_COOKIE_SECURE=True
 SECURE_SSL_REDIRECT=True
 PASSWORD_RESET_USE_HTTPS=True
 SECURE_HSTS_SECONDS=300      # start small — see below
+SECURE_HSTS_PRELOAD=False    # settings.py defaults this True — keep it OFF during the ramp
 ```
 
 > **Ramp HSTS; do not start at a year.** `SECURE_HSTS_SECONDS=31536000` (the
@@ -849,6 +850,14 @@ SECURE_HSTS_SECONDS=300      # start small — see below
 > users are locked out until the header expires or each one clears their own
 > HSTS state. Start at 300, confirm HTTPS is solid for a few days, then raise
 > it in steps.
+>
+> **Turn `preload` off for the ramp.** `SECURE_HSTS_PRELOAD` and
+> `SECURE_HSTS_INCLUDE_SUBDOMAINS` both **default `True`** (`config/settings.py`),
+> so at `SECURE_HSTS_SECONDS=300` Django would emit
+> `Strict-Transport-Security: max-age=300; includeSubDomains; preload` — advertising
+> `preload` while the cert is still provisional. Set `SECURE_HSTS_PRELOAD=False` now;
+> enable it only at 13.7, once the cert is permanent and you actually intend to submit
+> the domain to the browser preload list.
 
 `Restart-Service SOCTicketWaitress` (drops pooled connections; `DB_CONN_MAX_AGE=300`).
 
