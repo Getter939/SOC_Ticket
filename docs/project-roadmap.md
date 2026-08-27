@@ -18,7 +18,7 @@ Verified against the repo on 2026-08-27:
 
 | Signal | Reading |
 |---|---|
-| Test suite | **822 tests, all passing**; **85.9% branch coverage** |
+| Test suite | **826 tests, all passing**; **85.8% branch coverage** |
 | Application code | ~14,000 production Python lines + ~6,700 template lines across 5 Django apps |
 | Lifecycle | 13-state FSM, 7 roles, transitions enforced in the model |
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
@@ -42,7 +42,7 @@ Standard software-delivery phases, scored against this project.
 |---|---|---|---|
 | 1 | Requirements & domain design | Glossary, ADRs, state machine, change log all written | ✅ 100% |
 | 2 | Application build | Full lifecycle, RBAC, Project Incidents, Response Teams, dashboards, ingest | ✅ ~95% |
-| 3 | Automated testing | 822 tests green; CI + 85% coverage floor | ✅ 95% |
+| 3 | Automated testing | 826 tests green; CI + 85% coverage floor | ✅ 95% |
 | 4 | Documentation | Handover (EN+TH), user guides, ADRs, runbooks | 🟢 85% |
 | 5 | Reporting / analytics | `mart` schema built; Grafana still reads the Indexer directly | 🟡 60% |
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
@@ -69,7 +69,7 @@ These are the last things that genuinely need a keyboard and the codebase.
   active outside tests.
 - [x] **Add `/healthz`.** The endpoint checks application and database health.
 - [x] **Set up CI.** GitHub Actions runs Django checks, migration consistency,
-  Ruff correctness rules, all 822 tests, and coverage with an 85% floor.
+  Ruff correctness rules, all 826 tests, and coverage with an 85% floor.
 - [x] **Fix broad ignore rules.** Markdown and JavaScript are tracked by default;
   sensitive security/UAT/internal-host documents remain explicitly local.
 - [ ] **Review branch hygiene separately.** Do not delete a branch as part of a

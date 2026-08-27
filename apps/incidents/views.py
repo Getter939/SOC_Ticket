@@ -31,7 +31,7 @@ from .forms import (
 )
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
-    ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
+    ProjectIncidentAttachment, ThreatGuidance, Ticket,
     TicketAttachment, TicketLog, TicketLogRevision,
     TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
@@ -73,6 +73,13 @@ from .case_creation import (
     create_project_incident_from_forms,
     create_ticket_from_form,
     load_alert_bundle,
+)
+from .project_workflow import (
+    add_shared_attachments,
+    delete_shared_attachment,
+    forward_project_review,
+    reassess_project_emergency,
+    restore_shared_attachment,
 )
 from .ticket_workflow import (
     assign_admin_or_owner_route,
@@ -720,44 +727,22 @@ def project_incident_detail(request, pk):
                 messages.error(request, 'กรุณาเลือก Normal หรือ Emergency และกรอกบันทึกการตรวจ')
             else:
                 want_emergency = assessment == 'emergency'
-                with transaction.atomic():
-                    pending = list(
-                        project.member_tickets.select_for_update().filter(
-                            status=Ticket.STATUS_PENDING_MGR_TRIAGE,
-                        )
+                try:
+                    result = forward_project_review(
+                        project=project,
+                        actor=request.user,
+                        want_emergency=want_emergency,
+                        note=note,
                     )
-                    if not pending:
-                        messages.error(request, 'ไม่มี Member Ticket ที่รอ Project Review')
-                    else:
-                        now = timezone.now()
-                        project.is_emergency = want_emergency
-                        project.emergency_decided_by = request.user
-                        project.emergency_decided_at = now
-                        project.save(update_fields=(
-                            'is_emergency', 'emergency_decided_by',
-                            'emergency_decided_at', 'updated_at',
-                        ))
-                        verdict = 'Emergency' if want_emergency else 'Normal'
-                        ProjectIncidentLog.objects.create(
-                            project=project,
-                            author=request.user,
-                            note=f'Project Review: {verdict} — {note}',
-                        )
-                        for ticket in pending:
-                            ticket.assess_emergency_initial(want_emergency, request.user)
-                            target = (
-                                Ticket.STATUS_AWAITING_OWNER
-                                if ticket.t1_route == Ticket.T1_ROUTE_OWNER
-                                else Ticket.STATUS_AWAITING_CONTAINMENT
-                            )
-                            ticket.transition_to(
-                                target, request.user,
-                                f'[Project Review: {verdict}] {note}',
-                            )
-                for ticket in pending:
-                    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                        _notify_containment(ticket, None, request)
-                messages.success(request, 'Project Review เสร็จสิ้นและส่งต่อ Member Ticket ที่รอทั้งหมดแล้ว')
+                except ValidationError as exc:
+                    messages.error(request, exc.message)
+                else:
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
+                    messages.success(
+                        request,
+                        'Project Review เสร็จสิ้นและส่งต่อ Member Ticket ที่รอทั้งหมดแล้ว',
+                    )
         elif action == 'project_reassess_emergency':
             value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
             reason = request.POST.get('emergency_reason', '').strip()
@@ -768,35 +753,12 @@ def project_incident_detail(request, pk):
             elif not reason:
                 messages.error(request, 'กรุณาระบุเหตุผลในการประเมิน Emergency ใหม่')
             else:
-                with transaction.atomic():
-                    active_members = list(
-                        project.member_tickets.select_for_update().exclude(
-                            status__in=Ticket.TERMINAL_STATUSES,
-                        ).exclude(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
-                    )
-                    for ticket in active_members:
-                        if ticket.is_emergency != value:
-                            old = ticket.is_emergency
-                            ticket.is_emergency = value
-                            ticket.save(update_fields=('is_emergency', 'updated_at'))
-                            action_label = 'ตั้งเป็น' if value else 'ยกเลิก'
-                            TicketLog.objects.create(
-                                ticket=ticket,
-                                author=request.user,
-                                status_at_time=ticket.status,
-                                note=(
-                                    f'[Project Reassess Emergency] {action_label} Emergency '
-                                    f'({old} → {value}) — เหตุผล: {reason}'
-                                ),
-                            )
-                    project.is_emergency = value
-                    project.save(update_fields=('is_emergency', 'updated_at'))
-                    state = 'Emergency' if value else 'Normal'
-                    ProjectIncidentLog.objects.create(
-                        project=project,
-                        author=request.user,
-                        note=f'Reassess Emergency: {state} — {reason}',
-                    )
+                reassess_project_emergency(
+                    project=project,
+                    actor=request.user,
+                    value=value,
+                    reason=reason,
+                )
                 messages.success(request, 'อัปเดต Emergency สำหรับ Member Ticket ที่ยังดำเนินการอยู่แล้ว')
         return redirect('project_incident_detail', pk=project.pk)
 
@@ -892,26 +854,19 @@ def upload_project_attachment(request, pk):
         if form.is_valid():
             description = form.cleaned_data.get('description', '')
             uploads = form.cleaned_data['file']
-            for upload in uploads:
-                ProjectIncidentAttachment.objects.create(
-                    project=project,
-                    file=upload,
-                    original_name=upload.name,
-                    description=description,
-                    uploaded_by=request.user,
-                )
-            ProjectIncidentLog.objects.create(
+            result = add_shared_attachments(
                 project=project,
-                author=request.user,
-                note=(
-                    'แนบหลักฐานส่วนกลาง: '
-                    + ', '.join(u.name for u in uploads)
-                ),
+                actor=request.user,
+                uploads=uploads,
+                description=description,
             )
-            if len(uploads) == 1:
-                messages.success(request, f'อัพโหลด "{uploads[0].name}" เรียบร้อยแล้ว')
+            if len(result.attachments) == 1:
+                messages.success(
+                    request,
+                    f'อัพโหลด "{result.attachments[0].original_name}" เรียบร้อยแล้ว',
+                )
             else:
-                messages.success(request, f'อัพโหลด {len(uploads)} ไฟล์เรียบร้อยแล้ว')
+                messages.success(request, f'อัพโหลด {len(result.attachments)} ไฟล์เรียบร้อยแล้ว')
         else:
             detail = '; '.join(
                 msg for errors in form.errors.values() for msg in errors
@@ -953,15 +908,7 @@ def delete_project_attachment(request, attachment_id):
         messages.error(request, 'กรุณาระบุเหตุผลในการลบไฟล์')
         return redirect('project_incident_detail', pk=project.pk)
 
-    att.deleted_by = request.user
-    att.deleted_at = timezone.now()
-    att.deleted_reason = reason[:255]
-    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
-    ProjectIncidentLog.objects.create(
-        project=project,
-        author=request.user,
-        note=f'ลบหลักฐานส่วนกลาง: {att.original_name} — เหตุผล: {reason}',
-    )
+    delete_shared_attachment(attachment=att, actor=request.user, reason=reason)
     messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว — ผู้จัดการ SOC สามารถกู้คืนได้')
     return redirect('project_incident_detail', pk=project.pk)
 
@@ -991,18 +938,7 @@ def restore_project_attachment(request, attachment_id):
         messages.error(request, 'กู้คืนไฟล์ได้เฉพาะผู้จัดการ SOC เท่านั้น')
         return redirect('project_incident_detail', pk=project.pk)
 
-    removed_by = (
-        att.deleted_by.get_full_name() or att.deleted_by.username
-    ) if att.deleted_by else 'ไม่ทราบผู้ลบ'
-    att.deleted_by = None
-    att.deleted_at = None
-    att.deleted_reason = ''
-    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
-    ProjectIncidentLog.objects.create(
-        project=project,
-        author=request.user,
-        note=f'กู้คืนหลักฐานส่วนกลาง: {att.original_name} (ลบโดย {removed_by})',
-    )
+    restore_shared_attachment(attachment=att, actor=request.user)
     messages.success(request, 'กู้คืนไฟล์เรียบร้อยแล้ว')
     return redirect('project_incident_detail', pk=project.pk)
 
