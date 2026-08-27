@@ -1,0 +1,19 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [
+    "apps/*/migrations",
+    "staticfiles",
+    "venv",
+]
+
+[tool.ruff.lint]
+# Phase 0 intentionally starts with correctness checks only. Enabling the full
+# style rule set or mass-formatting ~30k lines would obscure behavioral changes
+# and damage git blame; stricter rules can be ratcheted in dedicated cleanups.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "auto"

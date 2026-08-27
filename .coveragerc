@@ -1,0 +1,22 @@
+[run]
+branch = True
+source =
+    apps
+    config
+omit =
+    */migrations/*
+    */tests.py
+    */test_*.py
+    config/asgi.py
+    config/settings_local.py
+    config/wsgi.py
+
+[report]
+precision = 1
+show_missing = True
+skip_covered = True
+fail_under = 85.0
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:

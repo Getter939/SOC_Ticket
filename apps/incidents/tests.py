@@ -24,6 +24,7 @@ Run with:  py manage.py test apps.incidents --settings=config.settings_local
 """
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import re
@@ -79,6 +80,28 @@ from apps.wazuh_ingest.models import WazuhAlert
 # ──────────────────────────────────────────────────────────────────────────── #
 # Shared helpers                                                               #
 # ──────────────────────────────────────────────────────────────────────────── #
+
+def _ensure_threat_guidance_seed():
+    """Make migration-owned reference data explicit for tests that need it.
+
+    ``--keepdb`` preserves the database after the suite, while Django's
+    ``TransactionTestCase`` classes flush table data. Data migrations are not
+    replayed on the next kept-database run, so tests must not assume these rows
+    survived an earlier suite. Importing the canonical migration data avoids a
+    second copy of the SOC-approved guidance text.
+    """
+    seed = importlib.import_module(
+        'apps.incidents.migrations.0041_seed_threat_guidance',
+    ).SEED
+    for category, texts in seed.items():
+        ThreatGuidance.objects.update_or_create(
+            detailed_issue=category,
+            defaults={
+                'action_required': texts['action_required'],
+                'action_precautions': texts['action_precautions'],
+                'is_active': True,
+            },
+        )
 
 def _make_user(username, role, department='Test', phone='000', **kwargs):
     """Create a User + UserProfile in one call. Pass tier='T1'/'T2' via kwargs."""
@@ -3010,15 +3033,19 @@ class UnknownSeverityTest(TestCase):
         t.transition_to(Ticket.STATUS_APPROVED, self.mgr, 'approved')
         self.assertEqual(t.status, Ticket.STATUS_APPROVED)
 
-    # ── Display: distinct badge ─────────────────────────────────────────── #
-    def test_unknown_badge_renders_distinctly(self):
+    # ── Display: explicitly neutral badge ──────────────────────────────── #
+    def test_unknown_badge_renders_as_neutral_not_known_severity(self):
         from django.template.loader import render_to_string
         html = render_to_string('incidents/_severity_badge.html', {'severity': 'Unknown'})
         self.assertIn('Unknown', html)
-        self.assertIn('#6f42c1', html)  # distinct colour, not reused by any severity
-        # Sanity: the Unknown badge must not borrow an existing severity colour.
-        for other_colour in ('bg-danger', '#fd7e14', 'bg-warning', 'bg-success'):
-            self.assertNotIn(other_colour, html)
+        self.assertIn('signal-neutral', html)
+        # Unknown is explicitly unclassified, not a synonym for any ranked
+        # severity. Assert semantic classes rather than palette hex values so a
+        # theme or accessibility refresh cannot invalidate the workflow test.
+        for severity_class in (
+            'signal-critical', 'signal-high', 'signal-medium', 'signal-low',
+        ):
+            self.assertNotIn(severity_class, html)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -3340,6 +3367,7 @@ class BundleSuffixHelperTest(TestCase):
 class ProjectIncidentFanOutTest(TestCase):
     @classmethod
     def setUpTestData(cls):
+        _ensure_threat_guidance_seed()
         cls.t1      = _make_t1('pi_t1')
         cls.t2      = _make_t2('pi_t2')
         cls.manager = _make_user('pi_manager', UserProfile.ROLE_SOC_MANAGER)
@@ -3849,6 +3877,7 @@ class ProjectIncidentFanOutTest(TestCase):
 class ThreatGuidanceTest(TestCase):
     @classmethod
     def setUpTestData(cls):
+        _ensure_threat_guidance_seed()
         cls.t1 = _make_t1('guidance_t1')
 
     @staticmethod
@@ -5011,21 +5040,32 @@ class ReportAccessRoleTest(TestCase):
 
     def test_report_buttons_hidden_from_the_assigned_admin(self):
         self.client.force_login(self.admin)
-        html = self.client.get(
-            reverse('ticket_detail', args=[self.ticket.pk])).content.decode()
-        self.assertNotIn('Report Preview', html)
-        self.assertNotIn('Report DOCX', html)
-        self.assertNotIn('Report PDF', html)
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        html = response.content.decode()
+        self.assertNotContains(
+            response, reverse('ticket_report_preview', args=[self.ticket.pk]),
+        )
+        self.assertNotContains(
+            response, reverse('ticket_report_docx', args=[self.ticket.pk]),
+        )
+        self.assertNotContains(
+            response, reverse('ticket_report_pdf', args=[self.ticket.pk]),
+        )
         # The admin still has their own ticket page.
         self.assertIn('กลับรายการ Ticket', html)
 
     def test_report_buttons_shown_to_soc(self):
         self.client.force_login(self.t1)
-        html = self.client.get(
-            reverse('ticket_detail', args=[self.ticket.pk])).content.decode()
-        self.assertIn('Report Preview', html)
-        self.assertIn('Report DOCX', html)
-        self.assertIn('Report PDF', html)
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertContains(
+            response, reverse('ticket_report_preview', args=[self.ticket.pk]),
+        )
+        self.assertContains(
+            response, reverse('ticket_report_docx', args=[self.ticket.pk]),
+        )
+        self.assertContains(
+            response, reverse('ticket_report_pdf', args=[self.ticket.pk]),
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────── #

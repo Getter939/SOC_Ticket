@@ -1,0 +1,4 @@
+# Development and CI tooling. Application/runtime dependencies remain in
+# requirements.txt; these ranges avoid coupling production installs to tooling.
+coverage[toml]>=7.6,<8
+ruff>=0.12,<1

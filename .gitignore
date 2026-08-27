@@ -17,6 +17,10 @@ __pycache__/
 dist/
 build/
 .eggs/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
 
 # ── Virtual environments ──────────────────────────────────────────────────
 venv/
@@ -53,36 +57,20 @@ Thumbs.db
 desktop.ini
 # LibreOffice/OpenOffice editor locks (e.g. .~lock.report_template_v1.docx#)
 .~lock.*#
-*.js
-
 .codex_work/
-.claude/skills/03-exploit-development/scripts/payload_generator.py
 .claude/settings.json
 /.claude
-*.md
-# Documentation that stays versioned. NOTE: `*.md` above is a blanket ignore,
-# so any NEW .md file is silently untracked unless un-ignored here. Paths below
-# were updated 2026-07-21 when docs/ was reorganised into category subfolders.
-!docs/README.md
-!docs/operations/production-deployment.md
-!docs/operations/postgresql-standby-handbook.md
-!docs/architecture/workflow-change-log.md
-# Operational runbooks, un-ignored 2026-08-14. These govern the build and the
-# recovery of production, and handbook §2.8 pre-stages the spare VM with
-# `git clone` — an untracked runbook never reaches the machine that needs it
-# during a failover, and is in no backup either (New-SocConfigBundle.ps1
-# captures .env, IIS and the service definition, not docs).
-!docs/operations/production-deployment.windows.md
-!docs/operations/backup-and-standby-handbook.windows.md
-!docs/operations/backup-and-restore.md
-!docs/operations/backup-vm-handbook.md
-!docs/operations/backup-storage-decision-brief.md
-!docs/operations/reporting-layer-operations.md
-!docs/project-roadmap.md
-# Deliberately NOT un-ignored: docs/uat/uat-*.md and
-# docs/operations/grafana-wazuh-wall.md contain a shared UAT password and
-# internal host details. docs/security/ (VA report, credential rotation) stays
-# local because a findings report in a hosted repo is an attacker's checklist.
-# Keep all of these local unless the contents are scrubbed first.
-.claude/skills/03-exploit-development/scripts/payload_generator.py
-.claude/skills/03-exploit-development/SKILL.md
+
+# ── Sensitive/local documentation ─────────────────────────────────────────
+# Markdown is tracked by default. Keep only documents known to contain local
+# credentials, internal host details, security findings, or live UAT notes out
+# of the hosted repository. Scrub and review a file before removing it here.
+PROJECT_STATUS.md
+docs/security/
+docs/uat/*.md
+docs/operations/grafana-wazuh-wall.md
+docs/architecture/reporting-layer-build.md
+docs/architecture/reporting-layer-design.md
+
+# A blanket *.js rule used to hide application JavaScript silently. JavaScript
+# is now tracked by default so Phase 4 can move inline behavior into static/js/.

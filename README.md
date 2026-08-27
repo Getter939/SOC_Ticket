@@ -109,6 +109,30 @@ mocked:
 python manage.py test apps.wazuh_ingest
 ```
 
+## Development quality checks
+
+Install the development-only tooling separately from production dependencies:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+Run the same checks enforced by GitHub Actions:
+
+```bash
+ruff check .
+python manage.py check
+python manage.py check --deploy
+python manage.py makemigrations --check --dry-run
+coverage run manage.py test --noinput
+coverage report
+```
+
+The coverage configuration measures branch coverage across `apps/` and
+`config/`, excludes tests and migrations, and enforces the measured Phase 0
+baseline of 85%. The four HTTPS-related `check --deploy` warnings are expected
+until the documented TLS cutover; they are kept visible rather than silenced.
+
 ## Development — Seeding test data
 
 To populate the database with synthetic ticket data for dashboard testing:

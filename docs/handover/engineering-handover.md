@@ -1,7 +1,7 @@
 ﻿# Engineering Handover — SOC Ticketing System
 
 > **Audience:** the developer taking over this codebase · **Status:** Current
-> **Reflects:** repo at commit `564a196` ("23/7 Document TriageRecord's real workflow…")
+> **Reviewed against:** `main` on 2026-08-27
 > **Thai version:** [engineering-handover.th.md](engineering-handover.th.md)
 
 This document is the entry point for anyone taking over this project. It covers
@@ -18,7 +18,8 @@ Companion documents (read in this order):
 | [CONTEXT.md](../../CONTEXT.md) | **The glossary** — what every domain term means (Incident vs Event, OLA, Response Request…). Read this first if the vocabulary is unfamiliar |
 | [workflow-change-log.md](../architecture/workflow-change-log.md) | Full rationale for the ticket workflow redesign and its later amendments |
 | [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) | The current end-to-end flow, per role |
-| [production-deployment.md](../operations/production-deployment.md) | Production deployment (Docker, nginx, gunicorn) |
+| [production-deployment.windows.md](../operations/production-deployment.windows.md) | Current production deployment (Windows Server, Waitress, IIS/ARR) |
+| [production-deployment.md](../operations/production-deployment.md) | Superseded Linux/Docker deployment variant |
 | [adr/](../adr/) | Architecture decision records (case bundling, OLA clock origin, manager gate) |
 | `../user-guides/feature-guide.docx` | End-user feature guide (screenshots, per-role walkthroughs) |
 | [end-user-guide.th.md](../user-guides/end-user-guide.th.md) | Thai end-user guide |
@@ -71,17 +72,17 @@ deadline tracking — plus a KPI dashboard.
 
 | Component | Version / detail |
 |---|---|
-| Python / Django | Django 6.0.7 (see `requirements.txt` for exact pins) |
-| Database | PostgreSQL 16 (`psycopg2-binary`) |
+| Python / Django | Python 3.14 / Django 6.0.7 (see `requirements.txt` for exact pins) |
+| Database | Native PostgreSQL (`psycopg2-binary`); see the Windows runbook for the deployed version |
 | Config | `python-decouple` reading `.env` (template: `.env.example`) |
 | Static files | WhiteNoise |
-| Prod server | gunicorn behind nginx, via `docker-compose.prod.yml` |
-| Excel export | openpyxl (`export_tickets_excel` in incidents views) |
+| Prod server | Waitress under NSSM behind IIS/ARR |
+| Report export | DOCX (`python-docx`) and PDF (`xhtml2pdf`/ReportLab) |
 | Alert source | Wazuh alerts via the OpenSearch REST API (`requests`) |
 | Login throttling | `django-axes` 7.1.0 (lockout on repeated failed logins) |
 
-Migration heads at time of writing: `incidents 0046`, `wazuh_ingest 0006`,
-`accounts 0006`.
+Migration heads at time of writing: `incidents 0062`, `wazuh_ingest 0006`,
+`accounts 0009`, `reporting 0004`.
 
 ## 3. Feature summary
 
@@ -450,17 +451,16 @@ Needs a reachable PostgreSQL 16 (`DB_*` in `.env`). App at
 
 ## 6. Deployment
 
-Production: `docker compose -f docker-compose.prod.yml up -d --build`
-(nginx → gunicorn → Django + PostgreSQL). The `web` container runs
-`migrate` + `collectstatic` on every start. Full runbook in operations/production-deployment.md
-(UFW, superuser creation, team accounts, logs).
+Production is Windows Server: IIS/ARR proxies to Waitress running under NSSM,
+with native PostgreSQL and WhiteNoise static serving. Follow
+`operations/production-deployment.windows.md`; it is the authoritative build,
+restart, rollback, TLS, and smoke-test runbook.
 
-- `docker-compose.yml` (no suffix) is **local dev only** (runserver +
-  bind-mount). Never deploy it.
+- The Docker/nginx/gunicorn files are retained as a superseded Linux variant;
+  they are not the current Windows production path.
 - No public sign-up: all accounts are created via `/admin/`.
-- **Ask the outgoing owner:** where production actually runs (host/IP), who
-  holds the `.env` secrets (DB password, SMTP, OpenSearch credentials), and
-  what backs up the PostgreSQL volume — none of this is in the repo.
+- Secrets and host-specific values remain outside git. Confirm their operational
+  owners through the Windows production and backup/standby runbooks.
 
 ## 7. Known issues, gotchas, stale docs
 
@@ -486,12 +486,11 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
    `docs/adr/` and `docs/agents/` did **not** move — those paths are hardcoded
    in the agent skills under `.agents/skills/` and in the root `AGENTS.md`.
    See [docs/README.md](../README.md) for the full index.
-2. **CSP still allows `'unsafe-inline'`** for script/style
-   (`config/middleware.py`, policy string in settings). Two inline handlers
-   block going nonce-based: `ticket_detail.html` (confirm) and
-   `ticket_history.html` (onchange). Planned next hardening step.
-3. **No file-type/magic-byte validation on uploads** (low priority — mitigated
-   by forced-download serving, §8).
+2. **CSP scripts are nonce-based; styles still allow `'unsafe-inline'`.** Inline
+   scripts carry the request nonce and inline event handlers have been removed.
+   Phase 4 will move reusable CSS/JS into tracked static assets.
+3. **Uploads are extension, size, and magic-byte validated** through the shared
+   attachment validation path and remain forced-download only.
 4. ~~**Alert-level `escalation_queue` is vestigial**~~ — resolved 2026-07-23.
    The view is the live ticket-level Tier 2 queue with working claim/release.
 5. **`runserver-8099.*.log` files in the repo root** are stray dev logs —
@@ -530,7 +529,7 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
 
 | Dependency | Detail | Owner / where |
 |---|---|---|
-| PostgreSQL 16 | app database | _(fill in: host, backup owner)_ |
+| PostgreSQL | app database | Windows production + backup/standby runbooks |
 | SMTP server | all notifications | _(fill in: provider/account owner)_ |
 | Wazuh / OpenSearch cluster | alert feed, HTTP Basic creds in `.env` | _(fill in: SOC infra owner)_ |
 | Notion tech docs | "SOC Ticketing System — Technical Documentation" | workspace of the outgoing maintainer |
@@ -553,5 +552,5 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
   workflow rules as executable spec.
 - **Day 4** — review the dashboard views + `ola.py`; understand the OLA
   buckets and `status_changed_at`.
-- **Day 5** — review operations/production-deployment.md against the real production host with the
+- **Day 5** — review operations/production-deployment.windows.md against the real production host with the
   outgoing maintainer; confirm secrets, backups, and the ingest schedule.

@@ -1,6 +1,6 @@
 # SOC Ticket — Progression & Road to Go-Live
 
-> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-07-27
+> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-08-27
 > **Companion to:** [../PROJECT_STATUS.md](../PROJECT_STATUS.md) (this week's lanes) — this file is the *whole* arc
 
 The short answer to "how far am I?": **the software is essentially finished; the
@@ -14,23 +14,23 @@ naming the pieces explicitly.
 
 ## 1. Where you actually are — evidence, not vibes
 
-Verified against the repo on 2026-07-27:
+Verified against the repo on 2026-08-27:
 
 | Signal | Reading |
 |---|---|
-| Test suite | **537 tests, all passing** (`manage.py test`) |
-| Application code | ~23,000 lines across 5 Django apps, 33 templates |
+| Test suite | **798 tests, all passing**; **85.5% branch coverage** |
+| Application code | ~14,000 production Python lines + ~6,700 template lines across 5 Django apps |
 | Lifecycle | 13-state FSM, 7 roles, transitions enforced in the model |
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
 | Reporting layer | Phases 1–3 built; 4–5 pending; nightly refresh **not scheduled** |
 | Docs | 25+ documents incl. Thai user guides, ADRs, handover, runbooks |
-| CI | **None** — no `.github/`, nothing runs those 537 tests but you |
-| App logging | **None configured** — no `LOGGING` block in `config/settings.py` |
-| Production | **Does not exist yet.** Nothing is backing anything up |
+| CI | GitHub Actions runs checks, migration drift, Ruff correctness rules, all tests, and an 85% coverage floor |
+| App logging | Rotating file + console handlers configured in `config/settings.py` |
+| Production | Windows/Waitress/IIS deployment and DR runbooks are current; TLS cutover remains an explicit gate |
 | UAT | 1 of 7 roles in progress (SOC Manager); 6 unstarted |
 
-The gap between "537 green tests" and "no production server" is the whole
-remaining project.
+The remaining work is primarily UAT, TLS/cutover, and operational acceptance;
+the codebase refactor is being delivered as behavior-preserving phases behind CI.
 
 ---
 
@@ -42,11 +42,11 @@ Standard software-delivery phases, scored against this project.
 |---|---|---|---|
 | 1 | Requirements & domain design | Glossary, ADRs, state machine, change log all written | ✅ 100% |
 | 2 | Application build | Full lifecycle, RBAC, Project Incidents, Response Teams, dashboards, ingest | ✅ ~95% |
-| 3 | Automated testing | 537 tests green — but no CI, no coverage gate | 🟢 80% |
+| 3 | Automated testing | 798 tests green; CI + 85% coverage floor | ✅ 95% |
 | 4 | Documentation | Handover (EN+TH), user guides, ADRs, runbooks | 🟢 85% |
 | 5 | Reporting / analytics | `mart` schema built; Grafana still reads the Indexer directly | 🟡 60% |
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
-| 7 | **Production build** | Nothing provisioned. Deployment docs target the wrong OS | 🔴 5% |
+| 7 | **Production build** | Windows/Waitress/IIS runbook current; TLS/cutover remains | 🟡 70% |
 | 8 | **Backup & DR** | Backups + off-host pull + restore drill + **streaming standby live (5433)**, monitored; app stack pre-staged on spare | 🟢 90% |
 | 9 | **Security hardening** | Settings are sound; no TLS, no logging, no pre-prod review | 🟡 40% |
 | 10 | **Go-live cutover** | Not planned | 🔴 0% |
@@ -62,31 +62,24 @@ Standard software-delivery phases, scored against this project.
 
 These are the last things that genuinely need a keyboard and the codebase.
 
-- [ ] **Decide the two open audit findings.** Both are blocked on you, not on code:
-  - **L1** — `apps/dashboard/views.py` `dashboard()` uses `Ticket.objects.all()`, so
-    Executive and profile-less users fall through to the full SOC dashboard.
-    Is that intended? It is a permission-model decision.
-  - **L2** — add indexes on `Ticket.status` / `severity` / `ola_contain_deadline` /
-    `created_at`. Migration is written up; needs sign-off.
-- [ ] **Add a `LOGGING` config.** Right now a production exception goes nowhere you
-  can read. Minimum: rotating file handler for `django` + your apps, WARNING and
-  above, written somewhere the backup job already captures.
-- [ ] **Add a health endpoint** (`/healthz` returning DB-reachable + version). IIS,
-  your monitoring, and the standby failover runbook all want one.
-- [ ] **Set up CI** (GitHub Actions on `Getter939/SOC_Ticket`): run the 537 tests +
-  `manage.py check --deploy` on every push. Without this, the suite decays the
-  moment you stop running it by hand.
-- [ ] **Fix the docs gitignore.** `.gitignore:62` is a blanket `*.md` — most of
-  `docs/` is untracked. If your laptop dies, the handover disappears. Un-ignore
-  `docs/` and `*.md` at the repo root, keep ignoring scratch dirs.
-- [ ] **Branch hygiene.** `reduce_sys_workload` is 55 commits behind, 0 ahead,
-  untouched since 2026-07-09 — delete it.
+- [x] **Close the two historical audit findings.** The dashboard has an explicit
+  org-wide role allowlist and fails closed for profile-less users; hot Ticket
+  indexes landed in migration `0061`.
+- [x] **Configure application logging.** Rotating file and console handlers are
+  active outside tests.
+- [x] **Add `/healthz`.** The endpoint checks application and database health.
+- [x] **Set up CI.** GitHub Actions runs Django checks, migration consistency,
+  Ruff correctness rules, all 798 tests, and coverage with an 85% floor.
+- [x] **Fix broad ignore rules.** Markdown and JavaScript are tracked by default;
+  sensitive security/UAT/internal-host documents remain explicitly local.
+- [ ] **Review branch hygiene separately.** Do not delete a branch as part of a
+  behavior-preserving refactor; confirm ownership and merge status first.
 - [ ] *(Optional, defer without guilt)* Project Incident dashboard rollup,
   consolidated per-Project report export, `GRAFANA_DASHBOARD.md`,
   `closed_at` backfill, OLA threshold tests.
 
-**Exit criteria:** CI green on `main`; L1/L2 decided and landed; logging and
-`/healthz` in place.
+**Exit criteria:** CI green on `main`; the approved refactor phases remain
+behavior-preserving; deployment warnings close only with the TLS cutover.
 
 ---
 
