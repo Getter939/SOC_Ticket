@@ -45,7 +45,6 @@ from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
     notify_containment_alert,
     notify_response_request_created,
-    notify_response_request_completed,
 )
 from .reports import (
     build_ticket_report_render_context,
@@ -86,6 +85,7 @@ from .ticket_evidence import (
     delete_ticket_attachment,
     restore_ticket_attachment,
 )
+from .ticket_updates import save_subtask_update, save_ticket_edit
 from .ticket_workflow import (
     assign_admin_or_owner_route,
     claim_tier2_ticket,
@@ -1988,15 +1988,6 @@ def update_subtask(request, subtask_id):
         previous_notes = subtask.result_notes
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
-            # status_changed_at is stamped by TicketSubtask.save() on a real
-            # transition, so admin and seed writes get it too. Only the audit
-            # row is this view's job.
-            subtask = form.save()
-            history.record_subtask_status_change(
-                subtask, previous_status, subtask.status, request.user)
-            history.record_subtask_change(
-                subtask, previous_notes, subtask.result_notes, request.user)
-
             # Optional deliverable file (e.g. forensic report / scan output),
             # linked to both the subtask and its ticket so it serves through the
             # hardened download_attachment path. Gated more tightly than the
@@ -2004,6 +1995,7 @@ def update_subtask(request, subtask_id):
             # request, but only the assignee, a SOC manager, or a superuser may
             # put a file on the ticket through this route.
             upload = request.FILES.get('result_file')
+            result_upload = None
             if upload is not None:
                 if not _can_upload_subtask_result(subtask, request.user):
                     messages.error(
@@ -2014,24 +2006,20 @@ def update_subtask(request, subtask_id):
                 else:
                     try:
                         validate_attachment(upload)
-                        add_ticket_attachments(
-                            ticket=ticket,
-                            actor=request.user,
-                            uploads=(upload,),
-                            subtask=subtask,
-                            description=request.POST.get('result_file_desc', '').strip(),
-                        )
+                        result_upload = upload
                     except ValidationError as e:
                         messages.error(request, e.message)
 
-            # A response request reaching DONE for the first time pings the SOC
-            # managers so they can review the result and proceed to approval.
-            if (
-                subtask.is_response_request
-                and subtask.is_done
-                and not was_done
-            ):
-                notify_response_request_completed(subtask)
+            subtask = save_subtask_update(
+                ticket=ticket,
+                actor=request.user,
+                update_form=form,
+                previous_status=previous_status,
+                previous_notes=previous_notes,
+                was_done=was_done,
+                result_upload=result_upload,
+                result_description=request.POST.get('result_file_desc', '').strip(),
+            ).subtask
 
             messages.success(request, f'อัปเดตงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
         else:
@@ -2202,25 +2190,17 @@ def edit_ticket(request, pk):
             if not reason:
                 messages.error(request, 'กรุณาระบุเหตุผลในการแก้ไข')
             else:
-                with transaction.atomic():
-                    # From the DB, not the instance: form.is_valid() above has
-                    # already copied the submitted values onto `ticket`.
-                    before = history.snapshot_saved(ticket)
-                    ticket = form.save()
-                    changes = history.record_changes(
-                        ticket, before, request.user, source='edit')
-                    if changes:
-                        summary = ', '.join(c.field_label for c in changes)
-                        TicketLog.objects.create(
-                            ticket=ticket,
-                            note=(f'แก้ไขข้อมูลเคส ({len(changes)} รายการ): '
-                                  f'{summary}\nเหตุผล: {reason}'),
-                            status_at_time=ticket.status,
-                            author=request.user,
-                        )
-                if changes:
+                result = save_ticket_edit(
+                    ticket=ticket,
+                    actor=request.user,
+                    edit_form=form,
+                    reason=reason,
+                )
+                if result.changes:
                     messages.success(
-                        request, f'บันทึกการแก้ไข {len(changes)} รายการเรียบร้อยแล้ว')
+                        request,
+                        f'บันทึกการแก้ไข {len(result.changes)} รายการเรียบร้อยแล้ว',
+                    )
                 else:
                     messages.info(request, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
                 return redirect('ticket_detail', pk=pk)
