@@ -9,8 +9,30 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-thai@5.2.5/index.css">
+    {# Resolve the theme before first paint so a saved dark theme never flashes light. #}
+    <script nonce="{{ request.csp_nonce }}">
+        (() => {
+            const storageKey = 'soc-theme';
+            let savedTheme = null;
+
+            try {
+                savedTheme = localStorage.getItem(storageKey);
+            } catch (error) {
+                // Storage can be unavailable in hardened/private browser contexts.
+            }
+
+            const theme = savedTheme === 'light' || savedTheme === 'dark'
+                ? savedTheme
+                : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.dataset.bsTheme = theme;
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <style>
         :root {
+            color-scheme: light;
             --sidebar-width: 240px;
             --sidebar-collapsed-width: 56px;
             --header-height: 56px;
@@ -19,10 +41,14 @@
             --sidebar-text: rgba(255,255,255,0.75);
             --sidebar-text-active: #fff;
             --sidebar-transition: 0.22s ease;
+            --ui-page-bg: #f4f6f9;
             --ui-surface: #ffffff;
             --ui-surface-subtle: #f7f8fa;
+            --ui-surface-hover: #f7faff;
             --ui-border: #e1e6ed;
+            --ui-border-subtle: #edf0f4;
             --ui-text: #1f2d3d;
+            --ui-text-strong: #354356;
             --ui-muted: #6c7888;
             --ui-primary: #245ea8;
             --ui-radius-sm: 6px;
@@ -33,10 +59,49 @@
             --ui-space-3: .75rem;
             --ui-space-4: 1rem;
         }
+        html[data-theme="dark"] {
+            color-scheme: dark;
+            --ui-page-bg: #0f141c;
+            --ui-surface: #18202b;
+            --ui-surface-subtle: #202a37;
+            --ui-surface-hover: #243246;
+            --ui-border: #344154;
+            --ui-border-subtle: #2a3646;
+            --ui-text: #e5ebf3;
+            --ui-text-strong: #f4f7fb;
+            --ui-muted: #a8b3c2;
+            --ui-primary: #79aef2;
+            --ui-shadow-sm: 0 .15rem .55rem rgba(0,0,0,.24);
+        }
         body {
-            background: #f4f6f9;
+            background: var(--ui-page-bg);
+            color: var(--ui-text);
             font-family: "Noto Sans Thai", "Segoe UI", Tahoma, Arial, sans-serif;
             overflow-x: hidden;
+        }
+
+        body,
+        #main-content,
+        .card,
+        .modal-content,
+        .dropdown-menu,
+        .filter-toolbar,
+        .ops-card,
+        .dash-filterbar,
+        .stat-card,
+        .panel,
+        .form-section,
+        .target-card,
+        .ticket-hero,
+        .snapshot-grid,
+        .timeline-entry,
+        .timeline-note,
+        .response-panel,
+        .form-control,
+        .form-select,
+        .input-group-text,
+        .table > :not(caption) > * > * {
+            transition: background-color .25s ease, border-color .25s ease, color .25s ease, box-shadow .25s ease;
         }
 
         /* ── Header ── */
@@ -63,6 +128,60 @@
             background: rgba(255,255,255,0.1); color: #fff;
             font-size: 0.75rem; padding: 4px 12px;
             border-radius: 20px; white-space: nowrap;
+        }
+
+        /* ── Theme switch ── */
+        .theme-switch {
+            display: inline-flex;
+            align-items: center;
+            padding: 0;
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            cursor: pointer;
+        }
+        .theme-switch__track {
+            position: relative;
+            display: block;
+            width: 3rem;
+            height: 1.65rem;
+            border: 1px solid rgba(255,255,255,.3);
+            border-radius: 999px;
+            background: rgba(255,255,255,.12);
+            transition: background-color .25s ease, border-color .25s ease;
+        }
+        .theme-switch__thumb {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            display: grid;
+            width: 1.3rem;
+            height: 1.3rem;
+            place-items: center;
+            border-radius: 50%;
+            background: #fff;
+            color: #b66a00;
+            box-shadow: 0 1px 4px rgba(0,0,0,.28);
+            transition: transform .25s ease, background-color .25s ease, color .25s ease;
+        }
+        .theme-switch__icon { font-size: .72rem; line-height: 1; }
+        .theme-switch__icon--dark { display: none; }
+        html[data-theme="dark"] .theme-switch__track {
+            border-color: #79aef2;
+            background: #245ea8;
+        }
+        html[data-theme="dark"] .theme-switch__thumb {
+            transform: translateX(1.35rem);
+            background: #e8f0fb;
+            color: #334a73;
+        }
+        html[data-theme="dark"] .theme-switch__icon--light { display: none; }
+        html[data-theme="dark"] .theme-switch__icon--dark { display: inline-block; }
+        .theme-switch:hover .theme-switch__track { border-color: rgba(255,255,255,.65); }
+        .theme-switch:focus-visible { outline: none; }
+        .theme-switch:focus-visible .theme-switch__track {
+            outline: 3px solid rgba(121,174,242,.55);
+            outline-offset: 2px;
         }
 
         /* ── Sidebar toggle button ── */
@@ -145,20 +264,20 @@
         }
         .page-header__title {
             margin: 0;
-            color: #1f2d3d;
+            color: var(--ui-text);
             font-size: clamp(1.3rem, 2vw, 1.65rem);
             font-weight: 800;
             line-height: 1.2;
         }
-        .page-header__title i { color: #667386; }
+        .page-header__title i { color: var(--ui-muted); }
         .page-header__subtitle {
             margin: 0.3rem 0 0;
-            color: #6c757d;
+            color: var(--ui-muted);
             font-size: 0.82rem;
             line-height: 1.5;
         }
         .page-header__meta {
-            color: #6c757d;
+            color: var(--ui-muted);
             font-size: 0.76rem;
             line-height: 1.4;
             text-align: right;
@@ -219,8 +338,8 @@
         }
         .operational-table > thead > tr > th {
             background: var(--ui-surface-subtle);
-            border-bottom: 1px solid #d6dce5;
-            color: #526071;
+            border-bottom: 1px solid var(--ui-border);
+            color: var(--ui-muted);
             font-size: .72rem;
             font-weight: 800;
             letter-spacing: .025em;
@@ -229,7 +348,7 @@
             white-space: nowrap;
         }
         .operational-table > tbody > tr > td {
-            border-color: #edf0f4;
+            border-color: var(--ui-border-subtle);
             padding: .7rem .75rem;
             vertical-align: middle;
         }
@@ -244,7 +363,7 @@
         .operational-table .cell-actions { white-space: nowrap; text-align: right; }
         .operational-table tr.is-emergency > td:first-child { box-shadow: inset 3px 0 0 #c82f41; }
         .clickable-row { cursor: pointer; }
-        .clickable-row:hover > td { background-color: #f7faff; }
+        .clickable-row:hover > td { background-color: var(--ui-surface-hover); }
         .clickable-row:focus { outline: 2px solid var(--ui-primary); outline-offset: -2px; }
         .clickable-row:focus:not(:focus-visible) { outline: 0; }
 
@@ -267,11 +386,11 @@
             margin-bottom: .65rem;
             place-items: center;
             border-radius: 50%;
-            background: #eef3f8;
-            color: #63758c;
+            background: var(--ui-surface-subtle);
+            color: var(--ui-muted);
             font-size: 1.35rem;
         }
-        .empty-state__title { color: #354356; font-size: .92rem; font-weight: 800; }
+        .empty-state__title { color: var(--ui-text-strong); font-size: .92rem; font-weight: 800; }
         .empty-state__description { max-width: 30rem; margin: .25rem 0 0; font-size: .78rem; line-height: 1.55; }
 
         .page-loading-indicator {
@@ -349,6 +468,78 @@
         .table thead.thead-brand th { background: var(--sidebar-bg); color: #fff; }
         .font-monospace { font-family: "Cascadia Code", "Courier New", monospace; }
 
+        /* Custom page components use the same semantic theme surfaces. */
+        html[data-theme="dark"] body {
+            background-color: var(--ui-page-bg) !important;
+            color: var(--ui-text);
+        }
+        html[data-theme="dark"] body .dash-filterbar,
+        html[data-theme="dark"] body .stat-card,
+        html[data-theme="dark"] body .panel,
+        html[data-theme="dark"] body .form-section,
+        html[data-theme="dark"] body .target-card,
+        html[data-theme="dark"] body .ticket-hero,
+        html[data-theme="dark"] body .snapshot-grid,
+        html[data-theme="dark"] body .section-card .card-header,
+        html[data-theme="dark"] body .timeline-entry,
+        html[data-theme="dark"] body .timeline-note,
+        html[data-theme="dark"] body .subtask-new,
+        html[data-theme="dark"] body .action-stack .card-header {
+            background-color: var(--ui-surface) !important;
+            border-color: var(--ui-border) !important;
+            color: var(--ui-text) !important;
+        }
+        html[data-theme="dark"] body .response-panel,
+        html[data-theme="dark"] body .heat-blocked-col,
+        html[data-theme="dark"] body .bg-light {
+            background-color: var(--ui-surface-subtle) !important;
+            border-color: var(--ui-border) !important;
+            color: var(--ui-text) !important;
+        }
+        html[data-theme="dark"] body .panel-title,
+        html[data-theme="dark"] body .threat-legend-item,
+        html[data-theme="dark"] body .threat-legend-value,
+        html[data-theme="dark"] body .ticket-hero .hero-subject,
+        html[data-theme="dark"] body .snapshot-value,
+        html[data-theme="dark"] body .section-title,
+        html[data-theme="dark"] body .summary-copy,
+        html[data-theme="dark"] body .detail-grid dd,
+        html[data-theme="dark"] body .text-dark {
+            color: var(--ui-text) !important;
+        }
+        html[data-theme="dark"] body .threat-legend-item:hover,
+        html[data-theme="dark"] body .threat-legend-item:focus-visible {
+            background-color: var(--ui-surface-hover);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            body,
+            #main-content,
+            .card,
+            .modal-content,
+            .dropdown-menu,
+            .filter-toolbar,
+            .ops-card,
+            .dash-filterbar,
+            .stat-card,
+            .panel,
+            .form-section,
+            .target-card,
+            .ticket-hero,
+            .snapshot-grid,
+            .timeline-entry,
+            .timeline-note,
+            .response-panel,
+            .form-control,
+            .form-select,
+            .input-group-text,
+            .table > :not(caption) > * > *,
+            .theme-switch__track,
+            .theme-switch__thumb {
+                transition-duration: .01ms;
+            }
+        }
+
         /* ── Mobile ── */
         @media (max-width: 768px) {
             #sidebar { transform: translateX(-100%); transition: transform .25s; width: var(--sidebar-width) !important; }
@@ -389,8 +580,9 @@
         <small>ศูนย์ปฏิบัติการความปลอดภัย</small>
     </div>
 
-    {% if user.is_authenticated %}
-        <div class="ms-auto d-flex align-items-center gap-2">
+    <div class="ms-auto d-flex align-items-center gap-2">
+        {% include 'includes/_theme_toggle.html' %}
+        {% if user.is_authenticated %}
             <div class="user-pill">
                 <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
             </div>
@@ -403,8 +595,8 @@
                 <i class="bi bi-box-arrow-right"></i>
             </button>
         </form>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 
 <!-- ── Sidebar ── -->
@@ -546,6 +738,55 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script nonce="{{ request.csp_nonce }}">
+    (() => {
+        const storageKey = 'soc-theme';
+        const themeToggle = document.getElementById('theme-toggle');
+        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function savedTheme() {
+            try {
+                const value = localStorage.getItem(storageKey);
+                return value === 'light' || value === 'dark' ? value : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function applyTheme(theme, persist = false) {
+            const isDark = theme === 'dark';
+            const nextMode = isDark ? 'light' : 'dark';
+            const label = `Switch to ${nextMode} mode`;
+
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.dataset.bsTheme = theme;
+            document.documentElement.style.colorScheme = theme;
+            themeToggle?.setAttribute('aria-checked', String(isDark));
+            themeToggle?.setAttribute('aria-label', label);
+            themeToggle?.setAttribute('title', label);
+
+            if (persist) {
+                try {
+                    localStorage.setItem(storageKey, theme);
+                } catch (error) {
+                    // The active page still changes theme if storage is unavailable.
+                }
+            }
+
+            window.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
+        }
+
+        applyTheme(document.documentElement.dataset.theme || 'light');
+
+        themeToggle?.addEventListener('click', () => {
+            const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+            applyTheme(nextTheme, true);
+        });
+
+        systemTheme.addEventListener?.('change', (event) => {
+            if (!savedTheme()) applyTheme(event.matches ? 'dark' : 'light');
+        });
+    })();
+
     const sidebar   = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
     const sidebarTooltips = window.bootstrap?.Tooltip

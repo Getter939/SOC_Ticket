@@ -49,6 +49,15 @@ class UiSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'no-sidebar')
 
+    def test_base_renders_accessible_theme_switch(self):
+        resp = self.client.get(reverse('login'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="theme-toggle"')
+        self.assertContains(resp, 'role="switch"')
+        self.assertContains(resp, 'aria-label="Switch to dark mode"')
+        self.assertContains(resp, "prefers-color-scheme: dark")
+        self.assertContains(resp, "localStorage.setItem(storageKey, theme)")
+
     def test_ticket_list_renders_with_filters(self):
         self.client.force_login(self.soc_staff)
         resp = self.client.get(reverse('ticket_list'), {
