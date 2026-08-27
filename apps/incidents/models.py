@@ -1574,7 +1574,7 @@ class Ticket(models.Model):
     def court_holder_label(self):
         """Who this ticket is currently waiting on, for display.
 
-        The readable counterpart to views._holds_ticket_court: that answers
+        The readable counterpart to policies.holds_ticket_court: that answers
         "is it me?", this answers "then who?". Names the individual where the
         workflow gates on one (the creator, the assigned admin, the owner, a
         Tier 2 who has claimed it) and falls back to the role otherwise, since
@@ -2321,7 +2321,7 @@ class TriageRecord(models.Model):
     # bundle) instead of a single ticket. Mirrors WazuhAlert.project_incident:
     # the record points at the whole bundle, and the ``ticket`` OneToOne stays
     # null. Either link marks the record consumed (see
-    # _can_create_ticket_from_triage).
+    # policies.can_create_ticket_from_triage).
     project_incident = models.ForeignKey(
         'ProjectIncident', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='source_triages', verbose_name='Project Incident (Case Bundle)',
@@ -2339,7 +2339,7 @@ class TriageRecord(models.Model):
         """Resolved decision: T2's if escalated, else T1's.
 
         Only legacy rows can be ESCALATED (see the class docstring), but this
-        stays live: _can_create_ticket_from_triage still uses it so an old
+        stays live: policies.can_create_ticket_from_triage still uses it so an old
         escalated record can be converted rather than stranded.
         """
         if self.decision == self.DECISION_ESCALATED:

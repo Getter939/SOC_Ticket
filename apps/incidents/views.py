@@ -12,7 +12,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Exists, F, OuterRef, Prefetch, Q
+from django.db.models import Exists, F, OuterRef, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -32,7 +32,7 @@ from .forms import (
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
     ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
-    TicketAlertLink, TicketAttachment, TicketFieldChange, TicketLog, TicketLogRevision,
+    TicketAlertLink, TicketAttachment, TicketLog, TicketLogRevision,
     TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
     validate_attachment,
@@ -56,6 +56,23 @@ from .reports import (
     generate_ticket_report,
     generate_ticket_report_pdf,
 )
+from .policies import (
+    can_access_ticket_report as _can_access_ticket_report,
+    can_create_ticket_from_triage as _can_create_ticket_from_triage,
+    can_create_ticket_from_wazuh as _can_create_ticket_from_wazuh,
+    can_delete_project_attachment as _can_delete_project_attachment,
+    can_delete_ticket_attachment as _can_delete_ticket_attachment,
+    can_edit_ticket as _can_edit_ticket,
+    can_restore_ticket_attachment as _can_restore_ticket_attachment,
+    can_upload_project_attachment as _can_upload_project_attachment,
+    can_upload_subtask_result as _can_upload_subtask_result,
+    can_upload_ticket_attachment as _can_upload_ticket_attachment,
+    holds_ticket_court as _holds_ticket_court,
+    is_soc as _is_soc,
+    is_soc_manager as _is_soc_manager,
+    user_can_drive as _user_can_drive,
+)
+from .selectors import get_ticket_detail_read_model
 
 logger = logging.getLogger(__name__)
 
@@ -77,271 +94,6 @@ def _active_threat_guidance():
         }
         for guidance in ThreatGuidance.objects.filter(is_active=True)
     }
-
-
-def _user_can_drive(ticket, user, perm):
-    """Whether ``user`` satisfies a SOC-side transition permission token.
-
-    Only the SOC-driven tokens are considered here (the ASSIGNED_ADMIN step is
-    handled by the dedicated containment form, not the status dropdown).
-    """
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    if profile is None:
-        return False
-    if perm == 'TIER1_CREATOR':
-        return profile.is_tier1 and user.pk == ticket.created_by_id
-    if perm == 'TIER2':
-        return profile.is_tier2
-    if perm == 'MANAGER':
-        return profile.is_soc_manager
-    return False
-
-
-def _holds_ticket_court(ticket, user):
-    """Whether user is the party this ticket is currently waiting on.
-
-    The "whose court is it?" rule on its own, so the surfaces that care about
-    it cannot drift apart: the attachment gate enforces it, and the edit form
-    warns on it (see ``edit_ticket``).
-
-    Deliberately pure court logic — no terminal-status refusal and no
-    superuser bypass. Callers layer those on, which is what lets the edit
-    warning treat a superuser as out-of-court (they never hold one) while
-    _can_upload_ticket_attachment still lets them through.
-    """
-    profile = getattr(user, 'profile', None)
-    if profile is None:
-        return False
-
-    if ticket.status in (
-        Ticket.STATUS_NEW,
-        Ticket.STATUS_T1_REVIEW,
-        Ticket.STATUS_OWNER_REMEDIATED,
-    ):
-        return profile.is_tier1 and ticket.created_by_id == user.pk
-    if ticket.status in Ticket.TIER2_QUEUE_STATUSES:
-        return profile.is_tier2 and not ticket.t2_claim_blocks(user)
-    if ticket.status in Ticket.MANAGER_QUEUE_STATUSES:
-        return profile.is_soc_manager
-    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
-        return profile.is_system_admin and ticket.assigned_admin_id == user.pk
-    if ticket.status == Ticket.STATUS_AWAITING_OWNER:
-        # Both, deliberately. Owners are contacted out of band and in practice
-        # never log in — gating this on the owner alone meant NOBODY could
-        # attach while the ticket sat here, so a screenshot the owner emailed
-        # in had nowhere to go until Tier 1 advanced the ticket just to earn
-        # the right to upload it. The creator is the party actually holding
-        # the case; the owner keeps the right for the day one does log in.
-        if profile.is_system_owner and ticket.system_owner_id == user.pk:
-            return True
-        return profile.is_tier1 and ticket.created_by_id == user.pk
-    return False
-
-
-def _can_upload_ticket_attachment(ticket, user):
-    """Whether user currently owns this ticket's attachment action.
-
-    Seeing a ticket is deliberately broader than acting on it. Attachments
-    therefore follow the same "whose court is it?" rule as the workflow
-    (_holds_ticket_court), and are never accepted after a ticket has reached a
-    terminal state.
-
-    This gates ``upload_attachment``. There is exactly one documented exception:
-    a response-request deliverable uploaded through ``update_subtask``, which
-    runs on _can_upload_subtask_result() instead — see the reasoning there.
-    """
-    if ticket.status in Ticket.TERMINAL_STATUSES:
-        return False
-    if user.is_superuser:
-        return True
-    return _holds_ticket_court(ticket, user)
-
-
-def _is_soc(user):
-    """Superuser, or a SOC analyst/manager — the "sees and drives everything" set."""
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    return bool(profile and profile.is_soc)
-
-
-def _is_soc_manager(user):
-    """Superuser, or a SOC Manager — the privileged-override set.
-
-    Mirrors Ticket._is_emergency_manager, which is the same rule expressed on
-    the model for emergency reassessment. Kept as a plain predicate here because
-    the checks below are about a person, not about a particular ticket.
-    """
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    return bool(profile and profile.is_soc_manager)
-
-
-def _can_delete_ticket_attachment(ticket, attachment, user):
-    """Whether user may remove this piece of evidence.
-
-    Removing evidence is deliberately narrower than adding it. The terminal
-    check comes first, ahead of the superuser bypass — the same order as
-    _can_upload_ticket_attachment, and what makes a closed case refuse
-    everyone. Once a ticket is APPROVED or CLOSED_EVENT its evidence is frozen;
-    that is the window in which a quiet deletion would never be noticed.
-
-    "Any SOC member" is not enough: SOC can see every ticket, so that rule let
-    an uninvolved analyst remove another team's evidence. The uploader may undo
-    their own mistake, the responder assigned to a response request may manage
-    that request's deliverables, and a SOC Manager may act on anything still
-    open.
-    """
-    if ticket.status in Ticket.TERMINAL_STATUSES:
-        return False
-    if attachment.uploaded_by_id == user.pk:
-        return True
-    if (
-        attachment.subtask_id
-        and attachment.subtask.is_response_request
-        and attachment.subtask.assigned_to_id == user.pk
-    ):
-        return True
-    return _is_soc_manager(user)
-
-
-def _can_upload_project_attachment(project, user):
-    """Whether user may add shared evidence to a case bundle.
-
-    The bundle has no single "court" of its own — it is a grouping, and each
-    member sits in its own. So the rule is: hold the court on ANY member, or be
-    a SOC Manager. That admits exactly the people already working the incident
-    (the assigned admin of one affected system, the owner of another) without
-    opening group evidence to every SOC account.
-
-    Frozen once every member is closed, mirroring the terminal-status refusal
-    in _can_upload_ticket_attachment — a finished case's evidence set is fixed.
-    """
-    if project.all_closed:
-        return False
-    if user.is_superuser:
-        return True
-    if _is_soc_manager(user):
-        return True
-    return any(
-        _holds_ticket_court(member, user)
-        for member in project.member_tickets.all()
-    )
-
-
-def _can_delete_project_attachment(project, attachment, user):
-    """Whether user may remove shared bundle evidence.
-
-    Same shape as _can_delete_ticket_attachment: narrower than adding, frozen
-    on a finished bundle, uploader may undo their own mistake, SOC Manager may
-    act on anything still open.
-    """
-    if project.all_closed:
-        return False
-    if attachment.uploaded_by_id == user.pk:
-        return True
-    return _is_soc_manager(user)
-
-
-def _can_edit_ticket(ticket, user):
-    """Whether user may correct this ticket's content.
-
-    There was no edit surface at all before this: Tier 1's original content
-    could only ever be fixed by a Tier 2 analyst while the ticket sat at
-    ESCALATED_T2, so a ticket routed straight to the manager was uneditable for
-    its whole life.
-
-    The creator gets to fix their own typo while the ticket is still untouched
-    (NEW — nobody else has acted on it). After that it is SOC's call, because by
-    then the content is what other roles are acting on. Closed cases are frozen,
-    and every edit is recorded field-by-field (see apps.incidents.history).
-
-    Note the creator clause is currently redundant: only Tier 1 can open a
-    ticket, and Tier 1 is SOC, so the final line already covers them. It is
-    written out anyway so that narrowing SOC's edit rights later cannot silently
-    take away the author's right to correct their own untouched ticket.
-
-    A Tier 2 claim covers the ticket's CONTENT as well as its status.
-    transition_to refuses a second Tier 2 at its step 3b; without the same
-    check here that analyst could still rewrite the description the claimer is
-    working from, so the two surfaces would answer differently about the same
-    ticket at the same moment.
-
-    Otherwise this stays deliberately broader than _holds_ticket_court: a
-    correction is not a workflow move, and refusing an analyst the right to fix
-    their own earlier mistake once the ticket moved on would cost more than it
-    protects. ``edit_ticket`` warns when the ticket is in someone else's court
-    instead, and every edit is attributed and diffed either way.
-    """
-    if ticket.status in Ticket.TERMINAL_STATUSES:
-        return False
-    if user.is_superuser:
-        return True
-    profile = getattr(user, 'profile', None)
-    if profile is None:
-        return False
-    if ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == user.pk:
-        return profile.is_tier1
-    if ticket.t2_claim_blocks(user):
-        return False
-    return _is_soc(user)
-
-
-def _can_restore_ticket_attachment(user):
-    """Whether user may bring deleted evidence back.
-
-    Not gated on terminal status, unlike deletion. Refusing removal on a closed
-    case protects the evidence set; refusing *recovery* would only make a
-    mistake permanent, so restore stays available after closure.
-    """
-    return _is_soc_manager(user)
-
-
-def _can_upload_subtask_result(subtask, user):
-    """Whether user may attach a deliverable to this subtask.
-
-    A deliberate exception to _can_upload_ticket_attachment()'s "whose court is
-    the TICKET in?" rule, because for a response request the court that matters
-    is the REQUEST. A Forensic Analyst must be able to file their report while
-    the parent ticket sits in PENDING_MGR_TRIAGE — a state whose ticket-level
-    rule answers `profile.is_soc_manager`, which would refuse them.
-
-    Narrower than the `is_soc or is_assignee` test this replaces: plain SOC
-    staff could previously attach a file here to a ticket they had no
-    ticket-level upload right on. The assignee does the work, the SOC manager
-    owns the request lifecycle, and nobody else needs a file on it.
-
-    Terminal-status refusal is NOT repeated here — callers check it first, ahead
-    of the superuser bypass, which is what makes a closed ticket refuse everyone.
-    """
-    if user.is_superuser:
-        return True
-    if subtask.assigned_to_id == user.pk:
-        return True
-    profile = getattr(user, 'profile', None)
-    return profile is not None and profile.is_soc_manager
-
-
-def _can_access_ticket_report(user):
-    """Whether user may preview or export the incident report.
-
-    The report is a SOC deliverable, not a per-party document: it carries NT
-    branding and the verified/approved sign-off block, and it is aimed outward
-    (ปปกก., executives). The roles that merely appear *in* a case — the assigned
-    admin, the system owner, a response-team member holding a subtask — are
-    subjects of the report rather than its authors, and everything they need
-    operationally is already on ticket_detail.
-
-    Deliberately a role test with no ticket argument: exporting writes the
-    report_* provenance fields (see reports._record_export_metadata), so letting
-    a party to the incident regenerate the report would overwrite who produced
-    it and reset the stale-report badge. Keeping that SOC-only is what keeps the
-    provenance authoritative.
-    """
-    return _is_soc(user)
 
 
 def _valid_soc_status_choices(ticket, user):
@@ -515,47 +267,6 @@ def _notify_owner_closed(ticket, request):
 
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
-
-def _can_create_ticket_from_triage(triage, user):
-    if triage.ticket_id or triage.project_incident_id:
-        return False
-    if not triage.decision:
-        return (
-            user.is_superuser
-            or (triage.claimed_by_id == user.id and getattr(getattr(user, 'profile', None), 'is_tier1', False))
-        )
-    if user.is_superuser:
-        return triage.final_decision == TriageRecord.DECISION_TP
-    if triage.decision == TriageRecord.DECISION_TP:
-        return triage.analyst_id == user.id
-    return (
-        triage.decision == TriageRecord.DECISION_ESCALATED
-        and triage.t2_decision == TriageRecord.DECISION_TP
-        and triage.escalated_to_id == user.id
-    )
-
-
-def _can_create_ticket_from_wazuh(alert, user):
-    profile = getattr(user, 'profile', None)
-    if (
-        alert.claimed_by_id != user.id
-        or hasattr(alert, 'ticket')
-        or hasattr(alert, 'ticket_alert_link')
-        or alert.project_incident_id
-    ):
-        return False
-    if user.is_superuser:
-        return alert.triage_status in (
-            WazuhAlert.TRIAGE_TRIAGING,
-            WazuhAlert.TRIAGE_ESCALATED,
-        )
-    if alert.triage_status == WazuhAlert.TRIAGE_TRIAGING:
-        return True
-    if alert.triage_status != WazuhAlert.TRIAGE_ESCALATED or profile is None:
-        return False
-    user_tier = WazuhAlert.TIER_MANAGER if profile.is_soc_manager else profile.tier
-    return alert.escalated_to_tier == user_tier
-
 
 MAX_ALERT_BUNDLE_SIZE = 25
 
@@ -1978,91 +1689,22 @@ def ticket_detail(request, pk):
 
         return redirect('ticket_detail', pk=pk)
 
-    # The timeline renders each entry's author, its edited badge, and any
-    # revisions. Without prefetching, was_edited/.count()/.all() fire per entry
-    # — a 15-entry ticket cost ~37 queries for the badge alone.
-    logs = ticket.logs.select_related('author').prefetch_related(
-        Prefetch(
-            'revisions',
-            queryset=TicketLogRevision.objects.select_related('edited_by'),
-        )
-    )
-    # A prior CONTAINMENT_REPORTED entry proves this is a Tier-2 return rather
-    # than the System Admin's first assignment. At AWAITING_CONTAINMENT, the
-    # latest entry into that status is necessarily the Tier-2 return note.
-    containment_return_log = None
-    if can_submit_containment and ticket.logs.filter(
-        status_at_time=Ticket.STATUS_CONTAINMENT_REPORTED,
-    ).exists():
-        containment_return_log = ticket.logs.filter(
-            status_at_time=Ticket.STATUS_AWAITING_CONTAINMENT,
-        ).select_related('author').first()
-    # Decide deletability once, in Python. The rule is per-attachment (it turns
-    # on its uploader and, for response deliverables, its assigned responder),
-    # and a template cannot call a helper with arguments — so without this the
-    # template has to restate _can_delete_ticket_attachment in tag syntax and
-    # the two copies drift.
-    # Subtask deliverables are rendered in their owning subtask below. Keep the
-    # ticket-level evidence panel to standalone attachments so a delete modal
-    # never appears twice with the same DOM id.
-    attachments = list(
-        ticket.attachments.filter(subtask__isnull=True).select_related('uploaded_by')
-    )
-    for attachment in attachments:
-        attachment.can_delete = _can_delete_ticket_attachment(
-            ticket, attachment, request.user)
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
-
-    subtasks = ticket.subtasks.select_related('assigned_to', 'created_by').prefetch_related(
-        Prefetch(
-            'attachments',
-            queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
-        ),
-        # A per-task history should contain only state transitions, never the
-        # result-note/file edits that share the generic TicketFieldChange table.
-        Prefetch(
-            'field_changes',
-            queryset=TicketFieldChange.objects.filter(field_name='status')
-            .select_related('changed_by').order_by('changed_at'),
-        ),
-    )
-    for subtask in subtasks:
-        for attachment in subtask.attachments.all():
-            attachment.can_delete = _can_delete_ticket_attachment(
-                ticket, attachment, request.user)
     subtask_form = SubtaskForm()
     subtask_update_form = SubtaskUpdateForm()
     response_request_form = ResponseRequestForm()
     can_create_subtask = request.user.is_superuser or (profile and profile.is_soc)
-
-    # Data for the spawn card's client-side assignee filter (view still validates
-    # the choice authoritatively). Only computed when the card is shown.
-    response_routing = {}
-    response_member_roles = {}
-    if can_request_response:
-        response_routing = TicketSubtask.response_routing()
-        response_member_roles = {
-            str(pk): role
-            for pk, role in User.objects.filter(
-                is_active=True,
-                profile__role__in=(
-                    UserProfile.ROLE_FORENSIC, UserProfile.ROLE_REDTEAM_MANAGER,
-                ),
-            ).values_list('pk', 'profile__role')
-        }
-
-    can_restore_attachment = _can_restore_ticket_attachment(request.user)
-    alert_links = list(
-        ticket.alert_links.select_related('alert', 'linked_by')
+    read_model = get_ticket_detail_read_model(
+        ticket=ticket,
+        user=request.user,
+        can_submit_containment=can_submit_containment,
+        can_request_response=can_request_response,
     )
 
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
-        'alert_links': alert_links,
-        'logs': logs,
-        'containment_return_log': containment_return_log,
-        'attachments': attachments,
+        **read_model,
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
         'can_access_report': _can_access_ticket_report(request.user),
@@ -2070,22 +1712,6 @@ def ticket_detail(request, pk):
         'can_step_back': ticket.can_step_back(request.user),
         'step_back_target_label': dict(Ticket.STATUS_CHOICES).get(
             ticket.step_back_target(), ''),
-        # Subtask STATUS transitions have their own per-task history rendered in
-        # the subtask card, so repeating them here only burns the 50-row cap and
-        # pushes real ticket edits out of view. Subtask *note* changes stay —
-        # they have no other home. Keep this exclusion in step with the
-        # field_name='status' Prefetch on `subtasks` above.
-        'field_changes': ticket.field_changes.exclude(
-            subtask__isnull=False, field_name='status',
-        ).select_related('changed_by', 'subtask')[:50],
-        'can_restore_attachment': can_restore_attachment,
-        # Removed evidence, shown only to the roles that can bring it back.
-        'deleted_attachments': (
-            TicketAttachment.all_objects
-            .filter(ticket=ticket, deleted_at__isnull=False)
-            .select_related('deleted_by').order_by('-deleted_at')
-            if can_restore_attachment else []
-        ),
         'profile': profile,
         'is_terminal': is_terminal,
         'can_upload_attachment': can_upload_attachment,
@@ -2107,14 +1733,11 @@ def ticket_detail(request, pk):
         'can_t2_reclassify': can_t2_reclassify,
         'can_request_response': can_request_response,
         'response_request_form': response_request_form,
-        'response_routing': response_routing,
-        'response_member_roles': response_member_roles,
         'RESPONSE_TYPES': list(TicketSubtask.RESPONSE_TYPES),
         'T1_ROUTE_ADMIN': Ticket.T1_ROUTE_ADMIN,
         'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,
         'can_reassess_emergency': ticket.can_reassess_emergency(request.user),
         'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
-        'subtasks': subtasks,
         'subtask_form': subtask_form,
         'subtask_update_form': subtask_update_form,
         'can_create_subtask': can_create_subtask,
