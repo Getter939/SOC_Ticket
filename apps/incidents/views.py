@@ -44,12 +44,10 @@ from .staging import (
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
     notify_containment_alert,
-    notify_containment_submitted,
     notify_manager_triage_pending,
     notify_response_request_created,
     notify_response_request_completed,
     notify_system_owner_created,
-    notify_system_owner_closed,
 )
 from .reports import (
     build_ticket_report_render_context,
@@ -73,6 +71,17 @@ from .policies import (
     user_can_drive as _user_can_drive,
 )
 from .selectors import get_ticket_detail_read_model
+from .ticket_workflow import (
+    assign_admin_or_owner_route,
+    claim_tier2_ticket,
+    complete_t2_review,
+    manager_forward,
+    reassess_emergency,
+    reclassify_as_event,
+    step_back,
+    submit_containment,
+    transition_ticket,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,13 +266,6 @@ def _notify_containment(ticket, reason, request):
         return
     if not notify_containment_alert(ticket, reason=reason):
         messages.warning(request, 'Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — โปรดแจ้งผู้ดูแลระบบด้วยตนเอง')
-
-
-def _notify_owner_closed(ticket, request):
-    if ticket.system_owner and ticket.system_owner.email:
-        attachments = list(ticket.attachments.all())
-        if not notify_system_owner_closed(ticket, attachments=attachments):
-            messages.warning(request, 'Ticket ปิดแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
 
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
@@ -1432,29 +1434,26 @@ def ticket_detail(request, pk):
         action = request.POST.get('action')
 
         if action == 'reassess_emergency':
-            # Auditable reassessment after the initial review. The model enforces
-            # manager-only + not-terminal + not-PENDING_MGR_TRIAGE + reason; we
-            # don't pre-check the UI flag here so the server stays authoritative.
             value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
             reason = request.POST.get('emergency_reason', '').strip()
             try:
-                ticket.reassess_emergency(value, request.user, reason)
+                reassess_emergency(ticket=ticket, actor=request.user, value=value, reason=reason)
                 state = 'ตั้งเป็น Emergency' if value else 'ยกเลิก Emergency'
                 messages.success(request, f'ประเมินสถานะฉุกเฉินใหม่ ({state}) เรียบร้อยแล้ว')
             except ValidationError as e:
                 messages.error(request, e.message)
 
         elif action == 'step_back':
-            # Same shape as reassess_emergency: the model owns manager-only,
-            # not-terminal and reason-required, so the server stays authoritative
-            # regardless of what the UI offered.
             try:
-                target = ticket.step_back(
-                    request.user, request.POST.get('step_back_reason', ''))
+                result = step_back(
+                    ticket=ticket,
+                    actor=request.user,
+                    reason=request.POST.get('step_back_reason', ''),
+                )
                 messages.success(
                     request,
                     'ย้อนขั้นตอนเรียบร้อยแล้ว — '
-                    f'สถานะปัจจุบัน: {dict(Ticket.STATUS_CHOICES).get(target, target)}',
+                    f'สถานะปัจจุบัน: {dict(Ticket.STATUS_CHOICES).get(result.target_status, result.target_status)}',
                 )
             except ValidationError as e:
                 messages.error(request, e.message)
@@ -1473,22 +1472,18 @@ def ticket_detail(request, pk):
                 messages.error(request, 'Classification must match the selected Tier 2 decision.')
             elif review_form.is_valid():
                 try:
-                    with transaction.atomic():
-                        # Tier 2 rewrites ~25 content fields here; without this
-                        # the previous values would be unrecoverable. Read from
-                        # the DB — review_form.is_valid() has already written the
-                        # submitted data onto the in-memory ticket.
-                        before = history.snapshot_saved(ticket)
-                        ticket = review_form.save()
-                        history.record_changes(
-                            ticket, before, request.user, source='t2_review')
-                        ticket.transition_to(
-                            next_status, request.user,
-                            request.POST.get('decision_note', '').strip()
-                            or dict((item['status'], item['label']) for item in transition_actions)[next_status],
-                        )
-                    if next_status == Ticket.STATUS_CLOSED_EVENT:
-                        _notify_owner_closed(ticket, request)
+                    result = complete_t2_review(
+                        ticket=ticket,
+                        actor=request.user,
+                        review_form=review_form,
+                        next_status=next_status,
+                        decision_note=request.POST.get('decision_note', '').strip(),
+                        fallback_label=dict(
+                            (item['status'], item['label']) for item in transition_actions
+                        )[next_status],
+                    )
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
                 except ValidationError as e:
                     messages.error(request, e.message)
             else:
@@ -1507,23 +1502,23 @@ def ticket_detail(request, pk):
                 messages.error(request, 'A review note is required.')
             elif route == Ticket.T1_ROUTE_OWNER:
                 try:
-                    with transaction.atomic():
-                        ticket.t1_route = Ticket.T1_ROUTE_OWNER
-                        ticket.transition_to(
-                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user, note,
-                        )
-                    notify_manager_triage_pending(ticket)
+                    assign_admin_or_owner_route(
+                        ticket=ticket,
+                        actor=request.user,
+                        route=route,
+                        note=note,
+                    )
                 except ValidationError as e:
                     messages.error(request, e.message)
             elif assignment_form.is_valid():
                 try:
-                    with transaction.atomic():
-                        ticket = assignment_form.save(commit=False)
-                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
-                        ticket.transition_to(
-                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user, note,
-                        )
-                    notify_manager_triage_pending(ticket)
+                    assign_admin_or_owner_route(
+                        ticket=ticket,
+                        actor=request.user,
+                        route=route,
+                        note=note,
+                        assignment_form=assignment_form,
+                    )
                 except ValidationError as e:
                     messages.error(request, e.message)
             else:
@@ -1544,16 +1539,16 @@ def ticket_detail(request, pk):
                 messages.error(request, 'กรุณาประเมินสถานะฉุกเฉิน (Normal หรือ Emergency)')
             else:
                 want_emergency = assessment == 'emergency'
-                # Prepend the verdict to the forward note so the timeline shows
-                # the Normal/Emergency decision (Q1: one review note is enough).
-                verdict = 'Emergency' if want_emergency else 'Normal'
-                forward_note = f'[ประเมินสถานะฉุกเฉิน: {verdict}] {note}'
                 try:
-                    with transaction.atomic():
-                        ticket.assess_emergency_initial(want_emergency, request.user)
-                        ticket.transition_to(mgr_forward_target, request.user, forward_note)
-                    if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                        _notify_containment(ticket, None, request)
+                    result = manager_forward(
+                        ticket=ticket,
+                        actor=request.user,
+                        want_emergency=want_emergency,
+                        target_status=mgr_forward_target,
+                        note=note,
+                    )
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
                 except ValidationError as e:
                     messages.error(request, e.message)
 
@@ -1567,12 +1562,9 @@ def ticket_detail(request, pk):
                 messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
             else:
                 try:
-                    with transaction.atomic():
-                        ticket.classification = Ticket.CLASSIFICATION_EVENT
-                        ticket.transition_to(
-                            Ticket.STATUS_CLOSED_EVENT, request.user, note,
-                        )
-                    _notify_owner_closed(ticket, request)
+                    result = reclassify_as_event(ticket=ticket, actor=request.user, note=note)
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
                 except ValidationError as e:
                     messages.error(request, e.message)
 
@@ -1580,10 +1572,6 @@ def ticket_detail(request, pk):
             if not can_submit_containment:
                 messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
             else:
-                # The System Admin writes the countermeasure (containment_report)
-                # and investigation-findings (remediation_summary) fields, then
-                # submits the ticket for Tier 2 verification. Classification is
-                # NOT set here — it is Tier 1's (or Tier 2's) decision.
                 report = request.POST.get('containment_report', '').strip()
                 remediation = request.POST.get('remediation_summary', '').strip()
                 note = request.POST.get('note', '').strip()
@@ -1591,53 +1579,23 @@ def ticket_detail(request, pk):
                 if not report:
                     messages.error(request, 'กรุณากรอกรายงานการควบคุม')
                 else:
-                    # Tier 2 can bounce a containment report back for rework,
-                    # and the form returns pre-filled — so a resubmit overwrites
-                    # the previous text. Keep what it replaced.
-                    before = history.snapshot(ticket)
-                    ticket.containment_report = report
-                    if remediation:
-                        ticket.remediation_summary = remediation
-
-                    # Save the (non-mandatory) containment checklist. Items are
-                    # parsed from the current action_required so indices line up
-                    # with the checkboxes rendered on the form.
-                    item_lines, _ = Ticket.parse_checklist_items(ticket.action_required)
-                    checked = set(request.POST.getlist('checklist_done'))
-                    ticket.containment_checklist = [
-                        {'text': line, 'done': str(idx) in checked}
-                        for idx, line in enumerate(item_lines)
-                    ]
-                    done_count = sum(1 for c in ticket.containment_checklist if c['done'])
-                    total_count = len(ticket.containment_checklist)
-
-                    transition_note = note or 'ส่งรายงานการควบคุมแล้ว'
-                    if total_count:
-                        transition_note = (
-                            f'{transition_note}\n'
-                            f'(เช็กลิสต์สิ่งที่ต้องดำเนินการ: '
-                            f'ดำเนินการแล้ว {done_count}/{total_count} รายการ)'
-                        )
                     try:
-                        ticket.transition_to(
-                            Ticket.STATUS_CONTAINMENT_REPORTED,
-                            request.user,
-                            transition_note,
+                        result = submit_containment(
+                            ticket=ticket,
+                            actor=request.user,
+                            report=report,
+                            remediation=remediation,
+                            note=note,
+                            checked_indexes=set(request.POST.getlist('checklist_done')),
                         )
-                        history.record_changes(
-                            ticket, before, request.user, source='containment')
-                        if not notify_containment_submitted(ticket):
-                            messages.warning(
-                                request,
-                                'ส่งรายงานการควบคุมแล้ว แต่ส่งอีเมลแจ้งเจ้าหน้าที่ SOC ไม่สำเร็จ',
-                            )
+                        for warning in result.warnings:
+                            messages.warning(request, warning)
                     except ValidationError as e:
                         messages.error(request, e.message)
 
         elif action in ('workflow_action', 'soc_update'):
             new_note = request.POST.get('update_notes', '').strip()
             new_status = request.POST.get('status')
-            prev_status = ticket.status
 
             if not new_note:
                 messages.error(request, 'กรุณากรอกบันทึกการดำเนินการ')
@@ -1645,24 +1603,14 @@ def ticket_detail(request, pk):
                 messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
             else:
                 try:
-                    ticket.transition_to(new_status, request.user, new_note)
-
-                    # Notify Security Admin when routed to AWAITING_CONTAINMENT.
-                    # The rejection-loop note (CONTAINMENT_REPORTED → AC) tells
-                    # the admin what to fix; the first assignment has no reason.
-                    if new_status == Ticket.STATUS_AWAITING_CONTAINMENT:
-                        reason = (
-                            new_note
-                            if prev_status == Ticket.STATUS_CONTAINMENT_REPORTED
-                            else None
-                        )
-                        _notify_containment(ticket, reason, request)
-
-                    # Notify System Owner on closure (incident approved or
-                    # benign Event closed).
-                    if new_status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
-                        _notify_owner_closed(ticket, request)
-
+                    result = transition_ticket(
+                        ticket=ticket,
+                        actor=request.user,
+                        next_status=new_status,
+                        note=new_note,
+                    )
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
                 except ValidationError as e:
                     messages.error(request, e.message)
 
@@ -1674,12 +1622,8 @@ def ticket_detail(request, pk):
             if not is_t2_viewer:
                 messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถรับ Ticket ได้')
             else:
-                updated = Ticket.objects.filter(
-                    pk=ticket.pk,
-                    status__in=Ticket.TIER2_QUEUE_STATUSES,
-                    t2_claimed_by__isnull=True,
-                ).update(t2_claimed_by=request.user, t2_claimed_at=timezone.now())
-                if not updated:
+                result = claim_tier2_ticket(ticket=ticket, actor=request.user)
+                if not result.claimed:
                     messages.error(
                         request,
                         'Ticket นี้ถูกเจ้าหน้าที่คนอื่นรับไปแล้ว หรือไม่ได้อยู่ในคิว Tier 2',
