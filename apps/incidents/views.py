@@ -81,6 +81,11 @@ from .project_workflow import (
     reassess_project_emergency,
     restore_shared_attachment,
 )
+from .ticket_evidence import (
+    add_ticket_attachments,
+    delete_ticket_attachment,
+    restore_ticket_attachment,
+)
 from .ticket_workflow import (
     assign_admin_or_owner_route,
     claim_tier2_ticket,
@@ -2009,9 +2014,11 @@ def update_subtask(request, subtask_id):
                 else:
                     try:
                         validate_attachment(upload)
-                        TicketAttachment.objects.create(
-                            ticket=ticket, subtask=subtask, file=upload,
-                            original_name=upload.name, uploaded_by=request.user,
+                        add_ticket_attachments(
+                            ticket=ticket,
+                            actor=request.user,
+                            uploads=(upload,),
+                            subtask=subtask,
                             description=request.POST.get('result_file_desc', '').strip(),
                         )
                     except ValidationError as e:
@@ -2090,18 +2097,19 @@ def upload_attachment(request, pk):
         if form.is_valid():
             description = form.cleaned_data.get('description', '')
             uploads = form.cleaned_data['file']
-            for upload in uploads:
-                TicketAttachment.objects.create(
-                    ticket=ticket,
-                    file=upload,
-                    original_name=upload.name,
-                    description=description,
-                    uploaded_by=request.user,
+            result = add_ticket_attachments(
+                ticket=ticket,
+                actor=request.user,
+                uploads=uploads,
+                description=description,
+            )
+            if len(result.attachments) == 1:
+                messages.success(
+                    request,
+                    f'อัพโหลด "{result.attachments[0].original_name}" เรียบร้อยแล้ว',
                 )
-            if len(uploads) == 1:
-                messages.success(request, f'อัพโหลด "{uploads[0].name}" เรียบร้อยแล้ว')
             else:
-                messages.success(request, f'อัพโหลด {len(uploads)} ไฟล์เรียบร้อยแล้ว')
+                messages.success(request, f'อัพโหลด {len(result.attachments)} ไฟล์เรียบร้อยแล้ว')
         else:
             # Name the offending file — "check your file again" is useless when
             # several were selected and only one was rejected.
@@ -2165,16 +2173,7 @@ def delete_attachment(request, attachment_id):
         messages.error(request, 'กรุณาระบุเหตุผลในการลบไฟล์')
         return redirect('ticket_detail', pk=ticket.pk)
 
-    att.deleted_by = request.user
-    att.deleted_at = timezone.now()
-    att.deleted_reason = reason[:255]
-    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
-    TicketLog.objects.create(
-        ticket=ticket,
-        note=f'Attachment removed: {att.original_name} — เหตุผล: {reason}',
-        status_at_time=ticket.status,
-        author=request.user,
-    )
+    delete_ticket_attachment(attachment=att, actor=request.user, reason=reason)
     messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว — ผู้จัดการ SOC สามารถกู้คืนได้')
     return redirect('ticket_detail', pk=ticket.pk)
 
@@ -2256,19 +2255,7 @@ def restore_attachment(request, attachment_id):
         messages.error(request, 'กู้คืนไฟล์ได้เฉพาะผู้จัดการ SOC เท่านั้น')
         return redirect('ticket_detail', pk=ticket.pk)
 
-    removed_by = (
-        att.deleted_by.get_full_name() or att.deleted_by.username
-    ) if att.deleted_by else 'ไม่ทราบผู้ลบ'
-    att.deleted_by = None
-    att.deleted_at = None
-    att.deleted_reason = ''
-    att.save(update_fields=('deleted_by', 'deleted_at', 'deleted_reason'))
-    TicketLog.objects.create(
-        ticket=ticket,
-        note=f'Attachment restored: {att.original_name} (เดิมลบโดย {removed_by})',
-        status_at_time=ticket.status,
-        author=request.user,
-    )
+    restore_ticket_attachment(attachment=att, actor=request.user)
     messages.success(request, f'กู้คืน "{att.original_name}" เรียบร้อยแล้ว')
     return redirect('ticket_detail', pk=ticket.pk)
 
