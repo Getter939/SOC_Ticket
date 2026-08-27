@@ -32,22 +32,20 @@ from .forms import (
 from .models import (
     MAX_ATTACHMENT_BATCH_SIZE, MAX_ATTACHMENT_SIZE, ProjectIncident,
     ProjectIncidentAttachment, ProjectIncidentLog, ThreatGuidance, Ticket,
-    TicketAlertLink, TicketAttachment, TicketLog, TicketLogRevision,
+    TicketAttachment, TicketLog, TicketLogRevision,
     TicketSubtask, TriageRecord,
     allowed_attachment_extensions, bundle_suffix_for_index,
     validate_attachment,
 )
 from .staging import (
-    MAX_ATTACHMENT_COUNT, adopt_staged, discard_staged, restore_staged,
+    MAX_ATTACHMENT_COUNT, discard_staged, restore_staged,
     staged_for, stage_uploads,
 )
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
     notify_containment_alert,
-    notify_manager_triage_pending,
     notify_response_request_created,
     notify_response_request_completed,
-    notify_system_owner_created,
 )
 from .reports import (
     build_ticket_report_render_context,
@@ -71,6 +69,11 @@ from .policies import (
     user_can_drive as _user_can_drive,
 )
 from .selectors import get_ticket_detail_read_model
+from .case_creation import (
+    create_project_incident_from_forms,
+    create_ticket_from_form,
+    load_alert_bundle,
+)
 from .ticket_workflow import (
     assign_admin_or_owner_route,
     claim_tier2_ticket,
@@ -270,9 +273,6 @@ def _notify_containment(ticket, reason, request):
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
 
-MAX_ALERT_BUNDLE_SIZE = 25
-
-
 def _alert_bundle_ids(request):
     """Return distinct selected Wazuh alert ids, preserving form order."""
     values = request.POST.getlist('alert_bundle') or request.GET.getlist('alert_bundle')
@@ -285,110 +285,6 @@ def _alert_bundle_ids(request):
         if alert_id > 0 and alert_id not in ids:
             ids.append(alert_id)
     return ids
-
-
-def _load_alert_bundle(alert_ids, user, *, lock=False):
-    """Load and validate an opt-in Alert Bundle for this analyst.
-
-    Selection is a convenience supplied by the browser, never authority. The
-    claimed, actionable and unconsumed checks are repeated here and, for the
-    save path, under row locks in the same transaction as ticket creation.
-    """
-    if len(alert_ids) < 2:
-        raise ValidationError('กรุณาเลือก Alert ที่เกี่ยวข้องอย่างน้อย 2 รายการ')
-    if len(alert_ids) > MAX_ALERT_BUNDLE_SIZE:
-        raise ValidationError(
-            f'เลือก Alert ได้ไม่เกิน {MAX_ALERT_BUNDLE_SIZE} รายการต่อ Ticket'
-        )
-    query = WazuhAlert.objects.filter(pk__in=alert_ids).order_by('pk')
-    if lock:
-        query = query.select_for_update()
-    alerts = list(query)
-    if len(alerts) != len(alert_ids):
-        raise ValidationError('มี Alert ที่เลือกไว้ไม่พบในระบบ')
-    unavailable = [
-        str(alert.pk) for alert in alerts
-        if not _can_create_ticket_from_wazuh(alert, user)
-    ]
-    if unavailable:
-        raise ValidationError(
-            'Alert ต่อไปนี้ไม่อยู่ในความรับผิดชอบของคุณหรือถูกดำเนินการแล้ว: '
-            + ', '.join(unavailable)
-        )
-    return alerts
-
-
-def _consume_source_alert(alert, user, *, classification, link_ticket,
-                          project_incident=None, stamp_conversion=True):
-    """Mark a claimed Wazuh alert handled once it has become a ticket (or a
-    case bundle) and stamp the analyst response time on ``link_ticket``.
-
-    Shared by the single-ticket (create_ticket) and fan-out
-    (create_project_incident) flows — the only differences are the disposition
-    (a bundle is always an Incident) and whether the alert links to a
-    ProjectIncident. ``alert`` must already be locked (select_for_update) and
-    re-validated by the caller.
-    """
-    now = timezone.now()
-    alert.triage_status = (
-        WazuhAlert.TRIAGE_FALSE_POSITIVE
-        if classification == Ticket.CLASSIFICATION_EVENT
-        else WazuhAlert.TRIAGE_TRUE_POSITIVE
-    )
-    alert.triaged_by = user
-    alert.triaged_at = now
-    alert.escalated_to_tier = None
-    alert.claimed_by = None
-    alert.claimed_at = None
-    update_fields = [
-        'triage_status', 'triaged_by', 'triaged_at',
-        'escalated_to_tier', 'claimed_by', 'claimed_at',
-    ]
-    if project_incident is not None:
-        alert.project_incident = project_incident
-        update_fields.insert(0, 'project_incident')
-    alert.save(update_fields=update_fields)
-
-    # Stamp analyst response time once (alert actionable → ticket raised).
-    # now() is within sub-second of the ticket's auto_now_add created_at; guard
-    # against clock skew that would otherwise yield a negative duration.
-    delta = now - alert.ingested_at
-    if stamp_conversion and delta.total_seconds() >= 0:
-        link_ticket.alert_conversion_duration = delta
-        link_ticket.save(update_fields=['alert_conversion_duration'])
-
-
-def _consume_source_triage(triage, *, classification, user, ticket=None,
-                           project_incident=None):
-    """Mark a claimed manual-triage record handled once it has become a ticket
-    (or a case bundle): record the Event/Incident decision, link it to whatever
-    it spawned, stamp who handled it, and release the claim so it leaves the
-    manual queue.
-
-    Shared by both create flows. ``triage`` must already be locked
-    (select_for_update) and re-validated by the caller.
-    """
-    triage.decision = (
-        TriageRecord.DECISION_FP
-        if classification == Ticket.CLASSIFICATION_EVENT
-        else TriageRecord.DECISION_TP
-    )
-    # Stamped before the claim is cleared — this is the only durable record of
-    # who disposed of the report.
-    triage.resolved_by = user
-    triage.resolved_at = timezone.now()
-    triage.claimed_by = None
-    triage.claimed_at = None
-    update_fields = [
-        'decision', 'resolved_by', 'resolved_at', 'claimed_by', 'claimed_at',
-    ]
-    if ticket is not None:
-        triage.ticket = ticket
-        update_fields.insert(0, 'ticket')
-    if project_incident is not None:
-        triage.project_incident = project_incident
-        update_fields.insert(0, 'project_incident')
-    triage.save(update_fields=update_fields)
 
 
 @login_required
@@ -561,7 +457,7 @@ def create_ticket(request):
     alert_bundle = []
     if alert_bundle_ids:
         try:
-            alert_bundle = _load_alert_bundle(alert_bundle_ids, request.user)
+            alert_bundle = load_alert_bundle(alert_bundle_ids, request.user)
         except ValidationError as exc:
             messages.error(request, exc.message)
             return redirect('triage_queue')
@@ -605,149 +501,19 @@ def create_ticket(request):
                 )
         if form.is_valid():
             try:
-                with transaction.atomic():
-                    locked_triage = None
-                    if triage:
-                        locked_triage = TriageRecord.objects.select_for_update().get(pk=triage.pk)
-                        if not _can_create_ticket_from_triage(locked_triage, request.user):
-                            raise ValidationError(
-                                'This triage record is no longer available for ticket creation.'
-                            )
-
-                    ticket = form.save(commit=False)
-                    ticket.created_by = request.user
-                    ticket.assigned_to = request.user
-
-                    locked_alert = None
-                    locked_alerts = []
-                    if alert_bundle_ids:
-                        locked_alerts = _load_alert_bundle(
-                            alert_bundle_ids, request.user, lock=True,
-                        )
-                        if ticket.wazuh_alert_id not in {
-                            alert.pk for alert in locked_alerts
-                        }:
-                            raise ValidationError(
-                                'กรุณาเลือก Primary Alert จาก Alert ที่รวมไว้เท่านั้น'
-                            )
-                    elif ticket.wazuh_alert_id:
-                        locked_alert = WazuhAlert.objects.select_for_update().get(
-                            pk=ticket.wazuh_alert_id
-                        )
-                        if not _can_create_ticket_from_wazuh(locked_alert, request.user):
-                            raise ValidationError(
-                                'This Wazuh alert is not assigned to you or already has a ticket.'
-                            )
-
-                    ticket.save()
-
-                    source_alerts = locked_alerts or (
-                        [locked_alert] if locked_alert else []
-                    )
-                    for source_alert in source_alerts:
-                        link = TicketAlertLink(
-                            ticket=ticket,
-                            alert=source_alert,
-                            role=(
-                                TicketAlertLink.ROLE_PRIMARY
-                                if source_alert.pk == ticket.wazuh_alert_id
-                                else TicketAlertLink.ROLE_SUPPORTING
-                            ),
-                            linked_by=request.user,
-                        )
-                        # full_clean, not objects.create: TicketAlertLink.clean()
-                        # is what stops a PRIMARY link from disagreeing with
-                        # ticket.wazuh_alert. The role above is derived from that
-                        # same field, so this can only fire if the derivation
-                        # itself regresses — which is exactly when we want it to.
-                        link.full_clean()
-                        link.save()
-
-                    # T1 disposition is part of the create flow: the
-                    # Event/Incident classification (set on the ticket by the
-                    # form) plus the chosen route decide where the ticket goes.
-                    route = form.cleaned_data.get('t1_route')
-                    if ticket.classification == Ticket.CLASSIFICATION_EVENT:
-                        # Event → must be confirmed by Tier 2 before closing.
-                        # Tier 1 can no longer close an Event directly.
-                        ticket.transition_to(
-                            Ticket.STATUS_ESCALATED_T2, request.user,
-                            'จัดประเภทเป็น Event — ส่งให้ Tier 2 ยืนยันก่อนปิด',
-                        )
-                    elif route == TicketForm.ROUTE_ESCALATE_T2:
-                        ticket.transition_to(
-                            Ticket.STATUS_ESCALATED_T2, request.user,
-                            'จัดประเภทเป็น Incident — ส่งต่อให้ Tier 2',
-                        )
-                    elif route == TicketForm.ROUTE_ASSIGN_ADMIN:
-                        # Incident → admin lane, but first the SOC Manager
-                        # pre-containment review. Remember the chosen lane.
-                        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
-                        ticket.transition_to(
-                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
-                            'จัดประเภทเป็น Incident — เลือกมอบหมายผู้ดูแลระบบ (รอผู้จัดการ SOC ตรวจ)',
-                        )
-                    elif route == TicketForm.ROUTE_DIRECT_OWNER:
-                        # Incident → owner lane (no System Admin ticket / email),
-                        # also via the SOC Manager pre-containment review.
-                        ticket.t1_route = Ticket.T1_ROUTE_OWNER
-                        ticket.transition_to(
-                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
-                            'จัดประเภทเป็น Incident — เลือกให้เจ้าของระบบแก้ไขเอง (รอผู้จัดการ SOC ตรวจ)',
-                        )
-
-                    if locked_triage:
-                        _consume_source_triage(
-                            locked_triage,
-                            classification=ticket.classification,
-                            user=request.user,
-                            ticket=ticket,
-                        )
-
-                    for source_alert in source_alerts:
-                        _consume_source_alert(
-                            source_alert, request.user,
-                            classification=ticket.classification,
-                            link_ticket=ticket,
-                            stamp_conversion=(
-                                source_alert.pk == ticket.wazuh_alert_id
-                            ),
-                        )
-
-                    if len(source_alerts) > 1:
-                        supporting_ids = [
-                            str(alert.pk) for alert in source_alerts
-                            if alert.pk != ticket.wazuh_alert_id
-                        ]
-                        TicketLog.objects.create(
-                            ticket=ticket,
-                            note=(
-                                f'สร้าง Alert Bundle: Primary Alert #{ticket.wazuh_alert_id}; '
-                                f'Supporting Alerts #{", #".join(supporting_ids)}'
-                            ),
-                            status_at_time=ticket.status,
-                            author=request.user,
-                        )
-
-                    adopt_staged(evidence_token, request.user, ticket=ticket)
+                result = create_ticket_from_form(
+                    form=form,
+                    actor=request.user,
+                    triage=triage,
+                    alert_bundle_ids=alert_bundle_ids,
+                    evidence_token=evidence_token,
+                )
             except ValidationError as exc:
                 form.add_error(None, exc.message)
-                ticket = None
-
-            # Stage 5 — notify System Owner
-            if ticket and ticket.system_owner and ticket.system_owner.email:
-                if not notify_system_owner_created(ticket):
-                    messages.warning(request, 'Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
-
-            # An Incident now waits in the SOC Manager pre-containment review
-            # (PENDING_MGR_TRIAGE) rather than going straight to the lane, so
-            # alert the SOC Managers that a ticket needs their triage. The
-            # admin/owner is notified later, when the manager forwards.
-            if ticket and ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE:
-                notify_manager_triage_pending(ticket)
-
-            if ticket:
-                return redirect('ticket_detail', pk=ticket.pk)
+            else:
+                for warning in result.warnings:
+                    messages.warning(request, warning)
+                return redirect('ticket_detail', pk=result.ticket.pk)
     else:
         initial = {}
         if triage:
@@ -815,14 +581,6 @@ def create_ticket(request):
     })
 
 
-# ── Project Incident (Case Bundling) ─────────────────────────────────── #
-# Incident-level fields copied from the shared form onto every member ticket.
-# Derived from the form itself so a field added to ProjectIncidentForm can't be
-# silently dropped from members by a stale hand-maintained copy. (title is a
-# form-only field, not in Meta.fields, so it is correctly excluded.)
-_BUNDLE_SHARED_FIELDS = list(ProjectIncidentForm.Meta.fields)
-
-
 @login_required
 def create_project_incident(request):
     """Fan out one multi-system incident into linked member tickets.
@@ -868,114 +626,26 @@ def create_project_incident(request):
         for staged_error in staged_errors:
             shared_form.add_error(None, staged_error)
         if shared_form.is_valid() and target_formset.is_valid():
-            shared = shared_form.cleaned_data
-            created = []
             try:
-                with transaction.atomic():
-                    project = ProjectIncident.objects.create(
-                        title=shared['title'],
-                        summary=shared.get('issue_description', ''),
-                        created_by=request.user,
-                        actions_taken_summary=shared.get('actions_taken_summary', ''),
-                        next_steps_summary=shared.get('next_steps_summary', ''),
-                    )
-                    for tform in target_formset:
-                        cd = getattr(tform, 'cleaned_data', None)
-                        if not cd or cd.get('DELETE'):
-                            continue
-                        ticket = tform.save(commit=False)
-                        for field in _BUNDLE_SHARED_FIELDS:
-                            setattr(ticket, field, shared[field])
-                        # The bundle title doubles as each member's incident name.
-                        ticket.incident_name = shared['title']
-                        ticket.classification = Ticket.CLASSIFICATION_INCIDENT
-                        # Each member follows its own Tier-1-selected handling
-                        # route, then waits for the shared Manager Review.
-                        ticket.t1_route = cd['t1_route']
-                        ticket.created_by = request.user
-                        ticket.assigned_to = request.user
-                        ticket.project_incident = project
-                        ticket.bundle_suffix = bundle_suffix_for_index(len(created))
-                        ticket.save()
-                        ticket.transition_to(
-                            Ticket.STATUS_PENDING_MGR_TRIAGE, request.user,
-                            f'Project Incident {project.project_code} — '
-                            f'จัดประเภทเป็น Incident มอบหมายผู้ดูแลระบบ ({ticket.device_name}) '
-                            f'— รอผู้จัดการ SOC ตรวจ',
-                        )
-                        created.append(ticket)
-
-                    if len(created) < 2:
-                        raise ValidationError(
-                            'ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident'
-                        )
-
-                    # Consume the originating alert: link it to the bundle and
-                    # mark it handled so it leaves the triage queue (mirrors the
-                    # single-ticket flow, but pointing at the ProjectIncident).
-                    if source_alert is not None:
-                        locked_alert = WazuhAlert.objects.select_for_update().get(
-                            pk=source_alert.pk
-                        )
-                        if not _can_create_ticket_from_wazuh(locked_alert, request.user):
-                            raise ValidationError(
-                                'Wazuh Alert นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
-                                '(อาจถูกดำเนินการไปแล้ว)'
-                            )
-                        # A bundle is always an Incident; the response time is
-                        # stamped once on the first member.
-                        _consume_source_alert(
-                            locked_alert, request.user,
-                            classification=Ticket.CLASSIFICATION_INCIDENT,
-                            link_ticket=created[0],
-                            project_incident=project,
-                        )
-
-                    # Consume the originating manual-triage record: link it to
-                    # the bundle and mark it TP so it leaves the manual queue.
-                    if source_triage is not None:
-                        locked_triage = TriageRecord.objects.select_for_update().get(
-                            pk=source_triage.pk
-                        )
-                        if not _can_create_ticket_from_triage(locked_triage, request.user):
-                            raise ValidationError(
-                                'รายการ Manual Triage นี้ไม่พร้อมสำหรับการสร้าง Project Incident '
-                                '(อาจถูกดำเนินการไปแล้ว)'
-                            )
-                        _consume_source_triage(
-                            locked_triage,
-                            classification=Ticket.CLASSIFICATION_INCIDENT,
-                            user=request.user,
-                            project_incident=project,
-                        )
-
-                    # Shared evidence belongs to the Project Incident itself,
-                    # not an arbitrary first member ticket. Adopted last so a
-                    # rollback above cannot leave copied files orphaned on disk.
-                    adopt_staged(evidence_token, request.user, project=project)
+                result = create_project_incident_from_forms(
+                    shared_form=shared_form,
+                    target_formset=target_formset,
+                    actor=request.user,
+                    source_alert=source_alert,
+                    source_triage=source_triage,
+                    evidence_token=evidence_token,
+                )
             except ValidationError as exc:
                 shared_form.add_error(None, exc.message)
-                project = None
-                created = []
-
-            if project:
-                for ticket in created:
-                    if ticket.system_owner and ticket.system_owner.email:
-                        if not notify_system_owner_created(ticket):
-                            messages.warning(
-                                request,
-                                f'{ticket.bundle_ref}: ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ',
-                            )
-                # Every member waits in the SOC Manager pre-containment review;
-                # one alert covers the bundle (the admin is notified per member
-                # when the manager forwards each one).
-                notify_manager_triage_pending(created[0])
+            else:
+                for warning in result.warnings:
+                    messages.warning(request, warning)
                 messages.success(
                     request,
-                    f'สร้าง Project Incident {project.project_code} เรียบร้อย — '
-                    f'{len(created)} Ticket ตามระบบที่ได้รับผลกระทบ',
+                    f'สร้าง Project Incident {result.project.project_code} เรียบร้อย — '
+                    f'{len(result.tickets)} Ticket ตามระบบที่ได้รับผลกระทบ',
                 )
-                return redirect('project_incident_detail', pk=project.pk)
+                return redirect('project_incident_detail', pk=result.project.pk)
     else:
         initial = {}
         if source_alert is not None:
