@@ -73,6 +73,7 @@ desktop.ini
 # during a failover, and is in no backup either (New-SocConfigBundle.ps1
 # captures .env, IIS and the service definition, not docs).
 !docs/operations/production-deployment.windows.md
+!docs/operations/deploy-and-release.windows.md
 !docs/operations/backup-and-standby-handbook.windows.md
 !docs/operations/backup-and-restore.md
 !docs/operations/backup-vm-handbook.md

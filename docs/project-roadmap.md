@@ -24,7 +24,7 @@ Verified against the repo on 2026-07-27:
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
 | Reporting layer | Phases 1–3 built; 4–5 pending; nightly refresh **not scheduled** |
 | Docs | 25+ documents incl. Thai user guides, ADRs, handover, runbooks |
-| CI | **None** — no `.github/`, nothing runs those 537 tests but you |
+| CI | **GitHub Actions** (`.github/workflows/ci.yml`) — Postgres 18 + Python 3.14, runs the 537 tests + `makemigrations --check` + `check` on push/PR |
 | App logging | **None configured** — no `LOGGING` block in `config/settings.py` |
 | Production | **Does not exist yet.** Nothing is backing anything up |
 | UAT | 1 of 7 roles in progress (SOC Manager); 6 unstarted |
@@ -42,7 +42,7 @@ Standard software-delivery phases, scored against this project.
 |---|---|---|---|
 | 1 | Requirements & domain design | Glossary, ADRs, state machine, change log all written | ✅ 100% |
 | 2 | Application build | Full lifecycle, RBAC, Project Incidents, Response Teams, dashboards, ingest | ✅ ~95% |
-| 3 | Automated testing | 537 tests green — but no CI, no coverage gate | 🟢 80% |
+| 3 | Automated testing | 537 tests green; **CI live** (GitHub Actions) — no coverage gate yet | 🟢 90% |
 | 4 | Documentation | Handover (EN+TH), user guides, ADRs, runbooks | 🟢 85% |
 | 5 | Reporting / analytics | `mart` schema built; Grafana still reads the Indexer directly | 🟡 60% |
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
@@ -73,9 +73,10 @@ These are the last things that genuinely need a keyboard and the codebase.
   above, written somewhere the backup job already captures.
 - [ ] **Add a health endpoint** (`/healthz` returning DB-reachable + version). IIS,
   your monitoring, and the standby failover runbook all want one.
-- [ ] **Set up CI** (GitHub Actions on `Getter939/SOC_Ticket`): run the 537 tests +
-  `manage.py check --deploy` on every push. Without this, the suite decays the
-  moment you stop running it by hand.
+- [x] **Set up CI** (GitHub Actions on `Getter939/SOC_Ticket`) — `.github/workflows/ci.yml`
+  runs the 537 tests, `makemigrations --check`, `migrate`, and `manage.py check`
+  (with `check --deploy` informational) against a Postgres 18 service container on
+  Python 3.14, on every push to `main` and every PR. *(Phase 7)*
 - [ ] **Fix the docs gitignore.** `.gitignore:62` is a blanket `*.md` — most of
   `docs/` is untracked. If your laptop dies, the handover disappears. Un-ignore
   `docs/` and `*.md` at the repo root, keep ignoring scratch dirs.
@@ -238,7 +239,10 @@ repoint Django + log in).
 - [ ] **Train the users.** The Thai end-user guide and feature guide exist; book
   the session and record who attended.
 - [ ] **Agree a go-live date and a rollback trigger** — the specific condition under
-  which you revert to the manual process. Decide it while calm.
+  which you revert to the manual process. Decide it while calm. The *technical*
+  deploy/rollback mechanics are now written up:
+  [deploy-and-release.windows.md](operations/deploy-and-release.windows.md)
+  (cut a SemVer tag after CI is green → deploy → verify → roll back). *(Phase 7)*
 
 **Exit criteria:** real tickets flowing, dashboards populated from `mart`,
 backups running against live data.

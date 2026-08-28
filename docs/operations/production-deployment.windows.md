@@ -505,6 +505,13 @@ server and no way to log in.
 > that is data loss, not test setup. The production database stays empty until
 > real tickets arrive.
 
+> **This is the one-time build. For every subsequent release** — re-deploying a
+> new version onto this box, or rolling one back — follow
+> [deploy-and-release.windows.md](deploy-and-release.windows.md) instead: it wraps
+> these same `migrate` / `collectstatic` / `Restart-Service` primitives in a
+> backup-first, tag-based, verified flow with a rollback path. Do not hand-pull
+> `main` onto production; deploy a CI-green **tag**.
+
 ---
 
 ## Stage 7 — Logging
