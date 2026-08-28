@@ -25,14 +25,17 @@ def _make_user(username, role, department='Test', phone='000', tier=''):
 
 
 def _make_alert(rule_level=12, opensearch_id='alert-1', **kwargs):
+    values = {
+        'timestamp': timezone.now(),
+        'rule_description': 'Suspicious PowerShell execution',
+        'agent_name': 'DESKTOP-EP4F8C5',
+        'mitre_tactics': ['Defense Evasion'],
+    }
+    values.update(kwargs)
     return WazuhAlert.objects.create(
         opensearch_id=opensearch_id,
-        timestamp=timezone.now(),
         rule_level=rule_level,
-        rule_description='Suspicious PowerShell execution',
-        agent_name='DESKTOP-EP4F8C5',
-        mitre_tactics=['Defense Evasion'],
-        **kwargs,
+        **values,
     )
 
 
@@ -369,48 +372,139 @@ class TriageQueueTest(TestCase):
     # ── Filter pills / facet counts ──────────────────────────────────── #
 
     @staticmethod
-    def _facet(response, key):
+    def _facet(response, dimension, key):
         return next(
-            f for f in response.context['level_facets'] if f['key'] == key)
+            f for f in response.context[f'{dimension}_facets'] if f['key'] == key)
 
     def _get(self, **params):
         self.client.login(username='triage_soc', password='testpass123')
         return self.client.get(reverse('triage_queue'), params)
 
-    def test_level_facets_are_cumulative_thresholds(self):
-        """"10+" contains "13+" — the pills are thresholds, not disjoint
-        buckets, which is what the "+" in each label says."""
-        _make_alert(rule_level=14, opensearch_id='facet-crit')
-        _make_alert(rule_level=11, opensearch_id='facet-high')
+    def test_level_facets_are_disjoint_wazuh_bands(self):
+        _make_alert(rule_level=15, opensearch_id='facet-severe')
+        _make_alert(rule_level=14, opensearch_id='facet-high')
+        _make_alert(rule_level=11, opensearch_id='facet-elevated')
         _make_alert(rule_level=8, opensearch_id='facet-med')
         # setUp already added one level-12 alert.
 
         r = self._get()
-        self.assertEqual(self._facet(r, None)['count'], 4)
-        self.assertEqual(self._facet(r, '13')['count'], 1)
-        self.assertEqual(self._facet(r, '10')['count'], 3)   # 14, 12, 11
-        self.assertEqual(self._facet(r, '7')['count'], 4)
+        self.assertEqual(self._facet(r, 'level', None)['count'], 5)
+        self.assertEqual(self._facet(r, 'level', '15')['count'], 1)
+        self.assertEqual(self._facet(r, 'level', '12')['count'], 2)  # 14, 12
+        self.assertEqual(self._facet(r, 'level', 'under12')['count'], 2)  # 11, 8
 
     def test_level_facets_count_triaging_alerts_too(self):
         """The filter narrows the whole queue, so the counts must cover both
         pending and claimed rows or the pills would under-report."""
         self._claim()
         r = self._get()
-        self.assertEqual(self._facet(r, None)['count'], 1)
-        self.assertEqual(self._facet(r, '10')['count'], 1)
+        self.assertEqual(self._facet(r, 'level', None)['count'], 1)
+        self.assertEqual(self._facet(r, 'level', '12')['count'], 1)
 
     def test_active_facet_is_flagged_and_filters(self):
         _make_alert(rule_level=8, opensearch_id='facet-low')
-        r = self._get(rule_level_filter='13')
-        self.assertTrue(self._facet(r, '13')['active'])
-        self.assertFalse(self._facet(r, None)['active'])
-        self.assertEqual(len(r.context['alerts']), 0)  # nothing is 13+
+        r = self._get(rule_level_filter='15')
+        self.assertTrue(self._facet(r, 'level', '15')['active'])
+        self.assertFalse(self._facet(r, 'level', None)['active'])
+        self.assertEqual(len(r.context['alerts']), 0)  # nothing is 15+
 
     def test_invalid_level_falls_back_to_all(self):
         r = self._get(rule_level_filter='bogus')
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(self._facet(r, None)['active'])
+        self.assertTrue(self._facet(r, 'level', None)['active'])
         self.assertEqual(len(r.context['alerts']), 1)
+
+    def test_default_scope_shows_unclaimed_and_my_claims_only(self):
+        mine = _make_alert(
+            opensearch_id='scope-mine',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.soc_staff,
+            claimed_at=timezone.now(),
+        )
+        theirs = _make_alert(
+            opensearch_id='scope-theirs',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.soc_staff2,
+            claimed_at=timezone.now(),
+        )
+
+        rows = list(self._get().context['alerts'])
+        self.assertIn(self.alert, rows)
+        self.assertIn(mine, rows)
+        self.assertNotIn(theirs, rows)
+
+    def test_claim_facets_and_explicit_all_scope(self):
+        mine = _make_alert(
+            opensearch_id='claim-facet-mine',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.soc_staff,
+        )
+        theirs = _make_alert(
+            opensearch_id='claim-facet-theirs',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.soc_staff2,
+        )
+
+        r = self._get(claim='all')
+        self.assertEqual(self._facet(r, 'claim', None)['count'], 2)
+        self.assertEqual(self._facet(r, 'claim', 'unclaimed')['count'], 1)
+        self.assertEqual(self._facet(r, 'claim', 'mine')['count'], 1)
+        self.assertEqual(self._facet(r, 'claim', 'others')['count'], 1)
+        self.assertEqual(self._facet(r, 'claim', 'all')['count'], 3)
+        self.assertCountEqual(list(r.context['alerts']), [self.alert, mine, theirs])
+
+    def test_ola_filters_are_disjoint(self):
+        now = timezone.now()
+        breached = self.alert
+        due = _make_alert(opensearch_id='ola-due')
+        on_track = _make_alert(opensearch_id='ola-on-track')
+        WazuhAlert.objects.filter(pk=breached.pk).update(
+            timestamp=now - timedelta(hours=5),
+        )
+        WazuhAlert.objects.filter(pk=due.pk).update(
+            timestamp=now - timedelta(hours=3, minutes=30),
+        )
+        WazuhAlert.objects.filter(pk=on_track.pk).update(
+            timestamp=now - timedelta(hours=1),
+        )
+
+        self.assertEqual(list(self._get(ola='breached').context['alerts']), [breached])
+        self.assertEqual(list(self._get(ola='due').context['alerts']), [due])
+        self.assertEqual(list(self._get(ola='on_track').context['alerts']), [on_track])
+
+    def test_search_matches_agent_ip_rule_mitre_and_description(self):
+        match = _make_alert(
+            opensearch_id='search-match',
+            agent_name='PAYROLL-SRV',
+            agent_ip='10.20.30.40',
+            rule_id='900123',
+            rule_description='Credential dumping detected',
+            mitre_ids=['T1003'],
+        )
+        for query in ('PAYROLL', '10.20.30.40', '900123', 'T1003', 'credential'):
+            with self.subTest(query=query):
+                self.assertEqual(list(self._get(q=query).context['alerts']), [match])
+
+    def test_default_sort_is_earliest_ola_then_highest_level(self):
+        now = timezone.now()
+        older = _make_alert(rule_level=10, opensearch_id='sort-older')
+        same_time_high = _make_alert(rule_level=14, opensearch_id='sort-high')
+        same_time_low = _make_alert(rule_level=11, opensearch_id='sort-low')
+        WazuhAlert.objects.filter(pk=older.pk).update(timestamp=now - timedelta(hours=2))
+        WazuhAlert.objects.filter(pk__in=[same_time_high.pk, same_time_low.pk]).update(
+            timestamp=now - timedelta(hours=1),
+        )
+        WazuhAlert.objects.filter(pk=self.alert.pk).update(timestamp=now)
+
+        self.assertEqual(
+            list(self._get().context['alerts']),
+            [older, same_time_high, same_time_low, self.alert],
+        )
+
+    def test_filtered_empty_state_differs_from_empty_queue(self):
+        self.assertContains(self._get(q='no-such-alert'), 'ไม่พบ Alert ที่ตรงกับเงื่อนไข')
+        WazuhAlert.objects.all().delete()
+        self.assertContains(self._get(), 'ไม่มี Alert ที่รอ Triage')
 
     def test_pagination_offers_links_and_keeps_the_sort(self):
         """The page counter had no prev/next links at all — beyond 25 alerts
