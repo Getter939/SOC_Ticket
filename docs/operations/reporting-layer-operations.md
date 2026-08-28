@@ -1,12 +1,24 @@
 # Reporting Layer — Operations & Production Readiness
 
-> **Audience:** operators, deployers · **Status:** Current — Phases 1–3 built, scheduling deferred to cutover · **Last updated:** 2026-07-22
+> **Audience:** operators, deployers · **Status:** Current — **live on PROD; scheduling executed 2026-08-26** · **Last updated:** 2026-08-26
 
 How to run, deploy, and operate the reporting layer (Layer ③, the `mart` schema).
 For the *design* see [../architecture/reporting-layer-design.md](../architecture/reporting-layer-design.md);
 for the *as-built* record see [../architecture/reporting-layer-build.md](../architecture/reporting-layer-build.md).
 
 ---
+
+> **✅ As-built — executed on PROD 2026-08-26.** The §3 cutover has been run:
+> `ingest_wazuh_alerts` runs **per-minute** (`SOC-Ingest-Wazuh`, SYSTEM, IgnoreNew)
+> against the production Indexer `10.1.220.32:9200`, and `refresh_reporting` runs
+> **nightly** (`SOC-Refresh-Reporting`, 00:20) — MV refresh + queue snapshot +
+> Indexer detection capture, all `errors: []` (first run `detection_rows: 31`).
+> Retention is scheduled (`SOC-Purge-Wazuh`, daily 04:00, 90-day window; deletes
+> nothing until data ages). **Interim security note:** the Indexer link runs
+> `OPENSEARCH_VERIFY_SSL=False` (encrypted but unauthenticated) because the Wazuh
+> root CA isn't on the VM yet — swap to `OPENSEARCH_CA_BUNDLE=C:\SOCTicket\certs\opensearch-ca.pem`
+> + `OPENSEARCH_VERIFY_SSL=True` once the admin provides `root-ca.pem`. CSV
+> historical import and Grafana/`reporting_ro` (§3.D) were intentionally deferred.
 
 ## 1. What it is, in one paragraph
 

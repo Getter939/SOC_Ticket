@@ -505,6 +505,13 @@ server and no way to log in.
 > that is data loss, not test setup. The production database stays empty until
 > real tickets arrive.
 
+> **This is the one-time build. For every subsequent release** — re-deploying a
+> new version onto this box, or rolling one back — follow
+> [deploy-and-release.windows.md](deploy-and-release.windows.md) instead: it wraps
+> these same `migrate` / `collectstatic` / `Restart-Service` primitives in a
+> backup-first, tag-based, verified flow with a rollback path. Do not hand-pull
+> `main` onto production; deploy a CI-green **tag**.
+
 ---
 
 ## Stage 7 — Logging
@@ -627,9 +634,24 @@ New-WebSite -Name 'SOCTicket' -Port 80 -IPAddress 127.0.0.1 `
 <configuration>
   <system.webServer>
     <rewrite>
+      <!-- The proxy hop to Waitress is plain http on loopback, so Django cannot
+           tell an HTTPS request from an HTTP one on its own. Forward the scheme
+           as X-Forwarded-Proto: https and Django trusts it via
+           SECURE_PROXY_SSL_HEADER (settings.py, gated on USE_PROXY_SSL_HEADER).
+           WITHOUT this, flipping SECURE_SSL_REDIRECT=True at Stage 13.3 makes
+           Django see every request as insecure and 301-loop forever.
+           The variable MUST be allow-listed or the rule returns HTTP 500.
+           A static "https" is correct here: once 443 is bound and :80 redirects,
+           all traffic reaching this rule arrived over TLS at IIS. -->
+      <allowedServerVariables>
+        <add name="HTTP_X_FORWARDED_PROTO" />
+      </allowedServerVariables>
       <rules>
         <rule name="ProxyToWaitress" stopProcessing="true">
           <match url="(.*)" />
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+          </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:8000/{R:1}" />
         </rule>
       </rules>
@@ -651,6 +673,45 @@ New-WebSite -Name 'SOCTicket' -Port 80 -IPAddress 127.0.0.1 `
   </system.webServer>
 </configuration>
 ```
+
+> ### The X-Forwarded-Proto chain has two more links — both fail silently
+>
+> Declaring the server variable in `web.config` is necessary but **not sufficient**.
+> The scheme has to survive two more hops, and each was found the hard way during the
+> first HTTPS go-live (2026-08-26):
+>
+> 1. **Unlock the section at the server level, or every request 500s.**
+>    `allowedServerVariables` is locked in `applicationHost.config` by default
+>    (`overrideModeDefault="Deny"`), so a *site* `web.config` that declares it returns
+>    **HTTP 500.52** (`0x80070021`, "This configuration section cannot be used at this
+>    path") on **every** request — the site is down, not degraded. Unlock it once:
+>    ```powershell
+>    & "$env:windir\system32\inetsrv\appcmd.exe" unlock config `
+>        -section:"system.webServer/rewrite/allowedServerVariables"
+>    ```
+>    (The DR config bundle captures this via `applicationHost.config`.)
+>
+> 2. **Waitress ≥ 2.0 strips `X-Forwarded-*` unless told to trust the proxy.**
+>    `clear_untrusted_proxy_headers` defaults to **True**, so Waitress deletes
+>    `X-Forwarded-Proto` before Django sees it. `SECURE_PROXY_SSL_HEADER` then never
+>    fires and `SECURE_SSL_REDIRECT=True` **301-loops forever** — even though IIS is
+>    sending the header correctly, and even though `manage.py check` shows the setting
+>    present. Launch Waitress trusting the loopback proxy (in `run-prod.cmd`):
+>    ```
+>    waitress-serve.exe --listen=127.0.0.1:8000 --threads=8 ^
+>      --trusted-proxy=127.0.0.1 --trusted-proxy-headers="x-forwarded-for x-forwarded-proto" ^
+>      config.wsgi:application
+>    ```
+>    **Prove it before flipping the redirect** — hit Waitress *directly*, with and
+>    without the header:
+>    ```powershell
+>    curl.exe -s -o NUL -w "%{http_code}" -H "X-Forwarded-Proto: https" http://127.0.0.1:8000/healthz  # want 200
+>    curl.exe -s -o NUL -w "%{http_code}"                               http://127.0.0.1:8000/healthz  # want 301
+>    ```
+>    Both 301 means Waitress is still stripping it. `run-prod.cmd` is **not** in git and
+>    is **not** in the config bundle by default — add it (and `web.config`) to
+>    `New-SocConfigBundle.ps1 -ExtraFiles`, or a rebuild silently loses this flag and the
+>    loop returns.
 
 > ### Do not add a static handler for `/media/`
 >
@@ -761,6 +822,52 @@ real rather than aspirational.
 
 ## Stage 13 — HTTPS (deferred until the certificate exists)
 
+> ### ✅ As-built — HTTPS go-live via a self-signed IP bridge (2026-08-26)
+>
+> HTTPS was brought up **ahead of the real certificate** using a **self-signed cert
+> bound to the IP `10.1.220.118`** — a temporary *bridge* to prove the whole stack
+> (TLS + redirect + secure cookies + app SMTP) while the DNS record and CA/PKI cert
+> remain the long pole. The steps below still describe the **real-cert cutover**; the
+> bridge differs as follows:
+>
+> - **No PFX, no import (13.1 skipped).** The cert was generated in place, private key
+>   included, so there is nothing to import and no PFX passphrase:
+>   ```powershell
+>   $cert = New-SelfSignedCertificate -DnsName '10.1.220.118' -CertStoreLocation Cert:\LocalMachine\My `
+>            -FriendlyName 'SOC Ticket self-signed (IP bridge)' -NotAfter (Get-Date).AddYears(2) `
+>            -KeyLength 2048 -HashAlgorithm SHA256
+>   ```
+> - **IP binding — no host header, no SNI** (13.2): `New-WebBinding -Name 'SOCTicket'
+>   -Protocol https -Port 443 -IPAddress '*'` then `AddSslCertificate($cert.Thumbprint,'My')`.
+>   Verify the bind really took with `netsh http show sslcert ipport=0.0.0.0:443`
+>   (`AddSslCertificate` reports success even when it no-ops).
+> - **Firewall reality.** Stage 10 created **two per-port blocks**,
+>   `SOC-Block-Inbound-HTTP-80` and `SOC-Block-Inbound-HTTPS-443` (not the single
+>   `SOC-Block-Inbound-HTTP` named in 13.2), plus an *unscoped* built-in
+>   `World Wide Web Services (HTTPS Traffic-In)` allow. End-state: disable the 443 block
+>   **and** that unscoped WWW allow, then a deny-by-default profile + one scoped rule —
+>   `SOC HTTPS in`, TCP 443, `-RemoteAddress 10.1.220.0/24,10.0.188.0/24`. Port **80 is
+>   left blocked / loopback-only** (users go straight to `https://`).
+> - **`SECURE_HSTS_SECONDS` stays 0 — do NOT set HSTS on a self-signed cert.** HSTS +
+>   an untrusted cert is an unrecoverable lockout. `check --deploy` therefore keeps
+>   **W004** by design (the other three HTTPS warnings clear). HSTS ramp waits for the
+>   real cert.
+> - **The two silent gaps** that cost the most: the `allowedServerVariables` **unlock**
+>   and the **Waitress `--trusted-proxy`** flags — both documented in **Stage 9.3**.
+>   Without the second, the redirect 301-loops.
+> - **App SMTP (13.4)** was completed on the bridge: `ntsoc@ntplc.co.th` on
+>   **465 + `EMAIL_USE_SSL=True` / `EMAIL_USE_TLS=False`**; a real `send_mail`
+>   **arrived**. Watch for a typo'd `EMAIL_HOST_USER` (the deployed `.env` had
+>   `nntsoc@…`, which fails auth silently).
+> - **Cross-VLAN worked** once the server allow included the client subnet — the earlier
+>   TLS reset was purely the missing allow, not TLS inspection. But a wider cross-VLAN
+>   audience is still best served by the **real CA cert** (no browser warning, and it
+>   won't trip an inter-VLAN IPS the way self-signed can).
+>
+> **To cut over to the real cert later:** import the PFX (13.1), re-bind 443 to the new
+> thumbprint, set `SITE_URL`/`ALLOWED_HOSTS` to the hostname, then begin the HSTS ramp
+> (13.7). Tests on the bridge use `curl.exe -k` / click-through the browser warning.
+
 **Prerequisites (external — get these first; they are the long pole):** a DNS A
 record `<hostname>` -> the production IP, and a TLS certificate for that hostname as
 a **PFX with private key** (corporate PKI or a CA). Nothing below runs until both
@@ -789,12 +896,38 @@ this as when the WAF / load-test items apply.
 ```powershell
 New-WebBinding -Name 'SOCTicket' -Protocol https -Port 443 -HostHeader '<hostname>' -SslFlags 1   # 1 = SNI
 (Get-WebBinding -Name 'SOCTicket' -Protocol https).AddSslCertificate($cert.Thumbprint, 'My')
+
+# Stage 10 created SOC-Block-Inbound-HTTP blocking 80,443. A Windows Firewall BLOCK
+# beats any ALLOW, so the allow rule below does NOTHING until that block is lifted or
+# narrowed (the same trap the 5432 replication build hit). Disable it, or replace it
+# with a block scoped to exclude your intended audience.
+Disable-NetFirewallRule -DisplayName 'SOC-Block-Inbound-HTTP'
 New-NetFirewallRule -DisplayName 'SOC HTTPS in' -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -Profile Any
 #   scope with -RemoteAddress <subnet> if the audience is a specific LAN. Keep :80 for the redirect
 #   SECURE_SSL_REDIRECT (below) performs.
 ```
 
+**Prove 443 is actually open from a THIRD machine** (a rule's existence is not
+evidence it works — Stage 10 discipline):
+```powershell
+Test-NetConnection -ComputerName <hostname> -Port 443   # must now succeed
+```
+
 **13.3 `.env` flips** (`C:\SOCTicket\app\.env`):
+
+> **Required pre-check — or you get an infinite redirect loop.** Before setting
+> `SECURE_SSL_REDIRECT=True`, confirm **both** links of the X-Forwarded-Proto chain
+> from Stage 9.3 are in place: (a) the web.config forwards `HTTP_X_FORWARDED_PROTO=https`
+> **and** the `allowedServerVariables` section is **unlocked**; **(b) Waitress is
+> launched with `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="… x-forwarded-proto"`**
+> — Waitress ≥ 2.0 strips the header otherwise. The proxy hop to Waitress is plain http,
+> so without the header surviving both hops Django sees every request as insecure and
+> 301-loops. `USE_PROXY_SSL_HEADER=True` is already set; it is inert until the header
+> actually arrives. Isolate the layers before flipping the redirect: `curl.exe -H
+> "X-Forwarded-Proto: https" http://127.0.0.1:8000/healthz` (direct to Waitress) must
+> return **200** — if it returns 301, Waitress is still stripping it. Then after binding
+> 443, `curl.exe -k https://<hostname>/healthz` returns **200**, not a 301 loop.
+
 - Add `<hostname>` to `ALLOWED_HOSTS` (and trim any leftover `web`/LAN entries).
 - `SITE_URL=https://<hostname>` — baked into every notification link, so it must be final.
 - Flip the security flags:
@@ -805,6 +938,7 @@ CSRF_COOKIE_SECURE=True
 SECURE_SSL_REDIRECT=True
 PASSWORD_RESET_USE_HTTPS=True
 SECURE_HSTS_SECONDS=300      # start small — see below
+SECURE_HSTS_PRELOAD=False    # settings.py defaults this True — keep it OFF during the ramp
 ```
 
 > **Ramp HSTS; do not start at a year.** `SECURE_HSTS_SECONDS=31536000` (the
@@ -813,6 +947,14 @@ SECURE_HSTS_SECONDS=300      # start small — see below
 > users are locked out until the header expires or each one clears their own
 > HSTS state. Start at 300, confirm HTTPS is solid for a few days, then raise
 > it in steps.
+>
+> **Turn `preload` off for the ramp.** `SECURE_HSTS_PRELOAD` and
+> `SECURE_HSTS_INCLUDE_SUBDOMAINS` both **default `True`** (`config/settings.py`),
+> so at `SECURE_HSTS_SECONDS=300` Django would emit
+> `Strict-Transport-Security: max-age=300; includeSubDomains; preload` — advertising
+> `preload` while the cert is still provisional. Set `SECURE_HSTS_PRELOAD=False` now;
+> enable it only at 13.7, once the cert is permanent and you actually intend to submit
+> the domain to the browser preload list.
 
 `Restart-Service SOCTicketWaitress` (drops pooled connections; `DB_CONN_MAX_AGE=300`).
 
@@ -829,13 +971,41 @@ DEFAULT_FROM_EMAIL=SOC Notifications <noreply@<domain>>
 Restart, then test a real send (a password reset, or `send_mail` via `manage.py
 shell`) and confirm it **arrives** - not just that the setting is present.
 
+> **As-built at NT (Aug 2026).** This app-notification path reuses the SOC central
+> mailbox `ntsoc@ntplc.co.th` on **465 + `EMAIL_USE_SSL=True`** (identical to the
+> prototype/dev), `EMAIL_HOST_USER=ntsoc@ntplc.co.th`. So relative to the generic
+> block above, set `EMAIL_PORT=465`, `EMAIL_USE_SSL=True`, and **`EMAIL_USE_TLS=False`**
+> — 465 (implicit SSL) and STARTTLS are **mutually exclusive**; leaving the base
+> `.env`'s `EMAIL_USE_TLS=True` in place raises `ImproperlyConfigured` and no mail
+> sends. Note this is *different* from the backup-alerting path in 13.5, which uses the
+> same mailbox but on **port 25 + STARTTLS** — PowerShell's `Send-MailMessage` cannot
+> do implicit-TLS 465, while Django (Python `smtplib`) can.
+
 **13.5 Wire backup alerting (on the SPARE)** — this is what finally closes the
-handbook's Phase 2.5 gap. Update the `SOC-Archive-Check` task to add
-`-AlertEmail <addr> -SmtpServer <relay>` so a stale archive, broken pull, or
-non-streaming standby **emails** instead of failing silently. Prove it by inducing a
-failure (rename `prod-cred.xml`, run the pull + check) and confirming the email
-fires, then restore. Until this step, backup freshness is a manual weekly task with a
-named owner.
+handbook's Phase 2.5 gap. **✅ Done (Aug 2026) — Track A.** The `SOC-Archive-Check`
+task now alerts over the authenticated `mail.ntplc.co.th` relay, so a stale archive,
+broken pull, full disk, or non-streaming standby **emails** the SOC team instead of
+failing silently. As-built task arguments:
+
+```powershell
+# Appended to SOC-Archive-Check (runs as SYSTEM on the spare)
+-AlertEmail 'ntsoc@ntplc.co.th' -SmtpServer 'mail.ntplc.co.th' -SmtpPort 25 -UseSsl `
+  -MailFrom 'ntsoc@ntplc.co.th' -SmtpCredentialPath 'C:\ProgramData\SOCBackup\smtp-cred.xml'
+```
+
+Three things this had to get right — all now baked into `Test-SocArchive.ps1`:
+- **Port 25 + STARTTLS (`-UseSsl`)**, not 587 (which timed out here) and not 465
+  (implicit-TLS, which `Send-MailMessage` cannot speak).
+- **`-MailFrom ntsoc@ntplc.co.th`** — the relay rejects a non-`@ntplc.co.th` From
+  (the old default `soc-backup@<host>` was refused as "failed to route the address").
+- **`smtp-cred.xml` must be `Export-Clixml`'d _as SYSTEM_** — DPAPI is per-account, so
+  a credential exported by an interactive admin cannot be decrypted by the SYSTEM task.
+  The script's send now runs with `-ErrorAction Stop`, so a failed submission actually
+  throws instead of logging "sent" while nothing left.
+
+Proven by forcing a problem without changing anything (`-MinFreePercent 100`) and
+confirming the `[SOC-BACKUP] FAILED` email arrived. This retires the "backup freshness
+is a manual weekly task with a named owner" stopgap.
 
 **13.6 Verify + capture.**
 - `manage.py check --deploy` — the 4 HTTPS warnings should now be gone.
