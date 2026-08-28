@@ -44,7 +44,6 @@ from .staging import (
 from .report_content import GUIDANCE_COORDINATION_NOTE
 from .notifications import (
     notify_containment_alert,
-    notify_response_request_created,
 )
 from .reports import (
     build_ticket_report_render_context,
@@ -84,6 +83,10 @@ from .ticket_evidence import (
     add_ticket_attachments,
     delete_ticket_attachment,
     restore_ticket_attachment,
+)
+from .subtask_creation import (
+    create_legacy_subtask,
+    create_response_request as create_response_request_operation,
 )
 from .ticket_updates import save_subtask_update, save_ticket_edit
 from .ticket_workflow import (
@@ -1880,11 +1883,12 @@ def create_subtask(request, pk):
     if request.method == 'POST':
         form = SubtaskForm(request.POST)
         if form.is_valid():
-            subtask = form.save(commit=False)
-            subtask.ticket = ticket
-            subtask.created_by = request.user
-            subtask.save()
-            messages.success(request, f'สร้างงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
+            result = create_legacy_subtask(
+                ticket=ticket,
+                actor=request.user,
+                subtask_form=form,
+            )
+            messages.success(request, f'สร้างงานย่อย "{result.subtask.title}" เรียบร้อยแล้ว')
         else:
             messages.error(request, 'ไม่สามารถสร้างงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
     return redirect('ticket_detail', pk=pk)
@@ -1914,49 +1918,26 @@ def create_response_request(request, pk):
         messages.error(request, 'ไม่สามารถส่งคำขอได้ — กรุณาตรวจสอบข้อมูล')
         return redirect('ticket_detail', pk=pk)
 
-    subtask_type = form.cleaned_data['subtask_type']
-    chosen = form.cleaned_data.get('assigned_to')
-    eligible = TicketSubtask.eligible_assignees(subtask_type)
-    role_label = dict(UserProfile.ROLE_CHOICES).get(
-        TicketSubtask.role_for_type(subtask_type), '')
-
-    if not eligible.exists():
-        messages.error(
-            request,
-            f'ยังไม่มีบัญชีผู้ใช้ในบทบาท "{role_label}" — ไม่สามารถมอบหมายคำขอนี้ได้',
+    try:
+        result = create_response_request_operation(
+            ticket=ticket,
+            actor=request.user,
+            response_form=form,
         )
-        return redirect('ticket_detail', pk=pk)
-    if chosen is not None:
-        if not eligible.filter(pk=chosen.pk).exists():
-            messages.error(
-                request,
-                f'ผู้รับผิดชอบที่เลือกไม่ได้อยู่ในบทบาท "{role_label}"',
-            )
-            return redirect('ticket_detail', pk=pk)
-        assignee = chosen
-    elif eligible.count() == 1:
-        assignee = eligible.first()
-    else:
-        messages.error(
-            request,
-            f'มีผู้รับผิดชอบในบทบาท "{role_label}" มากกว่าหนึ่งคน — กรุณาเลือกผู้รับผิดชอบ',
-        )
+    except ValidationError as exc:
+        messages.error(request, exc.message)
         return redirect('ticket_detail', pk=pk)
 
-    subtask = form.save(commit=False)
-    subtask.ticket = ticket
-    subtask.created_by = request.user
-    subtask.assigned_to = assignee
-    subtask.save()
-    if not notify_response_request_created(subtask):
+    if not result.notification_sent:
         messages.warning(
             request,
             'สร้างคำขอแล้ว แต่ส่งอีเมลแจ้งผู้รับผิดชอบไม่สำเร็จ',
         )
     messages.success(
         request,
-        f'ส่งคำขอ "{subtask.get_subtask_type_display()}" ให้ '
-        f'{assignee.get_full_name() or assignee.username} เรียบร้อยแล้ว',
+        f'ส่งคำขอ "{result.subtask.get_subtask_type_display()}" ให้ '
+        f'{result.subtask.assigned_to.get_full_name() or result.subtask.assigned_to.username} '
+        'เรียบร้อยแล้ว',
     )
     return redirect('ticket_detail', pk=pk)
 
