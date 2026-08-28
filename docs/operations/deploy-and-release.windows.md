@@ -50,9 +50,10 @@ git push origin v1.1.0
 An **annotated** tag (`-a`) — not a lightweight one — so `git describe` on the VM
 resolves to the release name and the tag carries its own message and date.
 
-Never tag a commit that only passed locally. CI runs `makemigrations --check`,
-`migrate`, `manage.py check`, and the full test suite on a clean runner; a green
-tag is the contract this runbook depends on.
+Never tag a commit that only passed locally. CI runs Ruff correctness lint,
+`makemigrations --check`, `migrate`, `manage.py check`, the full test suite, and
+an 85% coverage floor on a clean Postgres 18 runner; a green tag is the contract
+this runbook depends on.
 
 ---
 
