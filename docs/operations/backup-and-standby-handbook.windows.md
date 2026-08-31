@@ -621,12 +621,29 @@ kilobyte-sized encrypted bundle that rides along with the archives.
 cd C:\SOCTicket\app\scripts\backup\windows
 .\New-SocConfigBundle.ps1 -GpgRecipient soc-backup@nt.local `
   -EnvPath 'C:\SOCTicket\app\.env' -AppServiceName 'SOCTicketWaitress' `
-  -ExtraFiles @('C:\SOCTicket\certs\opensearch-ca.pem')
+  -ExtraFiles @('C:\SOCTicket\certs\opensearch-ca.pem',
+                'C:\SOCTicket\app\run-prod.cmd',
+                'C:\inetpub\socticket\web.config')
 ```
 
 Inspect the manifest inside the bundle to confirm it actually caught your IIS
 site and the app service - the script warns rather than fails if it cannot find
 them, so a silent miss is possible if your service name differs.
+
+> **Capture `run-prod.cmd` and `web.config` explicitly — the service definition is
+> not enough.** The bundle records the Waitress *service* (its `PathName` is just
+> `cmd /c C:\SOCTicket\app\run-prod.cmd`) but **not the contents of `run-prod.cmd`**,
+> which is where the HTTPS go-live added the mandatory
+> `--trusted-proxy=127.0.0.1 --trusted-proxy-headers="…"` flags (Stage 9.3).
+> `run-prod.cmd` is now **tracked in the repo at the app root**, so a clean clone/rebuild
+> already gets the proxy-trust flags; keeping it in `-ExtraFiles` is belt-and-suspenders
+> for a host that has drifted from the repo. `web.config` (the `X-Forwarded-Proto` rule)
+> is captured via `applicationHost.config` only partially — include it directly to be
+> safe. Both were added to the live `SOC-Config-Bundle-Weekly` task on 2026-08-26.
+>
+> Note: a PROD box built before this file was tracked may hold an *untracked* identical
+> `run-prod.cmd`; `git stash -u` (or delete it) before pulling, or git refuses to
+> overwrite the untracked file.
 
 Schedule it weekly, after the weekly data backup:
 
@@ -751,6 +768,23 @@ $tasks = @(
      Arg="-NoProfile -ExecutionPolicy Bypass -File `"$dir\Test-SocArchive.ps1`" -ArchiveDir D:\SOCBackup\archive -AlertEmail you@nt.local -SmtpServer smtp.nt.local"
      Trigger=(New-ScheduledTaskTrigger -Daily -At 07:00) }
 )
+```
+
+> **As-built (this deployment).** The live `SOC-Archive-Check` runs against an
+> **authenticated STARTTLS relay** and also checks the standby, so its argument
+> string is:
+>
+> ```
+> -ArchiveDir D:\SOCBackup\archive -CheckStandby -StandbyUser soc_backup
+> -AlertEmail ntsoc@ntplc.co.th -SmtpServer mail.ntplc.co.th -SmtpPort 25 -UseSsl
+> -MailFrom ntsoc@ntplc.co.th -SmtpCredentialPath C:\ProgramData\SOCBackup\smtp-cred.xml
+> ```
+>
+> `-SmtpPort 25 -UseSsl` is opportunistic STARTTLS on the submission port;
+> `-MailFrom` must equal an envelope sender the relay accepts (here it equals
+> `-AlertEmail`). See §2.5 for the credential and the silent-send fix.
+
+```powershell
 foreach ($t in $tasks) {
   Register-ScheduledTask -TaskName $t.Name `
     -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $t.Arg) `
@@ -790,6 +824,38 @@ Rename-Item C:\ProgramData\SOCBackup\prod-cred.xml.bak prod-cred.xml
 
 Everything else in this system fails loudly. A broken alert path fails silently
 and takes the rest of the system's trustworthiness with it. **Do not skip this.**
+
+#### As-built — authenticated SMTP alerting (this deployment)
+
+The alert path is **live and proven**, which retires the interim "named owner
+reviews the check weekly" arrangement. Details, because the traps here are all
+silent:
+
+- **Relay + auth.** `mail.ntplc.co.th` on **port 25 with STARTTLS** (`-UseSsl`)
+  and a login. The port is forced: **587 timed out** and **465 is implicit-TLS,
+  which `Send-MailMessage` cannot speak** — 25 + STARTTLS is the only combination
+  PowerShell can use. Both sender and recipient are `ntsoc@ntplc.co.th`; the relay
+  **rejects a non-`@ntplc.co.th` From** (the old default `soc-backup@<host>` was
+  refused as "failed to route the address"), so `-MailFrom` is mandatory.
+  `Test-SocArchive.ps1` takes `-SmtpPort`, `-UseSsl`, `-MailFrom`, and
+  `-SmtpCredentialPath` for exactly this.
+- **Credential.** A `PSCredential` saved to `C:\ProgramData\SOCBackup\smtp-cred.xml`
+  and loaded with `Import-Clixml`. `Export-Clixml` encrypts with **per-account
+  DPAPI**, so the file was written **under the SYSTEM account** and only decrypts
+  under the *same* account that runs `SOC-Archive-Check`. Export it as whatever
+  account the task runs as, or `Import-Clixml` fails with a decryption error — the
+  same S4U/DPAPI trap noted for `prod-cred.xml` in §2.4. The repo and config bundles
+  hold the **path and role name only, never the password**.
+- **The silent-send bug and its fix.** `Send-MailMessage` reports SMTP rejections
+  as *non-terminating* errors, so a failed send left the check exiting `0` and
+  looking healthy. `Test-SocArchive.ps1` now passes **`-ErrorAction Stop`** on the
+  send, making a rejection terminating so the `try/catch` reports it. This was the
+  fix that stopped alerts from silently not being sent.
+- **Proof of delivery.** Forced a failure with **`-MinFreePercent 100`** (no drive
+  can be 100% free, so the free-space check trips) and confirmed a
+  **`[SOC-BACKUP] FAILED`** email arrived at `ntsoc@ntplc.co.th`. That exercised the
+  full path — auth, STARTTLS, credential decrypt, terminating-error handling — not
+  just the setting being present.
 
 ### 2.6 The restore-drill instance
 
@@ -1377,7 +1443,9 @@ that already exists and is already protected. Do **not** merge it with step 3.
 - [ ] All three tests in §2.3 behave as marked (read works, write refused, delete refused)
 - [ ] Pull, prune, and check tasks scheduled with **stored passwords**, not S4U
 - [ ] `-MaxArchiveGB` set to the archive budget
-- [ ] **Alert path tested by deliberately breaking the credential file**
+- [x] **Alert path tested by deliberately breaking something** — proven via
+  `-MinFreePercent 100`; a `[SOC-BACKUP] FAILED` email arrived over the
+  authenticated STARTTLS relay (§2.5 as-built)
 - [ ] Verify instance running on 5434; one restore drill passed
 - [ ] Weekly drill scheduled
 - [ ] **App stack pre-staged on the spare VM** (§2.8), configured and stopped
@@ -1388,13 +1456,16 @@ that already exists and is already protected. Do **not** merge it with step 3.
 - [ ] `pg_hba.conf` uses `hostssl`, restricted to `SPARE_IP/32`
 - [ ] `pg_is_in_recovery()` returns `t`; `pg_stat_replication` shows `streaming`
 - [ ] **Restart test passed** - standby resumes streaming after a service restart
-- [ ] Health check running with `-CheckStandby`
+- [x] Health check running with `-CheckStandby` (and now with authenticated SMTP
+  alerting — §2.5 as-built)
 
 **Phase 4-5 and launch gates**
 - [ ] Planned failover drill completed end to end at least once
 - [ ] Actual RPO and RTO recorded (measured, not estimated)
 - [ ] Someone other than you has read §4.2 and knows where the GPG passphrase lives
-- [ ] Real email delivery tested - a notification actually arrived
+- [x] **Backup-alert** email delivery tested — a `[SOC-BACKUP] FAILED` alert
+  actually arrived (§2.5 as-built). *App* notification email is live too (Track B
+  HTTPS go-live, 465 + implicit SSL — deployment runbook Stage 13).
 - [ ] Wazuh ingestion task set to *"Do not start a new instance"*
 - [ ] 90-day cleanup tested against seeded data; ticket-linked alerts confirmed retained
 - [ ] Retention floor confirmed with compliance (§5.1)

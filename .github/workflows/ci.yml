@@ -1,0 +1,124 @@
+# Continuous integration for the SOC Ticket app — the single gate a change must
+# pass before it can be tagged for a production deploy
+# (see docs/operations/deploy-and-release.windows.md).
+#
+# Gates every push to main and every pull request with the same checks a
+# developer runs locally, on a clean runner: Ruff correctness lint, migration
+# drift, migrate on a real DB, Django system checks, the full test suite, and an
+# 85% coverage floor (config/.coveragerc).
+#
+# Production runs Python 3.14 on Windows Server + native PostgreSQL 18. CI runs
+# Python 3.14 on ubuntu-latest with a postgres:18 service container — the same
+# major version as PROD — so the schema is reproduced faithfully; no migration
+# hardcodes the production Thai_Thailand.874 collation (that is a database-create
+# concern, handled in runbook Stage 4, not a migration concern).
+#
+# No real secrets are used. config/settings.py reads config via python-decouple;
+# the only keys without a safe default are SECRET_KEY and DB_*, so those are the
+# only ones supplied here — as throwaway values scoped to this job. OPENSEARCH_*
+# is left unset so ingest tests never reach a real Indexer, and EMAIL_BACKEND is
+# locmem so no mail leaves the runner.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint + migrations + checks + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: ticketdata_ci
+          POSTGRES_USER: ticket_ci
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Throwaway config — not secrets. Mirrors the required (no-default) keys
+      # config/settings.py reads via python-decouple.
+      SECRET_KEY: ci-dummy-secret-key-not-used-in-production
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DB_NAME: ticketdata_ci
+      DB_USER: ticket_ci
+      DB_PASSWORD: ci-postgres-password
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_SSLMODE: disable
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      # Keep the file log handler out of CI (settings also drops it under `test`).
+      # NB: the `runner` context is NOT available in a job-level `env:` block —
+      # `${{ runner.temp }}` here makes GitHub reject the workflow at startup
+      # (0 jobs, instant failure), so use a literal path on the Linux runner.
+      LOG_DIR: /tmp/soc-logs
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint correctness rules
+        # Ruff's correctness set (E9/F63/F7/F82 per pyproject.toml) — undefined
+        # names, broken syntax, f-string and comparison bugs. Fast, so it runs first.
+        run: ruff check .
+
+      - name: Check for missing migrations
+        # Fails if a model change has no accompanying migration — the class of
+        # bug that otherwise only surfaces during `migrate` on the PROD box.
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Apply migrations
+        run: python manage.py migrate --noinput
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: Deployment check (informational)
+        # `check --deploy` flags W004 (HSTS) and the secure-cookie settings that
+        # are intentionally OFF here (no TLS in CI) — those are by-design on the
+        # HTTPS proxy bridge in PROD, so this is reported but never blocks the build.
+        continue-on-error: true
+        run: python manage.py check --deploy
+
+      - name: Run the test suite with coverage
+        run: coverage run manage.py test --noinput
+
+      - name: Report coverage (85% floor)
+        # fail_under = 85.0 lives in .coveragerc, so this step fails the build
+        # if branch coverage drops below the floor.
+        run: coverage report

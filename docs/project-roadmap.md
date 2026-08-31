@@ -24,13 +24,15 @@ Verified against the repo on 2026-08-27:
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
 | Reporting layer | Phases 1–3 built; 4–5 pending; nightly refresh **not scheduled** |
 | Docs | 25+ documents incl. Thai user guides, ADRs, handover, runbooks |
-| CI | GitHub Actions runs checks, migration drift, Ruff correctness rules, all tests, and an 85% coverage floor |
+| CI | **GitHub Actions** (`.github/workflows/ci.yml`) — Postgres 18 + Python 3.14; Ruff correctness rules, migration-drift check, the full test suite, and an 85% coverage floor, on every push + PR |
 | App logging | Rotating file + console handlers configured in `config/settings.py` |
-| Production | Windows/Waitress/IIS deployment and DR runbooks are current; TLS cutover remains an explicit gate |
+| Production | **Live** on the self-signed HTTPS IP bridge (`https://10.1.220.118`, Windows/Waitress/IIS); nightly encrypted backups + off-host pull + streaming standby; Wazuh ingest, reporting mart, and retention scheduled. Real CA cert + DNS still the long pole |
 | UAT | 1 of 7 roles in progress (SOC Manager); 6 unstarted |
 
-The remaining work is primarily UAT, TLS/cutover, and operational acceptance;
-the codebase refactor is being delivered as behavior-preserving phases behind CI.
+The remaining work is primarily UAT and operational acceptance (hypercare);
+production is live on the self-signed HTTPS bridge — a real CA cert + DNS are the
+last go-live gate — and the codebase refactor is delivered as behavior-preserving
+phases behind CI.
 
 ---
 
@@ -48,7 +50,7 @@ Standard software-delivery phases, scored against this project.
 | 6 | **UAT** | 1 of 7 roles started; no exit criteria or sign-off defined | 🔴 15% |
 | 7 | **Production build** | Windows/Waitress/IIS runbook current; TLS/cutover remains | 🟡 70% |
 | 8 | **Backup & DR** | Backups + off-host pull + restore drill + **streaming standby live (5433)**, monitored; app stack pre-staged on spare | 🟢 90% |
-| 9 | **Security hardening** | Settings are sound; no TLS, no logging, no pre-prod review | 🟡 40% |
+| 9 | **Security hardening** | Settings sound; **TLS live (self-signed IP bridge; real cert pending)**, secure cookies on; no pre-prod review | 🟡 55% |
 | 10 | **Go-live cutover** | Not planned | 🔴 0% |
 | 11 | **Hypercare & maintenance** | Not planned | 🔴 0% |
 
@@ -68,12 +70,14 @@ These are the last things that genuinely need a keyboard and the codebase.
 - [x] **Configure application logging.** Rotating file and console handlers are
   active outside tests.
 - [x] **Add `/healthz`.** The endpoint checks application and database health.
-- [x] **Set up CI.** GitHub Actions runs Django checks, migration consistency,
-  Ruff correctness rules, all 837 tests, and coverage with an 85% floor.
+- [x] **Set up CI.** GitHub Actions (`.github/workflows/ci.yml`) — Ruff correctness
+  rules, migration-drift check, the full test suite, and an 85% coverage floor,
+  against a Postgres 18 + Python 3.14 service container on every push and PR. *(Phase 7)*
 - [x] **Fix broad ignore rules.** Markdown and JavaScript are tracked by default;
   sensitive security/UAT/internal-host documents remain explicitly local.
-- [ ] **Review branch hygiene separately.** Do not delete a branch as part of a
-  behavior-preserving refactor; confirm ownership and merge status first.
+- [ ] **Branch hygiene.** `reduce_sys_workload` (55 commits behind, 0 ahead,
+  untouched since 2026-07-09) can be deleted — confirm ownership/merge status first,
+  and never as part of a behavior-preserving refactor.
 - [ ] *(Optional, defer without guilt)* Project Incident dashboard rollup,
   consolidated per-Project report export, `GRAFANA_DASHBOARD.md`,
   `closed_at` backfill, OLA threshold tests.
@@ -131,11 +135,17 @@ generated UAT `.docx`.
   `listen_addresses`, `max_wal_senders`, `max_slot_wal_keep_size`, TLS for
   replication. These need a restart; setting them now saves a maintenance
   window later. See §Phase 0 of the Windows backup handbook.
-- [ ] **HTTPS on production**, with a documented certificate renewal owner and date.
-- [ ] **Harden the deployment env**: `DEBUG=False`, real `SECRET_KEY`, correct
-  `ALLOWED_HOSTS`, and turn on `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`,
-  `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`. All of these already exist as
-  env-driven settings and all default to off.
+- [x] **HTTPS on production** — *live as of 2026-08-26 via a **self-signed IP bridge**
+  (`https://10.1.220.118`)*: 443 bound, redirect works (no loop), secure cookies on,
+  app SMTP sending. Deferred to real-cert cutover: the **CA/PKI cert + DNS record**
+  (clears the browser warning, unlocks HSTS, needed for a wider cross-VLAN audience)
+  and a **documented certificate renewal owner and date**. See deployment runbook
+  Stage 13 (as-built) and the two Stage 9.3 gaps (`allowedServerVariables` unlock,
+  Waitress `--trusted-proxy`).
+- [x] **Harden the deployment env**: `DEBUG=False`, real `SECRET_KEY`, correct
+  `ALLOWED_HOSTS`, and `SESSION_COOKIE_SECURE` / `CSRF_COOKIE_SECURE` /
+  `SECURE_SSL_REDIRECT` on. `SECURE_HSTS_SECONDS` intentionally **0** on the
+  self-signed bridge — ramp it at real-cert cutover.
 - [ ] **Run `manage.py check --deploy`** and clear every warning you do not
   consciously accept.
 - [ ] **A pre-production security pass** on the app itself — file upload handling,
@@ -188,8 +198,11 @@ Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
 - [x] **Commit the backup scripts.** `scripts/backup/windows/*.ps1` are tracked.
 
 **Exit criteria:** ~~a restore drill completed and timed~~ ✅; freshness check
-proven to detect a failure ✅ (email half deferred to Phase 5 SMTP — until then a
-**named owner reviews `SOC-Archive-Check` weekly**); **RPO ≈ 24 h** (nightly daily
+proven to detect a failure ✅, and the email half is now **live** — Phase 5 Track A
+wired `SOC-Archive-Check` to alert `ntsoc@ntplc.co.th` over the authenticated
+`mail.ntplc.co.th` relay, so a stale archive / broken pull / full disk /
+non-streaming standby emails the SOC team (the manual-weekly-owner stopgap is
+retired); **RPO ≈ 24 h** (nightly daily
 tier) written down; **RTO** = data-restore proven in seconds, end-to-end service
 RTO pending the annual full recovery rehearsal (restore + recreate roles/grants +
 repoint Django + log in).
@@ -205,15 +218,15 @@ repoint Django + log in).
 - [ ] **Create the real user accounts** and rotate every dev/UAT password. Several
   are written down in your notes and in `test_accounts.txt` — treat all of them
   as compromised.
-- [ ] **Point the Wazuh ingest at production** and confirm the watermark starts
-  clean.
-- [ ] **Schedule `refresh_reporting` nightly** — ingest first, then refresh. History
-  only starts accruing from the day you schedule it, and snapshot metrics are
-  *unrecoverable* if a day is missed.
-  - ⚠️ **Time-sensitive:** detection capture reads the Wazuh Indexer, whose
-    retention is ~3 months. If go-live is further out than that, start detection
-    capture *now* against production-adjacent data or you permanently lose that
-    window of history.
+- [x] **Point the Wazuh ingest at production** — *done 2026-08-26.* `SOC-Ingest-Wazuh`
+  runs per-minute (SYSTEM, IgnoreNew) against Indexer `10.1.220.32:9200`; first pull
+  4,532 alerts, watermark advancing. **Interim:** `OPENSEARCH_VERIFY_SSL=False`
+  (encrypted, unauthenticated) until the Wazuh admin sends `root-ca.pem` → CA bundle.
+- [x] **Schedule `refresh_reporting` nightly** — *done 2026-08-26.* `SOC-Refresh-Reporting`
+  at 00:20 (per-minute ingest guarantees ingest-before-refresh). Detection capture live
+  (`detection_rows: 31`). Retention scheduled too: `SOC-Purge-Wazuh` daily 04:00, 90-day
+  window (confirm with compliance within the runway). CSV historical import deferred by
+  the owner (idempotent, run any time).
 - [ ] **Reporting Phase 4** — create the `reporting_ro` role
   (`docs/operations/reporting-ro-setup.sql`) and repoint Grafana at `mart`
   instead of the Indexer.
@@ -222,7 +235,10 @@ repoint Django + log in).
 - [ ] **Train the users.** The Thai end-user guide and feature guide exist; book
   the session and record who attended.
 - [ ] **Agree a go-live date and a rollback trigger** — the specific condition under
-  which you revert to the manual process. Decide it while calm.
+  which you revert to the manual process. Decide it while calm. The *technical*
+  deploy/rollback mechanics are now written up:
+  [deploy-and-release.windows.md](operations/deploy-and-release.windows.md)
+  (cut a SemVer tag after CI is green → deploy → verify → roll back). *(Phase 7)*
 
 **Exit criteria:** real tickets flowing, dashboards populated from `mart`,
 backups running against live data.
