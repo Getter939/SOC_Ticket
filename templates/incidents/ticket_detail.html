@@ -185,6 +185,12 @@ onto its own wrapped row, which space-between then left-aligned.
     <section id="overview" class="card section-card mb-4">
       <div class="card-header"><h2 class="section-title">สรุปเหตุการณ์</h2><div class="section-hint">สิ่งที่เกิดขึ้นและผลกระทบที่ประเมินได้</div></div>
       <div class="card-body summary-copy">{{ ticket.issue_description|linebreaks }}</div>
+      {% if ticket.system_detail %}
+      <div class="card-body summary-copy border-top">
+        <div class="section-hint mb-1">รายละเอียดเฉพาะระบบ</div>
+        {{ ticket.system_detail|linebreaks }}
+      </div>
+      {% endif %}
     </section>
 
     <section id="technical" class="card section-card mb-4">

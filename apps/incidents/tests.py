@@ -3412,6 +3412,42 @@ class ProjectIncidentFanOutTest(TestCase):
         # Per-target facts differ.
         self.assertEqual({m.device_name for m in members}, {'HR Portal', 'AD Server'})
 
+    def test_per_system_detail_saved_per_member(self):
+        """Each system's own รายละเอียด note lands on its member ticket only,
+        while the shared incident summary stays copied onto both."""
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(
+                self.admin_a, self.admin_b,
+                **{
+                    'target-0-system_detail': 'HR Portal: webshell on /upload',
+                    'target-1-system_detail': 'AD Server: golden ticket suspected',
+                },
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        members = {m.device_name: m for m in ProjectIncident.objects.get().members}
+        self.assertEqual(members['HR Portal'].system_detail, 'HR Portal: webshell on /upload')
+        self.assertEqual(members['AD Server'].system_detail, 'AD Server: golden ticket suspected')
+        # The shared overall summary is untouched and identical on both.
+        self.assertEqual(
+            members['HR Portal'].issue_description,
+            members['AD Server'].issue_description,
+        )
+
+    def test_per_system_detail_is_optional(self):
+        """Omitting the note leaves member tickets with a blank system_detail."""
+        self.client.login(username='pi_t1', password='testpass123')
+        resp = self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(self.admin_a, self.admin_b),
+        )
+        self.assertEqual(resp.status_code, 302)
+        for m in ProjectIncident.objects.get().members:
+            self.assertEqual(m.system_detail, '')
+
     def test_members_keep_independent_lifecycle(self):
         """Closing one member must not move the others (grouping only)."""
         self.client.login(username='pi_t1', password='testpass123')

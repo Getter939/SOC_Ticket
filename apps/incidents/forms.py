@@ -449,27 +449,20 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         label='เส้นทางการดำเนินการ',
         widget=forms.RadioSelect(attrs={'class': 'route-radio'}),
     )
-    # Per-system detail. Kept OUT of Meta so it does not collide with the shared
-    # issue_description copied onto every member; the creation service applies it
-    # as an override, falling back to the shared summary when left blank.
-    issue_description = forms.CharField(
-        required=False,
-        label='รายละเอียด',
-        widget=forms.Textarea(attrs={
-            'class': 'form-control form-control-sm', 'rows': 3,
-            'placeholder': 'รายละเอียดเฉพาะของระบบนี้ (เว้นว่างไว้เพื่อใช้สรุปรวมด้านบน)',
-        }),
-    )
 
     class Meta:
         model = Ticket
         fields = [
-            'device_name', 'ip_address', 'mac_address', 'asset_type',
-            'operating_system', 'asset_owner', 'asset_owner_name',
+            'device_name', 'system_detail', 'ip_address', 'mac_address',
+            'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'assigned_admin', 'system_owner',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
+            'system_detail': forms.Textarea(attrs={
+                'class': 'form-control form-control-sm', 'rows': 3,
+                'placeholder': 'รายละเอียดเฉพาะของระบบนี้',
+            }),
             'ip_address':  forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': '0.0.0.0'}),
             'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),

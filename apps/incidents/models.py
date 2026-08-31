@@ -859,6 +859,12 @@ class Ticket(models.Model):
     # ── Section 3: Description ───────────────────────────────────────── #
     device_name = models.CharField(max_length=100, verbose_name='ระบบ / บริการ (System/Service)')
     issue_description = models.TextField(verbose_name='รายละเอียดเหตุการณ์')
+    # Per-system note captured on the Project Incident form — one entry per
+    # affected system. Distinct from issue_description, which stays the shared
+    # incident summary copied onto every bundle member.
+    system_detail = models.TextField(
+        blank=True, default='', verbose_name='รายละเอียดเฉพาะระบบ',
+    )
 
     # ── Section 4: Scope / Affected Asset ───────────────────────────── #
     # null=True with blank=False: forms still require an IP, but tickets

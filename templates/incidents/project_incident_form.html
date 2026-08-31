@@ -257,9 +257,9 @@
               {% if tform.system_owner.errors %}<div class="text-danger small">{{ tform.system_owner.errors }}</div>{% endif %}
             </div>
             <div class="col-12">
-              <label class="form-label small fw-semibold mb-1">รายละเอียด</label>
-              {{ tform.issue_description }}
-              {% if tform.issue_description.errors %}<div class="text-danger small">{{ tform.issue_description.errors }}</div>{% endif %}
+              <label class="form-label small fw-semibold mb-1">รายละเอียด <span class="text-muted fw-normal">(เฉพาะระบบนี้)</span></label>
+              {{ tform.system_detail }}
+              {% if tform.system_detail.errors %}<div class="text-danger small">{{ tform.system_detail.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
               <label class="form-label small fw-semibold mb-1">IP Address</label>
@@ -341,8 +341,8 @@
         {{ target_formset.empty_form.system_owner }}
       </div>
       <div class="col-12">
-        <label class="form-label small fw-semibold mb-1">รายละเอียด</label>
-        {{ target_formset.empty_form.issue_description }}
+        <label class="form-label small fw-semibold mb-1">รายละเอียด <span class="text-muted fw-normal">(เฉพาะระบบนี้)</span></label>
+        {{ target_formset.empty_form.system_detail }}
       </div>
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">IP Address</label>
