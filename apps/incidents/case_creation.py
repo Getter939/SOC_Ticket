@@ -323,6 +323,11 @@ def _create_project_members(project, shared, target_formset, actor):
         ticket = target_form.save(commit=False)
         for field_name in BUNDLE_SHARED_FIELDS:
             setattr(ticket, field_name, shared[field_name])
+        # Per-system detail overrides the shared summary when the analyst filled
+        # it; a blank box keeps the shared issue_description (previous behavior).
+        target_detail = (cleaned_data.get('issue_description') or '').strip()
+        if target_detail:
+            ticket.issue_description = target_detail
         ticket.incident_name = shared['title']
         ticket.classification = Ticket.CLASSIFICATION_INCIDENT
         ticket.t1_route = cleaned_data['t1_route']

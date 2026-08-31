@@ -1737,7 +1737,10 @@ class Ticket(models.Model):
         if user.is_superuser:
             pass
         elif required_perm == 'TIER1_CREATOR':
-            if profile is None or not profile.is_tier1:
+            # TEMP: Tier 2 may also drive their own case's creator edges so they
+            # can open and route tickets on their own (revert to is_tier1-only
+            # when the Tier-1-only creation gate is restored).
+            if profile is None or not (profile.is_tier1 or profile.is_tier2):
                 raise ValidationError(
                     'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถดำเนินการนี้ได้'
                 )

@@ -463,8 +463,10 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
 @login_required
 def create_ticket(request):
     profile = getattr(request.user, 'profile', None)
-    # Tickets are always created by Tier 1 — no other role may open a case.
-    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
+    # TEMP: Tier 2 allowed to open cases too (revert to is_tier1-only later).
+    if not request.user.is_superuser and (
+        profile is None or not (profile.is_tier1 or profile.is_tier2)
+    ):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเปิดเคสใหม่ได้')
         return redirect('ticket_list')
 
@@ -605,7 +607,10 @@ def create_project_incident(request):
     all pointing at one ProjectIncident so they stay grouped and trackable.
     """
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
+    # TEMP: Tier 2 allowed to open Project Incidents too (revert to is_tier1-only later).
+    if not request.user.is_superuser and (
+        profile is None or not (profile.is_tier1 or profile.is_tier2)
+    ):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเปิด Project Incident ได้')
         return redirect('ticket_list')
 

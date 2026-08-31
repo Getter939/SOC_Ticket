@@ -1070,9 +1070,11 @@ class T1ClassificationCreateTest(TestCase):
         self.assertFalse(Ticket.objects.exists())
 
     def test_t2_cannot_open_create_ticket_page(self):
+        # TEMP: Tier 2 is temporarily allowed to open cases (revert to 302 when
+        # the Tier-1-only gate is restored in views.create_ticket).
         self.client.login(username='cc_t2', password='testpass123')
         resp = self.client.get(reverse('create_ticket'))
-        self.assertEqual(resp.status_code, 302)  # redirected — Tier 1 only
+        self.assertEqual(resp.status_code, 200)  # TEMP: Tier 2 allowed
 
     def test_admin_cannot_open_create_ticket_page(self):
         self.client.login(username='cc_admin', password='testpass123')
@@ -1182,10 +1184,12 @@ class Tier2EscalationTest(TestCase):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'forbidden')
 
     def test_t2_cannot_create_ticket(self):
+        # TEMP: Tier 2 is temporarily allowed to create cases (revert to the
+        # redirect-away + no-ticket asserts when the Tier-1-only gate returns).
         self.client.login(username='t2t_t2', password='testpass123')
         resp = self.client.post(reverse('create_ticket'), _ticket_post_data())
-        self.assertEqual(resp.status_code, 302)  # redirected away, Tier 1 only
-        self.assertFalse(Ticket.objects.filter(device_name='TEST-ENDPOINT-01').exists())
+        self.assertEqual(resp.status_code, 302)  # TEMP: redirect to the new ticket
+        self.assertTrue(Ticket.objects.filter(device_name='TEST-ENDPOINT-01').exists())
 
     def test_t1_review_then_route_to_mgr_triage(self):
         t = self._escalated()
@@ -3524,9 +3528,11 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertFalse(Ticket.objects.exists())
 
     def test_non_tier1_cannot_open_fanout_page(self):
+        # TEMP: Tier 2 is temporarily allowed to open Project Incidents (revert
+        # to 302 when the Tier-1-only gate returns in create_project_incident).
         self.client.login(username='pi_t2', password='testpass123')
         resp = self.client.get(reverse('create_project_incident'))
-        self.assertEqual(resp.status_code, 302)  # Tier 1 only
+        self.assertEqual(resp.status_code, 200)  # TEMP: Tier 2 allowed
 
     # ── Step-back / re-forward ───────────────────────────────────────── #
 

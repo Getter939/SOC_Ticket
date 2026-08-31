@@ -256,6 +256,11 @@
               {{ tform.system_owner }}
               {% if tform.system_owner.errors %}<div class="text-danger small">{{ tform.system_owner.errors }}</div>{% endif %}
             </div>
+            <div class="col-12">
+              <label class="form-label small fw-semibold mb-1">รายละเอียด</label>
+              {{ tform.issue_description }}
+              {% if tform.issue_description.errors %}<div class="text-danger small">{{ tform.issue_description.errors }}</div>{% endif %}
+            </div>
             <div class="col-md-3">
               <label class="form-label small fw-semibold mb-1">IP Address</label>
               {{ tform.ip_address }}
@@ -334,6 +339,10 @@
       <div class="col-md-4 route-owner-field">
         <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (Direct-to-Owner)</label>
         {{ target_formset.empty_form.system_owner }}
+      </div>
+      <div class="col-12">
+        <label class="form-label small fw-semibold mb-1">รายละเอียด</label>
+        {{ target_formset.empty_form.issue_description }}
       </div>
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">IP Address</label>

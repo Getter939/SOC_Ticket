@@ -1,0 +1,66 @@
+{
+  "hits": {
+    "hits": [
+      {
+        "_id": "offline-alert-bundle-ransomware-001",
+        "_source": {
+          "@timestamp": "2026-08-10T03:15:00.000Z",
+          "agent": {
+            "id": "bundle-001",
+            "name": "OFFLINE-FILESERVER-BUNDLE-01",
+            "ip": "10.20.10.25"
+          },
+          "rule": {
+            "id": "87105",
+            "level": 14,
+            "description": "Ransomware behavior detected in Finance shared directory",
+            "groups": ["malware", "file_integrity", "ransomware"],
+            "mitre": {
+              "technique": ["Data Encrypted for Impact"],
+              "tactic": ["Impact"],
+              "id": ["T1486"]
+            }
+          },
+          "data": {
+            "file": {
+              "path": "C:\\Shares\\Finance\\Q3-forecast.xlsx.locked",
+              "sha256": "offline-alert-bundle-not-a-real-malware-sample"
+            }
+          },
+          "decoder": {"name": "syscheck"},
+          "id": "offline.bundle.1001"
+        }
+      },
+      {
+        "_id": "offline-alert-bundle-ransomware-002",
+        "_source": {
+          "@timestamp": "2026-08-10T03:17:00.000Z",
+          "agent": {
+            "id": "bundle-001",
+            "name": "OFFLINE-FILESERVER-BUNDLE-01",
+            "ip": "10.20.10.25"
+          },
+          "rule": {
+            "id": "87106",
+            "level": 13,
+            "description": "Mass file rename activity following ransomware detection",
+            "groups": ["file_integrity", "ransomware", "correlation"],
+            "mitre": {
+              "technique": ["Data Encrypted for Impact"],
+              "tactic": ["Impact"],
+              "id": ["T1486"]
+            }
+          },
+          "data": {
+            "file": {
+              "path": "C:\\Shares\\Finance",
+              "affected_file_count": 246
+            }
+          },
+          "decoder": {"name": "syscheck"},
+          "id": "offline.bundle.1002"
+        }
+      }
+    ]
+  }
+}
