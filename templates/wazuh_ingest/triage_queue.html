@@ -9,7 +9,8 @@
     <p class="page-header__subtitle">รับ Alert แล้วสร้าง Ticket เพื่อจัดประเภท Event/Incident และเลือกเส้นทางในหน้าถัดไป</p>
   </div>
   <div class="page-header__actions">
-    <span class="badge bg-danger">{{ pending_count }} pending</span>
+    <span class="badge bg-danger">พร้อมรับ {{ ready_count }}</span>
+    <span class="badge bg-primary">ของฉัน {{ mine_count }}</span>
     <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-alert-bundle">
       <i class="bi bi-collection me-1"></i>รวม Alert ที่เกี่ยวข้อง
     </button>
@@ -27,16 +28,45 @@
   </div>
 </form>
 
-{% comment %}
-Same control style as the Tier 2 queue: one-click pills carrying live counts
-instead of a select + submit button, and a sort that auto-submits. The counts
-are the point — the rule-level distribution was previously unknowable without
-filtering three times. Thresholds are cumulative ("10+" contains "13+"), which
-is what the "+" in each label says.
-{% endcomment %}
 <div class="card filter-toolbar mb-3"><div class="card-body py-3">
+  <form method="get" class="mb-3 js-submit-loading">
+    {% if claim_filter != 'actionable' %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
+    {% if ola_filter %}<input type="hidden" name="ola" value="{{ ola_filter }}">{% endif %}
+    {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
+    {% if sort != 'ola' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    <label class="visually-hidden" for="triage-search">ค้นหา Alert ที่เกี่ยวข้อง</label>
+    <div class="input-group input-group-sm">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input type="search" class="form-control" id="triage-search" name="q" value="{{ search_query }}"
+             placeholder="ค้นหา Agent / IP / Rule ID / MITRE ID / รายละเอียด">
+      <button class="btn btn-outline-primary" type="submit">ค้นหา</button>
+    </div>
+  </form>
+
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <span class="small fw-bold text-muted" style="min-width:6.5rem;">งาน</span>
+    {% for facet in claim_facets %}
+    <a href="{% querystring claim=facet.key page=None %}"
+       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
+      {{ facet.label }}
+      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <span class="small fw-bold text-muted" style="min-width:6.5rem;">OLA</span>
+    {% for facet in ola_facets %}
+    <a href="{% querystring ola=facet.key page=None %}"
+       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
+      {{ facet.label }}
+      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
   <div class="d-flex flex-wrap align-items-center gap-2">
-    <span class="small fw-bold text-muted" style="min-width:6.5rem;">Rule level</span>
+    <span class="small fw-bold text-muted" style="min-width:6.5rem;">Wazuh level</span>
     {% for facet in level_facets %}
     <a href="{% querystring rule_level_filter=facet.key page=None %}"
        class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
@@ -45,24 +75,31 @@ is what the "+" in each label says.
     </a>
     {% endfor %}
     <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
+      {% if claim_filter != 'actionable' %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
+      {% if ola_filter %}<input type="hidden" name="ola" value="{{ ola_filter }}">{% endif %}
       {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
+      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
       <label class="form-label small fw-bold mb-0" for="triage-sort">เรียงตาม</label>
       <select name="sort" id="triage-sort" class="form-select form-select-sm js-autosubmit" style="width:auto;">
-        <option value="level" {% if sort == 'level' %}selected{% endif %}>Rule level สูงสุด</option>
         <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
+        <option value="level" {% if sort == 'level' %}selected{% endif %}>Rule level สูงสุด</option>
+        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Alert ล่าสุด</option>
       </select>
     </form>
   </div>
-  {% if rule_level_filter %}
-  <div class="mt-2"><a href="{% url 'triage_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a></div>
-  {% endif %}
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-2">
+    <span class="small text-muted">แสดง {{ filtered_count }} จาก {{ queue_total }} Alert ในคิว</span>
+    {% if claim_filter != 'actionable' or ola_filter or rule_level_filter or search_query or sort != 'ola' %}
+    <a href="{% url 'triage_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a>
+    {% endif %}
+  </div>
 </div></div>
 
 <div class="card ops-card">
   <div class="table-responsive">
     <table class="table table-hover align-middle operational-table">
       <thead class="table-light">
-        <tr><th>เวลา</th><th>OLA</th><th>Agent</th><th>Level</th><th>Rule</th><th>สถานะ</th><th>ผู้รับผิดชอบ</th><th class="text-end">Actions</th></tr>
+        <tr><th>เวลา</th><th>OLA</th><th>Agent</th><th>Level</th><th>Rule</th><th>สถานะ</th><th>ผู้รับเรื่อง</th><th class="text-end">ดำเนินการ</th></tr>
       </thead>
       <tbody>
         {% for alert in alerts %}
@@ -72,7 +109,7 @@ is what the "+" in each label says.
           <td>{{ alert.agent_name|default:"-" }}</td>
           <td><span class="badge {% if alert.rule_level >= 13 %}bg-danger{% elif alert.rule_level >= 10 %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ alert.rule_level }}</span></td>
           <td style="max-width:420px;"><div class="cell-primary">{{ alert.rule_description }}</div><div class="cell-secondary">Rule {{ alert.rule_id|default:"-" }}</div></td>
-          <td>{{ alert.get_triage_status_display }}</td>
+          <td>{% if alert.triage_status == 'PENDING' %}<span class="badge bg-secondary">พร้อมรับ</span>{% else %}<span class="badge bg-primary">กำลัง Triage</span>{% endif %}</td>
           <td>{% if alert.claimed_by %}{{ alert.claimed_by.get_full_name|default:alert.claimed_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
           <td class="cell-actions">
             {% if alert.triage_status == 'PENDING' %}
@@ -96,7 +133,12 @@ is what the "+" in each label says.
           </td>
         </tr>
         {% empty %}<tr><td colspan="8">
-          {% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มี Alert ที่รอ Triage' description='ยังไม่มี Wazuh alert ใหม่ที่ต้องรับรายการหรือจัดประเภท' %}
+          {% if queue_total %}
+            {% url 'triage_queue' as empty_action_url %}
+            {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบ Alert ที่ตรงกับเงื่อนไข' description='ลองเปลี่ยนขอบเขตงาน สถานะ OLA ระดับ Wazuh หรือคำค้นหา' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
+          {% else %}
+            {% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มี Alert ที่รอ Triage' description='ยังไม่มี Wazuh alert ใหม่ที่ต้องรับรายการหรือจัดประเภท' %}
+          {% endif %}
         </td></tr>{% endfor %}
       </tbody>
     </table>

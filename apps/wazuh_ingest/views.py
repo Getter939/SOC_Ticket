@@ -1,10 +1,12 @@
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import CharField, Count, F, Q, TextField
+from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -68,7 +70,6 @@ def _allowed_escalation_tiers(profile, user=None):
 
 @login_required
 def triage_queue(request):
-    profile = getattr(request.user, 'profile', None)
     if not _has_tier1_access(request.user):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเข้าถึง Triage Queue ได้')
         return redirect('ticket_list')
@@ -76,55 +77,197 @@ def triage_queue(request):
     queue = WazuhAlert.objects.filter(
         triage_status__in=[WazuhAlert.TRIAGE_PENDING, WazuhAlert.TRIAGE_TRIAGING],
     )
-    pending = queue.filter(triage_status=WazuhAlert.TRIAGE_PENDING)
+    queue_total = queue.count()
 
-    # Whitelist rather than int() + except: the pills offer exactly these three
-    # thresholds, so anything else is not a filter this page has.
+    # The queue opens on work this analyst can act on: alerts nobody has claimed
+    # plus alerts they already hold. Other analysts' claims remain one click away
+    # for team awareness, without pushing actionable work onto later pages.
+    claim_filter = request.GET.get('claim', 'actionable').strip()
+    if claim_filter not in ('actionable', 'unclaimed', 'mine', 'others', 'all'):
+        claim_filter = 'actionable'
+
+    ola_filter = request.GET.get('ola', '').strip()
+    if ola_filter not in ('breached', 'due', 'on_track'):
+        ola_filter = ''
+
+    # These are disjoint Wazuh rule-level bands, not Ticket severity. Severity
+    # belongs to a judged case and is selected on the ticket form.
     rule_level_filter = request.GET.get('rule_level_filter', '').strip()
-    if rule_level_filter not in ('7', '10', '13'):
+    if rule_level_filter not in ('under12', '12', '15'):
         rule_level_filter = ''
-    alerts = queue
-    if rule_level_filter:
-        alerts = alerts.filter(rule_level__gte=int(rule_level_filter))
+
+    search_query = request.GET.get('q', '').strip()[:200]
+    now = timezone.now()
+    breached_before = now - timedelta(hours=WazuhAlert.OLA_HOURS)
+    due_within_hour_before = now - timedelta(hours=WazuhAlert.OLA_HOURS - 1)
+    ready_q = Q(
+        triage_status=WazuhAlert.TRIAGE_PENDING,
+        claimed_by__isnull=True,
+    )
+    mine_q = Q(
+        triage_status=WazuhAlert.TRIAGE_TRIAGING,
+        claimed_by=request.user,
+    )
+
+    def _apply_claim(qs, value=claim_filter):
+        if value == 'actionable':
+            return qs.filter(ready_q | mine_q)
+        if value == 'unclaimed':
+            return qs.filter(ready_q)
+        if value == 'mine':
+            return qs.filter(mine_q)
+        if value == 'others':
+            return qs.filter(
+                triage_status=WazuhAlert.TRIAGE_TRIAGING,
+                claimed_by__isnull=False,
+            ).exclude(claimed_by=request.user)
+        return qs
+
+    def _apply_ola(qs):
+        if ola_filter == 'breached':
+            return qs.filter(timestamp__lt=breached_before)
+        if ola_filter == 'due':
+            return qs.filter(
+                timestamp__gte=breached_before,
+                timestamp__lte=due_within_hour_before,
+            )
+        if ola_filter == 'on_track':
+            return qs.filter(timestamp__gt=due_within_hour_before)
+        return qs
+
+    def _apply_level(qs):
+        if rule_level_filter == '15':
+            return qs.filter(rule_level__gte=15)
+        if rule_level_filter == '12':
+            return qs.filter(rule_level__gte=12, rule_level__lt=15)
+        if rule_level_filter == 'under12':
+            return qs.filter(rule_level__lt=12)
+        return qs
+
+    def _apply_search(qs):
+        if not search_query:
+            return qs
+        return qs.annotate(
+            search_agent_ip=Cast('agent_ip', output_field=CharField()),
+            search_mitre_ids=Cast('mitre_ids', output_field=TextField()),
+        ).filter(
+            Q(agent_name__icontains=search_query)
+            | Q(search_agent_ip__icontains=search_query)
+            | Q(rule_id__icontains=search_query)
+            | Q(rule_description__icontains=search_query)
+            | Q(alert_id__icontains=search_query)
+            | Q(search_mitre_ids__icontains=search_query)
+        )
+
+    alerts = _apply_claim(_apply_ola(_apply_level(_apply_search(queue))))
 
     # ola_deadline is timestamp + a flat OLA_HOURS, so ordering by timestamp
     # ascending is the OLA order — no annotation needed.
-    sort = request.GET.get('sort', 'level').strip()
-    if sort not in ('level', 'ola'):
-        sort = 'level'
-    order = ('timestamp',) if sort == 'ola' else ('-rule_level', 'timestamp')
+    sort = request.GET.get('sort', 'ola').strip()
+    if sort not in ('ola', 'level', 'newest'):
+        sort = 'ola'
+    sort_map = {
+        'ola': ('timestamp', '-rule_level'),
+        'level': ('-rule_level', 'timestamp'),
+        'newest': ('-timestamp', '-rule_level'),
+    }
+    order = sort_map[sort]
     alerts = alerts.select_related('claimed_by').order_by(*order)
 
     paginator = Paginator(alerts, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    # Facet counts for the filter pills, in ONE query. Cumulative thresholds,
-    # not disjoint buckets — "10+" contains "13+" — which is what the "+" in
-    # each label says. Counted over the whole queue (pending AND triaging),
-    # matching what the filter actually narrows.
-    tally = queue.aggregate(
+    # Facets are cross-filtered: each count says what clicking that pill would
+    # produce while retaining the other active dimensions and search text.
+    claim_scope = _apply_ola(_apply_level(_apply_search(queue)))
+    claim_tally = claim_scope.aggregate(
         total=Count('id'),
-        lvl13=Count('id', filter=Q(rule_level__gte=13)),
-        lvl10=Count('id', filter=Q(rule_level__gte=10)),
-        lvl7=Count('id', filter=Q(rule_level__gte=7)),
+        actionable=Count('id', filter=ready_q | mine_q),
+        unclaimed=Count('id', filter=ready_q),
+        mine=Count('id', filter=mine_q),
+        others=Count(
+            'id',
+            filter=(
+                Q(triage_status=WazuhAlert.TRIAGE_TRIAGING)
+                & Q(claimed_by__isnull=False)
+                & ~Q(claimed_by=request.user)
+            ),
+        ),
+    )
+    claim_facets = [
+        {'key': None, 'label': 'พร้อมดำเนินการ', 'count': claim_tally['actionable'],
+         'active': claim_filter == 'actionable'},
+        {'key': 'unclaimed', 'label': 'พร้อมรับ', 'count': claim_tally['unclaimed'],
+         'active': claim_filter == 'unclaimed'},
+        {'key': 'mine', 'label': 'ที่ฉันรับไว้', 'count': claim_tally['mine'],
+         'active': claim_filter == 'mine'},
+        {'key': 'others', 'label': 'ผู้อื่นรับไว้', 'count': claim_tally['others'],
+         'active': claim_filter == 'others'},
+        {'key': 'all', 'label': 'ทั้งหมด', 'count': claim_tally['total'],
+         'active': claim_filter == 'all'},
+    ]
+
+    ola_scope = _apply_claim(_apply_level(_apply_search(queue)))
+    ola_tally = ola_scope.aggregate(
+        total=Count('id'),
+        breached=Count('id', filter=Q(timestamp__lt=breached_before)),
+        due=Count(
+            'id',
+            filter=Q(
+                timestamp__gte=breached_before,
+                timestamp__lte=due_within_hour_before,
+            ),
+        ),
+        on_track=Count('id', filter=Q(timestamp__gt=due_within_hour_before)),
+    )
+    ola_facets = [
+        {'key': None, 'label': 'ทั้งหมด', 'count': ola_tally['total'],
+         'active': not ola_filter},
+        {'key': 'breached', 'label': 'เกิน OLA', 'count': ola_tally['breached'],
+         'active': ola_filter == 'breached'},
+        {'key': 'due', 'label': 'ครบใน 1 ชม.', 'count': ola_tally['due'],
+         'active': ola_filter == 'due'},
+        {'key': 'on_track', 'label': 'ยังไม่เร่งด่วน', 'count': ola_tally['on_track'],
+         'active': ola_filter == 'on_track'},
+    ]
+
+    level_scope = _apply_claim(_apply_ola(_apply_search(queue)))
+    level_tally = level_scope.aggregate(
+        total=Count('id'),
+        lvl15=Count('id', filter=Q(rule_level__gte=15)),
+        lvl12=Count('id', filter=Q(rule_level__gte=12, rule_level__lt=15)),
+        under12=Count('id', filter=Q(rule_level__lt=12)),
     )
     level_facets = [
-        {'key': None, 'label': 'ทั้งหมด', 'count': tally['total'],
+        {'key': None, 'label': 'ทั้งหมด', 'count': level_tally['total'],
          'active': not rule_level_filter},
-        {'key': '13', 'label': '13+ Critical', 'count': tally['lvl13'],
-         'active': rule_level_filter == '13'},
-        {'key': '10', 'label': '10+ High', 'count': tally['lvl10'],
-         'active': rule_level_filter == '10'},
-        {'key': '7', 'label': '7+ Medium', 'count': tally['lvl7'],
-         'active': rule_level_filter == '7'},
+        {'key': '15', 'label': '15+', 'count': level_tally['lvl15'],
+         'active': rule_level_filter == '15'},
+        {'key': '12', 'label': '12–14', 'count': level_tally['lvl12'],
+         'active': rule_level_filter == '12'},
     ]
+    # Keep lower ingested alerts accounted for without making the secondary
+    # bucket permanent when the ingestion policy only admits level 12+.
+    if level_tally['under12'] or rule_level_filter == 'under12':
+        level_facets.append({
+            'key': 'under12', 'label': 'ต่ำกว่า 12', 'count': level_tally['under12'],
+            'active': rule_level_filter == 'under12',
+        })
 
     return render(request, 'wazuh_ingest/triage_queue.html', {
         'page_obj': page_obj,
         'alerts': page_obj,
-        'pending_count': pending.count(),
+        'queue_total': queue_total,
+        'filtered_count': paginator.count,
+        'ready_count': claim_tally['unclaimed'],
+        'mine_count': claim_tally['mine'],
+        'claim_facets': claim_facets,
+        'claim_filter': claim_filter,
+        'ola_facets': ola_facets,
+        'ola_filter': ola_filter,
         'level_facets': level_facets,
         'rule_level_filter': rule_level_filter,
+        'search_query': search_query,
         'sort': sort,
     })
 
