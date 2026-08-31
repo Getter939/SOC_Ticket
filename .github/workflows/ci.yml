@@ -69,7 +69,10 @@ jobs:
       DB_SSLMODE: disable
       EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
       # Keep the file log handler out of CI (settings also drops it under `test`).
-      LOG_DIR: ${{ runner.temp }}/soc-logs
+      # NB: the `runner` context is NOT available in a job-level `env:` block —
+      # `${{ runner.temp }}` here makes GitHub reject the workflow at startup
+      # (0 jobs, instant failure), so use a literal path on the Linux runner.
+      LOG_DIR: /tmp/soc-logs
 
     steps:
       - name: Check out the code
