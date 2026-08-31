@@ -23,6 +23,51 @@ The **code is identical** across all three. Only `.env` differs (DB, secrets, `S
 
 ---
 
+## The operating rhythm — what to do, and when (start here)
+
+Default to a **2-week release train**. Copy this calendar and just follow it; tune the interval later if two weeks feels too tight or too slow.
+
+### The 2-week train, day by day
+
+**Week 1 — Build**
+- **Mon (~30 min) — Plan the train.** Open the backlog, pick the top items that realistically fit two weeks, put them in this train's Milestone (`v1.X.0`). That set is the plan; everything else waits.
+- **Tue–Fri — Build.** One item at a time: `feat/…` branch off `main` → code **+ test** → PR → CI green → merge → delete the branch. Repeat.
+
+**Week 2 — Stabilise & ship**
+- **Mon — Cut the candidate.** Tag `v1.X.0-rc.1`, deploy it to **UAT**, and send coworkers the item list + how to test each (the acceptance criteria).
+- **Tue–Wed — UAT.** They test. A bug → fix on `main` → tag `-rc.2` → redeploy UAT. Repeat until it holds.
+- **Thu — Sign-off + tag the release.** Cutoff for changes. Once signed off, tag `v1.X.0` on the **exact commit UAT approved**.
+- **Thu/Fri (your window) — Deploy to PROD.** Follow [deploy-and-release.windows.md](deploy-and-release.windows.md): backup → checkout tag → migrate/collectstatic → restart → verify `/healthz` → set `APP_VERSION` → bring the spare to the same tag. Watch the rest of the day.
+- **Fri — Close out.** Write the deploy-log line; groom the backlog for the next train.
+
+Next Monday it starts again. Requests that arrived mid-train simply ride the next one.
+
+### Every day (~10 min)
+
+Triage new requests into the backlog — each gets **acceptance criteria** + a **severity**. That's the whole obligation. You do **not** act on them now. "Added to the backlog" is a complete answer.
+
+### "What do I do right now?" — quick reference
+
+| Situation | Do this |
+|---|---|
+| A coworker asks for a change | Add to backlog (criteria + severity). Say "added." Don't touch the running train. |
+| It's Monday, Week 1 | Plan the train: pick scope → Milestone. |
+| An item's code is ready | `feat/…` branch → PR → CI green → merge → delete branch. |
+| All train items merged & green | Tag `-rc.1` → deploy UAT → send the test list. |
+| UAT finds a bug | Fix on `main` → `-rc.N` → redeploy UAT. |
+| UAT signed off | Tag the release → PROD deploy via runbook → watch. |
+| PROD is broken **now** | Hotfix: `fix/…` off the released tag → PR/CI → `vX.Y.1` → deploy (backup first). Jump the queue. |
+| Unsure a request is worth doing | Leave it in the backlog. Decide at planning. Nice-to-haves can wait forever. |
+| Mid-train, tempted to "just push a quick fix to PROD" | Don't. Unless PROD is broken, it rides the train. |
+
+### If you only remember three things
+
+1. **Requests go to the backlog; releases go out on the train** — never deploy PROD on demand.
+2. **One `main`, short branches, ship a tag** — the tag is what moves Dev → UAT → PROD, unchanged.
+3. **Back up before every PROD deploy** — that backup is the whole rollback plan.
+
+---
+
 ## 1. Branching — trunk-based, no "dev/prod" branches
 
 - **`main` is the only long-lived branch.** It is always green (CI passes) and always releasable.
