@@ -36,7 +36,12 @@ class CaseCreationResult:
 
 
 def load_alert_bundle(alert_ids, user, *, lock=False):
-    """Load an actionable Wazuh Alert Bundle owned by ``user``."""
+    """Load and validate an opt-in Alert Bundle for this analyst.
+
+    Selection is a convenience supplied by the browser, never authority. The
+    claimed, actionable and unconsumed checks are repeated here and, for the
+    save path, under row locks in the same transaction as ticket creation.
+    """
     if len(alert_ids) < 2:
         raise ValidationError('กรุณาเลือก Alert ที่เกี่ยวข้องอย่างน้อย 2 รายการ')
     if len(alert_ids) > MAX_ALERT_BUNDLE_SIZE:
@@ -172,7 +177,15 @@ def consume_source_alert(
     project_incident=None,
     stamp_conversion=True,
 ):
-    """Mark a locked Wazuh alert handled by a ticket or project bundle."""
+    """Mark a claimed Wazuh alert handled once it has become a ticket (or a
+    case bundle) and stamp the analyst response time on ``link_ticket``.
+
+    Shared by the single-ticket (create_ticket) and fan-out
+    (create_project_incident) flows — the only differences are the disposition
+    (a bundle is always an Incident) and whether the alert links to a
+    ProjectIncident. ``alert`` must already be locked (select_for_update) and
+    re-validated by the caller.
+    """
     now = timezone.now()
     alert.triage_status = (
         WazuhAlert.TRIAGE_FALSE_POSITIVE
@@ -197,6 +210,9 @@ def consume_source_alert(
         update_fields.insert(0, 'project_incident')
     alert.save(update_fields=update_fields)
 
+    # Stamp analyst response time once (alert actionable → ticket raised).
+    # now() is within sub-second of the ticket's auto_now_add created_at; guard
+    # against clock skew that would otherwise yield a negative duration.
     delta = now - alert.ingested_at
     if stamp_conversion and delta.total_seconds() >= 0:
         link_ticket.alert_conversion_duration = delta
@@ -204,12 +220,21 @@ def consume_source_alert(
 
 
 def consume_source_triage(triage, *, classification, user, ticket=None, project_incident=None):
-    """Mark a locked manual-triage record handled by a ticket or bundle."""
+    """Mark a claimed manual-triage record handled once it has become a ticket
+    (or a case bundle): record the Event/Incident decision, link it to whatever
+    it spawned, stamp who handled it, and release the claim so it leaves the
+    manual queue.
+
+    Shared by both create flows. ``triage`` must already be locked
+    (select_for_update) and re-validated by the caller.
+    """
     triage.decision = (
         TriageRecord.DECISION_FP
         if classification == Ticket.CLASSIFICATION_EVENT
         else TriageRecord.DECISION_TP
     )
+    # Stamped before the claim is cleared — this is the only durable record of
+    # who disposed of the report.
     triage.resolved_by = user
     triage.resolved_at = timezone.now()
     triage.claimed_by = None
