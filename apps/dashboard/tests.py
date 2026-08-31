@@ -643,6 +643,51 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'dashboard/executive.html')
 
+    def _resolve_for_mttr(self, duration_hours, resolved_at):
+        """Create a terminal ticket with a precise first-terminal timestamp."""
+        from apps.incidents.models import TicketLog
+
+        ticket = _make_ticket(status=Ticket.STATUS_APPROVED)
+        Ticket.objects.filter(pk=ticket.pk).update(
+            created_at=resolved_at - timedelta(hours=duration_hours),
+        )
+        log = TicketLog.objects.create(
+            ticket=ticket,
+            note='resolved for executive MTTR test',
+            status_at_time=Ticket.STATUS_APPROVED,
+            author=self.soc,
+        )
+        TicketLog.objects.filter(pk=log.pk).update(created_at=resolved_at)
+        return ticket
+
+    def test_mttr_card_shows_rolling_30_day_median_mean_and_sample(self):
+        now = timezone.now()
+        self._resolve_for_mttr(2, now - timedelta(days=1))
+        self._resolve_for_mttr(4, now - timedelta(days=2))
+        self._resolve_for_mttr(100, now - timedelta(days=31))
+
+        response = self._get()
+
+        self.assertEqual(response.context['mttr_median'], 3.0)
+        self.assertEqual(response.context['mttr_mean'], 3.0)
+        self.assertEqual(response.context['mttr_n'], 2)
+        html = response.content.decode()
+        self.assertIn('3.0 ชม.', html)
+        self.assertIn('n=2', html)
+        self.assertIn('30 วันล่าสุด', html)
+        self.assertNotIn('อยู่ระหว่างรวบรวมข้อมูล', html)
+
+    def test_mttr_card_has_clear_empty_state(self):
+        response = self._get()
+
+        self.assertIsNone(response.context['mttr_median'])
+        self.assertIsNone(response.context['mttr_mean'])
+        self.assertEqual(response.context['mttr_n'], 0)
+        self.assertIn(
+            'ไม่มีเคสที่ปิดใน 30 วันล่าสุด',
+            response.content.decode(),
+        )
+
     # ── Project Incident rollup ──────────────────────────────────────── #
 
     def _bundle(self, size=3, severity='Critical',

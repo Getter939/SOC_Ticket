@@ -211,12 +211,17 @@
                 </div>
                 <div class="col-6">
                     <div class="stat-card b-orange">
-                        {# TODO(MTTR): compute median/mean of (closed_at - created_at) over #}
-                        {# terminal tickets (last 30 days) once closed_at coverage is       #}
-                        {# sufficient — imported historical rows mostly lack closed_at.     #}
+                        {% if mttr_n %}
+                        <div class="stat-value text-warning">{{ mttr_median }} ชม.</div>
+                        <div class="stat-label">มัธยฐานเวลาในการแก้ไข (MTTR)</div>
+                        <div class="stat-sub text-muted">
+                            ค่าเฉลี่ย {{ mttr_mean }} ชม. · n={{ mttr_n|intcomma }} · 30 วันล่าสุด
+                        </div>
+                        {% else %}
                         <div class="stat-value text-muted">–</div>
-                        <div class="stat-label">เวลาเฉลี่ยในการแก้ไข (MTTR)</div>
-                        <div class="stat-sub text-muted">อยู่ระหว่างรวบรวมข้อมูล</div>
+                        <div class="stat-label">มัธยฐานเวลาในการแก้ไข (MTTR)</div>
+                        <div class="stat-sub text-muted">ไม่มีเคสที่ปิดใน 30 วันล่าสุด</div>
+                        {% endif %}
                     </div>
                 </div>
             </div>

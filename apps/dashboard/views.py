@@ -82,6 +82,43 @@ def humanize_minutes(total_minutes):
         return f'{hours}h {mins}m' if mins else f'{hours}h'
     return f'{mins}m'
 
+
+def _with_resolved_at(queryset):
+    """Annotate terminal tickets with their authoritative resolution time."""
+    terminal = list(Ticket.TERMINAL_STATUSES)
+    first_terminal_log = (
+        TicketLog.objects
+        .filter(ticket=OuterRef('pk'), status_at_time__in=terminal)
+        .order_by('created_at')
+        .values('created_at')[:1]
+    )
+    return queryset.annotate(
+        resolved_at=Coalesce(
+            Subquery(first_terminal_log), F('approved_at'), F('updated_at'),
+        )
+    )
+
+
+def _mttr_stats(resolved_queryset, now):
+    """Return 30-day ticket-grain MTTR median, mean, and sample size."""
+    mttr_rows = (
+        resolved_queryset
+        .filter(resolved_at__gte=now - timedelta(days=30))
+        .values_list('resolved_at', 'created_at')
+    )
+    hours = [
+        (resolved - created).total_seconds() / 3600
+        for resolved, created in mttr_rows
+        if resolved and created and resolved >= created
+    ]
+    if not hours:
+        return {'mttr_median': None, 'mttr_mean': None, 'mttr_n': 0}
+    return {
+        'mttr_median': round(_median(hours), 1),
+        'mttr_mean': round(_mean(hours), 1),
+        'mttr_n': len(hours),
+    }
+
 @login_required
 def dashboard(request):
     profile = getattr(request.user, 'profile', None)
@@ -159,44 +196,16 @@ def dashboard(request):
     # ── Resolution timestamp (no resolved_at field — derive from TicketLog) ─ #
     # First time the ticket entered a terminal state. Coalesced with
     # approved_at / updated_at for rows seeded straight into a terminal state.
-    first_terminal_log = (
-        TicketLog.objects
-        .filter(ticket=OuterRef('pk'), status_at_time__in=terminal)
-        .order_by('created_at')
-        .values('created_at')[:1]
-    )
-    resolved_at_expr = Coalesce(
-        Subquery(first_terminal_log), F('approved_at'), F('updated_at'),
-    )
-    resolved_qs = closed_qs.annotate(resolved_at=resolved_at_expr)
+    resolved_qs = _with_resolved_at(closed_qs)
 
     # ── MTTR over the last 30 days (hours), median/mean/n ─────────────────── #
     # resolved_at is derived from TicketLog, so it always exists; median is
     # computed in Python to stay database-agnostic.
-    thirty_days_ago = now - timedelta(days=30)
-    mttr_rows = (
-        resolved_qs.filter(resolved_at__gte=thirty_days_ago)
-        .values_list('resolved_at', 'created_at')
-    )
-    mttr_hours = [
-        (resolved - created).total_seconds() / 3600
-        for resolved, created in mttr_rows
-        if resolved and created and resolved >= created
-    ]
-    if mttr_hours:
-        mttr_n      = len(mttr_hours)
-        mttr_median = round(_median(mttr_hours), 1)
-        mttr_mean   = round(_mean(mttr_hours), 1)
-    else:
-        mttr_n      = 0
-        mttr_median = None
-        mttr_mean   = None
+    mttr_stats = _mttr_stats(resolved_qs, now)
 
     stats = {
-        'active':          active_qs.count(),
-        'mttr_median':         mttr_median,            # hours, last 30 days (None if none)
-        'mttr_mean':           mttr_mean,              # hours, last 30 days (None if none)
-        'mttr_n':              mttr_n,                 # count of resolved in last 30 days
+        'active': active_qs.count(),
+        **mttr_stats,
     }
 
     # ── Pipeline chart — ACTIVE statuses only, in STATUS_CHOICES order ───── #
@@ -352,9 +361,7 @@ def dashboard(request):
     for a in assignee_heatmap:
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
 
-    # Avg MTTR by threat type (hours), last 30 days, ≥2 resolved per type.
-    # NOTE: computed but not currently rendered (the Row 3 MTTR panel was
-    # removed in Session 3C); kept available should the panel return.
+    # Avg MTTR by threat type was removed with the Row 3 panel in Session 3C.
     # OLA pressure — active queue bucketed by time-to-deadline. Answers the
     # manager's "what needs attention now?" Each bucket carries its severity mix
     # so a Critical that's overdue stands out (tooltip). Respects the same active
@@ -571,7 +578,7 @@ def executive_dashboard(request):
     """Executive dashboard — glanceable posture summary for management.
 
     Follows the approved wireframe: KPI cards (total High/Critical count
-    with month-over-month delta, MTTR placeholder), a date-scoped
+    with month-over-month delta, 30-day MTTR), a date-scoped
     High/Critical closure progress bar, a six-criteria executive summary
     with an overall GOOD / WAITING / WARNING verdict, the date-scoped
     pipeline chart, and a date-scoped filterable ticket detail table.
@@ -648,6 +655,14 @@ def executive_dashboard(request):
             'all': 'All Time',
         }[date_range]
     range_active_qs = range_tickets.exclude(status__in=terminal)
+
+    # MTTR intentionally stays on a fixed rolling 30-day window rather than
+    # following the dashboard's date-range control. This matches the SOC
+    # dashboard definition and keeps the executive KPI comparable over time.
+    executive_resolved_qs = _with_resolved_at(
+        all_tickets.filter(status__in=terminal)
+    )
+    mttr_stats = _mttr_stats(executive_resolved_qs, now)
 
     # ── KPI 1: total High/Critical cases + delta vs start of this month ─── #
     # Incident grain, not ticket grain — see _incident_count. The executive
@@ -860,6 +875,7 @@ def executive_dashboard(request):
         'hc_closed': hc_closed,
         'hc_open': hc_open,
         'hc_progress_pct': hc_progress_pct,
+        **mttr_stats,
         'summary_criteria': summary_criteria,
         'overall_status': overall_status,
         'pipeline_by_severity': pipeline_by_severity,
