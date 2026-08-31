@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog, Ticket, TicketLog
-from .notifications import notify_containment_alert
+from .notifications import notify_containment_alert, notify_system_owner_created
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class ProjectWorkflowResult:
 
 
 def forward_project_review(*, project, actor, want_emergency, note):
-    """Record one group verdict and forward every member awaiting review."""
+    """Record one group verdict and forward every Incident awaiting review."""
     verdict = 'Emergency' if want_emergency else 'Normal'
     with transaction.atomic():
         locked_project = ProjectIncident.objects.select_for_update().get(pk=project.pk)
@@ -63,8 +63,11 @@ def forward_project_review(*, project, actor, want_emergency, note):
     warnings = tuple(
         warning
         for ticket in pending
-        if ticket.status == Ticket.STATUS_AWAITING_CONTAINMENT
-        for warning in _containment_warnings(ticket)
+        for warning in (
+            _owner_route_warnings(ticket)
+            if ticket.status == Ticket.STATUS_AWAITING_OWNER
+            else _containment_warnings(ticket)
+        )
     )
     return ProjectWorkflowResult(
         project=locked_project,
@@ -81,6 +84,7 @@ def reassess_project_emergency(*, project, actor, value, reason):
             locked_project.member_tickets.select_for_update()
             .exclude(status__in=Ticket.TERMINAL_STATUSES)
             .exclude(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+            .filter(classification=Ticket.CLASSIFICATION_INCIDENT)
         )
         for ticket in active_members:
             if ticket.is_emergency != value:
@@ -185,4 +189,16 @@ def _containment_warnings(ticket):
         return (f'Ticket routed — {admin.get_full_name() or admin.username} ไม่มีอีเมล',)
     if not notify_containment_alert(ticket, reason=None):
         return ('Ticket routed แต่ส่งอีเมลแจ้งเตือนไม่สำเร็จ — โปรดแจ้งผู้ดูแลระบบด้วยตนเอง',)
+    return ()
+
+
+def _owner_route_warnings(ticket):
+    """Notify an owner only after the manager releases the Incident lane."""
+    if not ticket.system_owner_id:
+        return ('Ticket routed — ไม่สามารถแจ้งเจ้าของระบบได้: ยังไม่ได้กำหนดเจ้าของระบบ',)
+    owner = ticket.system_owner
+    if not owner.email:
+        return (f'Ticket routed — {owner.get_full_name() or owner.username} ไม่มีอีเมล',)
+    if not notify_system_owner_created(ticket):
+        return ('Ticket routed แต่ส่งอีเมลแจ้งเจ้าของระบบไม่สำเร็จ — โปรดแจ้งด้วยตนเอง',)
     return ()

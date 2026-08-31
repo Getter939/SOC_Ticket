@@ -51,7 +51,7 @@ _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, reso
 ## Grouping
 
 **Project Incident**:
-One real-world Incident that hit multiple systems, worked as several linked Tickets — one per affected system. The grouping and rollup unit. It has one group coordination gate, Project Review, but Containment and closure remain on each Member Ticket.
+One multi-system security case worked as several linked Member Tickets — one per affected system. Each member is independently classified as Event or Incident; only Incident members pass through Project Review and Containment.
 _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Incident" in prose
 
 **Alert Bundle**:
@@ -67,11 +67,11 @@ An Alert in an Alert Bundle that supplies corroborating evidence but does not se
 _Avoid_: Duplicate alert, secondary ticket
 
 **Project Review**:
-The SOC Manager's one-time, group-level Manager Triage Review for a Project Incident. It records one Normal/Emergency assessment and forwards every waiting Member Ticket to its already-selected handling route. A later reassessment changes the Emergency state of all active members together.
+The SOC Manager's one-time, group-level Manager Triage Review for the Incident members of a Project Incident. It records one Normal/Emergency assessment and forwards every waiting Incident member to its already-selected handling route; Event members remain with Tier 2 for individual verification.
 _Avoid_: member review, group approval
 
 **Member Ticket**:
-A Ticket that belongs to a Project Incident. Each member is contained and closed independently on its own OLA clock; only its target (device / IP / owner / admin) differs from its siblings.
+A Ticket that belongs to a Project Incident and is independently classified as Event or Incident. An Event member is verified and closed by Tier 2; an Incident member follows its own Owner/Admin route, OLA clock, Containment, and closure.
 _Avoid_: Child ticket, sub-ticket
 
 **Member Reference**:

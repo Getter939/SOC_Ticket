@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.wazuh_ingest.models import WazuhAlert
 
-from .forms import ProjectIncidentForm, TicketForm
+from .forms import ProjectIncidentForm, ProjectIncidentTargetForm, TicketForm
 from .models import (
     ProjectIncident,
     Ticket,
@@ -133,6 +133,12 @@ def create_project_incident_from_forms(
         if len(tickets) < 2:
             raise ValidationError('ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident')
 
+        source_classification = (
+            Ticket.CLASSIFICATION_INCIDENT
+            if any(ticket.is_incident for ticket in tickets)
+            else Ticket.CLASSIFICATION_EVENT
+        )
+
         if source_alert is not None:
             locked_alert = WazuhAlert.objects.select_for_update().get(pk=source_alert.pk)
             if not can_create_ticket_from_wazuh(locked_alert, actor):
@@ -143,7 +149,7 @@ def create_project_incident_from_forms(
             consume_source_alert(
                 locked_alert,
                 actor,
-                classification=Ticket.CLASSIFICATION_INCIDENT,
+                classification=source_classification,
                 link_ticket=tickets[0],
                 project_incident=project,
             )
@@ -152,15 +158,23 @@ def create_project_incident_from_forms(
             locked_triage = _lock_triage(source_triage, actor, project=True)
             consume_source_triage(
                 locked_triage,
-                classification=Ticket.CLASSIFICATION_INCIDENT,
+                classification=source_classification,
                 user=actor,
                 project_incident=project,
             )
 
         adopt_staged(evidence_token, actor, project=project)
 
-    warnings = list(_project_creation_warnings(tickets))
-    notify_manager_triage_pending(tickets[0])
+    # Incident owners/admins are notified only after the SOC Manager releases
+    # the corresponding member from Project Review.
+    warnings = []
+    first_incident = next(
+        (ticket for ticket in tickets
+         if ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE),
+        None,
+    )
+    if first_incident is not None:
+        notify_manager_triage_pending(first_incident)
     return CaseCreationResult(
         project=project,
         tickets=tuple(tickets),
@@ -181,10 +195,10 @@ def consume_source_alert(
     case bundle) and stamp the analyst response time on ``link_ticket``.
 
     Shared by the single-ticket (create_ticket) and fan-out
-    (create_project_incident) flows — the only differences are the disposition
-    (a bundle is always an Incident) and whether the alert links to a
-    ProjectIncident. ``alert`` must already be locked (select_for_update) and
-    re-validated by the caller.
+    (create_project_incident) flows. A mixed Project Incident records its
+    source as Incident when any member is an Incident, and as Event only when
+    every member is an Event. ``alert`` must already be locked
+    (select_for_update) and re-validated by the caller.
     """
     now = timezone.now()
     alert.triage_status = (
@@ -349,20 +363,39 @@ def _create_project_members(project, shared, target_formset, actor):
         for field_name in BUNDLE_SHARED_FIELDS:
             setattr(ticket, field_name, shared[field_name])
         ticket.incident_name = shared['title']
-        ticket.classification = Ticket.CLASSIFICATION_INCIDENT
-        ticket.t1_route = cleaned_data['t1_route']
+        route = cleaned_data['t1_route']
+        is_event = route == ProjectIncidentTargetForm.ROUTE_EVENT
+        ticket.classification = (
+            Ticket.CLASSIFICATION_EVENT if is_event
+            else Ticket.CLASSIFICATION_INCIDENT
+        )
+        ticket.t1_route = '' if is_event else route
         ticket.created_by = actor
         ticket.assigned_to = actor
         ticket.project_incident = project
         ticket.bundle_suffix = bundle_suffix_for_index(len(tickets))
         ticket.save()
-        ticket.transition_to(
-            Ticket.STATUS_PENDING_MGR_TRIAGE,
-            actor,
-            f'Project Incident {project.project_code} — '
-            f'จัดประเภทเป็น Incident มอบหมายผู้ดูแลระบบ ({ticket.device_name}) '
-            '— รอผู้จัดการ SOC ตรวจ',
-        )
+        if is_event:
+            ticket.transition_to(
+                Ticket.STATUS_ESCALATED_T2,
+                actor,
+                f'Project Incident {project.project_code} — '
+                f'จัดประเภท {ticket.device_name} เป็น Event '
+                '— ส่ง Tier 2 ยืนยันก่อนปิด',
+            )
+        else:
+            route_label = (
+                'เจ้าของระบบ'
+                if route == Ticket.T1_ROUTE_OWNER else 'ผู้ดูแลระบบ'
+            )
+            ticket.transition_to(
+                Ticket.STATUS_PENDING_MGR_TRIAGE,
+                actor,
+                f'Project Incident {project.project_code} — '
+                f'จัดประเภท {ticket.device_name} เป็น Incident '
+                f'และเลือกส่งให้{route_label} '
+                '— รอผู้จัดการ SOC ตรวจ',
+            )
         tickets.append(ticket)
     return tickets
 
@@ -374,13 +407,4 @@ def _ticket_creation_warnings(ticket):
             warnings.append('Ticket สร้างแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
     if ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE:
         notify_manager_triage_pending(ticket)
-    return tuple(warnings)
-
-
-def _project_creation_warnings(tickets):
-    warnings = []
-    for ticket in tickets:
-        if ticket.system_owner and ticket.system_owner.email:
-            if not notify_system_owner_created(ticket):
-                warnings.append(f'{ticket.bundle_ref}: ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
     return tuple(warnings)

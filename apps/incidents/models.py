@@ -110,14 +110,14 @@ def bundle_suffix_for_index(index):
 
 class ProjectIncident(models.Model):
     """
-    One real-world security incident that hit MULTIPLE systems and is therefore
-    worked as several linked tickets — one per affected system. The member
-    tickets share the incident facts and Project Review decision; only the
-    target (device / IP / owner / admin) and handling route may differ.
+    One multi-system security case worked as several linked tickets — one per
+    affected system. Member tickets share the case facts but are independently
+    classified: Events go to Tier 2 verification, while Incidents share the
+    Project Review decision before entering their per-target handling routes.
 
     This is the "Case Bundling" grouping: the bundle counts as a single
-    incident/report, while its member tickets are contained and closed
-    independently on their own OLA clocks. Members are reached via the
+    case/report, while its member tickets are verified or contained and closed
+    independently. Members are reached via the
     ``member_tickets`` reverse relation and carry a stable, trackable id of the
     form ``<project_code>-<bundle_suffix>`` (see ``Ticket.bundle_ref``).
     """
@@ -129,8 +129,8 @@ class ProjectIncident(models.Model):
     summary = models.TextField(
         blank=True, default='', verbose_name='รายละเอียดโดยรวม',
     )
-    # A Project Incident is one real-world event. The manager rules its
-    # Emergency assessment once at group review; active members inherit it.
+    # The manager rules Emergency once for the bundle's Incident members;
+    # Event members bypass Project Review and never inherit reassessments.
     is_emergency = models.BooleanField(default=False, verbose_name='สถานะฉุกเฉิน')
     emergency_decided_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,

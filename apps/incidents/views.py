@@ -796,6 +796,7 @@ def project_incident_detail(request, pk):
     next_ola_member = (
         project.member_tickets
         .exclude(status__in=Ticket.TERMINAL_STATUSES)
+        .filter(classification=Ticket.CLASSIFICATION_INCIDENT)
         .filter(ola_contain_deadline__isnull=False)
         .order_by('ola_contain_deadline')
         .first()

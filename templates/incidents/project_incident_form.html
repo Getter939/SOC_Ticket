@@ -475,11 +475,12 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
       });
       return;
     }
+    const isEventRoute = route === 'EVENT';
     const isOwnerRoute = route === 'OWNER';
-    admin.classList.toggle('d-none', isOwnerRoute);
-    owner.classList.toggle('d-none', !isOwnerRoute);
-    admin.querySelector('select').disabled = isOwnerRoute;
-    owner.querySelector('select').disabled = !isOwnerRoute;
+    admin.classList.toggle('d-none', isOwnerRoute || isEventRoute);
+    owner.classList.toggle('d-none', !isOwnerRoute || isEventRoute);
+    admin.querySelector('select').disabled = isOwnerRoute || isEventRoute;
+    owner.querySelector('select').disabled = !isOwnerRoute || isEventRoute;
   }
 
   container.querySelectorAll('.target-card').forEach(syncTargetRoute);

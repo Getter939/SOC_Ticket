@@ -3412,6 +3412,110 @@ class ProjectIncidentFanOutTest(TestCase):
         # Per-target facts differ.
         self.assertEqual({m.device_name for m in members}, {'HR Portal', 'AD Server'})
 
+    def test_each_system_can_choose_event_or_an_incident_route(self):
+        """A mixed bundle sends only Event members to Tier 2 verification."""
+        self.client.login(username='pi_t1', password='testpass123')
+        response = self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(
+                self.admin_a,
+                self.admin_b,
+                **{
+                    'target-0-t1_route': ProjectIncidentTargetForm.ROUTE_EVENT,
+                    'target-0-assigned_admin': '',
+                    'target-1-t1_route': Ticket.T1_ROUTE_OWNER,
+                    'target-1-assigned_admin': '',
+                    'target-1-system_owner': str(self.owner_b.pk),
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+
+        project = ProjectIncident.objects.get()
+        event_member, incident_member = list(project.members)
+        self.assertEqual(event_member.classification, Ticket.CLASSIFICATION_EVENT)
+        self.assertEqual(event_member.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertEqual(event_member.t1_route, '')
+        self.assertIsNone(event_member.assigned_admin)
+        self.assertIsNone(event_member.system_owner)
+        self.assertEqual(incident_member.classification, Ticket.CLASSIFICATION_INCIDENT)
+        self.assertEqual(incident_member.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(incident_member.t1_route, Ticket.T1_ROUTE_OWNER)
+
+        # Project Review moves only the Incident member. The Event remains an
+        # independent Tier 2 decision and carries no Emergency assessment.
+        self.client.logout()
+        self.client.login(username='pi_manager', password='testpass123')
+        self.client.post(reverse('project_incident_detail', args=[project.pk]), {
+            'action': 'project_mgr_forward',
+            'emergency_assessment': 'emergency',
+            'decision_note': 'Review the Incident member only.',
+        })
+        event_member.refresh_from_db()
+        incident_member.refresh_from_db()
+        self.assertEqual(event_member.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertFalse(event_member.is_emergency)
+        self.assertEqual(incident_member.status, Ticket.STATUS_AWAITING_OWNER)
+        self.assertTrue(incident_member.is_emergency)
+
+        # Tier 2 verifies and closes this Event member without moving its
+        # Incident sibling.
+        event_member.transition_to(
+            Ticket.STATUS_CLOSED_EVENT,
+            self.t2,
+            'Verified as Event.',
+        )
+        event_member.refresh_from_db()
+        incident_member.refresh_from_db()
+        self.assertEqual(event_member.status, Ticket.STATUS_CLOSED_EVENT)
+        self.assertEqual(incident_member.status, Ticket.STATUS_AWAITING_OWNER)
+
+    @patch('apps.incidents.case_creation.notify_manager_triage_pending')
+    def test_all_event_bundle_skips_manager_review_and_marks_source_event(
+        self,
+        notify_manager,
+    ):
+        alert = self._claimed_alert(self.t1)
+        self.client.login(username='pi_t1', password='testpass123')
+        response = self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(
+                self.admin_a,
+                self.admin_b,
+                wazuh_alert=str(alert.pk),
+                **{
+                    'target-0-t1_route': ProjectIncidentTargetForm.ROUTE_EVENT,
+                    'target-0-assigned_admin': '',
+                    'target-1-t1_route': ProjectIncidentTargetForm.ROUTE_EVENT,
+                    'target-1-assigned_admin': '',
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            ProjectIncident.objects.get().members.exclude(
+                classification=Ticket.CLASSIFICATION_EVENT,
+                status=Ticket.STATUS_ESCALATED_T2,
+            ).exists()
+        )
+        alert.refresh_from_db()
+        self.assertEqual(alert.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        notify_manager.assert_not_called()
+
+    def test_event_route_is_visible_and_does_not_require_an_assignment(self):
+        form = ProjectIncidentTargetForm(data={
+            'device_name': 'Benign host',
+            't1_route': ProjectIncidentTargetForm.ROUTE_EVENT,
+        })
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.cleaned_data['assigned_admin'])
+        self.assertIsNone(form.cleaned_data['system_owner'])
+        self.client.login(username='pi_t1', password='testpass123')
+        page = self.client.get(reverse('create_project_incident'))
+        self.assertContains(page, 'Event — ส่ง Tier 2 ยืนยันและปิด')
+        self.assertContains(page, "route === 'EVENT'")
+
     def test_per_system_detail_saved_per_member(self):
         """Each system's own รายละเอียด note lands on its member ticket only,
         while the shared incident summary stays copied onto both."""

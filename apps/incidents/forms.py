@@ -332,12 +332,12 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
 
 
 class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
-    """Shared, incident-level fields for a multi-system case bundle.
+    """Shared fields for a multi-system case bundle.
 
-    Classification is implicitly Incident, so this form carries no
-    classification radio — only the facts common to every affected system.
-    Per-target fields, including each member's handling route, live on
-    ``ProjectIncidentTargetForm``. This form is never saved
+    Classification belongs to each generated member Ticket, so this shared
+    form carries no classification radio. Per-target fields, including each
+    member's Event/Admin/Owner decision, live on ``ProjectIncidentTargetForm``.
+    This form is never saved
     directly; ``create_project_incident`` reads ``cleaned_data`` and copies the
     shared values onto each generated member ticket.
     """
@@ -443,8 +443,14 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         empty_label='-- เลือกเจ้าของระบบ --',
         widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
     )
+    ROUTE_EVENT = 'EVENT'
+    ROUTE_CHOICES = [
+        (ROUTE_EVENT, 'Event — ส่ง Tier 2 ยืนยันและปิด'),
+        *Ticket.T1_ROUTE_CHOICES,
+    ]
+
     t1_route = forms.ChoiceField(
-        choices=Ticket.T1_ROUTE_CHOICES,
+        choices=ROUTE_CHOICES,
         required=True,
         label='เส้นทางการดำเนินการ',
         widget=forms.RadioSelect(attrs={'class': 'route-radio'}),
@@ -480,7 +486,12 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         route = cleaned.get('t1_route')
-        if route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
+        if route == self.ROUTE_EVENT:
+            # Event members do not enter an Incident handling lane. Tier 2
+            # verifies them independently after creation.
+            cleaned['assigned_admin'] = None
+            cleaned['system_owner'] = None
+        elif route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
             self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบ')
         elif route == Ticket.T1_ROUTE_OWNER and not cleaned.get('system_owner'):
             self.add_error('system_owner', 'กรุณาเลือกเจ้าของระบบ')

@@ -196,7 +196,7 @@
           <td><span class="fw-semibold">{{ ticket.bundle_ref }}</span><div class="text-muted small">{{ ticket.ticket_id }}</div></td>
           <td>{{ ticket.device_name }}{% if ticket.ip_address %}<div class="text-muted small">{{ ticket.ip_address }}</div>{% endif %}{% if ticket.operating_system %}<div class="text-muted small"><i class="bi bi-pc-display me-1"></i>{{ ticket.operating_system }}</div>{% endif %}</td>
           <td>{{ ticket.asset_owner|default:"—" }}</td>
-           <td>{% if ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">Owner</span> {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username|default:"—" }}{% else %}<span class="badge bg-light text-dark border">Admin</span> {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}{% endif %}</td>
+           <td>{% if ticket.classification == 'EVENT' %}<span class="badge bg-secondary">Event</span> <span class="text-muted">Tier 2 ยืนยัน</span>{% elif ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">Owner</span> {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username|default:"—" }}{% else %}<span class="badge bg-light text-dark border">Admin</span> {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username|default:"—" }}{% endif %}</td>
           <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
           <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
           <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>

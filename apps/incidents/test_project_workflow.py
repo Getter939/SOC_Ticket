@@ -62,6 +62,7 @@ class ProjectWorkflowServiceTest(TestCase):
         cls.owner = _user(
             'project-workflow-owner',
             UserProfile.ROLE_SYSTEM_OWNER,
+            email='owner@example.com',
         )
 
     def _project(self, **overrides):
@@ -139,6 +140,12 @@ class ProjectWorkflowServiceTest(TestCase):
             ip_address='192.0.2.103',
             is_emergency=True,
         )
+        event = _member(
+            project,
+            ip_address='192.0.2.104',
+            classification=Ticket.CLASSIFICATION_EVENT,
+            status=Ticket.STATUS_ESCALATED_T2,
+        )
 
         result = reassess_project_emergency(
             project=project,
@@ -151,10 +158,12 @@ class ProjectWorkflowServiceTest(TestCase):
         active.refresh_from_db()
         terminal.refresh_from_db()
         pending.refresh_from_db()
+        event.refresh_from_db()
         self.assertFalse(project.is_emergency)
         self.assertFalse(active.is_emergency)
         self.assertTrue(terminal.is_emergency)
         self.assertTrue(pending.is_emergency)
+        self.assertFalse(event.is_emergency)
         self.assertEqual(result.tickets, (active,))
         self.assertTrue(TicketLog.objects.filter(
             ticket=active,
