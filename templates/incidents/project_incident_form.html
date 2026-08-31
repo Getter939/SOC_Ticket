@@ -174,14 +174,14 @@
           {% if form.destination_ip.errors %}<div class="text-danger small">{{ form.destination_ip.errors }}</div>{% endif %}
         </div>
         <div class="col-12">
-          <label class="form-label fw-semibold">Phase การโจมตี (MITRE ATT&amp;CK)</label>
+          <label class="form-label fw-semibold">MITRE ATT&amp;CK Tactics (ยุทธวิธีการโจมตี)</label>
           <div class="mitre-grid">
-            {% for cb in form.mitre_phase %}
+            {% for cb in form.mitre_tactics %}
               <div class="mitre-option">{{ cb.tag }}<label for="{{ cb.id_for_label }}">{{ cb.choice_label }}</label></div>
             {% endfor %}
           </div>
           <div class="field-hint">เลือกได้หลาย Tactic — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
-          {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
+          {% if form.mitre_tactics.errors %}<div class="text-danger small">{{ form.mitre_tactics.errors }}</div>{% endif %}
         </div>
         <div class="col-12">
           <label class="form-label fw-semibold">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>

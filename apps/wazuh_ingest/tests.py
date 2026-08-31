@@ -29,7 +29,7 @@ def _make_alert(rule_level=12, opensearch_id='alert-1', **kwargs):
         'timestamp': timezone.now(),
         'rule_description': 'Suspicious PowerShell execution',
         'agent_name': 'DESKTOP-EP4F8C5',
-        'mitre_tactics': ['Defense Evasion'],
+        'mitre_tactics': ['Stealth'],
     }
     values.update(kwargs)
     return WazuhAlert.objects.create(
@@ -52,7 +52,7 @@ def _make_hit(opensearch_id='6jTLMJkB07VbjNIu73jt', rule_level=12, timestamp='20
                 'groups': ['windows', 'authentication_success'],
                 'mitre': {
                     'technique': ['Valid Accounts'],
-                    'tactic': ['Defense Evasion', 'Persistence'],
+                    'tactic': ['Stealth', 'Persistence'],
                     'id': ['T1078'],
                 },
             },
@@ -94,7 +94,7 @@ class FetchAndStoreAlertsTest(TestCase):
         self.assertEqual(alert.rule_description, 'Windows Logon Success')
         self.assertEqual(alert.rule_groups, ['windows', 'authentication_success'])
         self.assertEqual(alert.mitre_techniques, ['Valid Accounts'])
-        self.assertEqual(alert.mitre_tactics, ['Defense Evasion', 'Persistence'])
+        self.assertEqual(alert.mitre_tactics, ['Stealth', 'Persistence'])
         self.assertEqual(alert.mitre_ids, ['T1078'])
         self.assertEqual(alert.decoder_name, 'windows_eventchannel')
         self.assertEqual(alert.raw_data, {'win': {'eventdata': {}, 'system': {'eventID': '4624'}}})

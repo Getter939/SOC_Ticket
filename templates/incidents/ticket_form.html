@@ -43,7 +43,7 @@
   input[value="NON_SEVERE"] + label { border-color: #198754; color: #198754; }
   input[value="NON_SEVERE"]:checked + label { background: #198754; color: #fff; }
 
-  /* MITRE ATT&CK multi-select checkboxes */
+  /* MITRE ATT&CK tactic multi-select checkboxes */
   .mitre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .3rem .75rem; }
   .mitre-option { display: flex; align-items: center; gap: .4rem; }
   .mitre-option label { font-size: .82rem; margin: 0; cursor: pointer; }
@@ -314,14 +314,14 @@
         </div>
 
         <div class="col-12">
-          <div class="form-label fw-semibold" id="mitre-group-label">Phase การโจมตีตาม MITRE ATT&CK</div>
+          <div class="form-label fw-semibold" id="mitre-group-label">MITRE ATT&CK Tactics (ยุทธวิธีการโจมตี)</div>
           <div class="mitre-grid" role="group" aria-labelledby="mitre-group-label">
-            {% for cb in form.mitre_phase %}
+            {% for cb in form.mitre_tactics %}
               <div class="mitre-option">{{ cb.tag }}<label for="{{ cb.id_for_label }}">{{ cb.choice_label }}</label></div>
             {% endfor %}
           </div>
-          <div class="field-hint">เลือกได้หลาย Tactic — เหตุการณ์หนึ่งอาจครอบคลุมหลายขั้นตอนของ MITRE ATT&CK</div>
-          {% if form.mitre_phase.errors %}<div class="text-danger small">{{ form.mitre_phase.errors }}</div>{% endif %}
+          <div class="field-hint">เลือกได้หลาย Tactic — เหตุการณ์หนึ่งอาจเกี่ยวข้องกับหลายเป้าหมายเชิงยุทธวิธีของ MITRE ATT&CK</div>
+          {% if form.mitre_tactics.errors %}<div class="text-danger small">{{ form.mitre_tactics.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">

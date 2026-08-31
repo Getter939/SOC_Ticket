@@ -210,7 +210,7 @@ onto its own wrapped row, which space-between then left-aligned.
               <dt>หน่วยงานเจ้าของทรัพย์สิน</dt><dd>{{ ticket.asset_owner|default:"-" }}</dd>
               <dt>ชื่อเจ้าของทรัพย์สิน</dt><dd>{{ ticket.asset_owner_name|default:"-" }}</dd>
               <dt>การกระจาย</dt><dd>{% if ticket.spread_to_others == True %}<span class="text-danger fw-bold">พบการกระจาย</span>{% elif ticket.spread_to_others == False %}ไม่พบการกระจาย{% else %}รอตรวจสอบ{% endif %}</dd>
-              <dt>MITRE ATT&CK</dt><dd>{% for phase in ticket.mitre_phase_labels %}<span class="badge bg-dark-subtle text-dark border me-1 mb-1">{{ phase }}</span>{% empty %}-{% endfor %}</dd>
+              <dt>MITRE ATT&CK Tactics</dt><dd>{% for tactic in ticket.mitre_tactic_labels %}<span class="badge bg-dark-subtle text-dark border me-1 mb-1">{{ tactic }}</span>{% empty %}-{% endfor %}</dd>
             </dl>
           </div>
           <div class="col-md-6">

@@ -70,15 +70,15 @@ def _ncsa_severity_field():
     )
 
 
-def _mitre_phase_field():
-    """Multi-select MITRE ATT&CK phases — an incident can span several phases.
-    Stored on the model as a comma-separated string (see ``clean_mitre_phase``
+def _mitre_tactic_field():
+    """Multi-select MITRE ATT&CK tactics — an incident can span several tactics.
+    Stored on the model as a comma-separated string (see ``clean_mitre_tactics``
     and ``_init_report_fields``). Fresh instance per form."""
     return forms.MultipleChoiceField(
-        choices=Ticket.MITRE_PHASE_CHOICES,
+        choices=Ticket.MITRE_TACTIC_CHOICES,
         required=False,
-        label='Phase การโจมตีตาม MITRE ATT&CK',
-        widget=forms.CheckboxSelectMultiple(attrs={'class': 'mitre-phase-checks'}),
+        label='MITRE ATT&CK Tactics (ยุทธวิธีการโจมตี)',
+        widget=forms.CheckboxSelectMultiple(attrs={'class': 'mitre-tactic-checks'}),
     )
 
 
@@ -113,7 +113,7 @@ def _spread_field():
 
 class _ReportFields:
     """Shared helper *methods* for the NCSA-report inputs (``ncsa_severity`` +
-    ``mitre_phase``).
+    ``mitre_tactics``).
 
     The two fields themselves are declared inline on each form via the factory
     helpers above — a plain mixin's ``Field`` class attributes are NOT collected
@@ -123,15 +123,15 @@ class _ReportFields:
     """
 
     def _init_report_fields(self):
-        """Seed the multi-select MITRE initial from the stored CSV (edit forms)."""
+        """Seed the multi-select MITRE tactic initial from stored CSV values."""
         inst = getattr(self, 'instance', None)
-        if inst is not None and not self.is_bound and inst.mitre_phase:
-            self.initial['mitre_phase'] = [
-                p for p in inst.mitre_phase.split(',') if p
+        if inst is not None and not self.is_bound and inst.mitre_tactics:
+            self.initial['mitre_tactics'] = [
+                p for p in inst.mitre_tactics.split(',') if p
             ]
 
-    def clean_mitre_phase(self):
-        return ','.join(self.cleaned_data.get('mitre_phase') or [])
+    def clean_mitre_tactics(self):
+        return ','.join(self.cleaned_data.get('mitre_tactics') or [])
 
 
 class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
@@ -154,7 +154,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         widget=forms.RadioSelect(attrs={'class': 'classification-radio'}),
     )
     ncsa_severity = _ncsa_severity_field()
-    mitre_phase = _mitre_phase_field()
+    mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
     t1_route = forms.ChoiceField(
         choices=ROUTE_CHOICES,
@@ -215,7 +215,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'ioc_details',
             'ioc_user',
             # Section 6
-            'mitre_phase',
+            'mitre_tactics',
             # Section 7
             'action_required',
             'action_precautions',
@@ -351,7 +351,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
         }),
     )
     ncsa_severity = _ncsa_severity_field()
-    mitre_phase = _mitre_phase_field()
+    mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
 
     class Meta:
@@ -361,7 +361,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
-            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_phase',
+            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_tactics',
             'spread_to_others',
             'action_required', 'action_precautions',
             'actions_taken_summary', 'next_steps_summary',
@@ -508,7 +508,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
 
     ncsa_severity = _ncsa_severity_field()
-    mitre_phase = _mitre_phase_field()
+    mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
 
     class Meta:
@@ -520,7 +520,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'spread_to_others',
-            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_phase', 'action_required',
+            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_tactics', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
         ]
         widgets = {

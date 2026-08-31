@@ -131,7 +131,7 @@ class Command(BaseCommand):
                 'คำสั่งที่พบ: vssadmin.exe delete shadows /all /quiet\n'
                 'ไฟล์ที่ถูกวาง: C:\\Users\\Public\\svc_update.exe'
             ),
-            mitre_phase='Impact,Defense Evasion',
+            mitre_tactics='Impact,Stealth',
             action_required=(
                 '1. ตัดการเชื่อมต่อเครือข่ายของเครื่อง NT-FS-FIN01 '
                 '(shutdown พอร์ตบนสวิตช์)\n'
@@ -244,7 +244,7 @@ class Command(BaseCommand):
                 'เครื่องมือที่พบ: rclone.exe (เปลี่ยนชื่อเป็น winupd.exe)\n'
                 'ที่พักไฟล์: C:\\Windows\\Temp\\a\\ (412 ไฟล์ ~2.3 GB)'
             ),
-            mitre_phase='Initial Access,Credential Access,Collection,Exfiltration',
+            mitre_tactics='Initial Access,Credential Access,Collection,Exfiltration',
             action_required=action_required,
             action_precautions=(
                 'ห้ามลบไฟล์ใน C:\\Windows\\Temp\\a\\ ก่อนเก็บหลักฐานให้ครบ — '

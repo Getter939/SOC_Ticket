@@ -139,7 +139,7 @@
       <text class="col-text" x="882" y="707" font-weight="400">reference_id</text>
       <text class="col-text" x="882" y="727" font-weight="400">destination_ip</text>
       <text class="col-text" x="882" y="747" font-weight="400">ioc_details</text>
-      <text class="col-text" x="882" y="767" font-weight="400">mitre_phase</text>
+      <text class="col-text" x="882" y="767" font-weight="400">mitre_tactics</text>
       <text class="col-text" x="882" y="787" font-weight="400">spread_to_others</text>
       <text class="col-text" x="882" y="807" font-weight="400">containment_report</text>
       <text class="col-text" x="882" y="827" font-weight="400">remediation_summary</text>

@@ -41,7 +41,7 @@ TRACKED_FIELDS = {
     'ioc_details':           'Indicators of Compromise',
     'ioc_user':              'บัญชีผู้ใช้ที่เกี่ยวข้อง',
     'log_source':            'แหล่งข้อมูล/Log',
-    'mitre_phase':           'MITRE ATT&CK',
+    'mitre_tactics':         'MITRE ATT&CK Tactics',
     'action_required':       'สิ่งที่ต้องดำเนินการ',
     'action_precautions':    'ข้อควรระวัง',
     'actions_taken_summary': 'เรื่องที่ดำเนินการแล้ว',

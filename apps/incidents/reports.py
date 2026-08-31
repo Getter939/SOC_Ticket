@@ -603,7 +603,7 @@ def _evidence_log(ticket):
     attachments = _attachment_summary(ticket)
     if attachments != '-':
         parts.append(attachments)
-    mitre = ', '.join(ticket.mitre_phase_labels)
+    mitre = ', '.join(ticket.mitre_tactic_labels)
     if mitre:
         parts.append(f'MITRE ATT&CK: {mitre}')
     return '\n'.join(parts) if parts else '-'

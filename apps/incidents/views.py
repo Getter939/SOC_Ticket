@@ -1720,7 +1720,7 @@ def dismiss_manual_triage(request, triage_id):
 # ticket-id search returned the entire table, ranked, sliced to 50.
 TICKET_SEARCH_FIELDS = (
     'ticket_id', 'device_name', 'ip_address', 'destination_ip',
-    'issue_description', 'ioc_details', 'mitre_phase', 'reference_id',
+    'issue_description', 'ioc_details', 'mitre_tactics', 'reference_id',
 )
 TRIAGE_SEARCH_FIELDS = (
     'source_reference', 'alert_description', 'source_ip', 'notes', 't2_notes',

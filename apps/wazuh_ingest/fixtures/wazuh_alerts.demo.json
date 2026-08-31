@@ -46,7 +46,7 @@
             "groups": ["windows", "powershell"],
             "mitre": {
               "technique": ["PowerShell", "Obfuscated Files or Information"],
-              "tactic": ["Execution", "Defense Evasion"],
+              "tactic": ["Execution", "Stealth"],
               "id": ["T1059.001", "T1027"]
             }
           },

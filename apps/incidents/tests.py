@@ -423,7 +423,7 @@ class TicketReportExportTest(TestCase):
             spread_to_others=False,
             destination_ip='203.0.113.50',
             ioc_details='203.0.113.50\nsoftether.example',
-            mitre_phase='Initial Access,Execution',
+            mitre_tactics='Initial Access,Execution',
             action_required='Block IoC and inspect persistence.',
             action_precautions='Preserve memory and logs before reboot.',
             actions_taken_summary='SOC contacted the owner and blocked the IP.',
@@ -3107,6 +3107,21 @@ class DetailedIssueCascadeTest(TestCase):
         self.assertIn('Malicious Logic', html)               # a hierarchy key is embedded
         self.assertIn('id="id_detailed_issue"', html)        # parent select
         self.assertIn('id="id_detailed_issue2"', html)       # child select
+
+
+class MitreTacticFormTest(TestCase):
+    def test_form_uses_current_enterprise_tactic_names(self):
+        form = TicketForm()
+
+        self.assertEqual(
+            form.fields['mitre_tactics'].label,
+            'MITRE ATT&CK Tactics (ยุทธวิธีการโจมตี)',
+        )
+        tactics = [value for value, _ in form.fields['mitre_tactics'].choices]
+        self.assertEqual(len(tactics), 15)
+        self.assertIn('Stealth', tactics)
+        self.assertIn('Defense Impairment', tactics)
+        self.assertNotIn('Defense Evasion', tactics)
 
 
 class TicketListOlaFilterTest(TestCase):

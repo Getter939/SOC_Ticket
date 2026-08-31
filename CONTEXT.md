@@ -144,6 +144,10 @@ _Avoid_: Urgent, priority flag, critical flag
 
 ## Detection detail
 
+**MITRE ATT&CK Tactic**:
+An adversary's tactical goal — why an action is performed — recorded on a Ticket using the current Enterprise ATT&CK tactic names. A Ticket can have several tactics.
+_Avoid_: MITRE phase, attack phase, technique (a technique is the specific way an adversary achieves the tactic)
+
 **Source**:
 The channel an Alert or report arrived through — SIEM, Admin, Threat Intelligence, Email, Phone, User Report, External, Other. It answers *how it reached the SOC*, never *what the threat is*.
 _Avoid_: issue_type (the model field name — misleading; it is the Source), origin, channel (informal)

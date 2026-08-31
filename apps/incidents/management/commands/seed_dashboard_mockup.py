@@ -498,7 +498,7 @@ class Command(BaseCommand):
             spread_to_others=severity == 'Critical' or spec['index'] % 7 == 0,
             destination_ip=scenario['destination'],
             ioc_details='\n'.join(f'- {line}' for line in scenario['ioc']),
-            mitre_phase=scenario['phase'],
+            mitre_tactics=scenario['phase'],
             action_required='\n'.join(f'{i + 1}. {line}' for i, line in enumerate(scenario['action'])),
             action_precautions=self._precautions(spec),
             remediation_summary=self._remediation_summary(spec),

@@ -922,14 +922,15 @@ class Ticket(models.Model):
     )
 
     # ── Section 6: MITRE ATT&CK ─────────────────────────────────────── #
-    MITRE_PHASE_CHOICES = [
+    MITRE_TACTIC_CHOICES = [
         ('Reconnaissance',       'Reconnaissance'),
         ('Resource Development', 'Resource Development'),
         ('Initial Access',       'Initial Access'),
         ('Execution',            'Execution'),
         ('Persistence',          'Persistence'),
         ('Privilege Escalation', 'Privilege Escalation'),
-        ('Defense Evasion',      'Defense Evasion'),
+        ('Stealth',              'Stealth'),
+        ('Defense Impairment',   'Defense Impairment'),
         ('Credential Access',    'Credential Access'),
         ('Discovery',            'Discovery'),
         ('Lateral Movement',     'Lateral Movement'),
@@ -938,13 +939,13 @@ class Ticket(models.Model):
         ('Exfiltration',         'Exfiltration'),
         ('Impact',               'Impact'),
     ]
-    # An incident can span several ATT&CK phases, so this stores a
-    # comma-separated list of MITRE_PHASE_CHOICES codes (set via the multi-select
-    # form field). Read it through ``mitre_phase_list`` / ``mitre_phase_labels``
+    # An incident can span several ATT&CK tactics, so this stores a
+    # comma-separated list of MITRE_TACTIC_CHOICES values (set via the multi-select
+    # form field). Read it through ``mitre_tactic_list`` / ``mitre_tactic_labels``
     # rather than parsing the raw string.
-    mitre_phase = models.CharField(
+    mitre_tactics = models.CharField(
         max_length=500, blank=True, default='',
-        verbose_name='Phase การโจมตีตาม MITRE ATT&CK',
+        verbose_name='MITRE ATT&CK Tactics (ยุทธวิธีการโจมตี)',
     )
 
     # ── Section 7: Recommended Actions ──────────────────────────────── #
@@ -1252,15 +1253,15 @@ class Ticket(models.Model):
         return items, '\n'.join(trailing_lines)
 
     @property
-    def mitre_phase_list(self):
-        """MITRE ATT&CK phase codes recorded on this ticket (multi-select)."""
-        return [p for p in self.mitre_phase.split(',') if p]
+    def mitre_tactic_list(self):
+        """MITRE ATT&CK tactic names recorded on this ticket (multi-select)."""
+        return [p for p in self.mitre_tactics.split(',') if p]
 
     @property
-    def mitre_phase_labels(self):
-        """Human labels for the recorded MITRE ATT&CK phases."""
-        labels = dict(self.MITRE_PHASE_CHOICES)
-        return [labels.get(p, p) for p in self.mitre_phase_list]
+    def mitre_tactic_labels(self):
+        """Human labels for the recorded MITRE ATT&CK tactics."""
+        labels = dict(self.MITRE_TACTIC_CHOICES)
+        return [labels.get(p, p) for p in self.mitre_tactic_list]
 
     @property
     def was_escalated_to_t2(self):
