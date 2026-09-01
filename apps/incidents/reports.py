@@ -20,6 +20,8 @@ from .models import Ticket
 from .report_content import (
     APPENDIX_CATEGORIES,
     APPENDIX_INTRO,
+    EVENT_FOOTER_RIGHT,
+    EVENT_SECTION1_ROWS,
     FOOTER_LEFT,
     FOOTER_RIGHT,
     SECTION1_ROWS,
@@ -33,9 +35,14 @@ logger = logging.getLogger(__name__)
 
 REPORT_TEMPLATE_VERSION = 'v2'
 REPORT_TEMPLATE_NAME = f'report_template_{REPORT_TEMPLATE_VERSION}.docx'
+EVENT_REPORT_TEMPLATE_VERSION = 'event-v1'
+EVENT_REPORT_TEMPLATE_NAME = 'event_report_template_v1.docx'
 REPORT_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 PDF_CONTENT_TYPE = 'application/pdf'
 REPORT_TEMPLATE_PATH = Path(__file__).resolve().parent / 'report_templates' / REPORT_TEMPLATE_NAME
+EVENT_REPORT_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent / 'report_templates' / EVENT_REPORT_TEMPLATE_NAME
+)
 REPORT_PREVIEW_TEMPLATE = 'incidents/report_preview.html'
 REPORT_FONT_NAME = 'ReportUnicode'
 REPORT_FONT_DIR = Path(__file__).resolve().parent / 'report_templates' / 'fonts'
@@ -87,11 +94,17 @@ class GeneratedTicketReport:
         return BytesIO(self.content)
 
 
-def generate_ticket_report(ticket_id, generated_by=None):
+def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
     ticket = _load_ticket(ticket_id)
     generated_at = timezone.now()
     context = build_ticket_report_context(ticket, generated_at=generated_at)
-    doc = Document(REPORT_TEMPLATE_PATH)
+    template_path = (
+        EVENT_REPORT_TEMPLATE_PATH if _is_event_report(ticket) else REPORT_TEMPLATE_PATH
+    )
+    doc = Document(template_path)
+    if hide_empty:
+        _remove_empty_docx_fields(doc, context)
+        _renumber_docx_section_one(doc)
     _replace_placeholders(doc, context)
 
     output = BytesIO()
@@ -99,27 +112,38 @@ def generate_ticket_report(ticket_id, generated_by=None):
     content = output.getvalue()
     digest = hashlib.sha256(content).hexdigest()
 
-    _record_export_metadata(ticket, generated_by, generated_at, digest, report_format='docx')
+    template_version = _report_template_version(ticket)
+    _record_export_metadata(
+        ticket, generated_by, generated_at, digest,
+        report_format='docx', template_version=template_version,
+    )
 
-    filename = f'report_{ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx'
+    filename = f'report_{ticket.ticket_id}_{template_version}.docx'
     return GeneratedTicketReport(filename=filename, content=content)
 
 
-def generate_ticket_report_pdf(ticket_id, generated_by=None, base_url=None):
+def generate_ticket_report_pdf(
+    ticket_id, generated_by=None, base_url=None, hide_empty=True,
+):
     ticket = _load_ticket(ticket_id)
     generated_at = timezone.now()
     context = build_ticket_report_render_context(
         ticket,
         generated_at=generated_at,
         show_report_actions=False,
+        hide_empty=hide_empty,
     )
     html = render_to_string(REPORT_PREVIEW_TEMPLATE, context)
     content = _render_pdf_from_html(html, base_url=base_url)
     digest = hashlib.sha256(content).hexdigest()
 
-    _record_export_metadata(ticket, generated_by, generated_at, digest, report_format='pdf')
+    template_version = _report_template_version(ticket)
+    _record_export_metadata(
+        ticket, generated_by, generated_at, digest,
+        report_format='pdf', template_version=template_version,
+    )
 
-    filename = f'report_{ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.pdf'
+    filename = f'report_{ticket.ticket_id}_{template_version}.pdf'
     return GeneratedTicketReport(
         filename=filename,
         content=content,
@@ -127,18 +151,33 @@ def generate_ticket_report_pdf(ticket_id, generated_by=None, base_url=None):
     )
 
 
-def build_ticket_report_render_context(ticket, generated_at=None, show_report_actions=True):
+def build_ticket_report_render_context(
+    ticket, generated_at=None, show_report_actions=True, hide_empty=True,
+):
+    is_event_report = _is_event_report(ticket)
     report = build_ticket_report_context(ticket, generated_at=generated_at)
     return {
         'ticket': ticket,
         'report': report,
-        'sections': build_ticket_report_sections(report, ticket),
+        'sections': build_ticket_report_sections(
+            report, ticket, hide_empty=hide_empty,
+        ),
         'appendix_categories': APPENDIX_CATEGORIES,
         'appendix_intro': APPENDIX_INTRO,
         'footer_left': FOOTER_LEFT,
-        'footer_right': FOOTER_RIGHT,
+        'footer_right': EVENT_FOOTER_RIGHT if is_event_report else FOOTER_RIGHT,
+        'is_event_report': is_event_report,
+        'browser_title': 'Event Report' if is_event_report else 'Incident Report',
+        'report_heading': (
+            'Alert Event REPORT' if is_event_report else 'INCIDENT REPORT: Containment'
+        ),
+        'report_subtitle': (
+            'แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ'
+            if is_event_report else 'แบบฟอร์มรายงานเหตุการณ์ผิดปกติ'
+        ),
         'nt_logo': _logo_data_uri(),
         'show_report_actions': show_report_actions,
+        'hide_empty': hide_empty,
     }
 
 
@@ -146,8 +185,11 @@ def build_ticket_report_context(ticket, generated_at=None):
     generated_at = generated_at or timezone.now()
     asset = ticket.asset_type
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
-    return {
-        'ticket_id': _value(ticket.ticket_id),
+    is_event_report = _is_event_report(ticket)
+    context = {
+        # The official report number carries a presentation-only classification
+        # suffix.  The Ticket Reference itself remains immutable in the database.
+        'ticket_id': _report_ticket_id(ticket),
         # Section 1 prints this in the Thai style used on the paper form.
         'incident_datetime': _format_dt_thai(ticket.incident_datetime),
         'incident_name': _value(ticket.incident_name),
@@ -177,7 +219,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'containment_report': _value(ticket.containment_report),
         'signoff_admin': _signoff_name(ticket.assigned_admin),
         'signoff_approver': _signoff_name(ticket.approved_by),
-        'template_version': REPORT_TEMPLATE_VERSION,
+        'template_version': _report_template_version(ticket),
         'generated_at': _format_dt(generated_at),
         # Checkbox states (☑/☐) driven by the ticket's actual values.
         'chk_class_event': _chk(ticket.classification == Ticket.CLASSIFICATION_EVENT),
@@ -187,7 +229,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_sev_medium': _chk(ticket.severity == 'Medium'),
         'chk_sev_low': _chk(ticket.severity == 'Low'),
         'chk_imp_high': _chk(ticket.is_emergency),
-        'chk_imp_normal': _chk(not ticket.is_emergency),
+        'chk_imp_normal': _chk(not is_event_report and not ticket.is_emergency),
         'chk_spread_yes': _chk(ticket.spread_to_others is True),
         'chk_spread_no': _chk(ticket.spread_to_others is False),
         'chk_ncsa_critical': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),
@@ -198,9 +240,29 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_asset_network': _chk(asset == 'Network Device'),
         'chk_asset_unknown': _chk(not asset_known),
     }
+    if is_event_report:
+        context['chk_imp_general'] = _chk(not ticket.is_emergency)
+    return context
 
 
-def build_ticket_report_sections(report, ticket):
+def _is_event_report(ticket):
+    return ticket.classification == Ticket.CLASSIFICATION_EVENT
+
+
+def _report_template_version(ticket):
+    return EVENT_REPORT_TEMPLATE_VERSION if _is_event_report(ticket) else REPORT_TEMPLATE_VERSION
+
+
+def _report_ticket_id(ticket):
+    suffix = {
+        Ticket.CLASSIFICATION_EVENT: 'E',
+        Ticket.CLASSIFICATION_INCIDENT: 'I',
+    }.get(ticket.classification)
+    ticket_id = _value(ticket.ticket_id)
+    return f'{ticket_id}-{suffix}' if suffix else ticket_id
+
+
+def build_ticket_report_sections(report, ticket, hide_empty=False):
     """Structured sections for the HTML/PDF preview, mirroring the v2 DOCX form.
 
     Row shapes consumed by report_preview.html:
@@ -208,9 +270,6 @@ def build_ticket_report_sections(report, ticket):
       {'type': 'checks', 'label', 'options': [{'label', 'checked'}, ...]}
       {'type': 'text', 'value'}                     — full-width free-text box
     """
-    asset = ticket.asset_type
-    asset_known = asset in {'Computer', 'Server', 'Network Device'}
-
     def kv(label, value):
         return {'type': 'kv', 'label': label, 'value': value}
 
@@ -220,16 +279,6 @@ def build_ticket_report_sections(report, ticket):
 
     def text(value):
         return {'type': 'text', 'value': value}
-
-    asset_options = [
-        ('Computer', asset == 'Computer'),
-        ('Server', asset == 'Server'),
-        ('Network Device', asset == 'Network Device'),
-    ]
-    spread_options = [
-        ('ใช่', ticket.spread_to_others is True),
-        ('ไม่ใช่', ticket.spread_to_others is False),
-    ]
 
     def rows_from(table):
         """Render a shared row table (report_content) into preview rows.
@@ -250,32 +299,55 @@ def build_ticket_report_sections(report, ticket):
                 ]))
         return built
 
-    return [
-        {'number': '1', 'title': SECTION_TITLES['1'],
-         'rows': rows_from(SECTION1_ROWS)},
-        {'number': '2', 'title': SECTION_TITLES['2'], 'rows': [
-            text(report['incident_description'])]},
-        {'number': '3', 'title': SECTION_TITLES['3'],
-         'rows': rows_from(SECTION3_ROWS)},
-        {'number': '4', 'title': SECTION_TITLES['4'],
-         'rows': rows_from(SECTION4_ROWS)},
-        {'number': '5', 'title': SECTION_TITLES['5'],
-         'rows': [text(report['evidence_log'])]},
-        {'number': '6', 'title': SECTION_TITLES['6'], 'rows': [
-            _containment_checklist_row(ticket) or text(report['action_required'])]},
-        {'number': '7', 'title': SECTION_TITLES['7'], 'rows': [
-            text(report['action_precautions'])]},
-        {'number': '8', 'title': SECTION_TITLES['8'], 'rows': [
-            kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
-            kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
-        ]},
-    ]
+    if _is_event_report(ticket):
+        sections = [{
+            'number': '1',
+            'title': SECTION_TITLES['1'],
+            'rows': rows_from(EVENT_SECTION1_ROWS),
+        }]
+    else:
+        sections = [
+            {'number': '1', 'title': SECTION_TITLES['1'],
+             'rows': rows_from(SECTION1_ROWS)},
+            {'number': '2', 'title': SECTION_TITLES['2'], 'rows': [
+                text(report['incident_description'])]},
+            {'number': '3', 'title': SECTION_TITLES['3'],
+             'rows': rows_from(SECTION3_ROWS)},
+            {'number': '4', 'title': SECTION_TITLES['4'],
+             'rows': rows_from(SECTION4_ROWS)},
+            {'number': '5', 'title': SECTION_TITLES['5'],
+             'rows': [text(report['evidence_log'])]},
+            {'number': '6', 'title': SECTION_TITLES['6'], 'rows': [
+                _containment_checklist_row(ticket) or text(report['action_required'])]},
+            {'number': '7', 'title': SECTION_TITLES['7'], 'rows': [
+                text(report['action_precautions'])]},
+            {'number': '8', 'title': SECTION_TITLES['8'], 'rows': [
+                kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
+                kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
+            ]},
+        ]
+    if not hide_empty:
+        return sections
+
+    for section in sections:
+        section['rows'] = [
+            row for row in section['rows']
+            if row['type'] not in {'kv', 'text'} or row['value'] != '-'
+        ]
+        if section['number'] == '1':
+            for index, row in enumerate(section['rows'], start=1):
+                row['label'] = re.sub(
+                    r'^1\.\d+(?=\s)', f'1.{index}', row['label'], count=1,
+                )
+    return [section for section in sections if section['rows']]
 
 
-def _record_export_metadata(ticket, generated_by, generated_at, digest, report_format):
+def _record_export_metadata(
+    ticket, generated_by, generated_at, digest, report_format, template_version,
+):
     generated_by_id = getattr(generated_by, 'pk', None)
     Ticket.objects.filter(pk=ticket.pk).update(
-        report_template_version=REPORT_TEMPLATE_VERSION,
+        report_template_version=template_version,
         report_format=report_format,
         report_generated_by_id=generated_by_id,
         report_generated_at=generated_at,
@@ -415,6 +487,127 @@ def _load_ticket(ticket_id):
         .prefetch_related('attachments')
         .get(pk=ticket_id)
     )
+
+
+_DOCX_OPTIONAL_SECTION_FIELDS = {
+    f'2. {SECTION_TITLES["2"]}': ('incident_description',),
+    f'4. {SECTION_TITLES["4"]}': (
+        'ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip', 'ioc_user',
+    ),
+    f'5. {SECTION_TITLES["5"]}': ('evidence_log',),
+    f'6. {SECTION_TITLES["6"]}': ('action_required',),
+    f'7. {SECTION_TITLES["7"]}': ('action_precautions',),
+    f'8. {SECTION_TITLES["8"]}': (
+        'remediation_summary', 'containment_report',
+    ),
+}
+
+
+def _remove_empty_docx_fields(doc, context):
+    """Remove report rows whose rendered value is only the ``-`` placeholder.
+
+    Most fields occupy one table row. Section 8 has two fields in one row, so
+    an empty field there is represented by a label paragraph followed by its
+    value paragraph; remove that pair while preserving its populated sibling.
+    Section headings are removed when every field in that section is empty.
+    """
+    empty_headings = {
+        heading
+        for heading, keys in _DOCX_OPTIONAL_SECTION_FIELDS.items()
+        if all(context.get(key) == '-' for key in keys)
+    }
+
+    for table in _iter_docx_tables(doc):
+        for row in list(table.rows):
+            row_text = '\n'.join(cell.text for cell in row.cells)
+            if row_text.strip() in empty_headings:
+                _remove_docx_row(row)
+                continue
+
+            keys = set(re.findall(r'\{\{([^}]+)\}\}', row_text))
+            if keys and all(context.get(key) == '-' for key in keys):
+                _remove_docx_row(row)
+                continue
+
+            _remove_empty_docx_paragraph_pairs(row, context)
+
+
+def _iter_docx_tables(doc):
+    def walk(table):
+        yield table
+        for row in table.rows:
+            for cell in row.cells:
+                for nested in cell.tables:
+                    yield from walk(nested)
+
+    for table in doc.tables:
+        yield from walk(table)
+    for section in doc.sections:
+        for header_footer in (section.header, section.footer):
+            for table in header_footer.tables:
+                yield from walk(table)
+
+
+def _remove_docx_row(row):
+    row._tr.getparent().remove(row._tr)
+
+
+def _remove_empty_docx_paragraph_pairs(row, context):
+    seen_cells = set()
+    for cell in row.cells:
+        if id(cell._tc) in seen_cells:
+            continue
+        seen_cells.add(id(cell._tc))
+        paragraphs = list(cell.paragraphs)
+        for index in range(len(paragraphs) - 1, -1, -1):
+            paragraph = paragraphs[index]
+            keys = set(re.findall(r'\{\{([^}]+)\}\}', paragraph.text))
+            if not keys or not all(context.get(key) == '-' for key in keys):
+                continue
+
+            element = paragraph._element
+            element.getparent().remove(element)
+            if index == 0:
+                continue
+            label = paragraphs[index - 1]
+            if '{{' not in label.text and label._element.getparent() is not None:
+                label._element.getparent().remove(label._element)
+
+
+def _renumber_docx_section_one(doc):
+    index = 0
+    for table in _iter_docx_tables(doc):
+        for row in table.rows:
+            matched = False
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    match = re.match(r'^1\.\d+(?=\s)', paragraph.text)
+                    if match is None:
+                        continue
+                    index += 1
+                    _replace_docx_paragraph_prefix(
+                        paragraph, match.group(0), f'1.{index}',
+                    )
+                    matched = True
+                    break
+                if matched:
+                    break
+
+
+def _replace_docx_paragraph_prefix(paragraph, old, new):
+    for run in paragraph.runs:
+        if old in run.text:
+            run.text = run.text.replace(old, new, 1)
+            return
+
+    # The current template keeps each label in one run. This fallback handles
+    # a future template that splits the numeric prefix across styled runs.
+    if not paragraph.runs:
+        return
+    text = paragraph.text
+    paragraph.runs[0].text = f'{new}{text[len(old):]}'
+    for run in paragraph.runs[1:]:
+        run.text = ''
 
 
 def _replace_placeholders(doc, context):

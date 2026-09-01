@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <title>Incident Report {{ report.ticket_id }}</title>
+  <title>{{ browser_title }} {{ ticket.ticket_id }}</title>
   <style>
     /* Screen ignores @frame; xhtml2pdf uses these frames to repeat the NT logo
        header and the footer on every page. Letter = 612x792pt, ~0.6in margins. */
@@ -47,6 +47,11 @@
     }
     .report-actions form { display: inline; margin: 0; }
     .report-actions .muted { color: #65758b; font-size: 11pt; }
+    .report-options { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .empty-toggle-form { display: flex !important; align-items: center; gap: 8px; }
+    .empty-toggle-form label { display: flex; align-items: center; gap: 6px; font-weight: 700; color: #364152; }
+    .empty-toggle-form input[type="checkbox"] { width: 16px; height: 16px; }
+    .empty-toggle-form button { padding: 4px 9px; }
 
     .report-page {
       max-width: 8.5in; margin: 24px auto;
@@ -70,6 +75,11 @@
     }
     .banner h1 { margin: 0; color: #1f2933; font-size: 20pt; letter-spacing: .5px; }
     .banner .subtitle { margin-top: 2px; color: #1f2933; font-size: 15pt; font-weight: 700; }
+
+    /* Match the pale-blue Event form supplied by the SOC while leaving the
+       established gold Incident report unchanged. */
+    .event-report .banner { background: #D9EAF7; }
+    .event-report .section-band { background: #EAF3FA; }
 
     .meta { text-align: right; color: #5B6775; font-size: 9pt; margin: 4px 0 12px; }
 
@@ -110,6 +120,7 @@
     @media screen and (max-width: 820px) {
       .report-page { margin: 0; padding: 20px; box-shadow: none; }
       .report-actions { position: static; flex-direction: column; align-items: flex-start; }
+      .report-options { align-items: flex-start; }
     }
     @media print {
       body { background: #ffffff; }
@@ -123,21 +134,27 @@
     <div class="report-actions">
       <div>
         <a href="{% url 'ticket_detail' ticket.pk %}">กลับไปแก้ไข Ticket</a>
-        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<button type="submit">ดาวน์โหลด DOCX</button></form>
-        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<button type="submit">ดาวน์โหลด PDF</button></form>
+        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด DOCX</button></form>
+        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด PDF</button></form>
       </div>
-      <div class="muted">ตัวอย่างแบบอ่านอย่างเดียว — แก้ไขข้อมูลได้ที่หน้า Ticket</div>
+      <div class="report-options">
+        <form method="get" class="empty-toggle-form" id="emptyFieldsForm">
+          <input type="hidden" name="hide_empty" value="0">
+          <label><input type="checkbox" name="hide_empty" value="1" id="hideEmptyFields" {% if hide_empty %}checked{% endif %}> ซ่อนช่องที่ไม่มีข้อมูล</label>
+          <button type="submit">ใช้</button>
+        </form>
+        <div class="muted">ตัวอย่างแบบอ่านอย่างเดียว — แก้ไขข้อมูลได้ที่หน้า Ticket</div>
+      </div>
     </div>
   {% endif %}
 
-  <main class="report-page">
+  <main class="report-page{% if is_event_report %} event-report{% endif %}">
     <div id="reportHeader">{% if nt_logo %}<img src="{{ nt_logo }}" alt="NT">{% endif %}</div>
 
     <div class="banner">
-      <h1>INCIDENT REPORT: Containment</h1>
-      <div class="subtitle">แบบฟอร์มรายงานเหตุการณ์ผิดปกติ</div>
+      <h1>{{ report_heading }}</h1>
+      <div class="subtitle">{{ report_subtitle }}</div>
     </div>
-    <div class="meta">Template {{ report.template_version }} | จัดทำเมื่อ {{ report.generated_at }}</div>
 
     {% for section in sections %}
       <div class="section-band"><span class="secnum">{{ section.number }}.</span> {{ section.title }}</div>
@@ -168,6 +185,7 @@
       {% endif %}
     {% endfor %}
 
+    {% if not is_event_report %}
     <table class="signoff">
       <tbody>
         <tr>
@@ -186,7 +204,6 @@
         </tr>
       </tbody>
     </table>
-
     <div class="section-band appendix">&#8206;*หมวดหมู่ของภัยคุกคามทางไซเบอร์</div>
     <p class="appendix-intro">{{ appendix_intro }}</p>
     {# Present in the DOCX builder but previously missing here, so DOCX and PDF disagreed. #}
@@ -202,6 +219,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% endif %}
 
     <table id="reportFooter">
       <tr>
@@ -210,5 +228,12 @@
       </tr>
     </table>
   </main>
+  {% if show_report_actions %}
+    <script>
+      document.getElementById('hideEmptyFields').addEventListener('change', function () {
+        document.getElementById('emptyFieldsForm').requestSubmit();
+      });
+    </script>
+  {% endif %}
 </body>
 </html>

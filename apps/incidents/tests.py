@@ -70,9 +70,10 @@ from apps.incidents.views import (
     _can_upload_ticket_attachment,
 )
 from apps.incidents.reports import (
+    EVENT_REPORT_TEMPLATE_PATH, EVENT_REPORT_TEMPLATE_VERSION,
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
     build_ticket_report_context, build_ticket_report_sections,
-    generate_ticket_report, _iter_paragraphs,
+    generate_ticket_report, generate_ticket_report_pdf, _iter_paragraphs,
 )
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -437,6 +438,24 @@ class TicketReportExportTest(TestCase):
             original_name='evidence.log',
             uploaded_by=cls.t1,
         )
+        cls.event_ticket = _make_ticket(
+            created_by=cls.t1,
+            classification=Ticket.CLASSIFICATION_EVENT,
+            incident_name='Repeated failed sign-in alert',
+            incident_datetime=timezone.now(),
+            log_source='Microsoft Sentinel',
+            severity='Medium',
+            ncsa_severity=Ticket.NCSA_SEVERITY_NON_SEVERE,
+            detailed_issue='Unsuccessful Activity Attempt',
+            issue_description='Multiple failed sign-ins were observed.',
+            device_name='APP-WEB-02',
+            ip_address='192.0.2.25',
+            asset_type='Server',
+            asset_owner='Digital Operations',
+            actions_taken_summary='SOC notified the service owner.',
+            next_steps_summary='Continue monitoring for 12 hours.',
+            is_emergency=False,
+        )
 
     def test_generate_ticket_report_renders_docx_and_updates_metadata(self):
         snapshot_updated_at = self.ticket.updated_at
@@ -446,6 +465,9 @@ class TicketReportExportTest(TestCase):
         text = _docx_text(content)
 
         self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
+        self.assertIn(f'{self.ticket.ticket_id}-I', text)
+        self.assertNotIn('คำสั่ง', text)
+        self.assertNotIn('Hash', text)
         self.assertIn('Suspicious SoftEther Signed File', text)
         self.assertIn('SOC contacted the owner and blocked the IP.', text)
         self.assertIn('Host isolated and C2 destination blocked.', text)
@@ -512,6 +534,11 @@ class TicketReportExportTest(TestCase):
         response = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<title>Incident Report {self.ticket.ticket_id}</title>', html=True)
+        self.assertContains(response, f'{self.ticket.ticket_id}-I')
+        self.assertContains(response, 'ซ่อนช่องที่ไม่มีข้อมูล')
+        self.assertNotContains(response, '<th>คำสั่ง</th>')
+        self.assertNotContains(response, '<th>Hash</th>')
         # NT-form section titles.
         self.assertContains(response, 'ข้อมูลทั่วไป (General Information)')
         self.assertContains(response, 'รายละเอียดเหตุการณ์ (Incident Description)')
@@ -531,6 +558,124 @@ class TicketReportExportTest(TestCase):
         # NT logo embedded as a data URI.
         self.assertContains(response, 'data:image/png;base64,')
 
+    def test_event_preview_uses_reduced_event_only_form(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.event_ticket.pk]),
+            {'hide_empty': '0'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<title>Event Report {self.event_ticket.ticket_id}</title>',
+            html=True,
+        )
+        self.assertContains(response, 'Alert Event REPORT')
+        self.assertContains(response, 'แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ')
+        self.assertContains(response, f'{self.event_ticket.ticket_id}-E')
+        self.assertContains(response, '1.13 รายละเอียดของเหตุ')
+        self.assertContains(response, 'Multiple failed sign-ins were observed.')
+        self.assertContains(response, '&#9745;</span>&#160;Event')
+        self.assertContains(response, '&#9745;</span>&#160;ปกติทั่วไป')
+        self.assertContains(response, '&#9745;</span>&#160;Moderate')
+        self.assertNotContains(response, 'Scope ทรัพย์สินที่ได้รับผลกระทบ')
+        self.assertNotContains(response, 'Indicators of Compromise')
+        self.assertNotContains(response, 'สิ่งที่ต้องดำเนินการ (Containment)')
+        self.assertNotContains(response, '( ผู้ดำเนินการแก้ไข )')
+        self.assertNotContains(response, 'ข้อ ๑ การจำแนกหมวดหมู่')
+
+    def test_event_docx_export_uses_event_template_and_metadata_version(self):
+        report = generate_ticket_report(
+            self.event_ticket.pk, generated_by=self.t1, hide_empty=False,
+        )
+        text = _docx_text(report.content)
+
+        self.assertEqual(
+            report.filename,
+            f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.docx',
+        )
+        self.assertIn('Alert Event REPORT', text)
+        self.assertIn(f'{self.event_ticket.ticket_id}-E', text)
+        self.assertIn('1.13 รายละเอียดของเหตุ', text)
+        self.assertIn('Multiple failed sign-ins were observed.', text)
+        self.assertIn('☑ Event', text)
+        self.assertIn('☑ ปกติทั่วไป', text)
+        self.assertIn('☑ Moderate', text)
+        self.assertNotIn('Indicators of Compromise', text)
+        self.assertNotIn('Containment', text)
+        self.assertNotIn('ผู้ดำเนินการแก้ไข', text)
+
+        self.event_ticket.refresh_from_db()
+        self.assertEqual(
+            self.event_ticket.report_template_version,
+            EVENT_REPORT_TEMPLATE_VERSION,
+        )
+
+    def test_event_pdf_export_uses_reduced_event_form(self):
+        report = generate_ticket_report_pdf(
+            self.event_ticket.pk, generated_by=self.t1, hide_empty=False,
+        )
+        pdf = PdfReader(BytesIO(report.content))
+        text = ' '.join(
+            '\n'.join(page.extract_text() or '' for page in pdf.pages).split()
+        )
+
+        self.assertEqual(
+            report.filename,
+            f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.pdf',
+        )
+        self.assertIn('Alert Event REPORT', text)
+        self.assertIn(f'{self.event_ticket.ticket_id}-E', text)
+        self.assertIn('Multiple failed sign-ins were observed.', text)
+        self.assertNotIn('Indicators of Compromise', text)
+        self.assertNotIn('Containment', text)
+
+        self.event_ticket.refresh_from_db()
+        self.assertEqual(
+            self.event_ticket.report_template_version,
+            EVENT_REPORT_TEMPLATE_VERSION,
+        )
+
+    def test_preview_toggle_can_show_empty_fields(self):
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]),
+            {'hide_empty': '0'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<th>คำสั่ง</th>')
+        self.assertContains(response, '<th>Hash</th>')
+        self.assertContains(response, '<td>-</td>')
+        self.assertNotContains(response, 'id="hideEmptyFields" checked')
+
+    def test_docx_export_toggle_can_show_empty_fields(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(
+            reverse('ticket_report_docx', args=[self.ticket.pk]),
+            {'hide_empty': '0'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        text = _docx_text(b''.join(response.streaming_content))
+        self.assertIn('คำสั่ง', text)
+        self.assertIn('Hash', text)
+
+    def test_report_number_suffix_tracks_classification_without_changing_ticket_id(self):
+        stored_ticket_id = self.ticket.ticket_id
+
+        incident_report = build_ticket_report_context(self.ticket)
+        self.assertEqual(incident_report['ticket_id'], f'{stored_ticket_id}-I')
+
+        self.ticket.classification = Ticket.CLASSIFICATION_EVENT
+        self.ticket.save(update_fields=['classification'])
+        event_report = build_ticket_report_context(self.ticket)
+
+        self.assertEqual(event_report['ticket_id'], f'{stored_ticket_id}-E')
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.ticket_id, stored_ticket_id)
+
     def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
         self.client.force_login(self.t1)
         response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
@@ -545,7 +690,9 @@ class TicketReportExportTest(TestCase):
         self.assertGreaterEqual(len(pdf.pages), 1)
         text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
         normalized_text = ' '.join(text.split())
+        self.assertIn(f'{self.ticket.ticket_id}-I', normalized_text)
         self.assertIn('Suspicious SoftEther Signed File', normalized_text)
+        self.assertNotIn('Hash', normalized_text)
 
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
@@ -553,6 +700,20 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(self.ticket.report_generated_by, self.t1)
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
         self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_pdf_export_toggle_can_show_empty_fields(self):
+        self.client.force_login(self.t1)
+        response = self.client.post(
+            reverse('ticket_report_pdf', args=[self.ticket.pk]),
+            {'hide_empty': '0'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        pdf = PdfReader(BytesIO(b''.join(response.streaming_content)))
+        text = ' '.join(
+            '\n'.join(page.extract_text() or '' for page in pdf.pages).split()
+        )
+        self.assertIn('Hash', text)
 
     def test_pdf_export_embeds_bundled_thai_font(self):
         from reportlab.pdfbase import pdfmetrics
@@ -585,10 +746,63 @@ class TicketReportExportTest(TestCase):
         return found
 
     def test_template_placeholders_match_context_keys(self):
-        # Both directions: an orphan placeholder in the .docx would raise at
-        # export time, and an unused context key is silent drift.
+        # The two presentation metadata values are used by HTML/PDF and the
+        # export filename/audit record, but the paper-style DOCX omits its
+        # meta line. Every actual DOCX placeholder must still be supplied.
         context_keys = set(build_ticket_report_context(self.ticket))
-        self.assertEqual(self._docx_placeholders(REPORT_TEMPLATE_PATH), context_keys)
+        template_keys = self._docx_placeholders(REPORT_TEMPLATE_PATH)
+        self.assertLessEqual(template_keys, context_keys)
+        self.assertEqual(
+            context_keys - template_keys,
+            {'template_version', 'generated_at'},
+        )
+
+    def test_event_template_has_exactly_the_placeholders_its_short_form_uses(self):
+        expected = {
+            'ticket_id', 'incident_datetime', 'incident_name',
+            'chk_class_incident', 'chk_class_event',
+            'chk_imp_general', 'chk_imp_normal', 'chk_imp_high',
+            'chk_sev_low', 'chk_sev_medium', 'chk_sev_high', 'chk_sev_critical',
+            'chk_ncsa_nonsevere', 'chk_ncsa_severe', 'chk_ncsa_critical',
+            'category', 'host_ip',
+            'chk_asset_computer', 'chk_asset_server', 'chk_asset_network',
+            'asset_owner', 'incident_description', 'status', 'system_name',
+            'actions_taken_summary', 'next_steps_summary', 'reporter', 'log_source',
+        }
+        self.assertEqual(self._docx_placeholders(EVENT_REPORT_TEMPLATE_PATH), expected)
+
+    def test_event_compact_mode_renumbers_after_an_empty_row_is_removed(self):
+        report = build_ticket_report_context(self.event_ticket)
+        report['asset_owner'] = '-'
+
+        section = build_ticket_report_sections(
+            report, self.event_ticket, hide_empty=True,
+        )[0]
+        labels = [row['label'] for row in section['rows']]
+
+        self.assertNotIn('1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', labels)
+        self.assertIn('1.12 รายละเอียดของเหตุ', labels)
+        self.assertEqual(
+            [int(re.match(r'1\.(\d+)', label).group(1)) for label in labels],
+            list(range(1, len(labels) + 1)),
+        )
+
+    def test_event_build_script_matches_committed_template(self):
+        script_path = (
+            Path(settings.BASE_DIR) / 'scripts' / 'build_event_report_template_v1.py'
+        )
+        spec = importlib.util.spec_from_file_location(
+            'build_event_report_template_v1', script_path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rebuilt_path = Path(tmp) / 'rebuilt_event_template.docx'
+            module.build(rebuilt_path)
+            rebuilt = self._docx_placeholders(rebuilt_path)
+
+        self.assertEqual(rebuilt, self._docx_placeholders(EVENT_REPORT_TEMPLATE_PATH))
 
     def test_build_script_matches_committed_template(self):
         script_path = Path(settings.BASE_DIR) / 'scripts' / 'build_report_template_v2.py'
@@ -631,6 +845,17 @@ class TicketReportExportTest(TestCase):
         # is_emergency drives ระดับความสำคัญ (สำคัญ vs สำคัญมาก).
         imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
         self.assertEqual([k for k, v in imp.items() if v], ['สำคัญ'])
+
+    def test_empty_only_section_is_removed_when_filter_is_enabled(self):
+        report = build_ticket_report_context(self.ticket)
+        for key in ('ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip', 'ioc_user'):
+            report[key] = '-'
+
+        compact = build_ticket_report_sections(report, self.ticket, hide_empty=True)
+        complete = build_ticket_report_sections(report, self.ticket, hide_empty=False)
+
+        self.assertNotIn('4', [section['number'] for section in compact])
+        self.assertIn('4', [section['number'] for section in complete])
 
     def test_emergency_flag_flips_importance_checkbox(self):
         self.ticket.is_emergency = True
@@ -5293,6 +5518,28 @@ class ReportSectionEightTest(TestCase):
         self.assertIn('Unauthorized service removed.', text)
         self.assertIn('Host isolated and C2 destination blocked.', text)
 
+    def test_compact_docx_removes_only_the_empty_section_eight_field(self):
+        self.ticket.containment_report = ''
+        self.ticket.save(update_fields=['containment_report'])
+
+        text = _docx_text(generate_ticket_report(self.ticket.pk).content)
+
+        self.assertIn('สรุปผลการดำเนินการแก้ไข', text)
+        self.assertIn('ผลการตรวจสอบ / Investigation Findings', text)
+        self.assertIn('Unauthorized service removed.', text)
+        self.assertNotIn('มาตรการควบคุม / Countermeasure', text)
+
+    def test_compact_docx_removes_section_heading_when_both_fields_are_empty(self):
+        self.ticket.remediation_summary = ''
+        self.ticket.containment_report = ''
+        self.ticket.save(update_fields=['remediation_summary', 'containment_report'])
+
+        text = _docx_text(generate_ticket_report(self.ticket.pk).content)
+
+        self.assertNotIn('สรุปผลการดำเนินการแก้ไข', text)
+        self.assertNotIn('ผลการตรวจสอบ / Investigation Findings', text)
+        self.assertNotIn('มาตรการควบคุม / Countermeasure', text)
+
     def test_section_six_dynamic_checklist_still_works(self):
         """The removal must not touch the checklist that is actually driven by
         ticket data."""
@@ -5385,6 +5632,32 @@ class ReportNTFormLayoutTest(TestCase):
                 label.startswith(f'1.{index} '),
                 f'row {index} is {label!r}, expected a "1.{index} " prefix',
             )
+
+    def test_compact_section_one_renumbers_after_empty_rows_are_removed(self):
+        report = build_ticket_report_context(self.ticket)
+        section = next(
+            section for section in build_ticket_report_sections(
+                report, self.ticket, hide_empty=True,
+            )
+            if section['number'] == '1'
+        )
+        labels = [row['label'] for row in section['rows']]
+
+        self.assertNotIn('1.4 ชื่อ incident/event', labels)
+        self.assertIn('1.4 ประเภท: event หรือ incident', labels)
+        for index, label in enumerate(labels, start=1):
+            self.assertTrue(label.startswith(f'1.{index} '))
+
+    def test_compact_docx_renumbers_but_complete_docx_keeps_fixed_numbers(self):
+        compact = _docx_text(generate_ticket_report(self.ticket.pk).content)
+        complete = _docx_text(
+            generate_ticket_report(self.ticket.pk, hide_empty=False).content,
+        )
+
+        self.assertIn('1.4 ประเภท: event หรือ incident', compact)
+        self.assertNotIn('1.5 ประเภท: event หรือ incident', compact)
+        self.assertIn('1.4 ชื่อ incident/event', complete)
+        self.assertIn('1.5 ประเภท: event หรือ incident', complete)
 
     def test_only_section_one_is_numbered(self):
         """The paper form numbers section 1 only — sections 3 and 4 are plain."""

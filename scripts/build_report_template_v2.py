@@ -379,12 +379,6 @@ def build(output_path=OUTPUT_PATH):
 
     add_title_banner(doc)
 
-    meta = doc.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    meta.paragraph_format.space_after = Pt(4)
-    add_runs(meta, [('Template {{template_version}} | จัดทำเมื่อ {{generated_at}}',
-                     BODY_FONT, 10, MUTED, False)])
-
     add_section_band(doc, f'1. {SECTION_TITLES["1"]}')
     add_kv_table(doc, docx_rows(SECTION1_ROWS))
 

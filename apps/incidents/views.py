@@ -1308,6 +1308,10 @@ def ticket_detail(request, pk):
     })
 
 
+def _hide_empty_report_fields(params):
+    return params.get('hide_empty', '1') != '0'
+
+
 @login_required
 @require_POST
 def ticket_report_docx(request, pk):
@@ -1315,7 +1319,11 @@ def ticket_report_docx(request, pk):
         raise Http404
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     try:
-        report = generate_ticket_report(pk, generated_by=request.user)
+        report = generate_ticket_report(
+            pk,
+            generated_by=request.user,
+            hide_empty=_hide_empty_report_fields(request.POST),
+        )
     except Exception:
         logger.exception('DOCX report generation failed for ticket %s', pk)
         messages.error(request, 'ไม่สามารถสร้างรายงาน DOCX ได้ — โปรดแจ้งผู้ดูแลระบบ')
@@ -1339,6 +1347,7 @@ def ticket_report_pdf(request, pk):
             pk,
             generated_by=request.user,
             base_url=request.build_absolute_uri('/'),
+            hide_empty=_hide_empty_report_fields(request.POST),
         )
     except Exception:
         logger.exception('PDF report generation failed for ticket %s', pk)
@@ -1360,7 +1369,10 @@ def ticket_report_preview(request, pk):
     return render(
         request,
         'incidents/report_preview.html',
-        build_ticket_report_render_context(ticket),
+        build_ticket_report_render_context(
+            ticket,
+            hide_empty=_hide_empty_report_fields(request.GET),
+        ),
     )
 
 
