@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Two-factor authentication — SOC Support System{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width: 650px;">
+    <div class="card shadow-sm">
+        <div class="card-body p-4 p-md-5">
+            <p class="text-primary fw-semibold"><i class="bi bi-shield-lock me-2" aria-hidden="true"></i>SOC Support System</p>
+            {% block mfa_content %}{% endblock %}
+        </div>
+    </div>
+    <p class="small text-muted mt-3">ต้องยืนยันตัวตน 2 ขั้นตอนก่อนเข้าใช้งานระบบ · Two-factor authentication is required for every role.</p>
+</div>
+{% endblock %}

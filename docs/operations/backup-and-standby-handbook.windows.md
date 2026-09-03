@@ -1001,6 +1001,14 @@ Two things follow:
    recreate the roles, point a real Django instance at it, and log in. That is
    the only test that exercises the whole path.
 
+A full custom-format `pg_restore` carries sequence state, so a clean restore
+needs no extra step. But if prod data ever arrives another way — a Django
+`loaddata` fixture, a data-only/single-table load, or a cross-environment copy —
+the id sequences stay parked below `MAX(id)` and reads keep working while the
+next INSERT (closing a ticket) throws a duplicate-key 500. After any such load,
+finish with `python manage.py check_sequences --fix` (idempotent; reports drift
+and resets it). Observed once in production, 2026-09-03.
+
 **Phase 2 is the stopping point that matters.** If you go no further, you have
 verified off-host backups. Everything after this reduces downtime, not data loss.
 

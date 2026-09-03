@@ -6,6 +6,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
 from apps.accounts import views as account_views
+from apps.accounts.mfa_views import MFALoginView
 from config.health import healthz
 
 urlpatterns = [
@@ -20,7 +21,7 @@ urlpatterns = [
     # redirect_authenticated_user: without it an already-signed-in visitor gets
     # the login form rendered inside the full app shell (sidebar, nav badges,
     # user pill), which reads as a broken/logged-out state.
-    path('login/', auth_views.LoginView.as_view(redirect_authenticated_user=True),
+    path('login/', MFALoginView.as_view(redirect_authenticated_user=True),
          name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('password-reset/', account_views.ThrottledPasswordResetView.as_view(),

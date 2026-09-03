@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     'django.contrib.humanize',
     # Third-party
     'axes',   # login brute-force protection / account lockout
+    'django_otp',
     # Project apps
     'apps.incidents',
     'apps.accounts.apps.AccountsConfig',
@@ -40,6 +41,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django_otp.middleware.OTPMiddleware',
+    'apps.accounts.mfa_middleware.RequireMFAMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Must be LAST — wraps authentication to record failed logins and enforce
@@ -145,6 +148,12 @@ MEDIA_ROOT = BASE_DIR / 'media'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'home'   # → dashboard
 LOGOUT_REDIRECT_URL = 'login'
+
+# New key first, retained old keys afterwards during rotation. Never derive
+# this from SECRET_KEY or store it with database backups. See the MFA runbook.
+MFA_ENCRYPTION_KEYS = [
+    key.strip() for key in config('MFA_ENCRYPTION_KEYS', default='').split(',') if key.strip()
+]
 
 # ── Security hardening ─────────────────────────────────────────────────────
 # Always-on — safe over both HTTP and HTTPS:

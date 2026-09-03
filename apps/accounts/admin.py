@@ -10,7 +10,7 @@ from django.template.response import TemplateResponse
 from axes.models import AccessAttempt
 from axes.utils import reset as reset_axes_attempts
 
-from .models import AccountLockoutAudit, PasswordChangeAudit, UserProfile
+from .models import AccountLockoutAudit, PasswordChangeAudit, UserProfile, MFAAudit
 from .password_audit import password_audit_context
 from .passwords import send_password_reset_email
 
@@ -18,6 +18,23 @@ from .passwords import send_password_reset_email
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
     can_delete = False
+
+
+@admin.register(MFAAudit)
+class MFAAuditAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'username', 'event', 'actor')
+    list_filter = ('event', 'created_at')
+    search_fields = ('username', 'actor__username')
+    readonly_fields = ('user', 'username', 'actor', 'event', 'reason', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class MyUserCreationForm(UserCreationForm):

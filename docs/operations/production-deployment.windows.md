@@ -430,6 +430,7 @@ backup variables the PowerShell scripts do not read.
 
 ```ini
 SECRET_KEY='<the generated key>'
+MFA_ENCRYPTION_KEYS='<separate generated Fernet key; see two-factor-authentication.md>'
 DEBUG=False
 
 # VM-local only for now. The DNS hostname is added at go-live, not before.

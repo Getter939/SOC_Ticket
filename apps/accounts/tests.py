@@ -25,7 +25,8 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import Client, RequestFactory, override_settings
+from .testing import MFATestCase as TestCase
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.urls import reverse
 

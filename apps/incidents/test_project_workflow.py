@@ -4,7 +4,8 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import override_settings
+from apps.accounts.testing import MFATestCase as TestCase
 
 from apps.accounts.models import UserProfile
 

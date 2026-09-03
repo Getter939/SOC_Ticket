@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from apps.accounts.testing import MFATestCase as TestCase
 
 from apps.accounts.models import UserProfile
 

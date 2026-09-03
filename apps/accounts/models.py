@@ -1,4 +1,5 @@
 from django.db import models
+from .mfa_models import AuthenticatorDevice, MFAAudit, MFARecoveryCode  # noqa: F401
 from django.contrib.auth.models import User
 
 

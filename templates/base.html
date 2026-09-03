@@ -563,13 +563,13 @@
         html.sidebar-pre-collapsed #main-content { margin-left: 56px; }
     </style>
 </head>
-<body{% if not user.is_authenticated %} class="no-sidebar"{% endif %}>
+<body{% if not request.mfa_complete %} class="no-sidebar"{% endif %}>
 
 <div class="page-loading-indicator" id="page-loading-indicator" role="status" aria-live="polite" aria-label="กำลังโหลด"></div>
 
 <!-- ── Topbar ── -->
 <div id="topbar">
-    {% if user.is_authenticated %}
+    {% if request.mfa_complete %}
     <button id="sidebarToggle" title="Toggle sidebar">
         <i class="bi bi-list"></i>
     </button>
@@ -586,9 +586,12 @@
             <div class="user-pill">
                 <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
             </div>
+            {% if request.mfa_complete %}
+            <a href="{% url 'mfa_recovery_codes' %}" class="btn btn-sm text-white" title="Two-factor authentication" aria-label="Two-factor authentication"><i class="bi bi-shield-lock"></i></a>
             <a href="{% url 'password_change' %}" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:0.9rem;" title="Change password" aria-label="Change password">
                 <i class="bi bi-key-fill"></i>
             </a>
+            {% endif %}
             <form method="post" action="{% url 'logout' %}" id="logout-form">
             {% csrf_token %}
             <button type="submit" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:0.75rem;" title="ออกจากระบบ">
@@ -600,7 +603,7 @@
 </div>
 
 <!-- ── Sidebar ── -->
-{% if user.is_authenticated %}
+{% if request.mfa_complete %}
 <nav id="sidebar">
     {% with profile=request.user.profile %}
 

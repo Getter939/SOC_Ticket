@@ -1,0 +1,18 @@
+{% extends 'accounts/mfa_base.html' %}
+{% block mfa_content %}
+<p class="small text-muted">Sign in · Step 2 of 2</p>
+<h1 class="h3">Enter your verification code</h1>
+<p>กรอกรหัสจากแอปยืนยันตัวตนเพื่อเข้าใช้งาน</p>
+<p>Open Google Authenticator and enter the six-digit code for your SOC account. You can also enter one of your unused recovery codes.</p>
+<form method="post">
+    {% csrf_token %}
+    <label for="{{ form.code.id_for_label }}" class="form-label">{{ form.code.label }}</label>
+    {{ form.code }}
+    {% for error in form.code.errors %}<p class="text-danger mt-2" role="alert">{{ error }}</p>{% endfor %}
+    <button class="btn btn-primary w-100 mt-3" type="submit">Verify and sign in</button>
+</form>
+<details class="mt-4"><summary>Lost your phone or having trouble?</summary>
+    <p class="small mt-2">Use an unused recovery code. If you have none, contact your IT administrator to verify your identity and reset your authenticator. Resetting your password does not remove two-factor authentication.</p>
+    <p class="small">If an app code fails, wait for the next code and check that your phone’s date and time are set automatically.</p>
+</details>
+{% endblock %}

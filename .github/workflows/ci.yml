@@ -59,6 +59,8 @@ jobs:
       # Throwaway config — not secrets. Mirrors the required (no-default) keys
       # config/settings.py reads via python-decouple.
       SECRET_KEY: ci-dummy-secret-key-not-used-in-production
+      # Public throwaway key for test fixtures only; never use in a deployment.
+      MFA_ENCRYPTION_KEYS: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       DEBUG: "False"
       ALLOWED_HOSTS: localhost,127.0.0.1
       DB_NAME: ticketdata_ci

@@ -7,7 +7,7 @@ from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from apps.accounts.testing import MFATestCase as TestCase
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime

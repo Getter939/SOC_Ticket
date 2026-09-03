@@ -55,3 +55,8 @@ requests==2.34.2
 # across gunicorn workers). Wired in config/settings.py: INSTALLED_APPS, the
 # AxesStandaloneBackend auth backend, and AxesMiddleware.
 django-axes==7.1.0
+
+# Mandatory authenticator-app MFA (django-otp's Django 6-compatible core).
+django-otp==1.7.0
+qrcode==8.2
+colorama==0.4.6; sys_platform == 'win32'

@@ -42,7 +42,8 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import override_settings
+from apps.accounts.testing import MFATestCase as TestCase
 from django.urls import reverse
 from django.utils import timezone
 from docx import Document

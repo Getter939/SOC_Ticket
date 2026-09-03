@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 from django.contrib.auth.models import User
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase
+from apps.accounts.testing import MFATestCase as TestCase
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile

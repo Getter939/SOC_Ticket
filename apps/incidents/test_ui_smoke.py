@@ -6,7 +6,7 @@ fail loudly in CI instead of in front of an analyst.
 Run with:  py manage.py test apps.incidents.test_ui_smoke
 """
 
-from django.test import TestCase
+from apps.accounts.testing import MFATestCase as TestCase
 from django.urls import reverse
 from django.utils import timezone
 

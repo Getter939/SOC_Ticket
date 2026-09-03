@@ -7,7 +7,7 @@ from apps.incidents.models import Ticket, TicketSubtask, TriageRecord
 def pending_triage_count(request):
     """Expose Tier 1 intake and Tier 2 ticket queue counts to the navigation."""
     user = getattr(request, 'user', None)
-    if user is None or not user.is_authenticated:
+    if user is None or not user.is_authenticated or not getattr(request, 'mfa_complete', False):
         return {}
 
     profile = getattr(user, 'profile', None)

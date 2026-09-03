@@ -77,6 +77,20 @@ prove backups are restorable. A real restore to a live DB follows the same steps
    `mart` matviews are in the dump but recompute from the restored operational
    tables anyway; the `snapshot_queue_daily` history and `dim_severity_map` edits
    restore as-is (they are the only non-recomputable reporting data).
+7. **⚠ Reset the id sequences.** A full custom-format `pg_restore` (§3.3) carries
+   sequence state, so this is a harmless verify there. But any load that writes
+   rows with their ids already set — a Django `loaddata` fixture, a **data-only**
+   or single-table restore, or a cross-environment copy — leaves every sequence
+   parked below its table's `MAX(id)`. Reads work; the **next** INSERT (closing a
+   ticket, adding a note) then dies with
+   `duplicate key value violates unique constraint "..._pkey"` — a silent 500 that
+   only surfaces when someone writes. Always finish a restore/seed with:
+   ```
+   python manage.py check_sequences          # report only; exits non-zero on drift
+   python manage.py check_sequences --fix     # setval(seq, MAX(id)) on the drifted ones
+   ```
+   It scans every installed app (`--app <label>` to narrow) and is idempotent, so
+   it is safe to run any time — including as a scheduled post-restore assertion.
 
 ---
 
