@@ -100,7 +100,7 @@ Backup priority follows the **derived-vs-snapshot** line (full picture in
   - **Off-host copy** — archives land on the host volume (`BACKUP_HOST_PATH`).
     Encryption makes off-siting safe. A second VM pulling a verified copy off-box
     (the **warm** tier of 3-2-1) is built in
-    [backup-vm-handbook.md](backup-vm-handbook.md); the **cold/immutable** tier
+    [backup-vm-handbook.md](../archive/backup-vm-handbook.md); the **cold/immutable** tier
     remains open pending the governance decision.
 
 ---
@@ -165,8 +165,8 @@ in UAT that you cannot afford to lose.
 ---
 
 ## 7. Related
-- [backup-vm-handbook.md](backup-vm-handbook.md) — build & operate the off-host backup VM (pull, verify, prune, restore drills, DR runbook).
+- [backup-vm-handbook.md](../archive/backup-vm-handbook.md) — build & operate the off-host backup VM (pull, verify, prune, restore drills, DR runbook).
 - [backup-storage-decision-brief.md](backup-storage-decision-brief.md) — one-page brief for the governance/compliance decision on storage location & retention.
 - [../architecture/data-infrastructure.md](../architecture/data-infrastructure.md) — the whole-picture diagram.
 - [reporting-layer-operations.md](reporting-layer-operations.md) — running the reporting layer.
-- [production-deployment.md](production-deployment.md) — overall prod deploy.
+- [production-deployment.md](../archive/production-deployment.md) — overall prod deploy.

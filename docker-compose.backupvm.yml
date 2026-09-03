@@ -13,7 +13,7 @@
 #     docker compose -f docker-compose.backupvm.yml --profile verify \
 #     run --rm restore_verify
 #
-# See docs/operations/backup-vm-handbook.md.
+# See docs/archive/backup-vm-handbook.md.
 
 services:
 

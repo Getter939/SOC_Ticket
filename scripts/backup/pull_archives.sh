@@ -9,7 +9,7 @@ set -eu
 # compromised production VM cannot reach in and delete the archives. Deletions
 # are never mirrored (no --delete), so pruning on prod does not prune here.
 #
-# See docs/operations/backup-vm-handbook.md.
+# See docs/archive/backup-vm-handbook.md.
 
 fail() {
   echo "pull-archives: $*" >&2

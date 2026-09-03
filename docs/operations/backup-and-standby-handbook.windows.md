@@ -1,7 +1,7 @@
 # SOC Ticket - Backup & Standby Handbook (Windows Server)
 
 > **Audience:** whoever builds and operates the production and spare VMs (you)
-> **Status:** Current · **Last updated:** 2026-07-27
+> **Status:** Current · **Last updated:** 2026-09-02 (Phases 1-3 built through 2026-08-25; restore drill passed 2026-08-24)
 > **Applies to:** native PostgreSQL on Windows Server, Django served by Waitress as a Windows service
 
 One spare VM, two jobs, in this order:
@@ -42,16 +42,18 @@ proceed with an estimate and re-check after go-live.
 ### Two things this repo currently gets wrong about your deployment
 
 1. [backup-and-restore.md](backup-and-restore.md) and
-   [backup-vm-handbook.md](backup-vm-handbook.md) describe a **Docker Compose**
+   [backup-vm-handbook.md](../archive/backup-vm-handbook.md) describe a **Docker Compose**
    production with Linux shell scripts. Your production is **native PostgreSQL on
    Windows**. Those documents and `scripts/backup/*.sh`,
    `docker-compose.backupvm.yml` do **not** apply here. This handbook and
    `scripts/backup/windows/*.ps1` replace them for this deployment.
-2. ~~Nothing is currently backing up production.~~ **Superseded 2026-08-24:**
-   Phases 1 and 2 are built. Production takes an encrypted archive nightly and
-   the spare pulls hourly. What is still unproven is the **restore** - see
-   Phase 2.6. Until a restore drill passes, treat these as archives, not
-   backups.
+2. ~~Nothing is currently backing up production.~~ ~~Superseded 2026-08-24: the
+   restore is still unproven.~~ **Updated 2026-08-25:** Phases 1-3 are built and
+   the **restore drill has passed** (2026-08-24 - decrypts, checksums, restores
+   into a throwaway DB, row counts matched the manifest; scheduled weekly as
+   `SOC-Restore-Drill`). These are proven backups, not just archives. The
+   remaining gaps are the **failover rehearsal** (promoting the standby) and the
+   **offline GPG-key test** - see Phase 3 and the go-live checklist (Section 6).
 
 ### Field notes from the first build (2026-08-24)
 
@@ -1423,6 +1425,15 @@ that already exists and is already protected. Do **not** merge it with step 3.
 
 ## 6. Go-live checklist
 
+> **Status 2026-09-02:** Phases 1-3 are built and proven - nightly encrypted
+> archives, hourly off-host pull, a **passed restore drill** (2026-08-24, weekly),
+> and a **streaming standby** (reboot-survival verified), with the app stack
+> pre-staged on the spare. Boxes below are ticked accordingly. The **three
+> remaining launch gates** are: the **offline GPG private-key test**, the
+> **planned failover rehearsal**, and the **separate-physical-host / shared-SAN
+> question** to infrastructure. Items left unticked are genuinely open or
+> unverified, not merely un-updated.
+
 **Foundations**
 - [ ] Spare VM disk size **confirmed** (120 vs 150 GB resolved) and written into §2
 - [ ] `D` and `A` measured; retention and `-MaxArchiveGB` chosen from the §1 table
@@ -1430,32 +1441,32 @@ that already exists and is already protected. Do **not** merge it with step 3.
 - [ ] Separate physical host confirmed - or the limitation recorded in writing
 
 **Phase 0-1 - production**
-- [ ] `wal_level=replica`, `ssl=on`, `listen_addresses`, `max_slot_wal_keep_size` set and verified after restart
+- [x] `wal_level=replica`, `ssl=on`, `listen_addresses`, `max_slot_wal_keep_size` set and verified after restart
 - [ ] Port 5432 confirmed **closed** from a third machine
-- [ ] GPG public key imported on prod; private key in **three** places
-- [ ] **Offline private key tested** - a decrypt performed on a machine that is neither VM
-- [ ] `New-SocBackup.ps1` produces a `.zip.gpg` with a `.sha256` and no leftover `.zip`
-- [ ] Backup tasks scheduled; `LastTaskResult` is 0 for each
+- [ ] GPG public key imported on prod; private key in **three** places *(public key on prod done; three-places storage tied to the offline-key gate below)*
+- [ ] **Offline private key tested** - a decrypt performed on a machine that is neither VM  ← **OPEN launch gate**
+- [x] `New-SocBackup.ps1` produces a `.zip.gpg` with a `.sha256` and no leftover `.zip`
+- [x] Backup tasks scheduled; `LastTaskResult` is 0 for each
 - [ ] `New-SocConfigBundle.ps1` run and scheduled; manifest inspected and contains IIS config, `.env`, and the app service
 
 **Phase 2 - spare VM**
-- [ ] Share is read-only at **both** share and NTFS level
-- [ ] All three tests in §2.3 behave as marked (read works, write refused, delete refused)
-- [ ] Pull, prune, and check tasks scheduled with **stored passwords**, not S4U
-- [ ] `-MaxArchiveGB` set to the archive budget
+- [x] Share is read-only at **both** share and NTFS level
+- [x] All three tests in §2.3 behave as marked (read works, write refused, delete refused)
+- [x] Pull, prune, and check tasks scheduled with **stored passwords**, not S4U
+- [x] `-MaxArchiveGB` set to the archive budget
 - [x] **Alert path tested by deliberately breaking something** — proven via
   `-MinFreePercent 100`; a `[SOC-BACKUP] FAILED` email arrived over the
   authenticated STARTTLS relay (§2.5 as-built)
-- [ ] Verify instance running on 5434; one restore drill passed
-- [ ] Weekly drill scheduled
-- [ ] **App stack pre-staged on the spare VM** (§2.8), configured and stopped
+- [x] Verify instance running on 5434; one restore drill passed *(2026-08-24)*
+- [x] Weekly drill scheduled *(`SOC-Restore-Drill`)*
+- [x] **App stack pre-staged on the spare VM** (§2.8), configured and stopped
 - [ ] Role/grant recreation steps (§4.3 step 3) written down where someone else can find them
 
 **Phase 3 - standby**
-- [ ] Same PostgreSQL major version on both VMs
-- [ ] `pg_hba.conf` uses `hostssl`, restricted to `SPARE_IP/32`
-- [ ] `pg_is_in_recovery()` returns `t`; `pg_stat_replication` shows `streaming`
-- [ ] **Restart test passed** - standby resumes streaming after a service restart
+- [x] Same PostgreSQL major version on both VMs *(PostgreSQL 18)*
+- [x] `pg_hba.conf` uses `hostssl`, restricted to `SPARE_IP/32`
+- [x] `pg_is_in_recovery()` returns `t`; `pg_stat_replication` shows `streaming`
+- [x] **Restart test passed** - standby resumes streaming after a service restart
 - [x] Health check running with `-CheckStandby` (and now with authenticated SMTP
   alerting — §2.5 as-built)
 
@@ -1502,6 +1513,6 @@ For the governance conversation - see
 
 - [backup-storage-decision-brief.md](backup-storage-decision-brief.md) - the governance ask
 - [production-deployment.windows.md](production-deployment.windows.md) - **steps 2-3 of the deployment order**: building the production VM
-- [production-deployment.md](production-deployment.md) - **superseded**; Docker/Linux only
+- [production-deployment.md](../archive/production-deployment.md) - **superseded**; Docker/Linux only
 - [../architecture/data-infrastructure.md](../architecture/data-infrastructure.md) - the whole data picture
 - [backup-and-restore.md](backup-and-restore.md) - **Docker/Linux variant; does not apply to this deployment**

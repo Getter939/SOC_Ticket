@@ -8,7 +8,7 @@ set -eu
 # SILENCE: the pull job dies, nobody notices, and the gap is discovered during
 # a restore. Wire this to a timer with OnFailure= so a stalled pull is loud.
 #
-# See docs/operations/backup-vm-handbook.md.
+# See docs/archive/backup-vm-handbook.md.
 
 fail() {
   echo "check-freshness: $*" >&2

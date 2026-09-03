@@ -204,6 +204,39 @@ Emergency **checkbox** inside the forward form. Duplicated decision points, and
 
 ---
 
+## 0.3. 2026-08-13 update — Direct-to-Owner two-step collapsed
+
+Commit `f0e4b59` ("13/8 System Owner Queue adjustment"). Model-only change to
+`ALLOWED_TRANSITIONS` / `TRANSITION_PERMISSIONS`; no new migration.
+
+**`AWAITING_OWNER → PENDING_T2_REVIEW` is now a single Tier 1 action.** The owner
+lane used to stop at `OWNER_REMEDIATED` first — Tier 1 recorded the owner's
+report, *then* forwarded to Tier 2 — two clicks by the same person for one act,
+the first of which existed mainly to unlock Tier 1's own upload permission.
+Tier 1 now attaches whatever the owner sent, records what they reported in the
+transition note, and hands to Tier 2 in one move. Adequacy is judged once, by
+Tier 2 (the `PENDING_T2_REVIEW` verification that always followed anyway).
+
+**FSM delta:**
+- **Added:** `AWAITING_OWNER → PENDING_T2_REVIEW` [`TIER1_CREATOR`].
+- **Removed (as a live edge):** `AWAITING_OWNER → OWNER_REMEDIATED`. Nothing
+  transitions *into* `OWNER_REMEDIATED` any more.
+- **`OWNER_REMEDIATED` is now LEGACY, not removed.** Its one out-edge
+  (`OWNER_REMEDIATED → PENDING_T2_REVIEW` [`TIER1_CREATOR`]) is kept so any
+  ticket already sitting in that status can still finish. The status stays in
+  `STATUS_CHOICES` (label, pill color, `CREATOR_REVIEW_STATUSES`,
+  `TIER1_QUEUE_STATUSES` membership all intact) — so `STATUS_CHOICES` now lists
+  **12 active states + 1 legacy compatibility state.** Do not wire a new edge in.
+- **Unchanged:** the Tier 2 verification that follows, and closure routing
+  (`requires_manager_verification == is_emergency`).
+
+**Docs that had to follow:** `ticket-lifecycle-states.md` (diagram + table),
+both engineering handovers, and `end-user-guide.th.md` all previously drew the
+`AWAITING_OWNER → OWNER_REMEDIATED → PENDING_T2_REVIEW` two-step as current;
+corrected 2026-09-02.
+
+---
+
 ## 1. CURRENT implementation (before this change)
 
 ### 1a. Ticket states & transitions — `apps/incidents/models.py` (`Ticket`)

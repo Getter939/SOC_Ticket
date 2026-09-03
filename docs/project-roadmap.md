@@ -22,7 +22,7 @@ Verified against the repo on 2026-08-27:
 | Application code | ~14,000 production Python lines + ~6,700 template lines across 5 Django apps |
 | Lifecycle | 13-state FSM, 7 roles, transitions enforced in the model |
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
-| Reporting layer | Phases 1–3 built; 4–5 pending; nightly refresh **not scheduled** |
+| Reporting layer | Phases 1–3 built; nightly refresh **scheduled** (`SOC-Refresh-Reporting`, 2026-08-26); Phases 4–5 (external `reporting_ro` role + retire `socdata`) pending |
 | Docs | 25+ documents incl. Thai user guides, ADRs, handover, runbooks |
 | CI | **GitHub Actions** (`.github/workflows/ci.yml`) — Postgres 18 + Python 3.14; Ruff correctness rules, migration-drift check, the full test suite, and an 85% coverage floor, on every push + PR |
 | App logging | Rotating file + console handlers configured in `config/settings.py` |
@@ -92,10 +92,12 @@ behavior-preserving; deployment warnings close only with the TLS cutover.
 This is the longest-elapsed phase and the one you cannot compress by working
 harder. Start it now, in parallel with Phase C.
 
-- [ ] **Repair the UAT VM.** Per the UAT operations guide, `.env` was corrected to
-  `ticketdata_uat` / `ticket_uat` and PostgreSQL then rejected the stored
-  password. Recover the credentials, re-run the DB checks, repeat the browser
-  test from a tester PC.
+- [x] **UAT VM database access confirmed working (2026-09-03).** `ticket_uat` still
+  authenticates to `ticketdata_uat` with the stored `.env` password and the database
+  is usable — verified on the VM. This closes the earlier "PostgreSQL rejected the
+  stored password" note; the `uat-vm-operations-guide.docx` (17 Jul 2026) status
+  ("corrected UAT database … access restored") is accurate. Remaining UAT-VM work
+  (HTTPS, running the roles) is tracked in the items below.
 - [ ] **Put HTTPS on the UAT VM.** Testers are logging in with real passwords over
   port 80 today.
 - [ ] **Run the remaining 6 roles.** Tier 1, Tier 2, System Admin, System Owner,
@@ -119,18 +121,17 @@ harder. Start it now, in parallel with Phase C.
 
 ### Phase C — Build production *(~4–6 focused days)*
 
-Run this in parallel with Phase B. Critically: **the repo's deployment docs
-describe the wrong platform.** `docs/operations/production-deployment.md`,
-`docker-compose.prod.yml`, `nginx.conf`, and `scripts/backup/*.sh` all assume
-Linux + Docker + gunicorn + nginx. Your real target is **Windows Server + native
-PostgreSQL + Waitress + IIS**, which today is documented only inside the
-generated UAT `.docx`.
+Run this in parallel with Phase B. Note that the **real target is Windows Server
++ native PostgreSQL + Waitress + IIS**, not the Linux/Docker/gunicorn/nginx that
+the legacy `docker-compose.prod.yml`, `nginx.conf`, and `scripts/backup/*.sh`
+assume — those are kept only for a possible future Linux move.
 
-- [ ] **Write `docs/operations/production-deployment.windows.md`** — the real
-  runbook: Python + venv, PostgreSQL install and tuning, Waitress as a Windows
-  service, IIS + ARR/URL Rewrite reverse proxy, static files, `.env` layout,
-  restart/rollback procedure. Mark the Docker doc as superseded (do not delete
-  it; a future Linux move may want it).
+- [x] **Windows production runbook written** —
+  [production-deployment.windows.md](operations/production-deployment.windows.md):
+  Python + venv, PostgreSQL install and tuning, Waitress as a Windows service,
+  IIS + ARR/URL Rewrite reverse proxy, static files, `.env` layout,
+  restart/rollback. The Docker runbook (`docs/archive/production-deployment.md`) is marked
+  superseded, not deleted.
 - [ ] **Set PostgreSQL's Phase 0 settings at install time** — `wal_level`,
   `listen_addresses`, `max_wal_senders`, `max_slot_wal_keep_size`, TLS for
   replication. These need a restart; setting them now saves a maintenance
@@ -160,11 +161,14 @@ Windows runbook written and followed end to end by you once.
 
 ### Phase D — Backup & DR *(~3–4 focused days)*
 
-**Nothing is backing up anything today.** Until Phase 1 of the handbook is done,
-one bad migration is unrecoverable. Do this *before* real data exists — you can
-still test destructively.
+**Backups are now live** (Phases 1–3 below done through 2026-08-25): nightly
+encrypted archives, hourly off-host pull to the spare, a passed restore drill,
+and a streaming standby. The remaining items are the **failover rehearsal** and
+the **offline GPG-key test** — the two gaps a restore drill cannot reach. The
+original warning stood while this was unbuilt: until Phase 1 existed, one bad
+migration was unrecoverable.
 
-Follow `docs/operations/backup-and-standby-handbook.windows.md` in order:
+Handbook: `docs/operations/backup-and-standby-handbook.windows.md`. Status per phase:
 
 - [x] **Phase 1 — backups on production.** GnuPG keypair (generated on the *spare*
   VM, public key only on prod), backup service account, `New-SocBackup.ps1`,

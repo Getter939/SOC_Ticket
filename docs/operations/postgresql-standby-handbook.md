@@ -292,7 +292,7 @@ the old primary data back over the promoted database.
 
 ## Related repository material
 
-- [Production deployment](production-deployment.md)
+- [Production deployment](../archive/production-deployment.md)
 - [Backup script](../../scripts/backup/backup.sh)
 - [Restore verification](../../scripts/backup/restore_verify.sh)
 

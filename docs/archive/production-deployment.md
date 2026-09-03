@@ -6,7 +6,7 @@
 > IIS/ARR**. Nothing in this document — nginx, gunicorn, docker-compose, the
 > Linux paths, the `web` hostname — describes the deployed system.
 >
-> **Use [production-deployment.windows.md](production-deployment.windows.md).**
+> **Use [production-deployment.windows.md](../operations/production-deployment.windows.md).**
 >
 > This file is retained only for the Docker development stack and for history.
 
@@ -188,5 +188,5 @@ docker compose -f docker-compose.prod.yml logs -f db
 ## Related documents
 
 - [../../README.md](../../README.md) — local development setup
-- [grafana-wazuh-wall.md](grafana-wazuh-wall.md) — the separate Grafana wall-board
+- [grafana-wazuh-wall.md](../operations/grafana-wazuh-wall.md) — the separate Grafana wall-board
 - [../handover/engineering-handover.md](../handover/engineering-handover.md) §6–§8 — deployment context, known issues, security posture

@@ -1,6 +1,6 @@
 <svg width="680" height="1260" viewBox="0 0 680 1260" xmlns="http://www.w3.org/2000/svg" role="img">
 <title>SOC ticket workflow as a vertical flow with role badges</title>
-<desc>A single top-to-bottom flow of the ticket lifecycle. Each step is colored by the responsible role (Tier 1, Tier 2, System Admin, SOC Manager); SANS-IR phases run down the left. Branches cover event-closes, Tier 2 escalation, the manager gate, and the not-contained loop.</desc>
+<desc>OUTDATED (as of 2026-09-02) — this hand-drawn flow no longer matches the workflow: it shows Tier 1 verifying containment and a Critical-severity manager route, and it omits the SOC Manager pre-containment review (PENDING_MGR_TRIAGE), the direct-to-owner lane, and the Emergency-only manager gate. The authoritative current workflow is the mermaid diagram in docs/architecture/ticket-lifecycle-states.md. Original description: a single top-to-bottom flow of the ticket lifecycle, each step colored by the responsible role, with SANS-IR phases down the left.</desc>
 <style>
   text{font-family:'Segoe UI','Leelawadee UI',Tahoma,Arial,sans-serif;}
   .t{font-size:14px;font-weight:400;}
@@ -101,4 +101,8 @@
 <text class="ts" x="330" y="1098" text-anchor="start" fill="#495057">ไม่ต้อง</text>
 <text class="ts" x="432" y="1033" text-anchor="start" fill="#495057">ใช่</text>
 <text class="ts" x="503" y="1126" text-anchor="middle" fill="#495057">อนุมัติ</text>
+<!-- OUTDATED overlay stamp added 2026-09-02 (see ticket-lifecycle-states.md) -->
+<rect x="0" y="0" width="680" height="34" fill="#dc3545"/>
+<text x="340" y="15" text-anchor="middle" fill="#ffffff" style="font-size:12px;font-weight:700">OUTDATED DIAGRAM — does not match the current workflow</text>
+<text x="340" y="29" text-anchor="middle" fill="#ffffff" style="font-size:11px;font-weight:700">Authoritative source: docs/architecture/ticket-lifecycle-states.md</text>
 </svg>

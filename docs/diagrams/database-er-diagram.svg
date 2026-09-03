@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1950" height="1450" viewBox="0 0 1950 1450" role="img" aria-labelledby="title desc">
-  <title id="title">SOC Ticket Live Database ER Diagram</title>
-  <desc id="desc">Entity relationship diagram for the running PostgreSQL database ticketdata after legacy customer/project tables were removed.</desc>
+  <title id="title">SOC Ticket Database ER Diagram — snapshot 2026-07-06</title>
+  <desc id="desc">Point-in-time snapshot (2026-07-06) of the PostgreSQL database ticketdata. As a dated snapshot it does NOT include schema added later — Project Incident / case-bundling tables, ticket audit-history, the staging tables, and the reporting mart schema. For current schema, inspect the models and migrations. (The "Docker" source note is also historical: production now runs native PostgreSQL on Windows.)</desc>
   <defs>
     <style>
       .bg { fill: #f8fafc; }
@@ -25,9 +25,10 @@
     </marker>
   </defs>
   <rect class="bg" x="0" y="0" width="1950" height="1450"/>
-  <text class="title" x="60" y="54">SOC Ticket Live Database ER Diagram</text>
-  <text class="subtitle" x="60" y="82">Source: running PostgreSQL database <tspan font-family="Consolas, Courier New, monospace">ticketdata</tspan> in Docker. Checked 2026-07-06.</text>
-  <text class="note" x="60" y="104">Legacy customer/project tables were removed from the live DB and repo; this diagram reflects the remaining active schema.</text>
+  <text class="title" x="60" y="54">SOC Ticket Database ER Diagram — snapshot 2026-07-06</text>
+  <text class="subtitle" x="60" y="82">Point-in-time snapshot of <tspan font-family="Consolas, Courier New, monospace">ticketdata</tspan>, checked 2026-07-06. NOT auto-generated — verify against models/migrations before relying on it.</text>
+  <text class="note" x="60" y="104">Legacy customer/project tables were removed from the live DB and repo; this diagram reflects the remaining active schema as of that date.</text>
+  <text class="note" x="60" y="124" fill="#b91c1c">Does NOT include later schema: Project Incident / case-bundling, audit-history, staging, reporting mart.</text>
   <g id="legend">
     <rect x="1325" y="36" width="560" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
     <text class="legend-title" x="1343" y="60">Legend</text>

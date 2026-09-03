@@ -8,7 +8,7 @@ set -eu
 # Deliberately separate from backup.sh's cleanup: production pruning must never
 # propagate here (that is exactly what ransomware would exploit).
 #
-# See docs/operations/backup-vm-handbook.md.
+# See docs/archive/backup-vm-handbook.md.
 
 fail() {
   echo "prune-archive: $*" >&2

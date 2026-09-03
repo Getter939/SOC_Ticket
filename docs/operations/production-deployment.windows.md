@@ -1,8 +1,8 @@
 # Production Deployment — Windows Server
 
-> **Audience:** whoever builds the production VM · **Status:** Current · **Last updated:** 2026-08-24
+> **Audience:** whoever builds the production VM · **Status:** Current · **Last updated:** 2026-09-02 (Stage 13 HTTPS as-built 2026-08-26)
 > **Applies to:** Windows Server + native PostgreSQL + Waitress + IIS — **the actual production platform**
-> **Supersedes** [production-deployment.md](production-deployment.md) (Docker/nginx/gunicorn — Linux only)
+> **Supersedes** [production-deployment.md](../archive/production-deployment.md) (Docker/nginx/gunicorn — Linux only)
 
 This runbook is **steps 2 and 3** of the deployment order in
 [backup-and-standby-handbook.windows.md §2](backup-and-standby-handbook.windows.md#where-this-fits-in-the-deployment-order):
@@ -10,10 +10,17 @@ build the VM, then create the database, secrets, superuser, and the Waitress
 service. The handbook owns everything from step 4 (PostgreSQL replication
 prerequisites) onward. Neither document repeats the other.
 
-**Where you stop.** This runbook ends at a production VM that works, reachable
-**only from the VM itself**. It does not go live. Users get nothing, the LAN
-gets nothing, Wazuh ingestion stays off, no data is imported. Go-live gates live
-in [handbook §6](backup-and-standby-handbook.windows.md#6-go-live-checklist).
+**Where the build steps stop — and what has since happened.** As *written*, this
+runbook's numbered stages (through Stage 11) end at a production VM reachable
+**only from the VM itself** — no LAN, no HTTPS, no ingest, no data. That is still
+the right place to pause when building a fresh VM. **As-built, production has moved
+past that point:** Stage 13 was executed on 2026-08-26 (HTTPS live on a
+**self-signed IP bridge**, `https://10.1.220.118`), Wazuh ingest and the nightly
+reporting refresh are scheduled, and the go-live gates in
+[handbook §6](backup-and-standby-handbook.windows.md#6-go-live-checklist) are
+mostly closed. The remaining go-live work is the **real CA cert + DNS** (see the
+Stage 13 as-built block). So "does not go live" describes the build procedure, not
+the current running system.
 
 ---
 
@@ -820,7 +827,7 @@ real rather than aspirational.
 
 ---
 
-## Stage 13 — HTTPS (deferred until the certificate exists)
+## Stage 13 — HTTPS (DONE via self-signed bridge 2026-08-26; real CA cert still deferred)
 
 > ### ✅ As-built — HTTPS go-live via a self-signed IP bridge (2026-08-26)
 >
@@ -1040,4 +1047,4 @@ and [project-roadmap.md](../project-roadmap.md) give:
 - [backup-and-standby-handbook.windows.md](backup-and-standby-handbook.windows.md) — steps 4–10 of the deployment order
 - [../project-roadmap.md](../project-roadmap.md) — where this sits in the whole project
 - [reporting-layer-operations.md](reporting-layer-operations.md) §3 — the reporting cutover, after go-live
-- [production-deployment.md](production-deployment.md) — **superseded**; Docker/Linux only
+- [production-deployment.md](../archive/production-deployment.md) — **superseded**; Docker/Linux only

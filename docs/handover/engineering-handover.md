@@ -19,7 +19,7 @@ Companion documents (read in this order):
 | [workflow-change-log.md](../architecture/workflow-change-log.md) | Full rationale for the ticket workflow redesign and its later amendments |
 | [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) | The current end-to-end flow, per role |
 | [production-deployment.windows.md](../operations/production-deployment.windows.md) | Current production deployment (Windows Server, Waitress, IIS/ARR) |
-| [production-deployment.md](../operations/production-deployment.md) | Superseded Linux/Docker deployment variant |
+| [production-deployment.md](../archive/production-deployment.md) | Superseded Linux/Docker deployment variant |
 | [adr/](../adr/) | Architecture decision records (case bundling, OLA clock origin, manager gate) |
 | `../user-guides/feature-guide.docx` | End-user feature guide (screenshots, per-role walkthroughs) |
 | [end-user-guide.th.md](../user-guides/end-user-guide.th.md) | Thai end-user guide |
@@ -112,10 +112,11 @@ NEW
     │                             ▲   (admin submits report)   │
     │                             └───(T2: not contained)──────┤
     │                                                          │
-    └─(t1_route = OWNER)──► AWAITING_OWNER ──► OWNER_REMEDIATED │
-                                 ▲  (T1 records owner fix)   │  │
-                                 └──(not actually fixed)─────┘  │
-                                 ▲                              │
+    └─(t1_route = OWNER)──► AWAITING_OWNER ─────────────────────┤
+                                 ▲  (T1 records the owner's fix  │
+                                 │   + attaches evidence in one  │
+                                 │   action — no OWNER_REMEDIATED │
+                                 │   stop; that state is legacy) │
                                  │        PENDING_T2_REVIEW ◄────┤ (mandatory
                                  └──(T2 rejects)──┘              │  T2 verify)
                                                                  │
@@ -154,7 +155,13 @@ Rules that are easy to get wrong:
   mandatory, not optional.
 - Two **rejection loops**: `CONTAINMENT_REPORTED → AWAITING_CONTAINMENT` (T2
   judges containment insufficient; the admin is re-notified) and
-  `PENDING_T2_REVIEW → AWAITING_OWNER` / `OWNER_REMEDIATED → AWAITING_OWNER`.
+  `PENDING_T2_REVIEW → AWAITING_OWNER` (T2 rejects the owner's fix; back to the
+  owner lane).
+- **`OWNER_REMEDIATED` is a legacy state (retired 2026-08-13).** The owner lane
+  now runs `AWAITING_OWNER → PENDING_T2_REVIEW` directly. `OWNER_REMEDIATED`
+  stays in `STATUS_CHOICES` with a single out-edge (`→ PENDING_T2_REVIEW`) only
+  so tickets already in it can finish — nothing transitions into it. So
+  `STATUS_CHOICES` is **12 active states + 1 legacy**. See the change log §0.3.
 - **Mid-containment reclassification**: Tier 2 may flip an in-flight Incident
   to `EVENT` and close it from either verification queue
   (`EVENT_CLOSE_TRANSITIONS`) — this bypasses the manager *even if the
@@ -472,7 +479,7 @@ restart, rollback, TLS, and smoke-test runbook.
    | Old path | Current path |
    |---|---|
    | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-change-log.md` |
-   | `DEPLOY.md` | `docs/operations/production-deployment.md` |
+   | `DEPLOY.md` | `docs/archive/production-deployment.md` |
    | `docs/HANDOVER.md` / `.th.md` | `docs/handover/engineering-handover.md` / `.th.md` |
    | `docs/soc-ticket-flow.md` | `docs/architecture/ticket-lifecycle-states.md` |
    | `docs/user-guide-th.md` | `docs/user-guides/end-user-guide.th.md` |

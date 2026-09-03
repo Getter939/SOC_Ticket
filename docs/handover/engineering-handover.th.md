@@ -1,8 +1,18 @@
 ﻿# เอกสารส่งมอบงานด้านวิศวกรรม — ระบบ SOC Ticketing
 
-> **ผู้อ่าน:** developer ที่จะรับช่วงดูแลโค้ดเบสนี้ · **สถานะ:** เป็นปัจจุบัน
+> **ผู้อ่าน:** developer ที่จะรับช่วงดูแลโค้ดเบสนี้ · **สถานะ:** ⚠️ ตามหลังฉบับภาษาอังกฤษ (แปลไว้ ณ 23 ก.ค. 2026)
 > **อ้างอิงจาก:** repo ที่ commit `564a196` ("23/7 Document TriageRecord's real workflow…")
-> **ฉบับภาษาอังกฤษ:** [engineering-handover.md](engineering-handover.md)
+> **ฉบับภาษาอังกฤษ (เป็นฉบับหลัก/ปัจจุบัน):** [engineering-handover.md](engineering-handover.md)
+
+> ⚠️ **ฉบับภาษาไทยนี้ยังไม่ได้ซิงก์กับโค้ดล่าสุด** แปลไว้ตั้งแต่ commit `564a196`
+> (23 ก.ค. 2026) จึงยัง **ไม่รวม** การเปลี่ยนแปลงหลังจากนั้น โดยเฉพาะ:
+> (1) เส้นทางเจ้าของระบบยุบเหลือขั้นตอนเดียว `AWAITING_OWNER → PENDING_T2_REVIEW`
+> และ `OWNER_REMEDIATED` กลายเป็นสถานะเก่าที่เลิกใช้ (13 ส.ค. 2026); และ
+> (2) **production จริงเป็น Windows Server + PostgreSQL native + Waitress + IIS**
+> ไม่ใช่ Docker/nginx/gunicorn ตามที่อ้างถึงด้านล่าง เอกสารที่ถือเป็นปัจจุบันคือ
+> [engineering-handover.md](engineering-handover.md),
+> [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) และ
+> [production-deployment.windows.md](../operations/production-deployment.windows.md)
 
 เอกสารนี้เป็นจุดเริ่มต้นสำหรับผู้ที่จะรับช่วงดูแลโปรเจกต์นี้ต่อ ครอบคลุมว่าระบบนี้คืออะไร
 ทำงานอย่างไร โค้ดส่วนสำคัญอยู่ที่ไหน วิธีรันและ deploy รวมถึงสิ่งที่**ไม่สามารถ**
@@ -18,7 +28,8 @@
 | [CONTEXT.md](../../CONTEXT.md) | **อภิธานศัพท์** — ความหมายของทุกคำในระบบ (Incident vs Event, OLA, Response Request…) หากยังไม่คุ้นคำศัพท์ ให้อ่านไฟล์นี้ก่อน |
 | [workflow-change-log.md](../architecture/workflow-change-log.md) | เหตุผลทั้งหมดของการออกแบบ workflow ตั๋วใหม่ รวมถึงการแก้ไขเพิ่มเติมภายหลัง |
 | [ticket-lifecycle-states.md](../architecture/ticket-lifecycle-states.md) | ภาพรวม flow ปัจจุบันตั้งแต่ต้นจนจบ แยกตาม role |
-| [production-deployment.md](../operations/production-deployment.md) | การ deploy production (Docker, nginx, gunicorn) |
+| [production-deployment.windows.md](../operations/production-deployment.windows.md) | **การ deploy production ฉบับปัจจุบัน** — Windows Server + PostgreSQL native + Waitress + IIS |
+| [production-deployment.md](../archive/production-deployment.md) ⚠️ | ฉบับ Docker/nginx/gunicorn — **เลิกใช้แล้ว** ไม่ตรงกับ production จริงบน Windows |
 | [adr/](../adr/) | บันทึกการตัดสินใจเชิงสถาปัตยกรรม (case bundling, จุดเริ่มนาฬิกา OLA, manager gate) |
 | `../user-guides/feature-guide.docx` | คู่มือฟีเจอร์สำหรับผู้ใช้งาน (ภาพหน้าจอ, วิธีใช้งานแยกตาม role) |
 | [end-user-guide.th.md](../user-guides/end-user-guide.th.md) | คู่มือผู้ใช้งานฉบับภาษาไทย |
@@ -105,10 +116,11 @@ NEW
     │                             ▲   (admin ส่งรายงาน)         │
     │                             └───(T2: ยังไม่ contain)──────┤
     │                                                          │
-    └─(t1_route = OWNER)──► AWAITING_OWNER ──► OWNER_REMEDIATED │
-                                 ▲  (T1 บันทึกผลจากเจ้าของ)   │  │
-                                 └──(ยังแก้ไม่จริง)───────────┘  │
-                                 ▲                              │
+    └─(t1_route = OWNER)──► AWAITING_OWNER ─────────────────────┤
+                                 ▲  (T1 บันทึกผลจากเจ้าของ +      │
+                                 │   แนบหลักฐาน ทำในขั้นตอนเดียว   │
+                                 │   — ไม่มี OWNER_REMEDIATED อีก  │
+                                 │   สถานะนั้นเลิกใช้แล้ว)         │
                                  │        PENDING_T2_REVIEW ◄────┤ (T2 ตรวจรับ
                                  └──(T2 ตีกลับ)───┘              │  บังคับเสมอ)
                                                                  │
@@ -132,8 +144,11 @@ NEW
   (`TIER2_QUEUE_STATUSES`) และการตรวจรับของ lane เจ้าของระบบเป็นขั้นบังคับ ข้ามไม่ได้
 - **วงจรการตีกลับ (rejection loop) มี 2 จุด**: `CONTAINMENT_REPORTED →
   AWAITING_CONTAINMENT` (Tier 2 เห็นว่า containment ยังไม่พอ และ admin
-  ได้รับอีเมลแจ้งอีกครั้ง) และ `PENDING_T2_REVIEW` / `OWNER_REMEDIATED →
-  AWAITING_OWNER`
+  ได้รับอีเมลแจ้งอีกครั้ง) และ `PENDING_T2_REVIEW → AWAITING_OWNER`
+  (Tier 2 ตีกลับผลของเจ้าของระบบ)
+- **`OWNER_REMEDIATED` เป็นสถานะเก่าที่เลิกใช้แล้ว (13 ส.ค. 2026)** เส้นทาง
+  เจ้าของระบบปัจจุบันคือ `AWAITING_OWNER → PENDING_T2_REVIEW` โดยตรง —
+  `STATUS_CHOICES` จึงมี 12 สถานะที่ใช้งานจริง + 1 สถานะเก่า
 - **การเปลี่ยน classification กลางทาง**: Tier 2 เปลี่ยน Incident ที่กำลังดำเนินอยู่
   ให้เป็น `EVENT` แล้วปิดได้จากคิวตรวจรับทั้งสอง (`EVENT_CLOSE_TRANSITIONS`)
   ซึ่ง**ข้าม manager แม้ตั๋วจะถูกตั้งธง emergency ไว้** เพราะ manager ไม่ยุ่งกับ Event
@@ -417,7 +432,7 @@ python manage.py runserver 0.0.0.0:8088
 
 Production: `docker compose -f docker-compose.prod.yml up -d --build`
 (nginx → gunicorn → Django + PostgreSQL) container `web` รัน `migrate` +
-`collectstatic` อัตโนมัติทุกครั้งที่ start ดูขั้นตอนเต็มใน operations/production-deployment.md
+`collectstatic` อัตโนมัติทุกครั้งที่ start ดูขั้นตอนเต็มใน archive/production-deployment.md
 (UFW, การสร้าง superuser, บัญชีทีม, การดู log)
 
 - `docker-compose.yml` (ไม่มี suffix) ใช้สำหรับ **dev บนเครื่องเท่านั้น**
@@ -437,7 +452,7 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
    | path เดิม | path ปัจจุบัน |
    |---|---|
    | `WORKFLOW_REDESIGN.md` | `docs/architecture/workflow-change-log.md` |
-   | `DEPLOY.md` | `docs/operations/production-deployment.md` |
+   | `DEPLOY.md` | `docs/archive/production-deployment.md` |
    | `docs/HANDOVER.md` / `.th.md` | `docs/handover/engineering-handover.md` / `.th.md` |
    | `docs/soc-ticket-flow.md` | `docs/architecture/ticket-lifecycle-states.md` |
    | `docs/user-guide-th.md` | `docs/user-guides/end-user-guide.th.md` |
@@ -517,5 +532,5 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
   เพื่อดูกติกา workflow ในรูปแบบสเปกที่รันได้
 - **วันที่ 4** — ทบทวน view ของ dashboard + `ola.py`; ทำความเข้าใจกลุ่ม OLA
   และ `status_changed_at`
-- **วันที่ 5** — ตรวจ operations/production-deployment.md เทียบกับเครื่อง production จริงร่วมกับ
+- **วันที่ 5** — ตรวจ archive/production-deployment.md เทียบกับเครื่อง production จริงร่วมกับ
   ผู้ดูแลคนเดิม; ยืนยันเรื่อง secret, backup และตารางเวลาการ ingest

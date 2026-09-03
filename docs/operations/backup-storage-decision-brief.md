@@ -1,7 +1,7 @@
 # Backup Storage & Retention — Decision Brief
 
-> **Audience:** CISO / Information Security, Data Governance, DPO, Compliance · **Status:** Draft for review · **Last updated:** 2026-07-27
-> **From:** SOC Ticketing System team · **Decision needed before:** production go-live
+> **Audience:** CISO / Information Security, Data Governance, DPO, Compliance · **Status:** Draft for review · **Last updated:** 2026-09-02
+> **From:** SOC Ticketing System team · **Decision needed:** the storage-location & retention policy is still open, and is now the governance gate — the mechanism is already live in production
 
 *A one-page brief to bring to the governance/security conversation. English draft;
 a Thai (`.th.md`) version can be produced on request.*
@@ -20,14 +20,16 @@ compliance, and infrastructure — not engineering alone.
 - SOC ticketing system (cases, audit logs, triage, user accounts, attachment
   **evidence**) on native **PostgreSQL / Windows Server**. Contains **personal
   data** and **security-incident records** with NCSA (สกมช.) reporting fields.
-- Backups are **scripted and designed** (`New-SocBackup.ps1`): **GPG public-key**
-  encryption (a compromised production host cannot decrypt its own backups),
-  tiered retention (hourly 2d · daily 30d · weekly 84d · monthly 365d),
-  integrity-checked, with a **restore drill** (`Test-SocRestore.ps1`).
-- The deployment plan already includes an **off-host archive copy** (read-only
-  pull to a separate VM) and a **streaming standby** for DR
-  (`backup-and-standby-handbook.windows.md`).
-- Currently **UAT / pre-launch** — none of this runs against real data yet.
+- Backups are **built and running in production** (`New-SocBackup.ps1`): **GPG
+  public-key** encryption (a compromised production host cannot decrypt its own
+  backups), tiered retention (hourly 2d · daily 30d · weekly 84d · monthly 365d),
+  integrity-checked, with a **restore drill** (`Test-SocRestore.ps1`) that
+  **passed on 2026-08-24** and runs weekly.
+- Also **live**: an **off-host archive copy** (read-only hourly pull to a separate
+  VM) and a **streaming standby** for DR (`backup-and-standby-handbook.windows.md`).
+- **Production is live** (as of 2026-08-26) and these jobs now run against **real
+  data** — so the storage-location and retention questions below are no longer
+  hypothetical. Open DR gates: the offline GPG-key test and the failover rehearsal.
 
 ## What still needs deciding
 
@@ -77,10 +79,13 @@ governance / compliance / infrastructure:
 
 ## Cost & timing
 
-Low effort — the backup + standby tooling exists; this is a **location + policy
-decision, not a build**. No cost to decide now while in UAT. On approval of the
-destination, residency, and retention, engineering points the existing scripts at
-the approved target and enables immutability before go-live.
+Low effort — the backup + standby tooling exists and runs; this is a **location +
+policy decision, not a build**. It is now the open governance item: production is
+live and archives are accumulating on the current (local off-host) target, so an
+approved destination, residency, and retention policy should be set **promptly** —
+engineering then points the existing scripts at the approved target and enables
+immutability. The longer this stays open, the more live data sits under an
+un-ratified retention policy.
 
 ---
 

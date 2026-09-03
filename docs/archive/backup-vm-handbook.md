@@ -6,19 +6,19 @@
 > production stack over SSH. The actual deployment is **Windows Server with
 > native PostgreSQL**, where none of these commands run.
 >
-> **Use [backup-and-standby-handbook.windows.md](backup-and-standby-handbook.windows.md) instead.**
+> **Use [backup-and-standby-handbook.windows.md](../operations/backup-and-standby-handbook.windows.md) instead.**
 >
 > Kept only as a reference for a possible future Linux deployment. The companion
 > scripts (`scripts/backup/pull_archives.sh`, `prune_archive.sh`,
 > `check_freshness.sh`) and `docker-compose.backupvm.yml` are likewise unused.
 
 > **Audience:** whoever builds and runs the backup VM (you) · **Status:** Superseded · **Last updated:** 2026-07-27
-> **Prerequisite reading:** [backup-and-restore.md](backup-and-restore.md) §4–5
+> **Prerequisite reading:** [backup-and-restore.md](../operations/backup-and-restore.md) §4–5
 
 Step-by-step build of a second VM that holds an independent, verified copy of
 production's backups — closing the **off-host** gap named in
-[backup-and-restore.md](backup-and-restore.md) §4 and
-[backup-storage-decision-brief.md](backup-storage-decision-brief.md).
+[backup-and-restore.md](../operations/backup-and-restore.md) §4 and
+[backup-storage-decision-brief.md](../operations/backup-storage-decision-brief.md).
 
 Written to be followed top to bottom. Every command is meant to be run as
 written after you substitute the values from §2.
@@ -55,7 +55,7 @@ reachable backups is the first thing modern ransomware does.
 | **Survives** | loss of the prod VM, prod disk corruption, ransomware on prod, accidental `DROP`, bad migration |
 | **RPO** | your backup tier interval (hourly tier ⇒ ≤ 1h data loss) plus up to one pull interval |
 | **RTO** | 1–3 hours, manual — see the DR runbook in §8 |
-| **Closes** | the "one off-host copy" leg of 3-2-1; the **warm** tier in [backup-and-restore.md](backup-and-restore.md) §5 |
+| **Closes** | the "one off-host copy" leg of 3-2-1; the **warm** tier in [backup-and-restore.md](../operations/backup-and-restore.md) §5 |
 
 ### What it does NOT give you — read this before you promise anything
 
@@ -64,12 +64,12 @@ reachable backups is the first thing modern ransomware does.
 - **Not automatic failover.** Nothing repoints traffic. See §8.
 - **Not the cold/DR tier.** If both VMs sit on the same hypervisor, SAN, or
   site, one host or array failure still takes both. That is decision #6 in the
-  [decision brief](backup-storage-decision-brief.md) and it is worth chasing
+  [decision brief](../operations/backup-storage-decision-brief.md) and it is worth chasing
   down before you consider this finished.
 - **Not immutable storage.** True immutability needs object-lock/WORM. §7 gets
   you a defensible approximation; it is not the same thing.
 - **Does not back up the Wazuh Indexer.** Still out of scope, as in
-  [backup-and-restore.md](backup-and-restore.md) §4.
+  [backup-and-restore.md](../operations/backup-and-restore.md) §4.
 
 ---
 
@@ -551,14 +551,14 @@ Rehearse this once. An untested runbook is a wish.
    ```
    The fallback matters: the `.sha256` files record production's *container*
    path (`/backups/...`), so plain `sha256sum -c` cannot find the file here.
-3. **Decrypt, extract, verify** — [backup-and-restore.md](backup-and-restore.md) §3.1.
+3. **Decrypt, extract, verify** — [backup-and-restore.md](../operations/backup-and-restore.md) §3.1.
 4. **Recreate the database** owned by the app role — §3.2.
 5. **Restore the dump** — §3.3.
 6. **⚠ Recreate roles and grants** — §3.4. *This is the step that bites.* The
    archive is a single-database `pg_dump --no-owner --no-acl`, so cluster-global
    roles and GRANTs are **not** in it. Data restores; access does not. Recreate
    the `ticket` role, and re-run
-   [reporting-ro-setup.sql](reporting-ro-setup.sql) if Grafana reads the mart.
+   [reporting-ro-setup.sql](../operations/reporting-ro-setup.sql) if Grafana reads the mart.
 7. **Restore media** (attachments/evidence) — §3.5.
 8. **Rebuild reporting matviews** — `manage.py refresh_reporting` — §3.6.
 9. **Repoint the service** — `.env`: `ALLOWED_HOSTS`, `SITE_URL`, `DB_HOST`; TLS
@@ -595,7 +595,7 @@ trustworthiness with it.
 ## 11. What this still does not close
 
 For the governance conversation — this handbook implements the **warm** tier of
-[backup-and-restore.md](backup-and-restore.md) §5 and no more:
+[backup-and-restore.md](../operations/backup-and-restore.md) §5 and no more:
 
 | Decision brief item | Status after this build |
 |---|---|
@@ -612,7 +612,7 @@ For the governance conversation — this handbook implements the **warm** tier o
 
 ## 12. Related
 
-- [backup-and-restore.md](backup-and-restore.md) — what a backup contains, restore procedure, the roles/grants gotcha
-- [backup-storage-decision-brief.md](backup-storage-decision-brief.md) — the governance ask
+- [backup-and-restore.md](../operations/backup-and-restore.md) — what a backup contains, restore procedure, the roles/grants gotcha
+- [backup-storage-decision-brief.md](../operations/backup-storage-decision-brief.md) — the governance ask
 - [production-deployment.md](production-deployment.md) — the prod stack this pulls from
 - [../architecture/data-infrastructure.md](../architecture/data-infrastructure.md) — where backup sits overall

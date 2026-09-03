@@ -1,11 +1,17 @@
 # Ticket Lifecycle States
 
-> **Audience:** developers and SOC leads · **Status:** Current · **Last updated:** 2026-07-23
+> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-02
 > **Source of truth:** `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS`
 
-The complete 13-state ticket lifecycle as a diagram plus a transition reference,
-organised by which role may perform each move. When the state machine changes in
-code, update the Mermaid block below — each line is one node or one arrow.
+The complete ticket lifecycle as a diagram plus a transition reference, organised
+by which role may perform each move. **`STATUS_CHOICES` defines 13 statuses: 12
+are reachable in the active workflow, plus 1 legacy compatibility state
+(`OWNER_REMEDIATED`) that nothing transitions *into* any more** — it is retained
+only so tickets already sitting in it can finish. When the state machine changes
+in code, update the Mermaid block below — each line is one node or one arrow.
+
+This is the single authoritative description of the *current* workflow; prose
+docs (handover, user guides) and the diagrams should match it, not restate it.
 
 ---
 
@@ -60,10 +66,12 @@ flowchart TD
     D4 -->|ใช่| PENDING_MANAGER[ผู้จัดการ SOC ตรวจสอบ<br/>PENDING_MANAGER]
 
     %% ── Direct-to-Owner lane (skips System Admin) ───────────
-    AWAITING_OWNER[รอเจ้าของระบบดำเนินการเอง<br/>AWAITING_OWNER] --> OWNER_REMEDIATED[T1 บันทึกผลการแก้ไขของเจ้าของ<br/>OWNER_REMEDIATED]
-    OWNER_REMEDIATED --> D5{แก้ไขจริงหรือไม่?<br/>ตัดสินโดย Tier 1}
-    D5 -->|ยังไม่แก้ไข| AWAITING_OWNER
-    D5 -->|ส่งตรวจสอบ| PENDING_T2_REVIEW[รอ Tier 2 ตรวจสอบ<br/>PENDING_T2_REVIEW]
+    %% One action: Tier 1 attaches what the owner sent, records it in the note,
+    %% and hands to Tier 2. Adequacy is judged once, by Tier 2 — no T1 decision.
+    AWAITING_OWNER[รอเจ้าของระบบดำเนินการเอง<br/>AWAITING_OWNER] -->|T1 บันทึกผลของเจ้าของ + แนบหลักฐาน| PENDING_T2_REVIEW[รอ Tier 2 ตรวจสอบ<br/>PENDING_T2_REVIEW]
+    %% LEGACY — no live edge leads INTO this node any more. Kept reachable-out
+    %% so tickets already in OWNER_REMEDIATED can still finish. Do not re-wire.
+    OWNER_REMEDIATED[เจ้าของแจ้งแก้ไขแล้ว — LEGACY<br/>OWNER_REMEDIATED] -.->|เฉพาะตั๋วเก่าที่ค้างอยู่| PENDING_T2_REVIEW
     PENDING_T2_REVIEW --> D6{Tier 2 ยืนยันการแก้ไข?}
     D6 -->|ปฏิเสธ — กลับไปเจ้าของ| AWAITING_OWNER
     D6 -->|จัดเป็น Event — ปิดเคส| CLOSED_EVENT
@@ -80,13 +88,15 @@ flowchart TD
     classDef mgr fill:#ffece7,stroke:#fb7185,color:#9f1239;
     classDef closed fill:#e6f6ec,stroke:#34d399,color:#065f46;
     classDef decision fill:#eef0f2,stroke:#adb5bd,color:#343a40;
+    classDef legacy fill:#f3f4f6,stroke:#9ca3af,color:#6b7280,stroke-dasharray:4 3;
 
-    class START,NEW,T1_REVIEW,AWAITING_OWNER,OWNER_REMEDIATED t1;
+    class START,NEW,T1_REVIEW,AWAITING_OWNER t1;
     class ESCALATED_T2,CONTAINMENT_REPORTED,PENDING_T2_REVIEW t2;
     class AWAITING_CONTAINMENT admin;
     class PENDING_MGR_TRIAGE,PENDING_MANAGER,PENDING_MGR_EVENT_REVIEW mgr;
     class APPROVED,CLOSED_EVENT closed;
-    class D1,D2,D3,D4,D5,D6,D7,D_ROUTE decision;
+    class OWNER_REMEDIATED legacy;
+    class D1,D2,D3,D4,D6,D7,D_ROUTE decision;
 ```
 
 ## Transition reference (who can do what)
@@ -100,12 +110,19 @@ flowchart TD
 | PENDING_MGR_TRIAGE | AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** |
 | AWAITING_CONTAINMENT | CONTAINMENT_REPORTED | Assigned Admin |
 | CONTAINMENT_REPORTED | AWAITING_CONTAINMENT (ไม่สำเร็จ) / CLOSED_EVENT (จัดเป็น Event) / APPROVED (ไม่ฉุกเฉิน) / PENDING_MANAGER (ฉุกเฉิน) | **Tier 2** |
-| AWAITING_OWNER | OWNER_REMEDIATED | Tier 1 (creator) |
-| OWNER_REMEDIATED | AWAITING_OWNER (ยังไม่แก้ไข) / PENDING_T2_REVIEW (เสมอ) | Tier 1 (creator) |
+| AWAITING_OWNER | PENDING_T2_REVIEW (record owner's fix + attach, hand to Tier 2 — one action) | Tier 1 (creator) |
+| ~~OWNER_REMEDIATED~~ (legacy) | PENDING_T2_REVIEW | Tier 1 (creator) — **legacy only**: no live edge enters this state; used solely by tickets already sitting in it |
 | PENDING_T2_REVIEW | APPROVED (ไม่ฉุกเฉิน) / PENDING_MANAGER (ฉุกเฉิน) / CLOSED_EVENT (จัดเป็น Event) / AWAITING_OWNER (ปฏิเสธ) | **Tier 2** |
 | PENDING_MANAGER | APPROVED | SOC Manager |
 
 **Terminal states:** APPROVED, CLOSED_EVENT.
+
+**Legacy state:** `OWNER_REMEDIATED` — Tier 1 used to stop here to record the
+owner's report before forwarding, which cost two clicks for one act. The live
+owner lane now goes `AWAITING_OWNER → PENDING_T2_REVIEW` directly. `OWNER_REMEDIATED`
+is retained only so tickets already in it can finish; **do not wire a new edge
+into it.** (Retired in the workflow change log; see
+[workflow-change-log.md](workflow-change-log.md).)
 
 **`t1_route` routing:** Tier 1 records the chosen lane (`ADMIN` / `OWNER`) when it sends an Incident to `PENDING_MGR_TRIAGE`. The SOC Manager forward is deterministically guarded so it can only reach the lane matching `t1_route` — the manager reviews and flags Emergency but cannot swap Admin ↔ Owner.
 

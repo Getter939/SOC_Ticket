@@ -192,5 +192,5 @@ migration 0001). No operational table is affected. Re-apply with
 - [../architecture/reporting-layer-design.md](../architecture/reporting-layer-design.md) — design spec.
 - [../architecture/reporting-layer-build.md](../architecture/reporting-layer-build.md) — as-built record.
 - [reporting-ro-setup.sql](reporting-ro-setup.sql) — the read-role DBA snippet.
-- [production-deployment.md](production-deployment.md) — the overall prod deploy runbook.
+- [production-deployment.md](../archive/production-deployment.md) — the overall prod deploy runbook.
 - [grafana-wazuh-wall.md](grafana-wazuh-wall.md) — the existing Grafana board (reads the Indexer directly; Phase 4 adds a mart-backed datasource).
