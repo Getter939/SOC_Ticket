@@ -2763,6 +2763,24 @@ def validate_attachment(uploaded_file):
     validate_attachment_type(uploaded_file)
 
 
+def validate_attachment_batch(uploaded_files):
+    """Reject a set of uploads whose combined size exceeds MAX_ATTACHMENT_BATCH_SIZE.
+
+    validate_attachment only sees one file at a time, but the batch total is the
+    real ceiling: nginx rejects an oversized request body with a bare 413 before
+    Django runs, which looks to the analyst like the files silently vanished.
+    stage_uploads (create flow) already enforces this per file as it accumulates;
+    this is the shared guard for the ticket-detail path (AttachmentForm), which
+    otherwise had only the bypassable client-side check.
+    """
+    total = sum(f.size for f in uploaded_files if f is not None)
+    if total > MAX_ATTACHMENT_BATCH_SIZE:
+        limit_mb = MAX_ATTACHMENT_BATCH_SIZE // (1024 * 1024)
+        raise ValidationError(
+            f'ไฟล์แนบรวมกันเกิน {limit_mb} MB — กรุณาลบบางไฟล์ออกแล้วลองใหม่'
+        )
+
+
 def attachment_upload_path(instance, filename):
     return f'ticket_attachments/{instance.ticket.ticket_id}/{filename}'
 

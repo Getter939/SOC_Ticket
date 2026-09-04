@@ -29,6 +29,7 @@ form; it drives every .evidence-picker on the page.
   .evidence-total { font-size: .78rem; color: #6c757d; }
 </style>
 
+{{ attachment_limits|json_script:"attachment-limits-data" }}
 <script nonce="{{ request.csp_nonce }}">
 // ── Evidence picker ──────────────────────────────────────────────────────
 // Two things a bare <input type="file" multiple> gets wrong for us:
@@ -38,7 +39,7 @@ form; it drives every .evidence-picker on the page.
 // We keep our own array of File objects and write it back into the input via
 // a DataTransfer — assigning input.files is what makes the accumulation real.
 (function () {
-  var LIMITS = {{ attachment_limits.json }};
+  var LIMITS = JSON.parse(document.getElementById('attachment-limits-data').textContent);
   var ALLOWED = LIMITS.allowed_extensions || [];
 
   function humanSize(bytes) {

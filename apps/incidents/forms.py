@@ -5,7 +5,7 @@ from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
 from .models import (
     Ticket, TicketAttachment, TicketSubtask, TriageRecord,
-    validate_attachment,
+    validate_attachment, validate_attachment_batch,
 )
 
 
@@ -761,6 +761,11 @@ class MultipleFileField(forms.FileField):
             cleaned = [single(data, initial)]
         for item in cleaned:
             validate_attachment(item)
+        # Per-file rules can't see the batch total, which is the cap that keeps
+        # the request body under nginx's limit (bare 413 otherwise). The picker
+        # advertises this cap client-side; enforce it server-side too so it
+        # holds with JavaScript disabled.
+        validate_attachment_batch(cleaned)
         return cleaned
 
 

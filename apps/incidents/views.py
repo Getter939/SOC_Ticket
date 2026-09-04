@@ -17,7 +17,6 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_POST
 
 from apps.accounts.models import UserProfile
@@ -103,12 +102,6 @@ from .ticket_workflow import (
 
 logger = logging.getLogger(__name__)
 
-# Matches django.utils.html.json_script: keeps a payload from breaking out of
-# the <script> element it is embedded in.
-_JSON_SCRIPT_ESCAPES = {
-    ord('>'): '\\u003E', ord('<'): '\\u003C', ord('&'): '\\u0026',
-}
-
 
 # ── Private helpers ──────────────────────────────────────────────────── #
 
@@ -176,24 +169,17 @@ def _attachment_limits():
 
     Derived from the model constants rather than restated in the template, so
     the `accept` list and the in-browser checks cannot drift from what
-    validate_attachment actually enforces.
-
-    ``json`` is pre-serialised here rather than left to the |json_script filter
-    because that filter emits its own <script> tag, which the CSP has no nonce
-    for. Same escaping the filter uses, so it is safe to interpolate.
+    validate_attachment actually enforces. The template hands this dict to the
+    picker with the |json_script filter (an inert application/json data block).
     """
     extensions = allowed_attachment_extensions()
-    limits = {
+    return {
         'allowed_extensions': extensions,
         'accept': ','.join('.' + ext for ext in extensions),
         'max_file_size': MAX_ATTACHMENT_SIZE,
         'max_batch_size': MAX_ATTACHMENT_BATCH_SIZE,
         'max_count': MAX_ATTACHMENT_COUNT,
     }
-    limits['json'] = mark_safe(
-        json.dumps(limits).translate(_JSON_SCRIPT_ESCAPES)
-    )
-    return limits
 
 
 def _transition_actions(ticket, user):

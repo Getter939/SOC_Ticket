@@ -46,6 +46,7 @@ from django.test import override_settings
 from apps.accounts.testing import MFATestCase as TestCase
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.datastructures import MultiValueDict
 from docx import Document
 from pypdf import PdfReader
 
@@ -2854,6 +2855,27 @@ class AttachmentUploadLimitTest(TestCase):
         )
         self.assertTrue(form.is_valid(), msg=form.errors)
 
+    def test_batch_over_total_cap_rejected_by_form(self):
+        """The detail-page path (MultipleFileField) must enforce the batch cap
+        server-side too — the picker's client-side check is bypassable with JS
+        off, which reaches the exact bare nginx 413 the cap exists to prevent."""
+        files = MultiValueDict({'file': [
+            SimpleUploadedFile('a.log', b'0123456789'),
+            SimpleUploadedFile('b.log', b'0123456789'),
+        ]})
+        with patch('apps.incidents.models.MAX_ATTACHMENT_BATCH_SIZE', 12):
+            form = AttachmentForm(data={'description': ''}, files=files)
+            self.assertFalse(form.is_valid())
+            self.assertIn('file', form.errors)
+
+    def test_batch_within_total_cap_accepted_by_form(self):
+        files = MultiValueDict({'file': [
+            SimpleUploadedFile('a.log', b'0123456789'),
+            SimpleUploadedFile('b.log', b'0123456789'),
+        ]})
+        form = AttachmentForm(data={'description': 'ok'}, files=files)
+        self.assertTrue(form.is_valid(), msg=form.errors)
+
 
 # ──────────────────────────────────────────────────────────────────────────── #
 # 16b. Attachment upload type / content validation                              #
@@ -5062,7 +5084,15 @@ class T1RouteToggleCspTest(TestCase):
         resp = self.client.get(
             reverse('ticket_detail', args=[self.ticket.pk]))
         html = resp.content.decode()
-        bare = re.findall(r'<script(?![^>]*\bnonce=)(?![^>]*\bsrc=)[^>]*>', html)
+        # Executable inline <script> needs the nonce. type="application/json"
+        # data blocks (Django's |json_script) are exempt: the browser never
+        # executes them and script-src does not gate them, so a nonce is neither
+        # required nor available (the filter emits no nonce). Without this
+        # exemption every json_script block would trip the assertion, forcing
+        # bespoke hand-serialised payloads instead.
+        bare = re.findall(
+            r'<script(?![^>]*\bnonce=)(?![^>]*\bsrc=)'
+            r'(?![^>]*\btype=["\']application/json["\'])[^>]*>', html)
         self.assertEqual(bare, [], f'inline script(s) without a nonce: {bare}')
 
 
