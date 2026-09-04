@@ -586,8 +586,10 @@
             <div class="user-pill">
                 <i class="bi bi-person-circle me-1"></i>{{ user.get_full_name|default:user.username }}
             </div>
-            {% if request.mfa_complete %}
+            {% if request.mfa_complete and request.mfa_enabled %}
             <a href="{% url 'mfa_recovery_codes' %}" class="btn btn-sm text-white" title="Two-factor authentication" aria-label="Two-factor authentication"><i class="bi bi-shield-lock"></i></a>
+            {% endif %}
+            {% if request.mfa_complete %}
             <a href="{% url 'password_change' %}" class="btn btn-sm" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:0.9rem;" title="Change password" aria-label="Change password">
                 <i class="bi bi-key-fill"></i>
             </a>

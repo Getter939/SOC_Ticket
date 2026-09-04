@@ -26,10 +26,19 @@ class RequireMFAMiddleware(MiddlewareMixin):
 
     def process_view(self, request, view_func, view_args, view_kwargs):
         name = request.resolver_match.view_name
-        # Rendering any pre-MFA screen must not expose navigation or queue data.
-        request.mfa_complete = (
-            mfa.is_verified(request) and request.user.otp_device.recovery_codes_confirmed
-        )
+        # Exposed to templates so nav can hide 2FA management when it is off.
+        request.mfa_enabled = mfa.enforcement_enabled()
+        if not request.mfa_enabled:
+            # 2FA disabled: an authenticated user is treated as fully verified so
+            # nav/queue views gated on mfa_complete render normally. All
+            # enrolment/verification redirects are skipped below; authentication
+            # itself is still enforced (and per-view @login_required remains).
+            request.mfa_complete = request.user.is_authenticated
+        else:
+            # Rendering any pre-MFA screen must not expose navigation or queue data.
+            request.mfa_complete = (
+                mfa.is_verified(request) and request.user.otp_device.recovery_codes_confirmed
+            )
         if name == 'admin:login':
             if request.mfa_complete:
                 # A fully authenticated user without staff permission must not
@@ -44,6 +53,9 @@ class RequireMFAMiddleware(MiddlewareMixin):
             return None
         if not request.user.is_authenticated:
             return redirect_to_login(request.get_full_path(), 'login')
+        if not request.mfa_enabled:
+            # Feature off — no enrolment or verification gating past this point.
+            return None
         if request.mfa_complete:
             # Retain no recoverable code bundle after the user acknowledges it.
             request.session.pop(mfa.CODE_BUNDLE, None)

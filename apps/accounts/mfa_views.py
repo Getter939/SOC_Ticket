@@ -66,6 +66,9 @@ class ReauthenticateForm(CodeForm):
 @method_decorator(never_cache, name='dispatch')
 class MFALoginView(auth_views.LoginView):
     def get_success_url(self):
+        if not mfa.enforcement_enabled():
+            # 2FA off: land on the normal post-login destination, no enrolment.
+            return super().get_success_url()
         if mfa.is_verified(self.request):
             return mfa.safe_destination(self.request, self.get_redirect_url())
         from django.urls import reverse

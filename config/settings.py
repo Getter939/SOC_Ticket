@@ -155,6 +155,14 @@ MFA_ENCRYPTION_KEYS = [
     key.strip() for key in config('MFA_ENCRYPTION_KEYS', default='').split(',') if key.strip()
 ]
 
+# Master switch for the authenticator (2FA) requirement. Default True — every
+# user must enrol and verify. Set MFA_ENABLED=False in the environment to log in
+# with password only and skip all enrolment/verification (authentication itself
+# is still enforced). A temporary escape hatch, not a redesign: enrolled devices
+# and recovery codes are left untouched, so flipping it back to True restores 2FA
+# exactly as before.
+MFA_ENABLED = config('MFA_ENABLED', default=True, cast=bool)
+
 # ── Security hardening ─────────────────────────────────────────────────────
 # Always-on — safe over both HTTP and HTTPS:
 SESSION_COOKIE_HTTPONLY = True       # session cookie unreadable from JavaScript

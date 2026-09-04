@@ -435,3 +435,39 @@ class MFAConcurrencyTests(TransactionTestCase):
         )
         self.assertEqual(self.concurrent_verify(code), [False, True])
         self.assertFalse(MFARecoveryCode.objects.exists())
+
+
+@override_settings(MFA_ENABLED=False)
+class MFADisabledTests(TestCase):
+    """With the feature switched off, login is password-only and no enrolment or
+    verification is required — but authentication itself is still enforced."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            'nomfa-user', 'nomfa@example.test', 'StrongPassword!123'
+        )
+        UserProfile.objects.create(
+            user=self.user, role=UserProfile.ROLE_SOC_STAFF,
+            department='Test', phone='000', tier=UserProfile.TIER_T1,
+        )
+
+    def login(self, next_url=''):
+        return self.client.post(
+            reverse('login'),
+            {'username': self.user.username, 'password': 'StrongPassword!123', 'next': next_url},
+        )
+
+    def test_password_only_login_reaches_app_without_2fa(self):
+        # Lands on the normal post-login destination, not an MFA setup page.
+        self.assertRedirects(self.login(), reverse('home'), fetch_redirect_response=False)
+        # A protected page renders instead of bouncing to enrolment/verification.
+        self.assertEqual(self.client.get(reverse('ticket_list')).status_code, 200)
+        # No authenticator device is created.
+        self.assertFalse(AuthenticatorDevice.objects.exists())
+
+    def test_unauthenticated_access_is_still_redirected_to_login(self):
+        self.assertEqual(self.client.get(reverse('ticket_list')).status_code, 302)
+
+    def test_startup_check_skips_key_requirement_when_disabled(self):
+        with override_settings(MFA_ENCRYPTION_KEYS=[]):
+            self.assertEqual(mfa_configuration(None), [])

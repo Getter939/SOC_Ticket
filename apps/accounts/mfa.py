@@ -28,6 +28,15 @@ CODE_BUNDLE = 'mfa_code_bundle'
 FLOW_SECONDS = 600
 
 
+def enforcement_enabled():
+    """Whether the 2FA requirement is switched on (settings.MFA_ENABLED).
+
+    The single source of truth read by the middleware, the login view and the
+    startup check so the feature flips as one unit.
+    """
+    return getattr(settings, 'MFA_ENABLED', True)
+
+
 def password_is_fresh(request):
     value = request.session.get(PASSWORD_AT)
     return isinstance(value, (int, float)) and 0 <= time.time() - value < FLOW_SECONDS

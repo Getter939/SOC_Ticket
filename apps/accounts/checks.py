@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.checks import Error, register
 from django.core.exceptions import ImproperlyConfigured
 
@@ -6,6 +7,9 @@ from .mfa_crypto import cipher
 
 @register()
 def mfa_configuration(app_configs, **kwargs):
+    # No encryption keys are needed while the feature is switched off.
+    if not getattr(settings, 'MFA_ENABLED', True):
+        return []
     try:
         cipher()
     except ImproperlyConfigured:
