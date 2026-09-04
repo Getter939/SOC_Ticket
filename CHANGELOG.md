@@ -6,6 +6,48 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
+## [v1.2.2] — 2026-09-04
+
+Two-factor authentication ships but is switched **off** pending a UX review, on
+top of the v1.2.1 Project Incident fixes and a ticket-draft preservation fix.
+
+### Changed
+- **Two-factor authentication is now switchable** via the `MFA_ENABLED` setting
+  (default `True`). Production runs with `MFA_ENABLED=False` for now — login is
+  password-only, with no enrolment or verification step. Authentication and
+  per-view access control are unaffected. Enrolled devices and recovery codes
+  are left intact, so re-enabling (`MFA_ENABLED=True` plus a valid
+  `MFA_ENCRYPTION_KEYS` key) restores 2FA unchanged.
+
+### Fixed
+- **Ticket draft no longer lost on an expired session.** The saved-in-browser
+  draft is cleared only after a genuine save, so a POST rejected by a login
+  redirect or CSRF 403 keeps everything the analyst had typed.
+- Carries the **Project Incident form** fixes from v1.2.1 (see below).
+
+### Database
+- `accounts.0010`, `accounts.0011` — authenticator-device / MFA-audit / recovery-
+  code tables (the 2FA feature). Reversible; to roll back to v1.2.0 run
+  `migrate accounts 0009` first. The tables sit unused while `MFA_ENABLED=False`.
+
+### Docs
+- Documentation refresh — README status taxonomy, ADR renumbering, workflow and
+  lifecycle docs, and a docs-sync test.
+
+## [v1.2.1] — 2026-09-04
+
+Project Incident form hotfix, cherry-picked onto v1.2.0. No breaking changes and
+no database migrations.
+
+### Fixed
+- Removed the **System Owner user-picker dropdown** from the Project Incident
+  form — owners are contacted directly, off-system. The Direct-to-Owner route
+  itself is unchanged.
+- The per-system **"ลบ" (remove) button** now removes the row and re-indexes the
+  formset instead of only dimming it, while enforcing the 2-system minimum.
+- Fixed a **500 on the Project Incident detail page** when a member used the
+  owner route but had no owner user assigned.
+
 ## [v1.2.0] — 2026-09-01
 
 Report forms + workflow docs. No breaking changes.
@@ -100,6 +142,8 @@ production VM (VM foundation + application readiness).
   (NSSM service) + IIS/ARR reverse proxy; Waitress pinned, `/healthz` endpoint,
   Wazuh retention command, STORAGES fix.
 
+[v1.2.2]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.2
+[v1.2.1]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.1
 [v1.2.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.1.0
 [v1.0.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.0.0
