@@ -3714,7 +3714,6 @@ class ProjectIncidentFanOutTest(TestCase):
                     'target-0-assigned_admin': '',
                     'target-1-t1_route': Ticket.T1_ROUTE_OWNER,
                     'target-1-assigned_admin': '',
-                    'target-1-system_owner': str(self.owner_b.pk),
                 },
             ),
         )
@@ -3799,11 +3798,20 @@ class ProjectIncidentFanOutTest(TestCase):
 
         self.assertTrue(form.is_valid(), form.errors)
         self.assertIsNone(form.cleaned_data['assigned_admin'])
-        self.assertIsNone(form.cleaned_data['system_owner'])
         self.client.login(username='pi_t1', password='testpass123')
         page = self.client.get(reverse('create_project_incident'))
         self.assertContains(page, 'Event — ส่ง Tier 2 ยืนยันและปิด')
         self.assertContains(page, "route === 'EVENT'")
+        # The Direct-to-Owner *route* stays selectable, but the System Owner
+        # user-picker dropdown is gone — the SOC contacts the owner off-system.
+        self.assertContains(page, 'ให้เจ้าของระบบแก้ไขเอง')
+        self.assertNotContains(page, 'เลือกเจ้าของระบบ')
+        self.assertNotContains(page, 'route-owner-field')
+        self.assertNotContains(page, 'system_owner')
+        # Each system row carries a real remove button that drops the row (the
+        # old dim-only DELETE checkbox is gone).
+        self.assertContains(page, 'aria-label="ลบระบบนี้"')
+        self.assertNotContains(page, 'delete-flag')
 
     def test_per_system_detail_saved_per_member(self):
         """Each system's own รายละเอียด note lands on its member ticket only,
@@ -3870,7 +3878,6 @@ class ProjectIncidentFanOutTest(TestCase):
             self.admin_a, self.admin_b,
             **{
                 'target-1-t1_route': Ticket.T1_ROUTE_OWNER,
-                'target-1-system_owner': str(self.owner_b.pk),
                 'evidence_files': SimpleUploadedFile(
                     'timeline.txt', b'project-wide evidence',
                     content_type='text/plain',
@@ -4137,6 +4144,28 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertContains(resp, project.project_code)
         self.assertContains(resp, 'HR Portal')
         self.assertContains(resp, 'AD Server')
+
+    def test_detail_page_renders_owner_route_member_without_owner_user(self):
+        """An Owner-route member now carries no system_owner user (the SOC
+        contacts the owner off-system). The overview must still render — the
+        template must not dereference the null owner (regression: 500)."""
+        self.client.login(username='pi_t1', password='testpass123')
+        self.client.post(
+            reverse('create_project_incident'),
+            _pi_post_data(
+                self.admin_a, self.admin_b,
+                **{
+                    'target-1-t1_route': Ticket.T1_ROUTE_OWNER,
+                    'target-1-assigned_admin': '',
+                },
+            ),
+        )
+        project = ProjectIncident.objects.get()
+        member = project.members.get(t1_route=Ticket.T1_ROUTE_OWNER)
+        self.assertIsNone(member.system_owner)
+        resp = self.client.get(reverse('project_incident_detail', args=[project.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Owner')
 
     def test_detail_page_scopes_members_to_system_admin(self):
         """A system admin only sees the member ticket assigned to them."""
