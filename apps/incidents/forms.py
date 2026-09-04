@@ -435,14 +435,6 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         required=False, label='ผู้ดูแลระบบ', empty_label='-- เลือกผู้ดูแลระบบ --',
         widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
     )
-    system_owner = UserChoiceField(
-        queryset=User.objects.filter(
-            profile__role=UserProfile.ROLE_SYSTEM_OWNER, is_active=True,
-        ).order_by('first_name', 'username'),
-        required=False, label='เจ้าของระบบ',
-        empty_label='-- เลือกเจ้าของระบบ --',
-        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
-    )
     ROUTE_EVENT = 'EVENT'
     ROUTE_CHOICES = [
         (ROUTE_EVENT, 'Event — ส่ง Tier 2 ยืนยันและปิด'),
@@ -461,7 +453,7 @@ class ProjectIncidentTargetForm(forms.ModelForm):
         fields = [
             'device_name', 'system_detail', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
-            'assigned_admin', 'system_owner',
+            'assigned_admin',
         ]
         widgets = {
             'device_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ระบบ HR Portal / NTHQ-WS-047'}),
@@ -490,11 +482,10 @@ class ProjectIncidentTargetForm(forms.ModelForm):
             # Event members do not enter an Incident handling lane. Tier 2
             # verifies them independently after creation.
             cleaned['assigned_admin'] = None
-            cleaned['system_owner'] = None
         elif route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
             self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบ')
-        elif route == Ticket.T1_ROUTE_OWNER and not cleaned.get('system_owner'):
-            self.add_error('system_owner', 'กรุณาเลือกเจ้าของระบบ')
+        # The Direct-to-Owner route names no user here: the SOC contacts the
+        # system owner directly (off-system), so no per-row owner is selected.
         return cleaned
 
 

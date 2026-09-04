@@ -37,7 +37,6 @@
   .target-card { border:1px solid #dee2e6; border-radius:10px; padding:1rem 1rem .75rem; margin-bottom:.85rem; background:#fbfcfe; position:relative; }
   .target-badge { position:absolute; top:-.7rem; left:1rem; background:#0d6efd; color:#fff; font-size:.72rem; font-weight:700; padding:.15rem .55rem; border-radius:12px; }
   .target-remove { position:absolute; top:.5rem; right:.6rem; }
-  .target-card.to-delete { opacity:.45; background:#fff5f5; border-color:#f1aeb5; }
 </style>
 
 <div class="row justify-content-center">
@@ -230,9 +229,7 @@
         <div class="target-card" data-form-index="{{ forloop.counter0 }}">
           <span class="target-badge">ระบบที่ <span class="target-num">{{ forloop.counter }}</span></span>
           {% if target_formset.can_delete %}
-          <div class="target-remove form-check">
-            <label class="small text-danger"><input type="checkbox" class="form-check-input delete-flag" name="{{ tform.DELETE.html_name }}" {% if tform.DELETE.value %}checked{% endif %}> ลบ</label>
-          </div>
+          <button type="button" class="target-remove btn btn-sm btn-outline-danger py-0 px-2" aria-label="ลบระบบนี้"><i class="bi bi-x-lg"></i> ลบ</button>
           {% endif %}
           {% for hidden in tform.hidden_fields %}{{ hidden }}{% endfor %}
           <div class="row g-2">
@@ -250,11 +247,6 @@
               <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin)</label>
               {{ tform.assigned_admin }}
               {% if tform.assigned_admin.errors %}<div class="text-danger small">{{ tform.assigned_admin.errors }}</div>{% endif %}
-            </div>
-            <div class="col-md-4 route-owner-field">
-              <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (Direct-to-Owner)</label>
-              {{ tform.system_owner }}
-              {% if tform.system_owner.errors %}<div class="text-danger small">{{ tform.system_owner.errors }}</div>{% endif %}
             </div>
             <div class="col-12">
               <label class="form-label small fw-semibold mb-1">รายละเอียด <span class="text-muted fw-normal">(เฉพาะระบบนี้)</span></label>
@@ -320,9 +312,7 @@
 <template id="empty-target-form">
   <div class="target-card" data-form-index="__prefix__">
     <span class="target-badge">ระบบที่ <span class="target-num"></span></span>
-    <div class="target-remove form-check">
-      <label class="small text-danger"><input type="checkbox" class="form-check-input delete-flag" name="target-__prefix__-DELETE"> ลบ</label>
-    </div>
+    <button type="button" class="target-remove btn btn-sm btn-outline-danger py-0 px-2" aria-label="ลบระบบนี้"><i class="bi bi-x-lg"></i> ลบ</button>
     <div class="row g-2">
       <div class="col-md-5">
         <label class="form-label small fw-semibold mb-1">ระบบ / บริการ <span class="required-star">*</span></label>
@@ -335,10 +325,6 @@
       <div class="col-md-4 route-admin-field">
         <label class="form-label small fw-semibold mb-1">ผู้ดูแลระบบ (Admin)</label>
         {{ target_formset.empty_form.assigned_admin }}
-      </div>
-      <div class="col-md-4 route-owner-field">
-        <label class="form-label small fw-semibold mb-1">เจ้าของระบบ (Direct-to-Owner)</label>
-        {{ target_formset.empty_form.system_owner }}
       </div>
       <div class="col-12">
         <label class="form-label small fw-semibold mb-1">รายละเอียด <span class="text-muted fw-normal">(เฉพาะระบบนี้)</span></label>
@@ -464,26 +450,52 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
   }
 
   function syncTargetRoute(card) {
+    // The Admin picker is relevant only for the ADMIN lane. Direct-to-Owner is
+    // handled off-system (the SOC contacts the owner directly) so no owner user
+    // is chosen here — hide+disable the Admin picker for OWNER, EVENT, or an
+    // as-yet-unselected route.
     const selected = card.querySelector('input[name$="-t1_route"]:checked');
     const route = selected ? selected.value : '';
     const admin = card.querySelector('.route-admin-field');
-    const owner = card.querySelector('.route-owner-field');
-    if (!route) {
-      [admin, owner].forEach(field => {
-        field.classList.remove('d-none');
-        field.querySelector('select').disabled = false;
-      });
-      return;
-    }
-    const isEventRoute = route === 'EVENT';
-    const isOwnerRoute = route === 'OWNER';
-    admin.classList.toggle('d-none', isOwnerRoute || isEventRoute);
-    owner.classList.toggle('d-none', !isOwnerRoute || isEventRoute);
-    admin.querySelector('select').disabled = isOwnerRoute || isEventRoute;
-    owner.querySelector('select').disabled = !isOwnerRoute || isEventRoute;
+    const hideAdmin = route === 'OWNER' || route === 'EVENT';
+    admin.classList.toggle('d-none', hideAdmin);
+    const adminSelect = admin.querySelector('select');
+    if (adminSelect) adminSelect.disabled = hideAdmin;
   }
 
   container.querySelectorAll('.target-card').forEach(syncTargetRoute);
+
+  const minForms = parseInt(
+    (document.getElementById('id_' + prefix + '-MIN_NUM_FORMS') || {}).value, 10) || 2;
+
+  // Rewrite every row's field name/id/for so the form indices stay contiguous
+  // (0..n-1) after a row is removed. Django's management form requires this and
+  // TOTAL_FORMS must equal the number of rows actually submitted.
+  function reindex() {
+    const cards = container.querySelectorAll('.target-card');
+    cards.forEach((card, i) => {
+      card.dataset.formIndex = i;
+      card.querySelectorAll('[name], [id], [for]').forEach(el => {
+        ['name', 'id', 'for'].forEach(attr => {
+          const v = el.getAttribute(attr);
+          if (v) el.setAttribute(attr, v.replace(/target-\d+-/g, 'target-' + i + '-'));
+        });
+      });
+    });
+    totalInput.value = cards.length;
+    renumber();
+  }
+
+  // A bundle must keep at least `minForms` systems, so the remove control only
+  // appears once there are more rows than the minimum.
+  function updateRemoveButtons() {
+    const cards = container.querySelectorAll('.target-card');
+    const removable = cards.length > minForms;
+    cards.forEach(card => {
+      const btn = card.querySelector('.target-remove');
+      if (btn) btn.hidden = !removable;
+    });
+  }
 
   function addTarget() {
     const idx = parseInt(totalInput.value, 10);
@@ -494,20 +506,31 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     totalInput.value = idx + 1;
     syncTargetRoute(container.lastElementChild);
     renumber();
+    updateRemoveButtons();
+  }
+
+  function removeTarget(card) {
+    if (container.querySelectorAll('.target-card').length <= minForms) return;
+    card.remove();
+    reindex();
+    updateRemoveButtons();
   }
 
   document.getElementById('add-target').addEventListener('click', addTarget);
   container.addEventListener('project:add-target', addTarget);
 
-  // Toggle a strikethrough style when a row is flagged for deletion.
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('.target-remove');
+    if (btn) removeTarget(btn.closest('.target-card'));
+  });
+
   container.addEventListener('change', (e) => {
-    if (e.target.classList.contains('delete-flag')) {
-      e.target.closest('.target-card').classList.toggle('to-delete', e.target.checked);
-    }
     if (e.target.matches('input[name$="-t1_route"]')) {
       syncTargetRoute(e.target.closest('.target-card'));
     }
   });
+
+  updateRemoveButtons();
 })();
 
 // ── Draft autosave (localStorage) ──────────────────────────────────────────
