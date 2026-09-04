@@ -1243,6 +1243,54 @@ class T1ClassificationCreateTest(TestCase):
         self.assertEqual(ticket.classification, Ticket.CLASSIFICATION_EVENT)
         self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
 
+    def test_successful_create_clears_localstorage_draft_on_detail(self):
+        """A confirmed save is the only thing that drops the draft: the form no
+        longer clears localStorage on the submit event (which fired even when
+        the POST was rejected), so the create view flags the detail page to
+        emit the removeItem, and the flag is one-shot."""
+        self.client.login(username='cc_t1', password='testpass123')
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data())
+        self.assertEqual(resp.status_code, 302)
+        ticket = Ticket.objects.latest('id')
+        self.assertEqual(resp.url, reverse('ticket_detail', args=[ticket.pk]))
+
+        # The form template must NOT wipe the draft on submit any more; it
+        # documents that intent inline so a future edit can't quietly reinstate
+        # the data-losing handler.
+        form_src = self._render_create_form_source()
+        self.assertIn('NOT cleared on submit', form_src)
+
+        # Landing on the detail page clears exactly the plain draft key.
+        detail = self.client.get(resp.url)
+        self.assertContains(detail, 'localStorage.removeItem("ticket_form_draft")')
+
+        # One-shot: a second visit to the same ticket must not re-emit the clear,
+        # or it would wipe an unrelated in-progress draft opened in another tab.
+        again = self.client.get(resp.url)
+        self.assertNotContains(again, 'localStorage.removeItem("ticket_form_draft")')
+
+    def test_triage_sourced_create_clears_triage_scoped_draft(self):
+        """The cleared key mirrors the triage-scoped DRAFT_KEY the form wrote."""
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
+            alert_description='Reported suspicious login.',
+            decision=TriageRecord.DECISION_TP, notes='Confirmed by T1.',
+        )
+        self.client.login(username='cc_t1', password='testpass123')
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            triage_id=triage.pk,
+        ))
+        self.assertEqual(resp.status_code, 302)
+        detail = self.client.get(resp.url)
+        self.assertContains(
+            detail,
+            f'localStorage.removeItem("ticket_form_draft_triage_{triage.pk}")',
+        )
+
+    def _render_create_form_source(self):
+        resp = self.client.get(reverse('create_ticket'))
+        return resp.content.decode()
+
     def test_incident_assign_admin_routes_to_mgr_triage(self):
         self.client.login(username='cc_t1', password='testpass123')
         resp = self.client.post(reverse('create_ticket'), _ticket_post_data(

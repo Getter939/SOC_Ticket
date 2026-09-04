@@ -530,6 +530,17 @@ def create_ticket(request):
             else:
                 for warning in result.warnings:
                     messages.warning(request, warning)
+                # The browser only gets here on a genuine save, so this is the
+                # one place it is safe to drop the localStorage draft. Clearing
+                # it on the form's submit event instead would wipe the draft
+                # even when the POST is rejected (expired session → login
+                # redirect, CSRF 403), losing everything the analyst typed. The
+                # key mirrors DRAFT_KEY in ticket_form.html; ticket_detail pops
+                # this flag and emits the removeItem.
+                draft_key = 'ticket_form_draft'
+                if triage_id:
+                    draft_key += f'_triage_{triage_id}'
+                request.session['clear_ticket_draft_key'] = draft_key
                 return redirect('ticket_detail', pk=result.ticket.pk)
     else:
         initial = {}
@@ -1269,6 +1280,10 @@ def ticket_detail(request, pk):
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
         **read_model,
+        # One-shot: set by create_ticket on a successful save so this page can
+        # clear the matching localStorage draft. Popped so a later plain visit
+        # to a ticket never wipes an unrelated in-progress draft.
+        'clear_draft_key': request.session.pop('clear_ticket_draft_key', ''),
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
         'can_access_report': _can_access_ticket_report(request.user),

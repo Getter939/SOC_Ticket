@@ -524,9 +524,11 @@ updateDecisionPanels();
   });
   form.addEventListener('change', saveDraft);
 
-  form.addEventListener('submit', () => {
-    localStorage.removeItem(DRAFT_KEY);
-  });
+  // The draft is intentionally NOT cleared on submit: a submit can fail after
+  // the POST leaves (expired idle session → login redirect, CSRF 403) and
+  // clearing here would throw away everything typed at the exact moment the
+  // safety net is needed. The server clears it only on a confirmed save, from
+  // the ticket detail page it redirects to (see create_ticket / ticket_detail).
 
   // 'ยกเลิก' discards the draft as well — otherwise an abandoned form would be
   // restored the next time the analyst opens a new ticket. Confirm first, since

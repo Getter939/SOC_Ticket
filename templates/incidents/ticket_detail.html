@@ -685,4 +685,5 @@ onto its own wrapped row, which space-between then left-aligned.
   </div>
 </div>
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
+{% if clear_draft_key %}<script nonce="{{ request.csp_nonce }}">try{localStorage.removeItem("{{ clear_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
 {% endblock %}
