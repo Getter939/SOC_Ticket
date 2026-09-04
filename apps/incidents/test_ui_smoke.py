@@ -76,6 +76,24 @@ class UiSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, f'#{self.ticket.ticket_id}')  # ticket is NEW
 
+    def test_ticket_list_displays_and_filters_event_incident_classification(self):
+        event = _make_ticket(
+            ticket_id='UI-ACTIVE-EVENT',
+            created_by=self.soc_staff,
+            classification=Ticket.CLASSIFICATION_EVENT,
+        )
+        self.client.force_login(self.soc_staff)
+
+        response = self.client.get(reverse('ticket_list'), {
+            'classification': Ticket.CLASSIFICATION_EVENT,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="classification"')
+        self.assertContains(response, event.ticket_id)
+        self.assertNotContains(response, self.ticket.ticket_id)
+        self.assertEqual(response.context['classification_filter'], Ticket.CLASSIFICATION_EVENT)
+
     def test_manager_queue_is_distinct_from_active_incidents(self):
         manager_ticket = _make_ticket(
             ticket_id='UI-MANAGER-QUEUE',
@@ -134,6 +152,32 @@ class UiSmokeTest(TestCase):
         resp = self.client.get(reverse('ticket_history'))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, 'text-truncate needs a block box')
+
+    def test_ticket_history_displays_and_filters_event_incident_classification(self):
+        incident = _make_ticket(
+            ticket_id='UI-HISTORY-INCIDENT',
+            created_by=self.soc_staff,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_APPROVED,
+        )
+        event = _make_ticket(
+            ticket_id='UI-HISTORY-EVENT',
+            created_by=self.soc_staff,
+            classification=Ticket.CLASSIFICATION_EVENT,
+            status=Ticket.STATUS_CLOSED_EVENT,
+        )
+        self.client.force_login(self.soc_staff)
+
+        response = self.client.get(reverse('ticket_history'), {
+            'all_time': '1',
+            'classification': Ticket.CLASSIFICATION_EVENT,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="classification"')
+        self.assertContains(response, event.ticket_id)
+        self.assertNotContains(response, incident.ticket_id)
+        self.assertEqual(response.context['classification_filter'], Ticket.CLASSIFICATION_EVENT)
 
     # ── edit_log permission rules ─────────────────────────────────────── #
 

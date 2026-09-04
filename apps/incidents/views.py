@@ -92,9 +92,11 @@ from .ticket_workflow import (
     assign_admin_or_owner_route,
     claim_tier2_ticket,
     complete_t2_review,
+    conclude_monitoring,
     manager_forward,
     reassess_emergency,
     reclassify_as_event,
+    start_monitoring,
     step_back,
     submit_containment,
     transition_ticket,
@@ -137,8 +139,9 @@ def _valid_soc_status_choices(ticket, user):
         result.append((ticket.status, status_map.get(ticket.status, ticket.status)))
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
-        if (ticket.status, next_status) in Ticket.STEP_BACK_EDGES:
-            continue  # manager step-back has its own control, not this dropdown
+        edge = (ticket.status, next_status)
+        if edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES:
+            continue  # step-back / monitoring have their own controls, not this dropdown
         if not ticket.can_transition_to(next_status):
             continue  # blocked by classification or manager-routing gate
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
@@ -217,8 +220,9 @@ def _transition_actions(ticket, user):
     }
     actions = []
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
-        if (ticket.status, next_status) in Ticket.STEP_BACK_EDGES:
-            continue  # manager step-back is a separate control, not a forward action
+        edge = (ticket.status, next_status)
+        if edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES:
+            continue  # step-back / monitoring are separate controls, not forward actions
         can_transition = ticket.can_transition_to(next_status)
         # Tier 2's two decision buttons also set the classification. Ask the
         # model whether each edge is valid with that proposed classification.
@@ -356,6 +360,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     search = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
+    classification_filter = request.GET.get('classification', '').strip()
     emergency_filter = request.GET.get('emergency', '').strip()
     sort = request.GET.get('sort', 'ola').strip()
 
@@ -386,6 +391,11 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         tickets_qs = tickets_qs.filter(severity=severity_filter)
     else:
         severity_filter = ''
+
+    if classification_filter in dict(Ticket.CLASSIFICATION_CHOICES):
+        tickets_qs = tickets_qs.filter(classification=classification_filter)
+    else:
+        classification_filter = ''
 
     if emergency_filter in ('1', '0'):
         tickets_qs = tickets_qs.filter(is_emergency=emergency_filter == '1')
@@ -441,11 +451,13 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'search': search,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
+        'classification_filter': classification_filter,
         'emergency_filter': emergency_filter,
         'ola_filter': ola_filter,
         'sort': sort,
         'active_status_choices': active_status_choices,
         'severity_choices': Ticket.SEVERITY_CHOICES,
+        'classification_choices': Ticket.CLASSIFICATION_CHOICES,
         'ola_bucket_choices': ola_buckets.OLA_BUCKETS,
     })
 
@@ -1025,6 +1037,21 @@ def ticket_detail(request, pk):
         )
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
+    # Tier 2 may park an escalated case under Tier 1 for the fixed watch window
+    # — once only (has_been_monitored). Offered alongside the normal Tier 2
+    # review, so it shows whether or not the classification decision is ready.
+    can_monitor = (
+        not is_terminal
+        and ticket.status == Ticket.STATUS_ESCALATED_T2
+        and not ticket.has_been_monitored
+        and (request.user.is_superuser or (profile is not None and profile.is_tier2))
+    )
+    # The owning Tier 1 concludes the watch window: Incident (something happened)
+    # or Event (window closed quietly). The exit edges are TIER1_CREATOR.
+    can_conclude_monitoring = (
+        ticket.status == Ticket.STATUS_MONITORING
+        and _user_can_drive(ticket, request.user, 'TIER1_CREATOR')
+    )
     # SOC Manager may spawn a response-team request (Forensic / Red Team) at any
     # active stage. Runs in parallel to containment; an open request blocks final
     # approval (Ticket.has_open_response_requests).
@@ -1189,6 +1216,44 @@ def ticket_detail(request, pk):
                 except ValidationError as e:
                     messages.error(request, e.message)
 
+        elif action == 't2_monitor':
+            # Tier 2 parks the case under Tier 1 for the fixed 30-day watch.
+            note = request.POST.get('decision_note', '').strip()
+            if not can_monitor:
+                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้ หรือเคสนี้เคยถูกเฝ้าระวังแล้ว')
+            elif not note:
+                messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
+            else:
+                try:
+                    result = start_monitoring(ticket=ticket, actor=request.user, note=note)
+                    messages.success(
+                        request,
+                        f'เริ่มเฝ้าระวังเคสนี้เป็นเวลา {Ticket.MONITORING_DURATION_DAYS} วัน',
+                    )
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
+        elif action == 'conclude_monitoring':
+            # The owning Tier 1 ends the watch: Incident (something happened) or
+            # Event (window closed quietly).
+            outcome = request.POST.get('monitoring_outcome', '')
+            note = request.POST.get('decision_note', '').strip()
+            if not can_conclude_monitoring:
+                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
+            elif outcome not in ('incident', 'event'):
+                messages.error(request, 'กรุณาเลือกผลการเฝ้าระวัง (Incident หรือ Event)')
+            elif not note:
+                messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
+            else:
+                try:
+                    result = conclude_monitoring(
+                        ticket=ticket, actor=request.user, outcome=outcome, note=note,
+                    )
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
         elif action == 'containment':
             if not can_submit_containment:
                 messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
@@ -1223,6 +1288,14 @@ def ticket_detail(request, pk):
             elif new_status not in transition_codes:
                 messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
             else:
+                # Tier 1 may attach a monitoring recommendation when escalating a
+                # brand-new case to Tier 2 (only there — this is the propose half
+                # of the propose/verify split; only Tier 2 can grant it). Consumed
+                # and cleared by transition_to once the case leaves Tier 2 review.
+                if (new_status == Ticket.STATUS_ESCALATED_T2
+                        and ticket.status == Ticket.STATUS_NEW
+                        and request.POST.get('propose_monitoring')):
+                    ticket.monitoring_proposed = True
                 try:
                     result = transition_ticket(
                         ticket=ticket,
@@ -1300,6 +1373,9 @@ def ticket_detail(request, pk):
         'can_mgr_forward': can_mgr_forward,
         'mgr_forward_target': mgr_forward_target,
         'can_t2_reclassify': can_t2_reclassify,
+        'can_monitor': can_monitor,
+        'can_conclude_monitoring': can_conclude_monitoring,
+        'monitoring_duration_days': Ticket.MONITORING_DURATION_DAYS,
         'can_request_response': can_request_response,
         'response_request_form': response_request_form,
         'RESPONSE_TYPES': list(TicketSubtask.RESPONSE_TYPES),
@@ -1430,6 +1506,7 @@ def ticket_history(request):
     search_ticket = request.GET.get('search_ticket', '').strip()
     status_filter = request.GET.get('status', '').strip()
     severity_filter = request.GET.get('severity', '').strip()
+    classification_filter = request.GET.get('classification', '').strip()
     emergency_filter = request.GET.get('emergency', '').strip()
     sort = request.GET.get('sort', 'newest').strip()
     approved_by_filter = request.GET.get('approved_by', '').strip()
@@ -1454,8 +1531,15 @@ def ticket_history(request):
     if status_filter in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
         query_set = query_set.filter(status=status_filter)
 
-    if severity_filter:
+    if severity_filter in dict(Ticket.SEVERITY_CHOICES):
         query_set = query_set.filter(severity=severity_filter)
+    else:
+        severity_filter = ''
+
+    if classification_filter in dict(Ticket.CLASSIFICATION_CHOICES):
+        query_set = query_set.filter(classification=classification_filter)
+    else:
+        classification_filter = ''
 
     if emergency_filter in ('1', '0'):
         query_set = query_set.filter(is_emergency=emergency_filter == '1')
@@ -1493,6 +1577,7 @@ def ticket_history(request):
         'search_ticket': search_ticket,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
+        'classification_filter': classification_filter,
         'emergency_filter': emergency_filter,
         'sort': sort,
         'approved_by_filter': approved_by_filter,
@@ -1501,6 +1586,7 @@ def ticket_history(request):
         'end_date': end_date,
         'all_time': all_time,
         'severity_choices': Ticket.SEVERITY_CHOICES,
+        'classification_choices': Ticket.CLASSIFICATION_CHOICES,
         'approved_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_APPROVED).count(),
         'event_count': Ticket.objects.visible_to(request.user).filter(status=Ticket.STATUS_CLOSED_EVENT).count(),
     })
@@ -1537,7 +1623,7 @@ def triage_list(request):
     # ?tab=manual so a claim/release/dismiss doesn't bounce the analyst out of
     # the queue they were working in.
     active_tab = request.GET.get('tab', 'tickets')
-    if active_tab not in ('tickets', 'manual', 'history'):
+    if active_tab not in ('tickets', 'monitoring', 'manual', 'history'):
         active_tab = 'tickets'
 
     queue = TriageRecord.objects.filter(decision='', ticket__isnull=True).select_related(
@@ -1551,22 +1637,31 @@ def triage_list(request):
         resolved_by=request.user,
     ).select_related('ticket').order_by('-resolved_at')[:10]
 
-    # Own-court tickets, most urgent contain-OLA first (no deadline = notify-
-    # only Medium/Low → below everything actually on a clock).
-    my_tickets = (
+    # Own-court tickets. Monitoring cases are split into their own tab — a case
+    # on a 30-day watch is not "awaiting action" like the rest, so mixing it into
+    # the action queue would just add noise — so the main tab excludes them and
+    # the monitoring tab lists only them, soonest-to-expire (and overdue) first.
+    own_court = (
         Ticket.objects.filter(
             created_by=request.user, status__in=Ticket.TIER1_QUEUE_STATUSES,
         )
         .select_related('assigned_admin')
-        .order_by(
-            F('ola_contain_deadline').asc(nulls_last=True),
-            '-status_changed_at',
-        )
     )
-    # Counted before paging — these drive the tab badges and the returned-cases
-    # alert, which describe the whole queue, not the page being viewed.
+    my_tickets = own_court.exclude(status=Ticket.STATUS_MONITORING).order_by(
+        F('ola_contain_deadline').asc(nulls_last=True),
+        '-status_changed_at',
+    )
+    monitoring_tickets = own_court.filter(status=Ticket.STATUS_MONITORING).order_by(
+        F('monitor_until').asc(nulls_last=True),
+    )
+    # Counted before paging — these drive the tab badges and the alerts, which
+    # describe the whole queue, not the page being viewed.
     my_tickets_total = my_tickets.count()
     returned_count = my_tickets.filter(status=Ticket.STATUS_T1_REVIEW).count()
+    monitoring_count = monitoring_tickets.count()
+    monitoring_overdue_count = monitoring_tickets.filter(
+        monitor_until__lte=timezone.now(),
+    ).count()
     # This page was the only queue in the app without a Paginator; an unbounded
     # ticket table is what pushed the manual-intake queue below the fold.
     page_obj = Paginator(my_tickets, 10).get_page(request.GET.get('page'))
@@ -1577,6 +1672,9 @@ def triage_list(request):
         'my_tickets': page_obj,
         'page_obj': page_obj,
         'my_tickets_total': my_tickets_total,
+        'monitoring_tickets': monitoring_tickets,
+        'monitoring_count': monitoring_count,
+        'monitoring_overdue_count': monitoring_overdue_count,
         # Actionable count, matching the sidebar badge's rule exactly
         # (wazuh_ingest.context_processors.pending_triage_count): reports this
         # analyst can pick up or already holds. The table below still lists a

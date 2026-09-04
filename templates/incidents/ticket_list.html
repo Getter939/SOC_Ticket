@@ -75,6 +75,15 @@
                 </select>
             </div>
             <div class="col-md-2">
+                <label class="form-label small fw-bold mb-1">ประเภท</label>
+                <select name="classification" class="form-select form-select-sm">
+                    <option value="">ทั้งหมด</option>
+                    {% for code, label in classification_choices %}
+                    <option value="{{ code }}" {% if classification_filter == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label small fw-bold mb-1">Emergency</label>
                 <select name="emergency" class="form-select form-select-sm">
                     <option value="">ทั้งหมด</option>
@@ -103,7 +112,7 @@
             <div class="col-md-1 d-grid">
                 <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
             </div>
-            {% if search or status_filter or severity_filter or emergency_filter or ola_filter %}
+            {% if search or status_filter or severity_filter or classification_filter or emergency_filter or ola_filter %}
             <div class="col-12">
                 <a href="{% url 'ticket_list' %}" class="small text-decoration-none">
                     <i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด
@@ -122,6 +131,7 @@
                     <th class="ps-4">Ticket ID</th>
                     <th>เรื่องที่แจ้ง</th>
                     <th>ความรุนแรง</th>
+                    <th>ประเภท</th>
                     <th>OLA</th>
                     <th>Source</th>
                     <th>System Admin</th>
@@ -160,6 +170,15 @@
                         <div class="cell-secondary">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → <span class="cell-technical">{{ ticket.ip_address }}</span>{% endif %}</div>
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+                    <td>
+                        {% if ticket.classification == 'EVENT' %}
+                        <span class="badge bg-secondary">Event</span>
+                        {% elif ticket.classification == 'INCIDENT' %}
+                        <span class="badge bg-danger">Incident</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
                     <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
                     <td>
                         <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
@@ -195,8 +214,8 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="10">
-                        {% if search or status_filter or severity_filter or emergency_filter or ola_filter %}
+                    <td colspan="11">
+                        {% if search or status_filter or severity_filter or classification_filter or emergency_filter or ola_filter %}
                             {% url 'ticket_list' as empty_action_url %}
                             {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบรายการที่ตรงกับตัวกรอง' description='ลองปรับเงื่อนไขการค้นหา หรือล้างตัวกรองเพื่อดูเคสทั้งหมดที่คุณเข้าถึงได้' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
                         {% else %}
@@ -214,11 +233,11 @@
 <nav class="mt-3" aria-label="Ticket pages">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">«</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if classification_filter %}&classification={{ classification_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">«</a></li>
     {% endif %}
     <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">»</a></li>
+      <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if classification_filter %}&classification={{ classification_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">»</a></li>
     {% endif %}
   </ul>
 </nav>
