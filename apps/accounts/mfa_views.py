@@ -19,7 +19,7 @@ from .models import AuthenticatorDevice
 
 class CodeForm(forms.Form):
     code = forms.CharField(
-        label='Authenticator or recovery code',
+        label='รหัสจากแอปยืนยันตัวตนหรือรหัสสำรอง',
         max_length=64,
         widget=forms.TextInput(
             attrs={
@@ -30,13 +30,17 @@ class CodeForm(forms.Form):
                 'autocapitalize': 'off',
             }
         ),
+        error_messages={
+            'required': 'กรุณากรอกรหัสยืนยันตัวตนหรือรหัสสำรอง',
+            'max_length': 'รหัสที่กรอกยาวเกินกว่าที่ระบบกำหนด',
+        },
     )
 
 
 class EnrollmentForm(CodeForm):
     code = forms.RegexField(
         regex=r'^[0-9]{6}$',
-        label='6-digit authenticator code',
+        label='รหัสยืนยันตัวตน 6 หลัก',
         widget=forms.TextInput(
             attrs={
                 'class': 'form-control form-control-lg',
@@ -47,20 +51,33 @@ class EnrollmentForm(CodeForm):
                 'autofocus': True,
             }
         ),
-        error_messages={'invalid': 'Enter the six digits shown in your authenticator app.'},
+        error_messages={
+            'required': 'กรุณากรอกรหัสยืนยันตัวตน 6 หลัก',
+            'invalid': 'กรอกรหัส 6 หลักที่แสดงในแอปยืนยันตัวตน',
+        },
     )
 
 
 class ReauthenticateForm(CodeForm):
     password = forms.CharField(
-        label='Current password',
+        label='รหัสผ่านปัจจุบัน',
         widget=forms.PasswordInput(
             attrs={
                 'class': 'form-control',
                 'autocomplete': 'current-password',
             }
         ),
+        error_messages={'required': 'กรุณากรอกรหัสผ่านปัจจุบัน'},
     )
+
+
+class MFAEnabledMixin:
+    """Keep manual MFA URLs inactive while the feature toggle is off."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if not mfa.enforcement_enabled():
+            return redirect('home')
+        return super().dispatch(request, *args, **kwargs)
 
 
 @method_decorator(never_cache, name='dispatch')
@@ -92,7 +109,7 @@ class MFALoginView(auth_views.LoginView):
 
 @method_decorator(never_cache, name='dispatch')
 @method_decorator(sensitive_post_parameters(), name='dispatch')
-class SetupView(View):
+class SetupView(MFAEnabledMixin, View):
     def get(self, request):
         device = AuthenticatorDevice.objects.filter(user=request.user).first()
         if device and device.confirmed:
@@ -111,7 +128,7 @@ class SetupView(View):
                 return redirect('mfa_recovery_codes')
             form.add_error(
                 'code',
-                'Code could not be verified. Wait for a new code, check your phone’s automatic time setting, and try again. Repeated attempts are temporarily limited.',
+                'ไม่สามารถยืนยันรหัสได้ โปรดรอรหัสชุดใหม่ ตรวจสอบว่าโทรศัพท์ตั้งค่าวันที่และเวลาเป็นอัตโนมัติ แล้วลองอีกครั้ง ระบบจะจำกัดการลองซ้ำเป็นการชั่วคราว',
             )
         device = AuthenticatorDevice.objects.filter(user=request.user, confirmed=False).first()
         if not device or str(device.setup_id) != request.session.get(mfa.SETUP_ID):
@@ -135,7 +152,7 @@ class SetupView(View):
 
 @method_decorator(never_cache, name='dispatch')
 @method_decorator(sensitive_post_parameters(), name='dispatch')
-class VerifyView(View):
+class VerifyView(MFAEnabledMixin, View):
     def get(self, request):
         if request.mfa_complete:
             return redirect('home')
@@ -155,14 +172,14 @@ class VerifyView(View):
                 )
             form.add_error(
                 'code',
-                'Code could not be verified. Wait for a new code and try again, or use an unused recovery code. Repeated attempts are temporarily limited.',
+                'ไม่สามารถยืนยันรหัสได้ โปรดรอรหัสชุดใหม่แล้วลองอีกครั้ง หรือใช้รหัสสำรองที่ยังไม่เคยใช้ ระบบจะจำกัดการลองซ้ำเป็นการชั่วคราว',
             )
         return render(request, 'accounts/mfa_verify.html', {'form': form})
 
 
 @method_decorator(never_cache, name='dispatch')
 @method_decorator(sensitive_post_parameters(), name='dispatch')
-class RecoveryCodesView(View):
+class RecoveryCodesView(MFAEnabledMixin, View):
     def get(self, request):
         if not mfa.is_verified(request):
             return redirect('mfa_verify')
@@ -209,7 +226,7 @@ class RecoveryCodesView(View):
             if user and mfa.replace_recovery_codes(request, form.cleaned_data['code']):
                 return redirect('mfa_recovery_codes')
             form.add_error(
-                None, 'Password or code could not be verified. Please wait before trying again.'
+                None, 'ไม่สามารถยืนยันรหัสผ่านหรือรหัสยืนยันตัวตนได้ โปรดรอสักครู่แล้วลองอีกครั้ง'
             )
         return render(
             request,

@@ -46,7 +46,7 @@ class RequireMFAMiddleware(MiddlewareMixin):
                 if not request.user.is_staff:
                     from django.http import HttpResponseForbidden
 
-                    return HttpResponseForbidden('Django admin access is not permitted.')
+                    return HttpResponseForbidden('บัญชีนี้ไม่มีสิทธิ์เข้าใช้งานระบบผู้ดูแล Django')
                 return redirect('admin:index')
             return redirect_to_login('/admin/', 'login')
         if name in self.PUBLIC_VIEWS:

@@ -15,7 +15,7 @@
 
             <div class="card border-0 shadow-lg">
                 <div class="card-body p-5">
-                    <p class="small text-muted">Step 1 of 2 · Enter your password, then verify with your authenticator app. First-time users will be guided through setup.</p>
+                    {% if request.mfa_enabled %}<p class="small text-muted">ขั้นตอนที่ 1 จาก 2 · กรอกรหัสผ่าน จากนั้นยืนยันด้วยแอปยืนยันตัวตน ผู้ใช้ครั้งแรกจะได้รับคำแนะนำในการตั้งค่า</p>{% endif %}
                     <form method="post" class="js-submit-loading">
                         {% csrf_token %}
                         {% if form.errors %}

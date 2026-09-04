@@ -5,6 +5,14 @@ complete authenticator enrollment before accessing the application. There is no
 role exemption or password-only fallback. Google Authenticator and standard TOTP
 apps work without a Google API connection or a Google account.
 
+## Feature toggle
+
+Set `MFA_ENABLED=False` in the deployment `.env` and restart the application to
+temporarily disable MFA. Password authentication and role permissions continue
+to apply. MFA setup links and screens remain hidden, while enrolled devices and
+recovery codes stay intact. Set `MFA_ENABLED=True` and restart the application
+to enforce MFA again. The secure production setting is `True`.
+
 ## User flow
 
 1. Enter the existing SOC username and password.

@@ -1,30 +1,29 @@
 {% extends 'accounts/mfa_base.html' %}
 {% block mfa_content %}
-<p class="small text-muted">Account setup · Step 1 of 2</p>
-<h1 class="h3">Set up your authenticator</h1>
-<p>ตั้งค่าแอปยืนยันตัวตนก่อนเข้าใช้งานระบบ</p>
-<p>Install Google Authenticator on your phone. You can also use another app that supports time-based verification codes.</p>
+<p class="small text-muted">ตั้งค่าบัญชี · ขั้นตอนที่ 1 จาก 2</p>
+<h1 class="h3">ตั้งค่าแอปยืนยันตัวตน</h1>
+<p>ติดตั้ง Google Authenticator บนโทรศัพท์ หรือใช้แอปอื่นที่รองรับรหัสยืนยันแบบใช้ครั้งเดียวตามเวลา</p>
 {% if form %}
 <ol class="ps-3">
-    <li>Open Google Authenticator, tap <strong>+</strong>, then <strong>Scan a QR code</strong>.</li>
-    <li>Scan this code for <strong>{{ user.username }}</strong>.</li>
-    <li>Enter the six-digit code from the app below.</li>
+    <li>เปิด Google Authenticator แตะ <strong>+</strong> แล้วเลือก <strong>สแกนคิวอาร์โค้ด</strong></li>
+    <li>สแกนคิวอาร์โค้ดนี้สำหรับบัญชี <strong>{{ user.username }}</strong></li>
+    <li>กรอกรหัส 6 หลักที่แสดงในแอปลงในช่องด้านล่าง</li>
 </ol>
-<div class="text-center my-3"><img src="data:image/png;base64,{{ qr_code }}" alt="Scan this QR code with your authenticator app" width="250" height="250" style="max-width:100%;height:auto;"></div>
-<details class="mb-3"><summary>Cannot scan? Enter a setup key</summary>
-    <p class="small mt-2">Choose “Enter a setup key”, use your SOC username, and select <strong>Time based</strong>.</p>
+<div class="text-center my-3"><img src="data:image/png;base64,{{ qr_code }}" alt="สแกนคิวอาร์โค้ดนี้ด้วยแอปยืนยันตัวตน" width="250" height="250" style="max-width:100%;height:auto;"></div>
+<details class="mb-3"><summary>สแกนไม่ได้? ใช้คีย์สำหรับตั้งค่า</summary>
+    <p class="small mt-2">เลือก “ป้อนคีย์การตั้งค่า” ใช้ชื่อผู้ใช้ SOC ของคุณ และเลือกชนิดคีย์แบบ <strong>อิงตามเวลา</strong></p>
     <code class="d-block user-select-all text-break">{{ secret }}</code>
 </details>
-<p class="small text-muted">Keep the QR code and setup key private. This setup session expires after 10 minutes.</p>
+<p class="small text-muted">เก็บคิวอาร์โค้ดและคีย์สำหรับตั้งค่าไว้เป็นความลับ ขั้นตอนการตั้งค่านี้จะหมดอายุใน 10 นาที</p>
 <form method="post">
     {% csrf_token %}
     <label for="{{ form.code.id_for_label }}" class="form-label">{{ form.code.label }}</label>
     {{ form.code }}
     {% for error in form.code.errors %}<p class="text-danger mt-2" role="alert">{{ error }}</p>{% endfor %}
-    <button class="btn btn-primary w-100 mt-3" type="submit">Confirm code and continue</button>
+    <button class="btn btn-primary w-100 mt-3" type="submit">ยืนยันรหัสและดำเนินการต่อ</button>
 </form>
 {% else %}
-<p>Your account will remain on this setup screen until you confirm a code and save your recovery codes.</p>
-<form method="post">{% csrf_token %}<input type="hidden" name="action" value="start"><button type="submit" class="btn btn-primary w-100">Show my setup QR code</button></form>
+<p>บัญชีของคุณจะอยู่ที่หน้าตั้งค่านี้จนกว่าจะยืนยันรหัสและบันทึกรหัสสำรองเรียบร้อยแล้ว</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="start"><button type="submit" class="btn btn-primary w-100">แสดงคิวอาร์โค้ดสำหรับตั้งค่า</button></form>
 {% endif %}
 {% endblock %}

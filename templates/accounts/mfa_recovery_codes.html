@@ -1,29 +1,28 @@
 {% extends 'accounts/mfa_base.html' %}
 {% block mfa_content %}
 {% if codes %}
-<p class="small text-muted">Account setup · Step 2 of 2</p>
-<h1 class="h3">Save your recovery codes</h1>
-<p>บันทึกรหัสสำรองไว้ในที่ปลอดภัยก่อนเข้าใช้งาน</p>
-<p>Use one of these codes with your password if your phone is unavailable. Each code works once. Store them securely, separately from your phone.</p>
-<p class="small text-muted">These codes are shown for this setup session only. Any previous recovery codes have been replaced.</p>
-<div class="border rounded p-3 mb-3 bg-body-tertiary" aria-label="Recovery codes">
+<p class="small text-muted">ตั้งค่าบัญชี · ขั้นตอนที่ 2 จาก 2</p>
+<h1 class="h3">บันทึกรหัสสำรองของคุณ</h1>
+<p>หากไม่สามารถใช้โทรศัพท์ได้ ให้ใช้รหัสใดรหัสหนึ่งด้านล่างร่วมกับรหัสผ่าน รหัสแต่ละชุดใช้ได้เพียงครั้งเดียว โปรดเก็บไว้ในที่ปลอดภัยและแยกจากโทรศัพท์</p>
+<p class="small text-muted">รหัสเหล่านี้จะแสดงเฉพาะในขั้นตอนการตั้งค่านี้เท่านั้น และรหัสสำรองชุดก่อนหน้าจะไม่สามารถใช้งานได้อีก</p>
+<div class="border rounded p-3 mb-3 bg-body-tertiary" aria-label="รหัสสำรอง">
     {% for code in codes %}<code class="d-block user-select-all text-break mb-1">{{ code }}</code>{% endfor %}
 </div>
 <form method="post">
     {% csrf_token %}<input type="hidden" name="action" value="acknowledge">
-    <div class="form-check mb-3"><input type="checkbox" class="form-check-input" name="saved" value="yes" id="saved" required><label for="saved" class="form-check-label">I have saved these recovery codes somewhere safe.</label></div>
-    <button type="submit" class="btn btn-primary w-100">Continue to SOC Support System</button>
+    <div class="form-check mb-3"><input type="checkbox" class="form-check-input" name="saved" value="yes" id="saved" required><label for="saved" class="form-check-label">ฉันได้บันทึกรหัสสำรองเหล่านี้ไว้ในที่ปลอดภัยแล้ว</label></div>
+    <button type="submit" class="btn btn-primary w-100">เข้าสู่ SOC Support System</button>
 </form>
 {% else %}
-<h1 class="h3">Two-factor authentication</h1>
-<p>Your authenticator is enabled. You have <strong>{{ remaining }}</strong> unused recovery codes.</p>
-<p>To replace your recovery codes, enter your current password and a fresh authenticator code or unused recovery code. All previous recovery codes will stop working.</p>
+<h1 class="h3">การยืนยันตัวตนแบบสองขั้นตอน</h1>
+<p>เปิดใช้งานแอปยืนยันตัวตนแล้ว คุณมีรหัสสำรองที่ยังไม่ได้ใช้อีก <strong>{{ remaining }}</strong> รหัส</p>
+<p>หากต้องการสร้างรหัสสำรองชุดใหม่ ให้กรอกรหัสผ่านปัจจุบันและรหัสล่าสุดจากแอปยืนยันตัวตน หรือใช้รหัสสำรองที่ยังไม่เคยใช้ รหัสสำรองชุดเดิมทั้งหมดจะไม่สามารถใช้งานได้อีก</p>
 <form method="post">
     {% csrf_token %}
     {% for error in form.non_field_errors %}<p class="text-danger" role="alert">{{ error }}</p>{% endfor %}
     {% for field in form %}<div class="mb-3"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<p class="text-danger" role="alert">{{ error }}</p>{% endfor %}</div>{% endfor %}
-    <button type="submit" class="btn btn-primary w-100">Generate replacement recovery codes</button>
+    <button type="submit" class="btn btn-primary w-100">สร้างรหัสสำรองชุดใหม่</button>
 </form>
-<p class="small text-muted mt-3">To replace a lost phone, contact IT for an identity-verified authenticator reset.</p>
+<p class="small text-muted mt-3">หากโทรศัพท์สูญหายและต้องการเปลี่ยนอุปกรณ์ โปรดติดต่อ IT เพื่อยืนยันตัวตนและรีเซ็ตแอปยืนยันตัวตน</p>
 {% endif %}
 {% endblock %}

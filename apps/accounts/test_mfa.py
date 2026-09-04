@@ -26,6 +26,7 @@ from .testing import TEST_MFA_KEY
 
 
 @override_settings(
+    MFA_ENABLED=True,
     MFA_ENCRYPTION_KEYS=[TEST_MFA_KEY],
     EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
 )
@@ -65,6 +66,15 @@ class MFAFlowTests(TestCase):
     def test_password_only_login_requires_setup(self):
         self.assertRedirects(self.password_login(), reverse('mfa_setup'))
         self.assertNotIn(DEVICE_ID_SESSION_KEY, self.client.session)
+
+    def test_mfa_pages_and_validation_are_in_thai(self):
+        self.password_login()
+        setup = self.client.get(reverse('mfa_setup'))
+        self.assertContains(setup, 'ตั้งค่าแอปยืนยันตัวตน')
+        self.assertContains(setup, 'แสดงคิวอาร์โค้ดสำหรับตั้งค่า')
+        self.client.post(reverse('mfa_setup'), {'action': 'start'})
+        invalid = self.client.post(reverse('mfa_setup'), {'code': ''})
+        self.assertContains(invalid, 'กรุณากรอกรหัสยืนยันตัวตน 6 หลัก')
 
     def test_wrong_password_cannot_start_setup(self):
         self.client.post(reverse('login'), {'username': self.user.username, 'password': 'wrong'})
@@ -471,3 +481,11 @@ class MFADisabledTests(TestCase):
     def test_startup_check_skips_key_requirement_when_disabled(self):
         with override_settings(MFA_ENCRYPTION_KEYS=[]):
             self.assertEqual(mfa_configuration(None), [])
+
+    def test_mfa_ui_is_hidden_and_direct_urls_return_to_home(self):
+        login_page = self.client.get(reverse('login'))
+        self.assertNotContains(login_page, 'ขั้นตอนที่ 1 จาก 2')
+        self.login()
+        for name in ('mfa_setup', 'mfa_verify', 'mfa_recovery_codes'):
+            with self.subTest(name=name):
+                self.assertRedirects(self.client.get(reverse(name)), reverse('home'))
