@@ -48,6 +48,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
 from docx import Document
+from PIL import Image
 from pypdf import PdfReader
 
 from apps.accounts.models import UserProfile
@@ -490,6 +491,61 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(self.ticket.report_ticket_updated_at, snapshot_updated_at)
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
         self.assertIsNotNone(self.ticket.report_generated_at)
+
+    def test_image_attachment_is_embedded_in_preview_docx_and_pdf(self):
+        with tempfile.TemporaryDirectory(prefix='soc_report_image_') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                image_bytes = BytesIO()
+                Image.new('RGB', (640, 360), '#2f6fad').save(image_bytes, 'PNG')
+                TicketAttachment.objects.create(
+                    ticket=self.ticket,
+                    file=SimpleUploadedFile(
+                        'incident-screen.png', image_bytes.getvalue(),
+                        content_type='image/png',
+                    ),
+                    original_name='incident-screen.png',
+                    description='EDR detection screenshot',
+                    uploaded_by=self.t1,
+                )
+
+                self.client.force_login(self.t1)
+                preview = self.client.get(
+                    reverse('ticket_report_preview', args=[self.ticket.pk]))
+                self.assertContains(preview, 'incident-screen.png - EDR detection screenshot')
+                # One PNG data URI is the header logo; the second is evidence.
+                self.assertGreaterEqual(
+                    preview.content.count(b'data:image/png;base64,'), 2)
+
+                docx_report = generate_ticket_report(self.ticket.pk)
+                doc = Document(BytesIO(docx_report.content))
+                self.assertGreaterEqual(len(doc.inline_shapes), 1)
+                self.assertIn(
+                    'incident-screen.png - EDR detection screenshot',
+                    _docx_text(docx_report.content),
+                )
+
+                pdf_report = generate_ticket_report_pdf(self.ticket.pk)
+                # The PDF contains separate image XObjects for the NT logo and
+                # the evidence screenshot.
+                self.assertGreaterEqual(
+                    pdf_report.content.count(b'/Subtype /Image'), 2)
+
+    def test_corrupt_image_is_listed_without_breaking_report_export(self):
+        with tempfile.TemporaryDirectory(prefix='soc_report_bad_image_') as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                TicketAttachment.objects.create(
+                    ticket=self.ticket,
+                    file=SimpleUploadedFile(
+                        'broken.png', b'not a real image', content_type='image/png',
+                    ),
+                    original_name='broken.png',
+                    description='Unreadable screenshot',
+                    uploaded_by=self.t1,
+                )
+
+                report = generate_ticket_report(self.ticket.pk)
+                self.assertIn(
+                    'broken.png - Unreadable screenshot', _docx_text(report.content))
 
     def test_ticket_report_docx_endpoint_streams_authorized_download(self):
         self.client.force_login(self.t1)
@@ -7014,3 +7070,182 @@ class ManagerStepBackTest(TestCase):
         for offered in (forward, choices):
             self.assertNotIn(Ticket.STATUS_CONTAINMENT_REPORTED, offered)
             self.assertNotIn(Ticket.STATUS_PENDING_T2_REVIEW, offered)
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# 35. Monitoring (กำลังเฝ้าระวัง) — watch-and-wait window                        #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class MonitoringWorkflowTest(TestCase):
+    """A case that is not yet Event or Incident: Tier 2 parks it under Tier 1 for
+    a fixed 30-day watch. Nothing happens → conclude Event; something happens →
+    issue Incident. Monitored at most once."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('mon_t1')
+        cls.other_t1 = _make_t1('mon_t1_other')
+        cls.t2 = _make_t2('mon_t2')
+        cls.manager = _make_user('mon_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+    def _escalated(self, **kwargs):
+        return _make_ticket(
+            status=Ticket.STATUS_ESCALATED_T2, created_by=self.t1,
+            classification=Ticket.CLASSIFICATION_INCIDENT, **kwargs,
+        )
+
+    def _monitoring(self, **kwargs):
+        t = self._escalated(**kwargs)
+        t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'watch it')
+        return t
+
+    # ── Entry ──────────────────────────────────────────────────────────── #
+    def test_tier2_starts_the_watch_window(self):
+        t = self._escalated()
+        t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'not sure yet')
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_MONITORING)
+        self.assertTrue(t.has_been_monitored)
+        # Classification reset to undetermined — the whole point of monitoring.
+        self.assertEqual(t.classification, '')
+        # 30-day deadline stamped (within a minute of now + 30d).
+        expected = timezone.now() + timedelta(days=Ticket.MONITORING_DURATION_DAYS)
+        self.assertAlmostEqual(
+            t.monitor_until, expected, delta=timedelta(minutes=1),
+        )
+
+    def test_monitoring_court_is_the_opening_tier1(self):
+        t = self._monitoring()
+        self.assertIn(Ticket.STATUS_MONITORING, Ticket.TIER1_QUEUE_STATUSES)
+        self.assertIn('Tier 1', t.court_holder_label)
+
+    def test_only_tier2_may_start_monitoring(self):
+        t = self._escalated()
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_MONITORING, self.t1, 'nope')
+
+    def test_a_case_is_monitored_at_most_once(self):
+        t = self._monitoring()
+        # Conclude as Event → back to ESCALATED_T2, where re-monitoring is blocked.
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'nothing happened')
+        t.refresh_from_db()
+        self.assertTrue(t.has_been_monitored)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_MONITORING))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'again?')
+
+    # ── Exits ──────────────────────────────────────────────────────────── #
+    def test_something_happened_issues_an_incident(self):
+        t = self._monitoring()
+        self.client.force_login(self.t1)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'conclude_monitoring',
+            'monitoring_outcome': 'incident',
+            'decision_note': 'พบการเชื่อมต่อผิดปกติ',
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(t.classification, Ticket.CLASSIFICATION_INCIDENT)
+
+    def test_quiet_window_concludes_as_event_via_tier2(self):
+        t = self._monitoring()
+        self.client.force_login(self.t1)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'conclude_monitoring',
+            'monitoring_outcome': 'event',
+            'decision_note': 'ครบกำหนด ไม่มีเหตุ',
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertEqual(t.classification, Ticket.CLASSIFICATION_EVENT)
+        # Tier 2 confirms and closes — the normal Event-close edge accepts it.
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirm close')
+        self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
+    def test_only_the_owning_tier1_may_conclude(self):
+        t = self._monitoring()
+        self.client.force_login(self.other_t1)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'conclude_monitoring',
+            'monitoring_outcome': 'incident',
+            'decision_note': 'not mine to close',
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_MONITORING)
+
+    def test_conclude_edges_are_not_offered_as_generic_actions(self):
+        from apps.incidents.views import (
+            _transition_actions, _valid_soc_status_choices,
+        )
+        t = self._monitoring()
+        forward = {a['status'] for a in _transition_actions(t, self.t1)}
+        choices = {code for code, _label in _valid_soc_status_choices(t, self.t1)}
+        # Driven by the dedicated conclude-monitoring control, not the dropdown.
+        self.assertEqual(forward, set())
+        self.assertEqual(choices - {Ticket.STATUS_MONITORING}, set())
+
+    # ── Propose / verify (Tier 1 recommends, only Tier 2 grants) ────────── #
+    def test_tier1_proposes_monitoring_when_escalating_from_new(self):
+        t = _make_ticket(
+            status=Ticket.STATUS_NEW, created_by=self.t1,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+        self.client.force_login(self.t1)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'workflow_action',
+            'status': Ticket.STATUS_ESCALATED_T2,
+            'update_notes': 'ขอเสนอเฝ้าระวัง',
+            'propose_monitoring': '1',
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertTrue(t.monitoring_proposed)
+
+    def test_the_recommendation_clears_when_tier2_acts(self):
+        t = self._escalated()
+        t.monitoring_proposed = True
+        t.save(update_fields=['monitoring_proposed'])
+        # Tier 2 grants it → flag consumed.
+        t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'ok watch it')
+        t.refresh_from_db()
+        self.assertFalse(t.monitoring_proposed)
+
+    def test_tier1_cannot_set_monitoring_directly_only_propose(self):
+        # There is no Tier-1 permission edge into MONITORING — the propose flag is
+        # advisory; only Tier 2's edge writes the status.
+        for edge, perm in Ticket.TRANSITION_PERMISSIONS.items():
+            if edge[1] == Ticket.STATUS_MONITORING:
+                self.assertEqual(perm, 'TIER2')
+
+    # ── Countdown badge ────────────────────────────────────────────────── #
+    def test_monitoring_badge_levels(self):
+        t = self._monitoring()
+        now = timezone.now()
+        for until, level in [
+            (now + timedelta(days=10), 'active'),
+            (now + timedelta(hours=12), 'final'),
+            (now - timedelta(hours=1), 'overdue'),
+        ]:
+            Ticket.objects.filter(pk=t.pk).update(monitor_until=until)
+            t.refresh_from_db()
+            self.assertEqual(t.monitoring_badge['level'], level)
+        self.assertTrue(t.is_monitoring_expired)  # last one is overdue
+
+    def test_badge_is_none_off_monitoring(self):
+        t = self._escalated()
+        self.assertIsNone(t.monitoring_badge)
+
+    # ── My Queue surfacing ─────────────────────────────────────────────── #
+    def test_monitoring_case_shows_in_its_own_queue_tab(self):
+        watched = self._monitoring()
+        Ticket.objects.filter(pk=watched.pk).update(
+            monitor_until=timezone.now() - timedelta(hours=2))  # overdue
+        self.client.force_login(self.t1)
+        resp = self.client.get(reverse('my_queue') + '?tab=monitoring')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(watched, resp.context['monitoring_tickets'])
+        self.assertEqual(resp.context['monitoring_count'], 1)
+        self.assertEqual(resp.context['monitoring_overdue_count'], 1)
+        # Kept out of the main action tab — it isn't awaiting immediate action.
+        self.assertNotIn(watched, list(resp.context['my_tickets']))

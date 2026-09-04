@@ -13,6 +13,9 @@ from django.utils import timezone
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Inches
+from docx.text.paragraph import Paragraph
+from PIL import Image, ImageOps, UnidentifiedImageError
 from reportlab.lib.fonts import addMapping
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFError, TTFont
@@ -83,6 +86,16 @@ def _chk(flag):
 
 REPORT_LOGO_PATH = Path(__file__).resolve().parent / 'report_templates' / 'assets' / 'nt_logo.png'
 
+# Report exports embed a presentation copy of image evidence, never the original
+# bytes. This keeps a ticket with many 25 MB screenshots from producing an
+# equally large (or larger) DOCX/PDF while the filename list still records every
+# attachment in section 5.
+REPORT_IMAGE_EXTENSIONS = frozenset({'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'})
+REPORT_IMAGE_MAX_COUNT = 20
+REPORT_IMAGE_MAX_PIXELS = 20_000_000
+REPORT_IMAGE_MAX_DIMENSION = 1600
+REPORT_IMAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class GeneratedTicketReport:
@@ -94,10 +107,27 @@ class GeneratedTicketReport:
         return BytesIO(self.content)
 
 
+@dataclass(frozen=True)
+class ReportEvidenceImage:
+    caption: str
+    content: bytes
+    content_type: str
+    width_px: int
+    height_px: int
+
+    @property
+    def data_uri(self):
+        encoded = base64.b64encode(self.content).decode('ascii')
+        return f'data:{self.content_type};base64,{encoded}'
+
+
 def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
     ticket = _load_ticket(ticket_id)
     generated_at = timezone.now()
     context = build_ticket_report_context(ticket, generated_at=generated_at)
+    evidence_images = (
+        _report_evidence_images(ticket) if not _is_event_report(ticket) else ()
+    )
     template_path = (
         EVENT_REPORT_TEMPLATE_PATH if _is_event_report(ticket) else REPORT_TEMPLATE_PATH
     )
@@ -105,7 +135,9 @@ def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
     if hide_empty:
         _remove_empty_docx_fields(doc, context)
         _renumber_docx_section_one(doc)
+    evidence_paragraph = _find_docx_placeholder_paragraph(doc, '{{evidence_log}}')
     _replace_placeholders(doc, context)
+    _append_docx_evidence_images(evidence_paragraph, evidence_images)
 
     output = BytesIO()
     doc.save(output)
@@ -156,11 +188,13 @@ def build_ticket_report_render_context(
 ):
     is_event_report = _is_event_report(ticket)
     report = build_ticket_report_context(ticket, generated_at=generated_at)
+    evidence_images = _report_evidence_images(ticket) if not is_event_report else ()
     return {
         'ticket': ticket,
         'report': report,
         'sections': build_ticket_report_sections(
             report, ticket, hide_empty=hide_empty,
+            evidence_images=evidence_images,
         ),
         'appendix_categories': APPENDIX_CATEGORIES,
         'appendix_intro': APPENDIX_INTRO,
@@ -262,13 +296,16 @@ def _report_ticket_id(ticket):
     return f'{ticket_id}-{suffix}' if suffix else ticket_id
 
 
-def build_ticket_report_sections(report, ticket, hide_empty=False):
+def build_ticket_report_sections(
+    report, ticket, hide_empty=False, evidence_images=(),
+):
     """Structured sections for the HTML/PDF preview, mirroring the v2 DOCX form.
 
     Row shapes consumed by report_preview.html:
       {'type': 'kv', 'label', 'value'}
       {'type': 'checks', 'label', 'options': [{'label', 'checked'}, ...]}
       {'type': 'text', 'value'}                     — full-width free-text box
+      {'type': 'evidence', 'value', 'images'}       — text plus image previews
     """
     def kv(label, value):
         return {'type': 'kv', 'label': label, 'value': value}
@@ -279,6 +316,13 @@ def build_ticket_report_sections(report, ticket, hide_empty=False):
 
     def text(value):
         return {'type': 'text', 'value': value}
+
+    def evidence(value):
+        return {
+            'type': 'evidence',
+            'value': value,
+            'images': tuple(evidence_images),
+        }
 
     def rows_from(table):
         """Render a shared row table (report_content) into preview rows.
@@ -316,7 +360,7 @@ def build_ticket_report_sections(report, ticket, hide_empty=False):
             {'number': '4', 'title': SECTION_TITLES['4'],
              'rows': rows_from(SECTION4_ROWS)},
             {'number': '5', 'title': SECTION_TITLES['5'],
-             'rows': [text(report['evidence_log'])]},
+             'rows': [evidence(report['evidence_log'])]},
             {'number': '6', 'title': SECTION_TITLES['6'], 'rows': [
                 _containment_checklist_row(ticket) or text(report['action_required'])]},
             {'number': '7', 'title': SECTION_TITLES['7'], 'rows': [
@@ -332,7 +376,7 @@ def build_ticket_report_sections(report, ticket, hide_empty=False):
     for section in sections:
         section['rows'] = [
             row for row in section['rows']
-            if row['type'] not in {'kv', 'text'} or row['value'] != '-'
+            if row['type'] not in {'kv', 'text', 'evidence'} or row['value'] != '-'
         ]
         if section['number'] == '1':
             for index, row in enumerate(section['rows'], start=1):
@@ -638,6 +682,42 @@ def _replace_placeholders(doc, context):
         raise ValueError(f'Unresolved report template placeholders: {", ".join(remaining)}')
 
 
+def _find_docx_placeholder_paragraph(doc, placeholder):
+    for paragraph in _iter_paragraphs(doc):
+        if placeholder in paragraph.text:
+            return paragraph
+    return None
+
+
+def _append_docx_evidence_images(paragraph, images):
+    """Insert image evidence after the section-5 filename paragraph."""
+    if not paragraph or not images or paragraph._p.getparent() is None:
+        return
+
+    previous = paragraph
+    for image in images:
+        element = OxmlElement('w:p')
+        previous._p.addnext(element)
+        image_paragraph = Paragraph(element, previous._parent)
+        image_paragraph.paragraph_format.keep_together = True
+
+        display_width = min(6.0, max(2.0, image.width_px / 150))
+        display_height = display_width * image.height_px / image.width_px
+        if display_height > 7.0:
+            display_height = 7.0
+            display_width = display_height * image.width_px / image.height_px
+        picture = image_paragraph.add_run()
+        picture.add_picture(
+            BytesIO(image.content),
+            width=Inches(display_width),
+            height=Inches(display_height),
+        )
+        picture.add_break()
+        caption = image_paragraph.add_run(image.caption)
+        caption.bold = True
+        previous = image_paragraph
+
+
 def _fill_run(run, text):
     """Assign ``text`` to a run. Ballot glyphs (☑/☐/☒) are emitted in DejaVu Sans
     — TH Sarabun New has no such glyphs — while the rest keeps the run's own
@@ -779,11 +859,102 @@ def _user_label(user, include_phone=False):
 def _attachment_summary(ticket):
     parts = []
     for attachment in ticket.attachments.all():
-        label = attachment.original_name
-        if attachment.description:
-            label = f'{label} - {attachment.description}'
-        parts.append(label)
+        parts.append(_attachment_label(attachment))
     return '\n'.join(parts) if parts else '-'
+
+
+def _attachment_label(attachment):
+    label = attachment.original_name
+    if attachment.description:
+        label = f'{label} - {attachment.description}'
+    return label
+
+
+def _report_evidence_images(ticket):
+    """Return bounded, normalized presentation copies of image evidence.
+
+    Every attachment still appears in the textual evidence list. Files that are
+    not images, are corrupt, exceed the decoded-pixel guard, or would push the
+    report over its image budget are therefore listed without a preview instead
+    of making the export fail.
+    """
+    images = []
+    total_bytes = 0
+
+    for attachment in ticket.attachments.all():
+        if len(images) >= REPORT_IMAGE_MAX_COUNT:
+            break
+        if Path(attachment.original_name).suffix.lower() not in REPORT_IMAGE_EXTENSIONS:
+            continue
+
+        try:
+            image = _prepare_report_evidence_image(attachment)
+        except (
+            Image.DecompressionBombError,
+            OSError,
+            UnidentifiedImageError,
+            ValueError,
+        ) as exc:
+            logger.warning(
+                'Skipping attachment %s in report image preview: %s',
+                attachment.pk, exc,
+            )
+            continue
+
+        if total_bytes + len(image.content) > REPORT_IMAGE_MAX_TOTAL_BYTES:
+            logger.warning(
+                'Skipping attachment %s: report image byte budget exceeded',
+                attachment.pk,
+            )
+            continue
+        images.append(image)
+        total_bytes += len(image.content)
+
+    return tuple(images)
+
+
+def _prepare_report_evidence_image(attachment):
+    with attachment.file.open('rb') as source_file:
+        with Image.open(source_file) as source:
+            width, height = source.size
+            if width * height > REPORT_IMAGE_MAX_PIXELS:
+                raise ValueError(
+                    f'decoded image exceeds {REPORT_IMAGE_MAX_PIXELS} pixels'
+                )
+
+            source.seek(0)  # animated formats use only their first frame
+            prepared = ImageOps.exif_transpose(source)
+            prepared.thumbnail(
+                (REPORT_IMAGE_MAX_DIMENSION, REPORT_IMAGE_MAX_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+
+            has_alpha = (
+                'A' in prepared.getbands()
+                or 'transparency' in source.info
+            )
+            output = BytesIO()
+            if source.format == 'PNG' or has_alpha:
+                prepared = prepared.convert('RGBA' if has_alpha else 'RGB')
+                prepared.save(output, format='PNG', optimize=True)
+                content_type = 'image/png'
+            else:
+                if has_alpha:
+                    background = Image.new('RGB', prepared.size, 'white')
+                    background.paste(prepared, mask=prepared.getchannel('A'))
+                    prepared = background
+                else:
+                    prepared = prepared.convert('RGB')
+                prepared.save(output, format='JPEG', quality=85, optimize=True)
+                content_type = 'image/jpeg'
+
+            return ReportEvidenceImage(
+                caption=_attachment_label(attachment),
+                content=output.getvalue(),
+                content_type=content_type,
+                width_px=prepared.width,
+                height_px=prepared.height,
+            )
 
 
 def _host_ip(ticket):

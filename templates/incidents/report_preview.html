@@ -107,6 +107,17 @@
       border: 1px solid #BFBFBF; padding: 10px 12px; min-height: 44px;
       white-space: pre-wrap; margin-bottom: 4px;
     }
+    .evidence-text { white-space: pre-wrap; }
+    .evidence-figure {
+      margin: 12px 0 4px; page-break-inside: avoid;
+    }
+    .evidence-figure figcaption {
+      margin-bottom: 4px; font-weight: 700; color: #364152;
+    }
+    .evidence-figure img {
+      display: block; width: 6.5in; height: auto;
+      border: 1px solid #D9D9D9;
+    }
 
     .signoff { border: none; margin-top: 18px; }
     .signoff td { border: none; text-align: center; width: 50%; }
@@ -121,6 +132,7 @@
       .report-page { margin: 0; padding: 20px; box-shadow: none; }
       .report-actions { position: static; flex-direction: column; align-items: flex-start; }
       .report-options { align-items: flex-start; }
+      .evidence-figure img { width: 100%; }
     }
     @media print {
       body { background: #ffffff; }
@@ -160,6 +172,16 @@
       <div class="section-band"><span class="secnum">{{ section.number }}.</span> {{ section.title }}</div>
       {% if section.rows.0.type == 'text' %}
         <div class="textbox">{{ section.rows.0.value }}</div>
+      {% elif section.rows.0.type == 'evidence' %}
+        <div class="textbox">
+          <div class="evidence-text">{{ section.rows.0.value }}</div>
+          {% for image in section.rows.0.images %}
+            <figure class="evidence-figure">
+              <figcaption>{{ image.caption }}</figcaption>
+              <img src="{{ image.data_uri }}" alt="{{ image.caption }}">
+            </figure>
+          {% endfor %}
+        </div>
       {% elif section.rows.0.type == 'containment_checklist' %}
         <div class="textbox">
           {% for item in section.rows.0.items %}
