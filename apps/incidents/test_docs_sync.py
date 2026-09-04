@@ -30,6 +30,22 @@ def _codes_in(text):
     return {c for c in ALL_CODES if re.search(rf"\b{re.escape(c)}\b", text)}
 
 
+def _forward_targets(frm):
+    """ALLOWED_TRANSITIONS targets for ``frm`` minus the backward step-back edges.
+
+    The authoritative lifecycle doc describes the *forward* flow; manager
+    step-back edges (STEP_BACK_EDGES) are a correction mechanism documented
+    separately, so the graph-shape and transition-table checks below reason over
+    the forward edges only — otherwise every step-back edge would demand a row in
+    the forward transition table and distort the '12 active + 1 legacy' framing.
+    """
+    return [
+        target
+        for target in Ticket.ALLOWED_TRANSITIONS.get(frm, [])
+        if (frm, target) not in Ticket.STEP_BACK_EDGES
+    ]
+
+
 class LifecycleDocIsPresent(SimpleTestCase):
     def test_authoritative_doc_exists(self):
         self.assertTrue(
@@ -59,14 +75,15 @@ class LifecycleDocMatchesStateMachine(SimpleTestCase):
         an edge back into it (or another state loses all inbound edges), the doc
         framing of "12 active + 1 legacy" is wrong and this fails.
         """
+        forward = {code: _forward_targets(code) for code in Ticket.ALLOWED_TRANSITIONS}
         inbound = {
             target
-            for targets in Ticket.ALLOWED_TRANSITIONS.values()
+            for targets in forward.values()
             for target in targets
         }
         legacy = {
             code
-            for code, targets in Ticket.ALLOWED_TRANSITIONS.items()
+            for code, targets in forward.items()
             # reachable-out but not reachable-in, excluding NEW (the initial
             # state, which is legitimately never a transition target)
             if targets and code not in inbound and code != Ticket.STATUS_NEW
@@ -122,10 +139,10 @@ class LifecycleDocMatchesStateMachine(SimpleTestCase):
             (frm,) = tuple(from_codes)
             documented[frm] = _codes_in(cells[1])
 
-        for frm, targets in Ticket.ALLOWED_TRANSITIONS.items():
-            expected = set(targets)
+        for frm in Ticket.ALLOWED_TRANSITIONS:
+            expected = set(_forward_targets(frm))
             if not expected:
-                continue  # terminal state — no row expected
+                continue  # terminal state — no forward row expected
             self.assertIn(
                 frm, documented,
                 f"transition table has no row for {frm}",

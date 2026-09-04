@@ -491,6 +491,7 @@ class Ticket(models.Model):
         ],
         STATUS_AWAITING_CONTAINMENT: [
             STATUS_CONTAINMENT_REPORTED,   # admin submits report → Tier 2 verifies
+            STATUS_PENDING_MGR_TRIAGE,     # ↩ manager step-back (see STEP_BACK_EDGES)
         ],
         STATUS_CONTAINMENT_REPORTED: [
             STATUS_AWAITING_CONTAINMENT,   # T2: not contained → back to admin (loop)
@@ -506,12 +507,14 @@ class Ticket(models.Model):
             # person for one act, the first of which existed mainly to unlock
             # Tier 1's own upload permission.
             STATUS_PENDING_T2_REVIEW,
+            STATUS_PENDING_MGR_TRIAGE,     # ↩ manager step-back (see STEP_BACK_EDGES)
         ],
         # LEGACY — no edge leads here any more (AWAITING_OWNER now goes straight
         # to PENDING_T2_REVIEW). Kept reachable-OUT so tickets already sitting
         # in this status can still finish; do not wire a new edge back into it.
         STATUS_OWNER_REMEDIATED: [
             STATUS_PENDING_T2_REVIEW,      # always → Tier 2 verifies (mandatory)
+            STATUS_AWAITING_OWNER,         # ↩ manager step-back (see STEP_BACK_EDGES)
         ],
         STATUS_PENDING_T2_REVIEW: [
             STATUS_APPROVED,               # T2 verified + not emergency → close
@@ -521,6 +524,10 @@ class Ticket(models.Model):
         ],
         STATUS_PENDING_MANAGER: [
             STATUS_APPROVED,               # manager verifies → close
+            # ↩ manager step-back to the lane Tier 1 fixed (see STEP_BACK_EDGES);
+            # the t1_route gate below allows exactly one of these per ticket.
+            STATUS_CONTAINMENT_REPORTED,   # admin lane  (t1_route=ADMIN)
+            STATUS_PENDING_T2_REVIEW,      # owner lane  (t1_route=OWNER)
         ],
         STATUS_APPROVED:     [],
         STATUS_CLOSED_EVENT: [],
@@ -532,6 +539,7 @@ class Ticket(models.Model):
     #   TIER2         — profile.is_tier2                                   #
     #   ASSIGNED_ADMIN— user == assigned_admin                            #
     #   MANAGER       — profile.is_soc_manager                            #
+    #   MANAGER_STEP_BACK — is_soc_manager, on a backward STEP_BACK_EDGE   #
     # ------------------------------------------------------------------ #
     TRANSITION_PERMISSIONS = {
         (STATUS_NEW,                  STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
@@ -563,7 +571,31 @@ class Ticket(models.Model):
         (STATUS_PENDING_T2_REVIEW,    STATUS_AWAITING_OWNER):       'TIER2',
         (STATUS_PENDING_T2_REVIEW,    STATUS_CLOSED_EVENT):         'TIER2',
         (STATUS_PENDING_MANAGER,      STATUS_APPROVED):             'MANAGER',
+        # ↩ Manager step-back edges (see STEP_BACK_EDGES / step_back()).
+        (STATUS_AWAITING_CONTAINMENT, STATUS_PENDING_MGR_TRIAGE):   'MANAGER_STEP_BACK',
+        (STATUS_AWAITING_OWNER,       STATUS_PENDING_MGR_TRIAGE):   'MANAGER_STEP_BACK',
+        (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER):       'MANAGER_STEP_BACK',
+        (STATUS_PENDING_MANAGER,      STATUS_CONTAINMENT_REPORTED): 'MANAGER_STEP_BACK',
+        (STATUS_PENDING_MANAGER,      STATUS_PENDING_T2_REVIEW):    'MANAGER_STEP_BACK',
     }
+
+    # Backward "step-back" edges a SOC Manager can drive to correct a mis-route.
+    # They live in ALLOWED_TRANSITIONS so step_back() runs through transition_to()
+    # and inherits every invariant it maintains (status_changed_at, Tier 2 claim
+    # clearing, the audit log) instead of a parallel hand-rolled write that has
+    # to remember them all a second time. They are NOT part of the forward flow:
+    #   • the detail-page action builders skip them (step_back has its own UI);
+    #   • can_transition_to/transition_to gate the PENDING_MANAGER pair on t1_route
+    #     so a ticket only steps back into the lane Tier 1 fixed;
+    #   • the lifecycle-doc sync test excludes them from the forward table.
+    # step_back_target() resolves which single edge applies to a given ticket.
+    STEP_BACK_EDGES = frozenset({
+        (STATUS_AWAITING_CONTAINMENT, STATUS_PENDING_MGR_TRIAGE),
+        (STATUS_AWAITING_OWNER,       STATUS_PENDING_MGR_TRIAGE),
+        (STATUS_OWNER_REMEDIATED,     STATUS_AWAITING_OWNER),
+        (STATUS_PENDING_MANAGER,      STATUS_CONTAINMENT_REPORTED),
+        (STATUS_PENDING_MANAGER,      STATUS_PENDING_T2_REVIEW),
+    })
 
     # Statuses on the Tier 1 side of the lifecycle that are gated to the
     # ticket's original creator (same analyst who opened it). Used both by
@@ -1522,6 +1554,16 @@ class Ticket(models.Model):
         if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_OWNER)
                 and self.t1_route != self.T1_ROUTE_OWNER):
             return False
+        # Manager step-back from PENDING_MANAGER returns the ticket to the lane
+        # Tier 1 fixed (mirrors the forward PENDING_MGR_TRIAGE gate): the admin
+        # lane steps back to CONTAINMENT_REPORTED, the owner lane to
+        # PENDING_T2_REVIEW — never across lanes.
+        if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_CONTAINMENT_REPORTED)
+                and self.t1_route != self.T1_ROUTE_ADMIN):
+            return False
+        if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_PENDING_T2_REVIEW)
+                and self.t1_route != self.T1_ROUTE_OWNER):
+            return False
         # Emergency split at Tier 2 verification (both lanes): an emergency
         # ticket must additionally pass the SOC manager; a non-emergency ticket
         # is closed by Tier 2 directly and never reaches the manager.
@@ -1688,6 +1730,18 @@ class Ticket(models.Model):
             raise ValidationError(
                 'Ticket นี้ถูกกำหนดเส้นทางเป็น "ผู้ดูแลระบบ" — ส่งให้เจ้าของระบบไม่ได้'
             )
+        # 5a′. Manager step-back honours the same fixed lane in reverse: a
+        # PENDING_MANAGER ticket steps back only into the lane Tier 1 chose.
+        if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_CONTAINMENT_REPORTED)
+                and self.t1_route != self.T1_ROUTE_ADMIN):
+            raise ValidationError(
+                'Ticket นี้ถูกกำหนดเส้นทางเป็น "เจ้าของระบบ" — ย้อนกลับไปยังผู้ดูแลระบบไม่ได้'
+            )
+        if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_PENDING_T2_REVIEW)
+                and self.t1_route != self.T1_ROUTE_OWNER):
+            raise ValidationError(
+                'Ticket นี้ถูกกำหนดเส้นทางเป็น "ผู้ดูแลระบบ" — ย้อนกลับไปยัง Tier 2 (เจ้าของระบบ) ไม่ได้'
+            )
         # 5b. Emergency tickets must pass the SOC manager after Tier 2 verifies;
         # non-emergency tickets are closed by Tier 2 and never reach the manager.
         if (edge == (self.STATUS_CONTAINMENT_REPORTED, self.STATUS_APPROVED)
@@ -1764,6 +1818,11 @@ class Ticket(models.Model):
             if profile is None or not profile.is_soc_manager:
                 raise ValidationError(
                     'เฉพาะผู้จัดการ SOC เท่านั้นที่สามารถอนุมัติได้'
+                )
+        elif required_perm == 'MANAGER_STEP_BACK':
+            if not self._is_emergency_manager(user):
+                raise ValidationError(
+                    'เฉพาะผู้จัดการ SOC เท่านั้นที่ย้อนขั้นตอนได้'
                 )
         elif required_perm == 'ASSIGNED_ADMIN':
             if self.assigned_admin_id is None or user.pk != self.assigned_admin_id:
@@ -1980,11 +2039,19 @@ class Ticket(models.Model):
     def step_back(self, user, reason):
         """Return the ticket one step, with a written reason. Auditable.
 
-        Bypasses ALLOWED_TRANSITIONS on purpose — these are exactly the edges
-        the forward-only state machine does not have. Everything else about a
-        transition still applies: the move is logged, and the write-once stamps
-        (verified_by, approved_by, emergency_decided_by …) are left untouched,
-        so stepping back never rewrites who decided what.
+        A thin wrapper over transition_to(): the backward edges live in
+        ALLOWED_TRANSITIONS (see STEP_BACK_EDGES) under the MANAGER_STEP_BACK
+        permission token, so the actual move — status write, status_changed_at,
+        Tier 2 claim clearing, the audit log — is the same single code path every
+        forward transition uses, not a parallel copy that has to remember each
+        invariant again. The write-once stamps (verified_by, approved_by,
+        emergency_decided_by …) are untouched because no step-back target is one
+        of the statuses transition_to() stamps them on, so stepping back never
+        rewrites who decided what.
+
+        The guards here run first so the manager sees a step-back-specific
+        message (terminal case, no target, missing reason) rather than the
+        generic transition_to() errors.
         """
         if not self._is_emergency_manager(user):
             raise ValidationError('เฉพาะผู้จัดการ SOC เท่านั้นที่ย้อนขั้นตอนได้')
@@ -2000,30 +2067,10 @@ class Ticket(models.Model):
             raise ValidationError('กรุณาระบุเหตุผลในการย้อนขั้นตอน')
 
         labels = dict(self.STATUS_CHOICES)
-        previous = self.status
-        self.status = target
-        # Same stamp transition_to keeps (see its comment there): every queue
-        # surface sorts and ages tickets on this. Without it a stepped-back
-        # ticket re-enters the Tier 2 queue showing when it FIRST reached that
-        # status — days stale — and sorts to the wrong end.
-        self.status_changed_at = timezone.now()
-        # A claim covers one stage only; re-entering the queue must put the
-        # ticket up for grabs again rather than leaving it locked to whoever
-        # handled the stage it just came back from.
-        self.t2_claimed_by = None
-        self.t2_claimed_at = None
-        self.save(update_fields=[
-            'status', 'status_changed_at', 't2_claimed_by', 't2_claimed_at',
-            'updated_at',
-        ])
-        TicketLog.objects.create(
-            ticket=self,
-            note=(f'↩ ย้อนขั้นตอนโดยผู้จัดการ SOC: '
-                  f'{labels.get(previous, previous)} → {labels.get(target, target)} '
-                  f'— เหตุผล: {reason}'),
-            status_at_time=target,
-            author=user,
-        )
+        note = (f'↩ ย้อนขั้นตอนโดยผู้จัดการ SOC: '
+                f'{labels.get(self.status, self.status)} → '
+                f'{labels.get(target, target)} — เหตุผล: {reason}')
+        self.transition_to(target, user, note)
         return target
 
 

@@ -137,6 +137,8 @@ def _valid_soc_status_choices(ticket, user):
         result.append((ticket.status, status_map.get(ticket.status, ticket.status)))
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
+        if (ticket.status, next_status) in Ticket.STEP_BACK_EDGES:
+            continue  # manager step-back has its own control, not this dropdown
         if not ticket.can_transition_to(next_status):
             continue  # blocked by classification or manager-routing gate
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
@@ -215,6 +217,8 @@ def _transition_actions(ticket, user):
     }
     actions = []
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
+        if (ticket.status, next_status) in Ticket.STEP_BACK_EDGES:
+            continue  # manager step-back is a separate control, not a forward action
         can_transition = ticket.can_transition_to(next_status)
         # Tier 2's two decision buttons also set the classification. Ask the
         # model whether each edge is valid with that proposed classification.

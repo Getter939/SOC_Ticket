@@ -1622,9 +1622,17 @@ class DirectToOwnerPathTest(TestCase):
     def test_tier1_cannot_send_a_recorded_report_back_to_the_owner(self):
         """Tier 1 used to get a "not fixed" edge at OWNER_REMEDIATED, which
         asked the same person the same question they had answered one state
-        earlier — and put adequacy in two places. It is Tier 2's call only."""
+        earlier — and put adequacy in two places. It is Tier 2's call only.
+
+        OWNER_REMEDIATED -> AWAITING_OWNER exists today only as a manager
+        step-back (STEP_BACK_EDGES) — so can_transition_to (which ignores
+        per-user permissions) sees a legal edge, but a Tier 1 driving it is
+        still refused on the MANAGER_STEP_BACK permission."""
         t = self._owner_case(status=Ticket.STATUS_OWNER_REMEDIATED)
-        self.assertFalse(t.can_transition_to(Ticket.STATUS_AWAITING_OWNER))
+        self.assertIn(
+            (Ticket.STATUS_OWNER_REMEDIATED, Ticket.STATUS_AWAITING_OWNER),
+            Ticket.STEP_BACK_EDGES,
+        )
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_AWAITING_OWNER, self.t1, 'not fixed')
 
@@ -6956,3 +6964,53 @@ class ManagerStepBackTest(TestCase):
         self.client.force_login(self.t2)
         self.assertNotIn('ย้อนขั้นตอน', self.client.get(
             reverse('ticket_detail', args=[ticket.pk])).content.decode())
+
+    def test_step_back_restamps_status_changed_at(self):
+        """Regression: step-back re-enters a queue, so its age must reset. When
+        it did not, a stepped-back ticket showed its ORIGINAL queue age and
+        sorted wrongly. Now that step_back routes through transition_to this is
+        the shared stamp, but the guard stays to lock the behaviour."""
+        ticket = self._ticket(Ticket.STATUS_AWAITING_CONTAINMENT)
+        old = timezone.now() - timedelta(days=3)
+        Ticket.objects.filter(pk=ticket.pk).update(status_changed_at=old)
+        self._step_back(self.manager, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertGreater(ticket.status_changed_at, old)
+
+    def test_step_back_clears_the_tier2_claim(self):
+        """Re-entering a queue must put the ticket up for grabs again rather than
+        leaving it locked to whoever handled the stage it just left."""
+        ticket = self._ticket(Ticket.STATUS_PENDING_MANAGER)
+        Ticket.objects.filter(pk=ticket.pk).update(
+            t2_claimed_by=self.t2, t2_claimed_at=timezone.now())
+        self._step_back(self.manager, ticket)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+        self.assertIsNone(ticket.t2_claimed_by)
+
+    def test_step_back_edges_are_registered_and_permissioned(self):
+        """Every STEP_BACK_EDGE must be a real ALLOWED_TRANSITIONS edge carrying
+        the MANAGER_STEP_BACK token — otherwise step_back()'s delegation to
+        transition_to() would be refused as an illegal transition."""
+        for frm, to in Ticket.STEP_BACK_EDGES:
+            with self.subTest(edge=(frm, to)):
+                self.assertIn(to, Ticket.ALLOWED_TRANSITIONS[frm])
+                self.assertEqual(
+                    Ticket.TRANSITION_PERMISSIONS.get((frm, to)),
+                    'MANAGER_STEP_BACK',
+                )
+
+    def test_step_back_edges_are_not_offered_as_forward_actions(self):
+        """The backward edges live in ALLOWED_TRANSITIONS, so the detail-page
+        action builders must skip them — a manager must not see 'step back to
+        CONTAINMENT_REPORTED' sitting next to the real forward buttons."""
+        from apps.incidents.views import (
+            _transition_actions, _valid_soc_status_choices,
+        )
+        ticket = self._ticket(Ticket.STATUS_PENDING_MANAGER)
+        forward = {a['status'] for a in _transition_actions(ticket, self.manager)}
+        choices = {code for code, _label in _valid_soc_status_choices(ticket, self.manager)}
+        for offered in (forward, choices):
+            self.assertNotIn(Ticket.STATUS_CONTAINMENT_REPORTED, offered)
+            self.assertNotIn(Ticket.STATUS_PENDING_T2_REVIEW, offered)
