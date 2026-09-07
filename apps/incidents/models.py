@@ -1642,7 +1642,12 @@ class Ticket(models.Model):
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             return False
         # A case may be monitored at most once — 30 days is the absolute watch.
-        if new_status == self.STATUS_MONITORING and self.has_been_monitored:
+        # Bundle members are excluded: a Project Incident is a confirmed
+        # multi-system incident, so its members are never "not yet classified".
+        # (Bundle-level monitoring is a separate design, deferred.)
+        if new_status == self.STATUS_MONITORING and (
+            self.has_been_monitored or self.project_incident_id
+        ):
             return False
         if (
             self.project_incident_id
@@ -1811,10 +1816,15 @@ class Ticket(models.Model):
             raise ValidationError(
                 'ต้องจัดประเภทเป็น Incident ก่อนจึงจะส่งต่อ/ดำเนินการได้'
             )
-        # A case may be monitored at most once — 30 days is the absolute watch.
+        # A case may be monitored at most once, and never a Project Incident
+        # member (a bundle is a confirmed incident — see can_transition_to).
         if new_status == self.STATUS_MONITORING and self.has_been_monitored:
             raise ValidationError(
                 'เคสนี้เคยถูกเฝ้าระวังแล้ว — ไม่สามารถเฝ้าระวังซ้ำได้'
+            )
+        if new_status == self.STATUS_MONITORING and self.project_incident_id:
+            raise ValidationError(
+                'Ticket ในกลุ่ม Project Incident ไม่รองรับการเฝ้าระวัง'
             )
 
         # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #

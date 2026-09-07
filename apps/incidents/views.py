@@ -526,6 +526,7 @@ def create_ticket(request):
                     triage=triage,
                     alert_bundle_ids=alert_bundle_ids,
                     evidence_token=evidence_token,
+                    propose_monitoring=bool(request.POST.get('propose_monitoring')),
                 )
             except ValidationError as exc:
                 form.add_error(None, exc.message)
@@ -1038,12 +1039,13 @@ def ticket_detail(request, pk):
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
     # Tier 2 may park an escalated case under Tier 1 for the fixed watch window
-    # — once only (has_been_monitored). Offered alongside the normal Tier 2
-    # review, so it shows whether or not the classification decision is ready.
+    # — once only (has_been_monitored), and never a bundle member. Rendered
+    # inside the Tier 2 review card, alongside the Incident/Event decision.
     can_monitor = (
         not is_terminal
         and ticket.status == Ticket.STATUS_ESCALATED_T2
         and not ticket.has_been_monitored
+        and not ticket.project_incident_id
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
     # The owning Tier 1 concludes the watch window: Incident (something happened)
@@ -1108,6 +1110,27 @@ def ticket_detail(request, pk):
 
         elif action == 't2_review':
             next_status = request.POST.get('status', '')
+            note = request.POST.get('decision_note', '').strip()
+            # The "เฝ้าระวัง" button lives in the same decision form and shares its
+            # (required) note, but it is a classification-deferring decision, not
+            # an Event/Incident call — so it routes to start_monitoring rather
+            # than the classification-matched review path below.
+            if next_status == Ticket.STATUS_MONITORING:
+                if not can_monitor:
+                    messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้ หรือเคสนี้เฝ้าระวังไม่ได้')
+                elif not note:
+                    messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
+                else:
+                    try:
+                        start_monitoring(ticket=ticket, actor=request.user, note=note)
+                        messages.success(
+                            request,
+                            f'เริ่มเฝ้าระวังเคสนี้เป็นเวลา {Ticket.MONITORING_DURATION_DAYS} วัน',
+                        )
+                    except ValidationError as e:
+                        messages.error(request, e.message)
+                return redirect('ticket_detail', pk=pk)
+
             review_form = TicketReviewForm(request.POST, instance=ticket)
             expected_classification = {
                 Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
@@ -1216,23 +1239,6 @@ def ticket_detail(request, pk):
                 except ValidationError as e:
                     messages.error(request, e.message)
 
-        elif action == 't2_monitor':
-            # Tier 2 parks the case under Tier 1 for the fixed 30-day watch.
-            note = request.POST.get('decision_note', '').strip()
-            if not can_monitor:
-                messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้ หรือเคสนี้เคยถูกเฝ้าระวังแล้ว')
-            elif not note:
-                messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
-            else:
-                try:
-                    result = start_monitoring(ticket=ticket, actor=request.user, note=note)
-                    messages.success(
-                        request,
-                        f'เริ่มเฝ้าระวังเคสนี้เป็นเวลา {Ticket.MONITORING_DURATION_DAYS} วัน',
-                    )
-                except ValidationError as e:
-                    messages.error(request, e.message)
-
         elif action == 'conclude_monitoring':
             # The owning Tier 1 ends the watch: Incident (something happened) or
             # Event (window closed quietly).
@@ -1288,14 +1294,6 @@ def ticket_detail(request, pk):
             elif new_status not in transition_codes:
                 messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
             else:
-                # Tier 1 may attach a monitoring recommendation when escalating a
-                # brand-new case to Tier 2 (only there — this is the propose half
-                # of the propose/verify split; only Tier 2 can grant it). Consumed
-                # and cleared by transition_to once the case leaves Tier 2 review.
-                if (new_status == Ticket.STATUS_ESCALATED_T2
-                        and ticket.status == Ticket.STATUS_NEW
-                        and request.POST.get('propose_monitoring')):
-                    ticket.monitoring_proposed = True
                 try:
                     result = transition_ticket(
                         ticket=ticket,

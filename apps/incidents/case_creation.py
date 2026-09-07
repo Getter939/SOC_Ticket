@@ -69,7 +69,8 @@ def load_alert_bundle(alert_ids, user, *, lock=False):
     return alerts
 
 
-def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(), evidence_token=''):
+def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(),
+                            evidence_token='', propose_monitoring=False):
     """Persist a validated TicketForm with all source records and evidence."""
     with transaction.atomic():
         locked_triage = _lock_triage(triage, actor) if triage else None
@@ -87,6 +88,13 @@ def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(), ev
         source_alerts = locked_alerts or ([locked_alert] if locked_alert else [])
         _link_alerts(ticket, source_alerts, actor)
         _apply_initial_ticket_route(ticket, actor, form.cleaned_data.get('t1_route'))
+
+        # Tier 1's monitoring recommendation: only meaningful once the case has
+        # landed at Tier 2 review (ESCALATED_T2). Advisory — only Tier 2 can grant
+        # it — and cleared by transition_to when the case leaves that review.
+        if propose_monitoring and ticket.status == Ticket.STATUS_ESCALATED_T2:
+            ticket.monitoring_proposed = True
+            ticket.save(update_fields=['monitoring_proposed'])
 
         if locked_triage:
             consume_source_triage(

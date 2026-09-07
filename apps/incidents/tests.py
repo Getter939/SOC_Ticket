@@ -7180,11 +7180,14 @@ class MonitoringWorkflowTest(TestCase):
         self.assertIn('conclude_monitoring', html)   # the dedicated form
         self.assertIn('สรุปผลการเฝ้าระวัง', html)
 
-    def test_monitor_button_renders_for_tier2_at_escalation(self):
+    def test_monitor_button_renders_in_the_tier2_decision_card(self):
         t = self._escalated()
         self.client.force_login(self.t2)
         html = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
-        self.assertIn('t2_monitor', html)            # the dedicated form
+        # The monitor button shares the Tier 2 review form (one decision note).
+        self.assertIn('name="status" value="MONITORING"', html)
+        # Exactly one decision-note field in that section, not two.
+        self.assertEqual(html.count('name="decision_note"'), 1)
 
     def test_only_the_owning_tier1_may_conclude(self):
         t = self._monitoring()
@@ -7209,21 +7212,40 @@ class MonitoringWorkflowTest(TestCase):
         self.assertEqual(choices - {Ticket.STATUS_MONITORING}, set())
 
     # ── Propose / verify (Tier 1 recommends, only Tier 2 grants) ────────── #
-    def test_tier1_proposes_monitoring_when_escalating_from_new(self):
-        t = _make_ticket(
-            status=Ticket.STATUS_NEW, created_by=self.t1,
-            classification=Ticket.CLASSIFICATION_INCIDENT,
-        )
+    def test_tier1_proposes_monitoring_when_escalating_at_creation(self):
+        # NEW is not a resting state — a created ticket routes straight to Tier 2
+        # (ESCALATED_T2) on the escalate route, so the recommendation rides the
+        # create form.
         self.client.force_login(self.t1)
-        self.client.post(reverse('ticket_detail', args=[t.pk]), {
-            'action': 'workflow_action',
-            'status': Ticket.STATUS_ESCALATED_T2,
-            'update_notes': 'ขอเสนอเฝ้าระวัง',
-            'propose_monitoring': '1',
-        })
-        t.refresh_from_db()
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            propose_monitoring='1',
+        ))
+        self.assertEqual(resp.status_code, 302)
+        t = Ticket.objects.filter(created_by=self.t1).latest('id')
         self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
         self.assertTrue(t.monitoring_proposed)
+
+    def test_recommendation_ignored_when_not_escalating_to_tier2(self):
+        # Assign-admin route lands at PENDING_MGR_TRIAGE, not Tier 2 — the flag is
+        # meaningless there and must not stick.
+        self.client.force_login(self.t1)
+        self.client.post(reverse('create_ticket'), _ticket_post_data(
+            t1_route=TicketForm.ROUTE_ASSIGN_ADMIN,
+            assigned_admin=_make_user('mon_admin', UserProfile.ROLE_SYSTEM_ADMIN).pk,
+            propose_monitoring='1',
+        ))
+        t = Ticket.objects.filter(created_by=self.t1).latest('id')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertFalse(t.monitoring_proposed)
+
+    def test_bundle_members_cannot_be_monitored(self):
+        # A Project Incident is a confirmed multi-system incident — its members
+        # are never "not yet classified", so monitoring is refused.
+        project = ProjectIncident.objects.create(title='bundle', created_by=self.t1)
+        t = self._escalated(project_incident=project)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_MONITORING))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'nope')
 
     def test_the_recommendation_clears_when_tier2_acts(self):
         t = self._escalated()
