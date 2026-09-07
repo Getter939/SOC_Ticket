@@ -56,7 +56,7 @@ from apps.incidents import history
 from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentTargetForm,
-    ResponseRequestForm, SubtaskForm, TicketForm, TriageForm,
+    ResponseRequestForm, SubtaskForm, TicketEditForm, TicketForm, TriageForm,
 )
 from apps.incidents.models import (
     ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
@@ -7119,6 +7119,16 @@ class MonitoringWorkflowTest(TestCase):
         self.assertIn(Ticket.STATUS_MONITORING, Ticket.TIER1_QUEUE_STATUSES)
         self.assertIn('Tier 1', t.court_holder_label)
 
+    def test_opening_tier1_may_upload_evidence_during_monitoring(self):
+        # The analyst watching the case holds its court, so the attachment gate
+        # must let them file the evidence they gather during the window. A
+        # different Tier 1 and a Tier 2 are not the responsible party here.
+        from .policies import can_upload_ticket_attachment
+        t = self._monitoring()
+        self.assertTrue(can_upload_ticket_attachment(t, self.t1))
+        self.assertFalse(can_upload_ticket_attachment(t, self.other_t1))
+        self.assertFalse(can_upload_ticket_attachment(t, self.t2))
+
     def test_only_tier2_may_start_monitoring(self):
         t = self._escalated()
         with self.assertRaises(ValidationError):
@@ -7262,3 +7272,27 @@ class MonitoringWorkflowTest(TestCase):
         self.assertEqual(resp.context['monitoring_overdue_count'], 1)
         # Kept out of the main action tab — it isn't awaiting immediate action.
         self.assertNotIn(watched, list(resp.context['my_tickets']))
+
+
+class IncidentDatetimeLocalizationTest(TestCase):
+    """incident_datetime must round-trip through the edit form in local time.
+
+    The field stores an aware UTC value but renders into a naive
+    ``datetime-local`` input; if the initial value is not localized to
+    TIME_ZONE (Asia/Bangkok, UTC+7) first, an analyst who reopens and re-saves
+    a ticket without touching the field silently shifts the recorded time 7
+    hours earlier. Regression guard for that round-trip.
+    """
+
+    def test_edit_form_renders_incident_datetime_in_local_time(self):
+        bangkok = timezone.get_current_timezone()
+        # 08:00 Bangkok == 01:00 UTC. Re-fetch so the instance carries the
+        # UTC-aware value the edit page actually loads from the database.
+        aware = timezone.make_aware(datetime(2026, 9, 7, 8, 0), bangkok)
+        t = _make_ticket(incident_datetime=aware)
+        t.refresh_from_db()
+
+        rendered = str(TicketEditForm(instance=t)['incident_datetime'])
+
+        self.assertIn('2026-09-07T08:00', rendered)      # local time, correct
+        self.assertNotIn('2026-09-07T01:00', rendered)   # never the raw UTC

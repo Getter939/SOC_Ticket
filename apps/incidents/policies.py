@@ -50,6 +50,10 @@ def holds_ticket_court(ticket, user):
     if ticket.status in (
         Ticket.STATUS_NEW,
         Ticket.STATUS_T1_REVIEW,
+        # A monitored case is the opening analyst's to watch and conclude
+        # (exits are TIER1_CREATOR edges), so they hold its court too and may
+        # attach evidence gathered during the watch window.
+        Ticket.STATUS_MONITORING,
         Ticket.STATUS_OWNER_REMEDIATED,
     ):
         return profile.is_tier1 and ticket.created_by_id == user.pk

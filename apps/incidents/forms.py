@@ -297,8 +297,12 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         if self.instance and self.instance.pk and self.instance.wazuh_alert_id:
             alert_qs = alert_qs | WazuhAlert.objects.filter(pk=self.instance.wazuh_alert_id)
         self.fields['wazuh_alert'].queryset = alert_qs
-        if self.instance and self.instance.pk and self.instance.incident_datetime:
-            self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+        # incident_datetime intentionally has NO manual initial override: the
+        # widget declares format='%Y-%m-%dT%H:%M' and Django's DateTimeField
+        # localizes the aware (UTC) value to TIME_ZONE via prepare_value when it
+        # renders. Pre-formatting with a raw strftime here would emit the UTC
+        # wall clock into the datetime-local field, which is then reparsed as
+        # Bangkok on submit — silently shifting a re-saved time 7 hours earlier.
         self.fields['log_source'].required = True
         # The form no longer defaults this to "now", so a blank submit is now
         # reachable. Enforce it rather than let Ticket.save() fall back silently
@@ -534,8 +538,11 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
                 field.widget.attrs.setdefault(
                     'class', 'form-select' if isinstance(field.widget, forms.Select) else 'form-control'
                 )
-        if self.instance and self.instance.incident_datetime:
-            self.initial['incident_datetime'] = self.instance.incident_datetime.strftime('%Y-%m-%dT%H:%M')
+        # No manual incident_datetime initial override — see the note in the
+        # creation form's __init__. A raw strftime here emits the UTC wall clock
+        # into the datetime-local field and reparses as Bangkok on submit,
+        # shifting an unchanged re-save 7 hours earlier. Let Django's
+        # DateTimeField localize the aware value through prepare_value instead.
         self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
