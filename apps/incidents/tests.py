@@ -2628,6 +2628,20 @@ class TriageWorkflowIntegrityTest(TestCase):
         # 1 unclaimed report + 1 own ticket; the peer-claimed report excluded.
         self.assertEqual(response.context['my_queue_count'], 2)
 
+    def test_my_queue_badge_excludes_still_watching_but_counts_overdue(self):
+        # A case still counting down is passive — not actionable, not counted.
+        _make_ticket(created_by=self.t1, status=Ticket.STATUS_MONITORING,
+                     monitor_until=timezone.now() + timedelta(days=10))
+        self.client.force_login(self.t1)
+        resp = self.client.get(reverse('my_queue'))
+        self.assertEqual(resp.context['my_queue_count'], 0)
+
+        # An expired watch needs Tier 1 to conclude it, so it IS counted.
+        _make_ticket(created_by=self.t1, status=Ticket.STATUS_MONITORING,
+                     monitor_until=timezone.now() - timedelta(hours=1))
+        resp = self.client.get(reverse('my_queue'))
+        self.assertEqual(resp.context['my_queue_count'], 1)
+
     def test_case_mode_switch_offers_both_scopes_from_either_form(self):
         """The two creation forms share one menu entry, so each must expose the
         switch to the other scope."""
@@ -7237,6 +7251,15 @@ class MonitoringWorkflowTest(TestCase):
         t = Ticket.objects.filter(created_by=self.t1).latest('id')
         self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
         self.assertFalse(t.monitoring_proposed)
+
+    def test_emergency_cannot_be_reassessed_while_monitoring(self):
+        # A monitored case is not yet classified, so an emergency verdict is
+        # premature — mirrors the PENDING_MGR_TRIAGE exclusion. View-proof:
+        # reassess_emergency itself refuses, not just the button.
+        t = self._monitoring()
+        self.assertFalse(t.can_reassess_emergency(self.manager))
+        with self.assertRaises(ValidationError):
+            t.reassess_emergency(True, self.manager, 'too early')
 
     def test_bundle_members_cannot_be_monitored(self):
         # A Project Incident is a confirmed multi-system incident — its members

@@ -24,6 +24,7 @@ class Command(BaseCommand):
     ACTIVE_STATUS_PLAN = (
         [Ticket.STATUS_NEW] * 2
         + [Ticket.STATUS_ESCALATED_T2] * 3
+        + [Ticket.STATUS_MONITORING] * 3
         + [Ticket.STATUS_T1_REVIEW] * 3
         + [Ticket.STATUS_AWAITING_CONTAINMENT] * 4
         + [Ticket.STATUS_CONTAINMENT_REPORTED] * 3
@@ -424,10 +425,13 @@ class Command(BaseCommand):
                 )
                 is_active = False
             severity = self._severity_for(index, status)
-            classification = (
-                Ticket.CLASSIFICATION_EVENT
-                if status == Ticket.STATUS_CLOSED_EVENT else Ticket.CLASSIFICATION_INCIDENT
-            )
+            if status == Ticket.STATUS_MONITORING:
+                # Not yet Event or Incident — that is the whole point of monitoring.
+                classification = ''
+            elif status == Ticket.STATUS_CLOSED_EVENT:
+                classification = Ticket.CLASSIFICATION_EVENT
+            else:
+                classification = Ticket.CLASSIFICATION_INCIDENT
             plan.append({
                 **slot,
                 'index': index + 1,
@@ -506,9 +510,19 @@ class Command(BaseCommand):
             status=status,
             classification=classification,
             escalated_to_t2_at=timeline.get(Ticket.STATUS_ESCALATED_T2),
-            # PENDING_MANAGER is reachable only via the emergency flag now.
-            is_emergency=(severity == 'Critical' and spec['index'] % 9 == 0)
-                         or status == Ticket.STATUS_PENDING_MANAGER,
+            # Watch window: 30 days from when it entered MONITORING; the flag is
+            # one-way. Both blank off monitoring.
+            monitor_until=(
+                timeline.get(Ticket.STATUS_MONITORING)
+                + timedelta(days=Ticket.MONITORING_DURATION_DAYS)
+            ) if status == Ticket.STATUS_MONITORING else None,
+            has_been_monitored=status == Ticket.STATUS_MONITORING,
+            # PENDING_MANAGER is reachable only via the emergency flag now. A
+            # monitored case is unclassified, so it never carries one.
+            is_emergency=status != Ticket.STATUS_MONITORING and (
+                (severity == 'Critical' and spec['index'] % 9 == 0)
+                or status == Ticket.STATUS_PENDING_MANAGER
+            ),
             assigned_to=current_owner,
             assigned_admin=admin if self._has_admin(status, classification) else None,
             verified_by=t2 if timeline.get(Ticket.STATUS_PENDING_MANAGER) or (
@@ -594,6 +608,9 @@ class Command(BaseCommand):
     def _status_path(status, classification, severity):
         if status == Ticket.STATUS_NEW:
             return [Ticket.STATUS_NEW]
+        if status == Ticket.STATUS_MONITORING:
+            # Tier 2 parked it under Tier 1 to watch, straight off escalation.
+            return [Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_MONITORING]
         path = [Ticket.STATUS_NEW]
         escalated = severity in ('Critical', 'High') or status in (
             Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW)
@@ -792,6 +809,11 @@ class Command(BaseCommand):
             Ticket.STATUS_CLOSED_EVENT: (
                 'Tier 2 closed this as an Event after review found no confirmed compromise. '
                 'Observed activity was blocked, explained, or unsuccessful; no containment required.'
+            ),
+            Ticket.STATUS_MONITORING: (
+                'Tier 2 could not yet confirm whether this is an Event or an Incident, '
+                'so it was placed under a 30-day watch and returned to Tier 1. If nothing '
+                'develops it will be closed as an Event; if activity resumes it becomes an Incident.'
             ),
         }
         return notes[status]

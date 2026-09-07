@@ -108,6 +108,7 @@ class DashboardMockupSeedTest(TestCase):
         self.assertEqual(active_counts[Ticket.STATUS_NEW], 2)
         for status in [
             Ticket.STATUS_ESCALATED_T2,
+            Ticket.STATUS_MONITORING,
             Ticket.STATUS_T1_REVIEW,
             Ticket.STATUS_AWAITING_CONTAINMENT,
             Ticket.STATUS_CONTAINMENT_REPORTED,

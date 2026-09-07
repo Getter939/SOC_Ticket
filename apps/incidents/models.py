@@ -2074,11 +2074,16 @@ class Ticket(models.Model):
         SOC Manager only (superuser always may), and only while the ticket is
         active and past the pre-containment review — at PENDING_MGR_TRIAGE the
         initial assessment is the control, and terminal tickets are frozen
-        (reassessment forbidden after APPROVED / CLOSED_EVENT).
+        (reassessment forbidden after APPROVED / CLOSED_EVENT). A MONITORING case
+        is not yet classified (neither Event nor Incident), so an emergency
+        verdict is premature there too — the manager assesses it at
+        PENDING_MGR_TRIAGE if the watch concludes as an Incident.
         """
         if self.status in self.TERMINAL_STATUSES:
             return False
         if self.status == self.STATUS_PENDING_MGR_TRIAGE:
+            return False
+        if self.status == self.STATUS_MONITORING:
             return False
         if self.project_incident_id:
             return False
@@ -2104,7 +2109,7 @@ class Ticket(models.Model):
         if not self.can_reassess_emergency(user):
             raise ValidationError(
                 'ไม่สามารถประเมินสถานะฉุกเฉินใหม่ได้ในขั้นตอนนี้ '
-                '(ปิดเคสแล้ว หรืออยู่ในขั้นตรวจก่อนมอบหมาย)'
+                '(ปิดเคสแล้ว อยู่ระหว่างเฝ้าระวัง หรืออยู่ในขั้นตรวจก่อนมอบหมาย)'
             )
         reason = (reason or '').strip()
         if not reason:

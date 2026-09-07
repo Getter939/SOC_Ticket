@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.utils import timezone
 
 from .models import WazuhAlert
 from apps.incidents.models import Ticket, TicketSubtask, TriageRecord
@@ -35,15 +36,22 @@ def pending_triage_count(request):
         # My Queue badge: manual reports this analyst can pick up or already
         # holds, plus their own-court tickets — above all cases Tier 2
         # returned (T1_REVIEW), which previously surfaced nowhere.
+        # A case still counting down in MONITORING is passive — nothing for
+        # Tier 1 to do until it expires or something happens — so it must not
+        # inflate this "needs action" badge. An EXPIRED watch is actionable
+        # (Tier 1 concludes it), so those stay counted.
+        own_court = Ticket.objects.filter(
+            created_by=user, status__in=Ticket.TIER1_QUEUE_STATUSES,
+        ).exclude(
+            Q(status=Ticket.STATUS_MONITORING) & Q(monitor_until__gt=timezone.now()),
+        )
         context['my_queue_count'] = (
             TriageRecord.objects.filter(
                 decision='', ticket__isnull=True,
             ).filter(
                 Q(claimed_by__isnull=True) | Q(claimed_by=user)
             ).count()
-            + Ticket.objects.filter(
-                created_by=user, status__in=Ticket.TIER1_QUEUE_STATUSES,
-            ).count()
+            + own_court.count()
         )
 
     if user.is_superuser or (profile and profile.is_tier2):

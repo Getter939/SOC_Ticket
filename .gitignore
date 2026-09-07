@@ -74,3 +74,11 @@ docs/architecture/reporting-layer-design.md
 
 # A blanket *.js rule used to hide application JavaScript silently. JavaScript
 # is now tracked by default so Phase 4 can move inline behavior into static/js/.
+
+# ── Node.js (role-manual build tooling only) ──────────────────────────────
+# docs/user-guides/manuals/_build uses `npm install docx` as a one-off local
+# step (see its README) — the dependency is never vendored. The committed
+# .docx are the build output; node_modules + npm's package files stay local.
+node_modules/
+docs/user-guides/manuals/_build/package.json
+docs/user-guides/manuals/_build/package-lock.json
