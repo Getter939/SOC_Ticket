@@ -204,7 +204,7 @@ onto its own wrapped row, which space-between then left-aligned.
               <dt>ความรุนแรง (สกมช.)</dt><dd>{{ ticket.get_ncsa_severity_display|default:"-" }}</dd>
               <dt>Source</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>แหล่งข้อมูล (Log Source)</dt><dd>{{ ticket.log_source|default:"-" }}</dd>
-              <dt>เหตุการณ์ที่พบ</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
+              <dt>ประเภทภัยคุกคาม</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
               <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
               <dt>ประเภททรัพย์สิน</dt><dd>{{ ticket.get_asset_type_display|default:"-" }}</dd>
               <dt>ระบบปฏิบัติการ</dt><dd>{{ ticket.operating_system|default:"-" }}</dd>

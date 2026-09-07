@@ -1259,7 +1259,7 @@ class Ticket(models.Model):
     )
     detailed_issue = models.CharField(
         max_length=255, choices=DETAILED_ISSUE_CHOICES, default='Investigating',
-        verbose_name='เหตุการณ์ที่พบ (Detailed Issue)',
+        verbose_name='ประเภทภัยคุกคาม (Detailed Issue)',
     )
     detailed_issue2 = models.CharField(
         max_length=255, choices=DETAILED_ISSUE_CHOICES2, default='Investigating Other',
