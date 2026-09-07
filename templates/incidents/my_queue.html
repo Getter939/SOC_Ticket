@@ -10,6 +10,13 @@
 </div>
 {% endif %}
 
+{% if monitoring_overdue_count %}
+<div class="alert alert-danger d-flex align-items-center mb-3 py-2" role="alert">
+  <i class="bi bi-binoculars-fill me-2 fs-5"></i>
+  <strong>{{ monitoring_overdue_count }} เคส</strong>&nbsp;ครบกำหนดเฝ้าระวังแล้ว — รอคุณสรุปผล (Event / Incident)
+</div>
+{% endif %}
+
 {% comment %}
 Three tabs rather than three stacked cards: the ticket table is unbounded, so
 stacking pushed the manual-intake queue ~1100px down — below the fold on a
@@ -25,6 +32,14 @@ stays above the tabs so the most urgent signal shows on every tab.
             aria-controls="tab-tickets" aria-selected="{% if active_tab == 'tickets' %}true{% else %}false{% endif %}">
       Ticket ของฉัน
       {% if my_tickets_total %}<span class="badge rounded-pill bg-primary ms-1">{{ my_tickets_total }}</span>{% endif %}
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link {% if active_tab == 'monitoring' %}active{% endif %}" id="tab-btn-monitoring"
+            data-bs-toggle="tab" data-bs-target="#tab-monitoring" type="button" role="tab"
+            aria-controls="tab-monitoring" aria-selected="{% if active_tab == 'monitoring' %}true{% else %}false{% endif %}">
+      กำลังเฝ้าระวัง
+      {% if monitoring_overdue_count %}<span class="badge rounded-pill bg-danger ms-1">{{ monitoring_count }}</span>{% elif monitoring_count %}<span class="badge rounded-pill" style="background:#4c6ef5;">{{ monitoring_count }}</span>{% endif %}
     </button>
   </li>
   <li class="nav-item" role="presentation">
@@ -81,6 +96,23 @@ stays above the tabs so the most urgent signal shows on every tab.
   </ul>
 </nav>
 {% endif %}
+</div>
+
+{# ── Tab: กำลังเฝ้าระวัง (Monitoring) — own-court watch window w/ countdown ─ #}
+<div class="tab-pane fade {% if active_tab == 'monitoring' %}show active{% endif %}" id="tab-monitoring" role="tabpanel" aria-labelledby="tab-btn-monitoring">
+<div class="card ops-card mb-4 rounded-top-0">
+  <div class="table-responsive"><table class="table table-hover align-middle operational-table">
+    <thead class="table-light"><tr><th>Ticket</th><th>สถานะเฝ้าระวัง</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>ครบกำหนด</th><th class="text-end"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>{% for ticket in monitoring_tickets %}<tr class="clickable-row" data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
+      <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
+      <td>{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</td>
+      <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+      <td><div class="cell-primary">{{ ticket.device_name|default:"-" }}</div><div class="cell-secondary">{{ ticket.issue_description|truncatechars:70 }}</div></td>
+      <td class="cell-secondary text-nowrap" title="{{ ticket.monitor_until|date:'d/m/Y H:i' }}">{{ ticket.monitor_until|date:"d/m/Y" }}</td>
+      <td class="cell-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'ticket_detail' ticket.pk %}">เปิด Ticket</a></td>
+    </tr>{% empty %}<tr><td colspan="6">{% include 'includes/_empty_state.html' with icon='bi-binoculars' title='ไม่มีเคสที่กำลังเฝ้าระวัง' description='เคสที่ Tier 2 ส่งมาให้เฝ้าระวังจะปรากฏที่นี่พร้อมนับถอยหลัง' %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
 </div>
 
 {# ── Tab 2: Manual-intake reports (the former Manual Triage queue) ─────── #}

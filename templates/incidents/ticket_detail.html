@@ -82,6 +82,7 @@
     nothing to show here.
     {% endcomment %}
     {% with ola=ticket.ola_badge %}{% if ola %}{% include 'incidents/_ola_badge.html' with ola=ola %}{% endif %}{% endwith %}
+    {% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}
     {% if ticket.is_emergency %}<span class="signal-badge signal-danger">Emergency</span>{% endif %}
   </div>
   {# Incident vs Event is context, not a state signal — plain eyebrow text, no badge. #}
@@ -675,12 +676,39 @@ onto its own wrapped row, which space-between then left-aligned.
         </div>
         {% endif %}
         <label class="form-label fw-bold">ผลการตรวจสอบ <small class="text-muted fw-normal">(Investigation findings)</small></label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ <small class="text-muted fw-normal">(Countermeasure)</small> <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit" title="Submit for Tier 2 review">ส่งให้ Tier 2 ตรวจสอบ</button></form></div></div>
+      {% elif can_conclude_monitoring %}
+      <div class="card shadow-sm workflow-primary" style="border:1px solid #4c6ef5;"><div class="card-header text-white" style="background:#4c6ef5;"><h5 class="mb-0"><i class="bi bi-binoculars-fill me-1"></i>สรุปผลการเฝ้าระวัง</h5><small>Monitoring — เลือกผลเมื่อครบกำหนด หรือเมื่อมีเหตุการณ์เกิดขึ้น</small></div><div class="card-body">
+        <div class="mb-2">{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</div>
+        <p class="small text-muted mb-2">ถ้ามีเหตุการณ์เกิดขึ้นระหว่างเฝ้าระวัง ให้ออกเป็น <strong>Incident</strong> (ส่งผู้จัดการ SOC) · ถ้าครบกำหนดแล้วไม่มีเหตุ ให้สรุปเป็น <strong>Event</strong> (ส่ง Tier 2 ยืนยันปิด)</p>
+        <form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="conclude_monitoring">
+          <label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label>
+          <textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
+          <div class="d-grid gap-2">
+            <button class="btn btn-danger" type="submit" name="monitoring_outcome" value="incident"><i class="bi bi-exclamation-triangle-fill me-1"></i>มีเหตุการณ์ → ออกเป็น Incident</button>
+            <button class="btn btn-secondary" type="submit" name="monitoring_outcome" value="event"><i class="bi bi-check2-circle me-1"></i>ครบกำหนด/ไม่มีเหตุ → สรุปเป็น Event</button>
+          </div>
+        </form>
+      </div></div>
       {% elif transition_actions %}
-      <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 ตรวจสอบมาตรการควบคุม{% elif ticket.status == 'PENDING_MANAGER' %}ผู้จัดการ SOC ตรวจสอบ{% elif ticket.status == 'PENDING_MGR_EVENT_REVIEW' %}ผู้จัดการ SOC ตรวจสอบการปิดแบบ Event{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 ส่งผลให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 ตรวจสอบการแก้ไขของเจ้าของระบบ{% else %}ขั้นตอนถัดไป{% endif %}</h5></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
+      <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">{% if ticket.status == 'CONTAINMENT_REPORTED' %}Tier 2 ตรวจสอบมาตรการควบคุม{% elif ticket.status == 'PENDING_MANAGER' %}ผู้จัดการ SOC ตรวจสอบ{% elif ticket.status == 'PENDING_MGR_EVENT_REVIEW' %}ผู้จัดการ SOC ตรวจสอบการปิดแบบ Event{% elif ticket.status == 'AWAITING_OWNER' %}ติดตามการแก้ไขของเจ้าของระบบ{% elif ticket.status == 'OWNER_REMEDIATED' %}Tier 1 ส่งผลให้ Tier 2 ตรวจสอบ{% elif ticket.status == 'PENDING_T2_REVIEW' %}Tier 2 ตรวจสอบการแก้ไขของเจ้าของระบบ{% else %}ขั้นตอนถัดไป{% endif %}</h5></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="workflow_action"><label class="form-label fw-bold">บันทึกการตรวจสอบ <span class="text-danger">*</span></label><textarea name="update_notes" class="form-control mb-3" rows="3" required></textarea>{% if ticket.status == 'NEW' %}<div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="propose_monitoring" id="propose-monitoring" value="1"><label class="form-check-label small" for="propose-monitoring"><i class="bi bi-binoculars me-1"></i>แนะนำให้เฝ้าระวัง (Monitoring) — มีผลเมื่อส่งต่อให้ Tier 2 เท่านั้น</label></div>{% endif %}<div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'AWAITING_CONTAINMENT' or item.status == 'AWAITING_OWNER' %}btn-outline-danger{% else %}btn-primary{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}</div></form></div></div>
       {% if can_t2_reclassify %}
       <div class="card shadow-sm border-secondary mt-3 workflow-secondary"><div class="card-header bg-light fw-bold">จัดประเภทใหม่เป็น Event</div><div class="card-body"><p class="small text-muted mb-2">หากตรวจสอบแล้วพบว่าไม่ใช่เหตุการณ์จริง — จัดเป็น Event และปิดเคสได้ทันที (ไม่ผ่านผู้จัดการ)</p><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_reclassify_event"><label class="form-label fw-bold small">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-2" rows="2" required></textarea><button class="btn btn-outline-secondary w-100" type="submit">จัดเป็น Event และปิดเคส</button></form></div></div>
       {% endif %}
       {% else %}<div class="alert alert-light border text-center text-muted workflow-primary">ไม่มี action สำหรับบทบาทของคุณในขั้นตอนนี้</div>{% endif %}
+
+      {# Tier 2 monitoring option — standalone so it shows alongside whichever #}
+      {# Tier 2 card renders at ESCALATED_T2. Hidden once monitored (once only). #}
+      {% if can_monitor %}
+      <div class="card shadow-sm mt-3 workflow-secondary" style="border:1px solid #4c6ef5;"><div class="card-header text-white" style="background:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>เฝ้าระวัง (Monitoring)</div><div class="card-body">
+        {% if ticket.monitoring_proposed %}<div class="alert alert-info small py-2 mb-2"><i class="bi bi-hand-thumbs-up me-1"></i>Tier 1 แนะนำให้เฝ้าระวังเคสนี้</div>{% endif %}
+        <p class="small text-muted mb-2">ยังไม่ชัดว่าเป็น Event หรือ Incident — เฝ้าระวังไว้ก่อน {{ monitoring_duration_days }} วัน แล้วส่งกลับให้ Tier 1 ผู้เปิดเคสติดตาม</p>
+        <form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_monitor">
+          <label class="form-label fw-bold small">บันทึกการตัดสินใจ <span class="text-danger">*</span></label>
+          <textarea name="decision_note" class="form-control mb-2" rows="2" required></textarea>
+          <button class="btn btn-outline-primary w-100" type="submit" style="border-color:#4c6ef5;color:#4c6ef5;">เฝ้าระวัง {{ monitoring_duration_days }} วัน</button>
+        </form>
+      </div></div>
+      {% endif %}
     </div>
   </div>
 </div>

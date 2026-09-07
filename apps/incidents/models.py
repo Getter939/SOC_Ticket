@@ -342,12 +342,23 @@ class Ticket(models.Model):
     # ticket cannot be quietly disposed of by reclassifying it. Confirming an
     # Event that Tier 1 already classified as one does NOT come through here.
     STATUS_PENDING_MGR_EVENT_REVIEW = 'PENDING_MGR_EVENT_REVIEW'
+    # Watch-and-wait: Tier 2 decided the case is not yet an Event or an Incident
+    # and parked it under Tier 1 for a fixed monitoring window (see
+    # MONITORING_DURATION_DAYS). If something happens Tier 1 issues it as an
+    # Incident; if the window closes quietly Tier 1 concludes it an Event. A case
+    # can be monitored at most once (has_been_monitored).
+    STATUS_MONITORING           = 'MONITORING'
     STATUS_APPROVED             = 'APPROVED'
     STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
+
+    # Fixed monitoring window. Not analyst-configurable on purpose: 30 days is
+    # the absolute watch duration, with no extension and no second round.
+    MONITORING_DURATION_DAYS = 30
 
     STATUS_CHOICES = [
         (STATUS_NEW,                  'แจ้งเหตุใหม่'),
         (STATUS_ESCALATED_T2,         'ส่งต่อให้ Tier 2'),
+        (STATUS_MONITORING,           'กำลังเฝ้าระวัง (Monitoring)'),
         (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
         (STATUS_PENDING_MGR_TRIAGE,   'รอผู้จัดการ SOC ตรวจ (ก่อนมอบหมาย)'),
         (STATUS_AWAITING_CONTAINMENT, 'รอการจัดการจากผู้ดูแลระบบ'),
@@ -385,6 +396,7 @@ class Ticket(models.Model):
     STATUS_PILL_COLORS = {
         STATUS_NEW:                  ('#0d6efd', '#ffffff'),  # blue — open, awaiting triage
         STATUS_ESCALATED_T2:         ('#6f42c1', '#ffffff'),  # purple — up to Tier 2
+        STATUS_MONITORING:           ('#4c6ef5', '#ffffff'),  # indigo — watch-and-wait under Tier 1
         STATUS_T1_REVIEW:            ('#0dcaf0', '#212529'),  # cyan — back to Tier 1
         STATUS_PENDING_MGR_TRIAGE:   ('#d4a017', '#212529'),  # goldenrod — SOC Manager pre-containment review
         STATUS_AWAITING_CONTAINMENT: ('#fd7e14', '#ffffff'),  # orange — blocked on System Admin
@@ -476,6 +488,14 @@ class Ticket(models.Model):
             STATUS_CLOSED_EVENT,
             # Event that T2 downgraded from Incident → SOC Manager verifies.
             STATUS_PENDING_MGR_EVENT_REVIEW,
+            # Not yet Event or Incident → Tier 2 parks it under Tier 1 to watch
+            # (once only — gated on has_been_monitored).
+            STATUS_MONITORING,
+        ],
+        # ── Watch-and-wait (Tier 1 court, fixed window) ──────────────────── #
+        STATUS_MONITORING: [
+            STATUS_PENDING_MGR_TRIAGE,     # something happened → issue as Incident
+            STATUS_ESCALATED_T2,           # window closed quietly → conclude Event (T2 confirms close)
         ],
         STATUS_PENDING_MGR_EVENT_REVIEW: [
             STATUS_CLOSED_EVENT,           # manager agrees it is benign → close
@@ -547,6 +567,13 @@ class Ticket(models.Model):
         (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_PENDING_MGR_EVENT_REVIEW): 'TIER2',
+        # Tier 2 parks the case under Tier 1 to watch (verifies a Tier 1
+        # monitoring proposal, or decides it themselves).
+        (STATUS_ESCALATED_T2,         STATUS_MONITORING):          'TIER2',
+        # Watch window resolves — the owning Tier 1 concludes it. Incident goes
+        # to SOC Manager triage; Event goes back to Tier 2 to confirm the close.
+        (STATUS_MONITORING,           STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
+        (STATUS_MONITORING,           STATUS_ESCALATED_T2):         'TIER1_CREATOR',
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_CLOSED_EVENT):    'MANAGER',
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_ESCALATED_T2):    'MANAGER',
         (STATUS_T1_REVIEW,            STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
@@ -597,11 +624,24 @@ class Ticket(models.Model):
         (STATUS_PENDING_MANAGER,      STATUS_PENDING_T2_REVIEW),
     })
 
+    # Monitoring edges are driven by their own dedicated controls (the Tier 2
+    # "Monitor" button and the Tier 1 conclude-monitoring buttons), NOT the
+    # generic status dropdown / Tier 2 decision list — the conclude edges also
+    # set the classification their gate requires, which the generic path cannot.
+    # The detail-page action builders skip these, exactly like STEP_BACK_EDGES.
+    MONITORING_EDGES = frozenset({
+        (STATUS_ESCALATED_T2, STATUS_MONITORING),       # Tier 2 starts the watch
+        (STATUS_MONITORING,   STATUS_PENDING_MGR_TRIAGE),  # Tier 1 concludes → Incident
+        (STATUS_MONITORING,   STATUS_ESCALATED_T2),        # Tier 1 concludes → Event
+    })
+
     # Statuses on the Tier 1 side of the lifecycle that are gated to the
     # ticket's original creator (same analyst who opened it). Used both by
     # transition_to and the same-status note guard.
     CREATOR_REVIEW_STATUSES = frozenset({
         STATUS_T1_REVIEW,
+        # A monitored case is the opening analyst's to watch and conclude.
+        STATUS_MONITORING,
         # Direct-to-Owner tracking sits with the opening analyst too. (The
         # CONTAINMENT_REPORTED and PENDING_T2_REVIEW queues are deliberately NOT
         # here — they are Tier 2 verification queues, so a non-creator Tier 2
@@ -615,7 +655,7 @@ class Ticket(models.Model):
     # somewhere the creator actually looks. The dashboard's analyst heatmap
     # derives its own-court columns from this same tuple.
     TIER1_QUEUE_STATUSES = (
-        STATUS_NEW, STATUS_T1_REVIEW,
+        STATUS_NEW, STATUS_T1_REVIEW, STATUS_MONITORING,
         STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
     )
 
@@ -653,6 +693,8 @@ class Ticket(models.Model):
     INCIDENT_TRANSITIONS = frozenset({
         (STATUS_NEW,          STATUS_PENDING_MGR_TRIAGE),
         (STATUS_ESCALATED_T2, STATUS_T1_REVIEW),
+        # Monitoring turned up something → Tier 1 commits it as an Incident.
+        (STATUS_MONITORING,   STATUS_PENDING_MGR_TRIAGE),
     })
 
     # ------------------------------------------------------------------ #
@@ -1039,6 +1081,25 @@ class Ticket(models.Model):
         null=True, blank=True, verbose_name='เวลาที่ส่งต่อ Tier 2 ครั้งแรก',
     )
 
+    # ── Monitoring (watch-and-wait) ─────────────────────────────────────── #
+    # When Tier 2 parks a case in STATUS_MONITORING, monitor_until is stamped
+    # now + MONITORING_DURATION_DAYS. Expiry is read on the fly (monitor_until vs
+    # now) — there is no scheduler; the countdown just turns overdue in the UI.
+    monitor_until = models.DateTimeField(
+        null=True, blank=True, verbose_name='เฝ้าระวังจนถึง',
+    )
+    # Set True the first (and only) time a ticket enters MONITORING and never
+    # cleared — gates re-monitoring so 30 days is the absolute watch duration.
+    has_been_monitored = models.BooleanField(
+        default=False, verbose_name='เคยถูกเฝ้าระวังแล้ว',
+    )
+    # Tier 1's recommendation, set when the opening analyst escalates from NEW
+    # proposing monitoring. Purely advisory to Tier 2 (only Tier 2 can grant it);
+    # cleared once the case leaves the Tier 2 review either way.
+    monitoring_proposed = models.BooleanField(
+        default=False, verbose_name='Tier 1 แนะนำให้เฝ้าระวัง',
+    )
+
     # Emergency marker — the operational flag that feeds
     # requires_manager_verification (closure routing). The SOC Manager makes an
     # explicit Normal/Emergency assessment at the pre-containment review
@@ -1357,6 +1418,48 @@ class Ticket(models.Model):
         )
 
     @property
+    def monitoring_badge(self):
+        """Live watch-window pill for the queue tables and ticket detail.
+
+        None unless the ticket is currently being monitored. ``level`` drives the
+        colour (mapped in incidents/_monitoring_badge.html): green while there is
+        comfortable time left, amber on the final day, red once the window has
+        closed and the case is waiting on Tier 1 to conclude it. Read on the fly
+        against now() — there is no scheduler, so an overdue window just shows as
+        overdue until the owning analyst acts.
+        """
+        if self.status != self.STATUS_MONITORING or self.monitor_until is None:
+            return None
+        now = timezone.now()
+        delta = self.monitor_until - now
+        secs = abs(delta).total_seconds()
+        days, hours = int(secs // 86400), int((secs % 86400) // 3600)
+        amount = (f'{days} วัน' if days >= 1
+                  else f'{hours} ชั่วโมง' if hours >= 1
+                  else 'ไม่ถึงชั่วโมง')
+        if delta.total_seconds() <= 0:
+            level, label = 'overdue', f'ครบกำหนดเฝ้าระวัง — เกิน {amount}'
+        elif delta <= timedelta(days=1):
+            level, label = 'final', f'เฝ้าระวัง — เหลือ {amount}'
+        else:
+            level, label = 'active', f'เฝ้าระวัง — เหลือ {amount}'
+        return {
+            'level': level,
+            'overdue': delta.total_seconds() <= 0,
+            'label': label,
+            'deadline': self.monitor_until,
+        }
+
+    @property
+    def is_monitoring_expired(self):
+        """A monitored case whose watch window has closed — waiting on Tier 1."""
+        return (
+            self.status == self.STATUS_MONITORING
+            and self.monitor_until is not None
+            and timezone.now() >= self.monitor_until
+        )
+
+    @property
     def is_ola_contain_breached(self):
         """
         Contain OLA: an active ticket now past its contain/resolve deadline
@@ -1538,6 +1641,9 @@ class Ticket(models.Model):
             return False
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             return False
+        # A case may be monitored at most once — 30 days is the absolute watch.
+        if new_status == self.STATUS_MONITORING and self.has_been_monitored:
+            return False
         if (
             self.project_incident_id
             and self.status == self.STATUS_PENDING_MGR_TRIAGE
@@ -1634,6 +1740,7 @@ class Ticket(models.Model):
             return None
         if self.status in (
             self.STATUS_NEW, self.STATUS_T1_REVIEW, self.STATUS_OWNER_REMEDIATED,
+            self.STATUS_MONITORING,
         ):
             who = self._person_label(self.created_by)
             return f'Tier 1 ผู้เปิดเคส ({who})' if who else 'Tier 1 ผู้เปิดเคส'
@@ -1703,6 +1810,11 @@ class Ticket(models.Model):
         if edge in self.INCIDENT_TRANSITIONS and not self.is_incident:
             raise ValidationError(
                 'ต้องจัดประเภทเป็น Incident ก่อนจึงจะส่งต่อ/ดำเนินการได้'
+            )
+        # A case may be monitored at most once — 30 days is the absolute watch.
+        if new_status == self.STATUS_MONITORING and self.has_been_monitored:
+            raise ValidationError(
+                'เคสนี้เคยถูกเฝ้าระวังแล้ว — ไม่สามารถเฝ้าระวังซ้ำได้'
             )
 
         # ── 5. Manager-routing gate (deterministic, view-proof) ───────── #
@@ -1874,6 +1986,20 @@ class Ticket(models.Model):
             self.direct_owner_remediation = True
             if self.owner_contacted_at is None:
                 self.owner_contacted_at = now
+
+        # Entering the watch window: stamp the fixed 30-day deadline, mark the
+        # ticket monitored (one-way — blocks a second round via the gate above),
+        # and reset classification to undetermined, since monitoring means "not
+        # Event or Incident yet". The owning Tier 1 sets it again on the way out.
+        if new_status == self.STATUS_MONITORING:
+            self.monitor_until = now + timedelta(days=self.MONITORING_DURATION_DAYS)
+            self.has_been_monitored = True
+            self.classification = ''
+
+        # Tier 1's monitoring recommendation is consumed the moment the case
+        # leaves the Tier 2 review — never let a stale flag linger.
+        if prev_status == self.STATUS_ESCALATED_T2:
+            self.monitoring_proposed = False
 
         # Terminal close on either path — approved_at alone misses CLOSED_EVENT.
         if new_status in self.TERMINAL_STATUSES and self.closed_at is None:

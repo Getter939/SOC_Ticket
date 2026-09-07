@@ -91,6 +91,43 @@ def manager_forward(*, ticket, actor, want_emergency, target_status, note):
     )
 
 
+def start_monitoring(*, ticket, actor, note):
+    """Tier 2 parks a not-yet-classified case under Tier 1 for the watch window.
+
+    transition_to stamps the 30-day deadline, marks the ticket monitored (one
+    way), and clears the classification. No email — the case simply appears in
+    the owning Tier 1's My Queue with its countdown.
+    """
+    with transaction.atomic():
+        ticket.transition_to(Ticket.STATUS_MONITORING, actor, note)
+    return TicketWorkflowResult(
+        ticket=ticket,
+        target_status=Ticket.STATUS_MONITORING,
+    )
+
+
+def conclude_monitoring(*, ticket, actor, outcome, note):
+    """The owning Tier 1 ends a monitoring window.
+
+    ``outcome='incident'`` — something happened: classify Incident and hand to
+    the SOC Manager pre-containment triage. ``outcome='event'`` — the window
+    closed quietly: classify Event and hand to Tier 2 to confirm the close. Both
+    set the classification the exit edge's gate requires.
+    """
+    with transaction.atomic():
+        if outcome == 'incident':
+            ticket.classification = Ticket.CLASSIFICATION_INCIDENT
+            target = Ticket.STATUS_PENDING_MGR_TRIAGE
+        else:
+            ticket.classification = Ticket.CLASSIFICATION_EVENT
+            target = Ticket.STATUS_ESCALATED_T2
+        ticket.transition_to(target, actor, note)
+
+    if target == Ticket.STATUS_PENDING_MGR_TRIAGE:
+        notify_manager_triage_pending(ticket)
+    return TicketWorkflowResult(ticket=ticket, target_status=target)
+
+
 def reclassify_as_event(*, ticket, actor, note):
     """Let Tier 2 classify an active case as an Event and close it."""
     with transaction.atomic():

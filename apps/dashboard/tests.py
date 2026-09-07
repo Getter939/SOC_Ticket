@@ -1059,11 +1059,14 @@ class AnalystHeatmapTest(TestCase):
         self._assign(analyst, Ticket.STATUS_PENDING_MGR_TRIAGE)
         self._assign(analyst, Ticket.STATUS_AWAITING_CONTAINMENT)
 
+        from apps.dashboard.views import _ANALYST_OWN_STATUSES
+
         row = self._row()
         self.assertEqual(row['load'], 0)
         self.assertEqual(row['blocked'], 2)
         self.assertEqual(row['total'], 2)
-        self.assertEqual(row['cells'], [0, 0, 0, 0])  # no own-court work
+        # No own-court work — one zero per own-court column, however many there are.
+        self.assertEqual(row['cells'], [0] * len(_ANALYST_OWN_STATUSES))
 
     def test_own_court_tickets_count_as_load(self):
         analyst = self._analyst()

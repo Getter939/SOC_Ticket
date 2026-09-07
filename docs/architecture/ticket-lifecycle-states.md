@@ -104,7 +104,8 @@ flowchart TD
 | From | To | Actor |
 |------|----|-------|
 | NEW | PENDING_MGR_TRIAGE (Incident) / ESCALATED_T2 (Event or Incident-escalate) | Tier 1 (creator) |
-| ESCALATED_T2 | T1_REVIEW (Incident) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) | Tier 2 (must hold the claim) |
+| ESCALATED_T2 | T1_REVIEW (Incident) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) / MONITORING (not yet Event or Incident — watch 30 days) | Tier 2 (must hold the claim) |
+| MONITORING | PENDING_MGR_TRIAGE (something happened → Incident) / ESCALATED_T2 (window closed quietly → Event, Tier 2 confirms close) | Tier 1 (creator) — Tier 2 sets the 30-day window; each case is monitored at most once |
 | PENDING_MGR_EVENT_REVIEW | CLOSED_EVENT (confirm) / ESCALATED_T2 (reject → classification back to Incident) | **SOC Manager** |
 | T1_REVIEW | PENDING_MGR_TRIAGE | Tier 1 (creator) |
 | PENDING_MGR_TRIAGE | AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** |

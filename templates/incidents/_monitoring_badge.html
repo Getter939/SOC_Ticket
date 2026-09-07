@@ -1,0 +1,13 @@
+{% comment %}
+Shared monitoring-window pill — the watch-and-wait countdown, mirroring the OLA
+pill. `mon` is the `monitoring_badge` property on Ticket: None unless the ticket
+is currently in STATUS_MONITORING. `level` drives the colour — green while there
+is comfortable time left, amber on the final day, red once the window has closed
+and the case is waiting on Tier 1 to conclude it.
+{% endcomment %}
+{% if mon %}
+<span class="signal-badge" title="ครบกำหนด {{ mon.deadline|date:'d/m/Y H:i' }}"
+      style="background-color:{% if mon.level == 'overdue' %}#dc3545{% elif mon.level == 'final' %}#fd7e14{% else %}#4c6ef5{% endif %};color:#ffffff;">
+  <i class="bi bi-binoculars-fill me-1"></i>{{ mon.label }}
+</span>
+{% endif %}

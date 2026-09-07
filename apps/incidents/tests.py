@@ -7163,6 +7163,19 @@ class MonitoringWorkflowTest(TestCase):
         t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirm close')
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
 
+    def test_conclude_control_renders_for_the_owner(self):
+        t = self._monitoring()
+        self.client.force_login(self.t1)
+        html = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
+        self.assertIn('conclude_monitoring', html)   # the dedicated form
+        self.assertIn('สรุปผลการเฝ้าระวัง', html)
+
+    def test_monitor_button_renders_for_tier2_at_escalation(self):
+        t = self._escalated()
+        self.client.force_login(self.t2)
+        html = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
+        self.assertIn('t2_monitor', html)            # the dedicated form
+
     def test_only_the_owning_tier1_may_conclude(self):
         t = self._monitoring()
         self.client.force_login(self.other_t1)
