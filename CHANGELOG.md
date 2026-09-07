@@ -6,6 +6,41 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
+## [v1.2.3] — 2026-09-07
+
+Adds the **Monitoring (กำลังเฝ้าระวัง)** watch-and-wait state for cases that are
+not yet an Event or an Incident, with its guards, dashboard coverage, and docs.
+
+### Added
+- **Monitoring status (`กำลังเฝ้าระวัง`).** When a case escalated to Tier 2 cannot
+  yet be classified, Tier 2 can park it under a fixed **30-day watch** and return
+  it to the opening Tier 1. Tier 1 may **recommend** monitoring at ticket creation
+  (advisory — only Tier 2 grants it). It resolves to **Incident** (something
+  happened → SOC-Manager triage) or **Event** (window closed quietly → Tier 2
+  confirms the close). Expiry is a countdown badge (green → amber → red) computed
+  on read, so no scheduler is required. Surfaced in a dedicated
+  "กำลังเฝ้าระวัง" tab in Tier 1's My Queue, and counted across the executive
+  and analyst-workload dashboards (14-state FSM).
+
+### Changed
+- The **My Queue nav badge** now counts only actionable work — a still-counting-
+  down monitoring case (passive) no longer inflates it, while an expired watch
+  (which Tier 1 must conclude) still does.
+
+### Guards
+- A case can be monitored **at most once**; **Project Incident (bundle) members**
+  cannot be monitored; and the **emergency flag cannot be reassessed while
+  monitoring** (the case is not yet classified).
+
+### Database
+- `incidents.0065` — `monitor_until`, `has_been_monitored`, `monitoring_proposed`
+  (all additive: nullable or defaulted). Reversible; to roll back to v1.2.2 run
+  `migrate incidents 0064` first.
+
+### Docs
+- End-user guide, the Tier 1 / Tier 2 / SOC Manager role manuals (`.docx`), and
+  the Notion technical documentation updated for the 14-state FSM.
+
 ## [v1.2.2] — 2026-09-04
 
 Two-factor authentication ships but is switched **off** pending a UX review, on
@@ -142,6 +177,7 @@ production VM (VM foundation + application readiness).
   (NSSM service) + IIS/ARR reverse proxy; Waitress pinned, `/healthz` endpoint,
   Wazuh retention command, STORAGES fix.
 
+[v1.2.3]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.3
 [v1.2.2]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.2
 [v1.2.1]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.1
 [v1.2.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.0
