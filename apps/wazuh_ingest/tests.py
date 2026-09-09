@@ -173,12 +173,16 @@ class FetchPaginationBoundaryTest(TestCase):
             query['query']['bool']['filter'][1],
             {'range': {'@timestamp': {'gte': since.isoformat()}}},
         )
-        self.assertNotIn('must_not', query['query']['bool'])
+        # must_not is no longer optional: it always carries the
+        # vulnerability-detector exclusion. What matters here is that the id
+        # exclusion is absent until it is asked for.
+        self.assertNotIn(
+            {'ids': {'values': ['a', 'b']}}, query['query']['bool']['must_not'],
+        )
 
         query = _build_query(10, since, 500, exclude_ids=['a', 'b'])
-        self.assertEqual(
-            query['query']['bool']['must_not'],
-            [{'ids': {'values': ['a', 'b']}}],
+        self.assertIn(
+            {'ids': {'values': ['a', 'b']}}, query['query']['bool']['must_not'],
         )
 
     @patch('apps.wazuh_ingest.ingest.requests.post')
@@ -225,7 +229,10 @@ class FetchPaginationBoundaryTest(TestCase):
             since = json['query']['bool']['filter'][1]['range']['@timestamp']['gte']
             excluded = set()
             for clause in json['query']['bool'].get('must_not', []):
-                excluded.update(clause['ids']['values'])
+                # must_not also carries the vulnerability-detector term now,
+                # which has no ids to collect.
+                if 'ids' in clause:
+                    excluded.update(clause['ids']['values'])
             matching = [
                 _make_hit(doc_id, timestamp=ts)
                 for doc_id, ts in index
@@ -1276,3 +1283,531 @@ class PurgeWazuhAlertsTest(TestCase):
         self.assertFalse(WazuhAlert.objects.filter(pk=safe.pk).exists())
         self.assertTrue(WazuhAlert.objects.filter(pk=raced.pk).exists())
         self.assertTrue(TicketAlertLink.objects.filter(alert=raced).exists())
+
+
+def _make_vuln_hit(opensearch_id='vuln-1', cve='CVE-2021-3773',
+                   package='linux-image-5.15.0-191-generic'):
+    """A vulnerability-detector hit, shaped like the rule 23506 alerts that made
+    up 771 of the 849 rows in the 2026-09 production queue."""
+    return {
+        '_id': opensearch_id,
+        '_source': {
+            '@timestamp': '2026-09-05T07:34:29.512Z',
+            'agent': {'id': '004', 'name': 'airflow-vm', 'ip': '10.1.220.44'},
+            'rule': {
+                'id': '23506',
+                'level': 13,
+                'description': f'{cve} affects {package}',
+                'groups': ['vulnerability-detector'],
+                'mitre': {},
+            },
+            'data': {
+                'vulnerability': {
+                    'cve': cve,
+                    'severity': 'Critical',
+                    'status': 'Active',
+                    'package': {'name': package, 'version': '5.15.0-191.201'},
+                },
+            },
+            'decoder': {'name': 'json'},
+            'id': '1788422259.91822',
+        },
+    }
+
+
+class AlertKindClassificationTest(TestCase):
+    """`kind` splits triage work from vulnerability inventory at ingest."""
+
+    def test_vulnerability_group_classifies_as_vulnerability(self):
+        self.assertEqual(
+            WazuhAlert.classify_kind(['vulnerability-detector']),
+            WazuhAlert.KIND_VULNERABILITY,
+        )
+
+    def test_group_is_matched_among_others(self):
+        self.assertEqual(
+            WazuhAlert.classify_kind(['syscheck', 'vulnerability-detector']),
+            WazuhAlert.KIND_VULNERABILITY,
+        )
+
+    def test_detection_groups_classify_as_detection(self):
+        for groups in (
+            ['windows', 'windows_security', 'bruteforce'],
+            ['web', 'accesslog', 'attack'],
+            [],
+            None,
+        ):
+            with self.subTest(groups=groups):
+                self.assertEqual(
+                    WazuhAlert.classify_kind(groups), WazuhAlert.KIND_DETECTION,
+                )
+
+    def test_partial_group_name_does_not_match(self):
+        # A substring-style match would quietly hide real detections.
+        self.assertEqual(
+            WazuhAlert.classify_kind(['vulnerability-detector-foo']),
+            WazuhAlert.KIND_DETECTION,
+        )
+
+    def test_query_excludes_the_vulnerability_rule_group(self):
+        # First gate: the alerts are never transferred out of OpenSearch.
+        query = _build_query(10, timezone.now(), 500)
+
+        self.assertIn(
+            {'term': {'rule.groups': 'vulnerability-detector'}},
+            query['query']['bool']['must_not'],
+        )
+
+    def test_query_keeps_both_exclusions_when_paginating(self):
+        # must_not carries the boundary-id exclusion too. An earlier version
+        # assigned that key outright, so adding the group filter here could
+        # easily have overwritten one of the two.
+        query = _build_query(10, timezone.now(), 500, exclude_ids=['a', 'b'])
+
+        must_not = query['query']['bool']['must_not']
+        self.assertIn({'term': {'rule.groups': 'vulnerability-detector'}}, must_not)
+        self.assertIn({'ids': {'values': ['a', 'b']}}, must_not)
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_vulnerability_alerts_are_dropped_even_if_the_query_returns_them(
+        self, mock_post,
+    ):
+        # Second gate. The query filter assumes rule.groups is mapped as a
+        # keyword field; if that is ever wrong the alerts come back anyway, and
+        # storing them is what this whole change exists to stop. So the mock
+        # deliberately returns what the query asked OpenSearch not to send.
+        mock_post.return_value = _mock_response([
+            _make_hit(opensearch_id='det-1'),
+            _make_vuln_hit(opensearch_id='vuln-1'),
+        ])
+
+        result = fetch_and_store_alerts(min_level=10)
+
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(result['skipped'], 1)
+        self.assertEqual(
+            WazuhAlert.objects.filter(kind=WazuhAlert.KIND_VULNERABILITY).count(), 0,
+        )
+        self.assertEqual(
+            WazuhAlert.objects.get(opensearch_id='det-1').kind,
+            WazuhAlert.KIND_DETECTION,
+        )
+
+    def test_migration_backfill_matches_classifier(self):
+        """0007 hardcodes the group name rather than importing classify_kind.
+
+        That is deliberate - a data migration must not change meaning when live
+        code changes - so this asserts the two still agree. If the classifier
+        moves to a different group or a different `kind` value, this fails and
+        the backfill has to be revisited rather than silently diverging.
+        """
+        import importlib
+
+        migration = importlib.import_module(
+            'apps.wazuh_ingest.migrations.0007_wazuhalert_kind',
+        )
+        self.assertEqual(
+            migration.VULNERABILITY_RULE_GROUP,
+            WazuhAlert.VULNERABILITY_RULE_GROUP,
+        )
+        self.assertEqual(
+            WazuhAlert.classify_kind([migration.VULNERABILITY_RULE_GROUP]),
+            'VULNERABILITY',
+        )
+
+
+class TriageQueueKindScopingTest(TestCase):
+    """Vulnerability alerts never appear as triage work."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc_staff = _make_user(
+            'kind_soc', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
+        )
+
+    def setUp(self):
+        self.detection = _make_alert(rule_level=12, opensearch_id='kind-detection')
+        self.vuln = _make_alert(
+            rule_level=13,
+            opensearch_id='kind-vuln',
+            kind=WazuhAlert.KIND_VULNERABILITY,
+            rule_id='23506',
+            rule_description='CVE-2021-3773 affects linux-image-5.15.0-191-generic',
+            rule_groups=['vulnerability-detector'],
+        )
+        self.client.login(username='kind_soc', password='testpass123')
+
+    def test_queue_lists_detections_only(self):
+        response = self.client.get(reverse('triage_queue'))
+
+        listed = [alert.pk for alert in response.context['alerts']]
+        self.assertIn(self.detection.pk, listed)
+        self.assertNotIn(self.vuln.pk, listed)
+
+    def test_queue_total_excludes_vulnerabilities(self):
+        # queue_total is the denominator in the "showing N of M" line - counting
+        # alerts the page will never show makes that ratio unreadable.
+        response = self.client.get(reverse('triage_queue'))
+
+        self.assertEqual(response.context['queue_total'], 1)
+        self.assertEqual(response.context['filtered_count'], 1)
+
+    def test_facet_counts_exclude_vulnerabilities(self):
+        response = self.client.get(reverse('triage_queue'))
+
+        ola_all = [f for f in response.context['ola_facets'] if f['key'] is None]
+        self.assertEqual(ola_all[0]['count'], 1)
+        # The vulnerability alert is level 13, so it would land in the 12-14
+        # band if it were in scope at all.
+        band = [f for f in response.context['level_facets'] if f['key'] == '12']
+        self.assertEqual(band[0]['count'], 1)
+
+    def test_search_cannot_surface_a_vulnerability_alert(self):
+        response = self.client.get(reverse('triage_queue'), {'q': 'CVE-2021-3773'})
+
+        self.assertEqual(list(response.context['alerts']), [])
+
+    def test_claim_refuses_a_vulnerability_alert(self):
+        self.client.post(
+            reverse('claim_alert'), {'alert_id': self.vuln.pk}, follow=True,
+        )
+
+        self.vuln.refresh_from_db()
+        self.assertEqual(self.vuln.triage_status, WazuhAlert.TRIAGE_PENDING)
+        self.assertIsNone(self.vuln.claimed_by)
+
+    def test_sidebar_badge_excludes_vulnerabilities(self):
+        response = self.client.get(reverse('triage_queue'))
+
+        self.assertEqual(response.context['pending_triage_count'], 1)
+
+
+class KindBackfillQueryTest(TestCase):
+    """The 0007 backfill runs once, against production data, and cannot be
+    re-run if it selects the wrong rows. The migration itself applies to an
+    empty test database, so its WHERE clause is exercised here instead --
+    against the exact rule_groups shapes seen in the 2026-09 export.
+    """
+
+    # Verbatim rule_groups values from the 849-row production export.
+    VULNERABILITY_GROUPS = ['vulnerability-detector']
+    DETECTION_GROUPS = [
+        ['windows', 'windows_security', 'authentication_failed',
+         'password_spray', 'bruteforce'],
+        ['windows', 'windows_security', 'authentication_failed', 'bruteforce'],
+        ['web', 'accesslog', 'attack'],
+        ['wazuh', 'agent_flooding'],
+        ['windows', 'windows_security', 'group_changed', 'win_group_changed'],
+        ['windows', ' powershell'],
+        ['ossec', 'rootcheck'],
+    ]
+
+    def test_backfill_query_selects_vulnerability_rows_only(self):
+        vuln = _make_alert(
+            rule_level=13,
+            opensearch_id='backfill-vuln',
+            rule_groups=self.VULNERABILITY_GROUPS,
+        )
+        detections = [
+            _make_alert(
+                rule_level=12,
+                opensearch_id=f'backfill-det-{index}',
+                rule_groups=groups,
+            )
+            for index, groups in enumerate(self.DETECTION_GROUPS)
+        ]
+
+        # Every row starts at the field default, as it does in production the
+        # moment AddField lands and before RunPython runs.
+        WazuhAlert.objects.update(kind=WazuhAlert.KIND_DETECTION)
+
+        # The migration's WHERE clause, verbatim.
+        matched = WazuhAlert.objects.filter(
+            rule_groups__contains=['vulnerability-detector'],
+        )
+
+        self.assertEqual([alert.pk for alert in matched], [vuln.pk])
+
+        matched.update(kind='VULNERABILITY')
+
+        vuln.refresh_from_db()
+        self.assertEqual(vuln.kind, WazuhAlert.KIND_VULNERABILITY)
+        for detection in detections:
+            detection.refresh_from_db()
+            self.assertEqual(
+                detection.kind, WazuhAlert.KIND_DETECTION,
+                f'{detection.rule_groups} was wrongly reclassified',
+            )
+
+
+class TriageQueueTableControlsTest(TestCase):
+    """Agent IP column, sortable headers, and the page-size selector."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc_staff = _make_user(
+            'table_soc', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1,
+        )
+
+    def setUp(self):
+        self.client.login(username='table_soc', password='testpass123')
+
+    def _alerts(self):
+        """Three alerts whose every sortable column orders differently, so a
+        test cannot pass by accident on a shared tie-break."""
+        now = timezone.now()
+        oldest = _make_alert(
+            rule_level=15, opensearch_id='tbl-oldest', agent_name='zulu-host',
+            agent_ip='10.0.0.9', rule_id='204',
+            timestamp=now - timedelta(hours=9),
+        )
+        middle = _make_alert(
+            rule_level=10, opensearch_id='tbl-middle', agent_name='alpha-host',
+            agent_ip='10.0.0.1', rule_id='100888',
+            timestamp=now - timedelta(hours=5),
+        )
+        newest = _make_alert(
+            rule_level=13, opensearch_id='tbl-newest', agent_name='mike-host',
+            agent_ip=None, rule_id='31168',
+            timestamp=now - timedelta(hours=1),
+        )
+        return oldest, middle, newest
+
+    def _ids(self, response):
+        return [alert.opensearch_id for alert in response.context['alerts']]
+
+    # -- Agent IP column ------------------------------------------------- #
+
+    def test_agent_ip_is_rendered(self):
+        self._alerts()
+
+        response = self.client.get(reverse('triage_queue'))
+
+        self.assertContains(response, '10.0.0.9')
+        self.assertContains(response, 'Agent IP')
+
+    def test_missing_agent_ip_renders_a_dash_not_none(self):
+        _make_alert(rule_level=12, opensearch_id='tbl-noip', agent_ip=None)
+
+        response = self.client.get(reverse('triage_queue'))
+
+        self.assertNotContains(response, 'None')
+
+    # -- Sortable headers ------------------------------------------------ #
+
+    def test_default_sort_is_unchanged(self):
+        oldest, middle, newest = self._alerts()
+
+        response = self.client.get(reverse('triage_queue'))
+
+        # Still OLA order: oldest first. The header work must not have moved
+        # the default out from under the analysts.
+        self.assertEqual(
+            self._ids(response),
+            [oldest.opensearch_id, middle.opensearch_id, newest.opensearch_id],
+        )
+        self.assertEqual(response.context['sort'], 'ola')
+
+    def test_sort_by_agent_name_both_directions(self):
+        oldest, middle, newest = self._alerts()
+
+        ascending = self.client.get(reverse('triage_queue'), {'sort': 'agent'})
+        descending = self.client.get(reverse('triage_queue'), {'sort': '-agent'})
+
+        self.assertEqual(
+            self._ids(ascending),
+            [middle.opensearch_id, newest.opensearch_id, oldest.opensearch_id],
+        )
+        self.assertEqual(list(reversed(self._ids(descending))), self._ids(ascending))
+
+    def test_sort_by_level_both_directions(self):
+        oldest, middle, newest = self._alerts()
+
+        ascending = self.client.get(reverse('triage_queue'), {'sort': 'level_asc'})
+
+        self.assertEqual(
+            self._ids(ascending),
+            [middle.opensearch_id, newest.opensearch_id, oldest.opensearch_id],
+        )
+
+    def test_alerts_without_an_ip_sort_last_not_first(self):
+        # A missing IP is absent information. Ascending must not hand the top
+        # of the first screen to the rows that say nothing.
+        oldest, middle, newest = self._alerts()
+
+        response = self.client.get(reverse('triage_queue'), {'sort': 'ip'})
+
+        self.assertEqual(self._ids(response)[-1], newest.opensearch_id)
+
+    def test_unclaimed_alerts_sort_last_by_owner(self):
+        mine = _make_alert(
+            rule_level=12, opensearch_id='tbl-mine',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.soc_staff, claimed_at=timezone.now(),
+        )
+        unclaimed = _make_alert(rule_level=12, opensearch_id='tbl-unclaimed')
+
+        response = self.client.get(
+            reverse('triage_queue'), {'sort': 'owner', 'claim': 'all'},
+        )
+
+        self.assertEqual(
+            self._ids(response), [mine.opensearch_id, unclaimed.opensearch_id],
+        )
+
+    def test_unknown_sort_falls_back_to_the_default(self):
+        self._alerts()
+
+        response = self.client.get(reverse('triage_queue'), {'sort': 'nonsense'})
+
+        self.assertEqual(response.context['sort'], 'ola')
+
+    def test_headers_expose_the_next_sort_and_current_direction(self):
+        response = self.client.get(reverse('triage_queue'), {'sort': 'agent'})
+
+        headers = {h['label']: h for h in response.context['sort_headers']}
+        # Active column shows its direction and offers the flip.
+        self.assertEqual(headers['Agent']['direction'], 'asc')
+        self.assertEqual(headers['Agent']['next_sort'], '-agent')
+        # Inactive column offers ascending and shows no arrow.
+        self.assertIsNone(headers['Rule']['direction'])
+        self.assertEqual(headers['Rule']['next_sort'], 'rule')
+        # OLA is a function of timestamp, so it carries no sort of its own.
+        self.assertFalse(headers['OLA']['sortable'])
+
+    def test_column_sort_is_reported_as_not_from_the_dropdown(self):
+        # The dropdown only offers three sorts; when a header set something
+        # else it must say so rather than appear to be on its first option.
+        from_column = self.client.get(reverse('triage_queue'), {'sort': 'rule'})
+        from_dropdown = self.client.get(reverse('triage_queue'), {'sort': 'level'})
+
+        self.assertTrue(from_column.context['sort_is_from_column'])
+        self.assertFalse(from_dropdown.context['sort_is_from_column'])
+
+    # -- Page size ------------------------------------------------------- #
+
+    def test_default_page_size_is_25(self):
+        response = self.client.get(reverse('triage_queue'))
+
+        self.assertEqual(response.context['per_page'], 25)
+        self.assertEqual(response.context['page_obj'].paginator.per_page, 25)
+
+    def test_page_size_can_be_raised(self):
+        for index in range(30):
+            _make_alert(rule_level=12, opensearch_id=f'tbl-page-{index}')
+
+        response = self.client.get(reverse('triage_queue'), {'per_page': 50})
+
+        self.assertEqual(response.context['per_page'], 50)
+        self.assertEqual(len(response.context['alerts']), 30)
+        self.assertEqual(response.context['page_obj'].paginator.num_pages, 1)
+
+    def test_unsupported_page_sizes_fall_back_to_the_default(self):
+        # Including the one that matters: an unbounded per_page would let a
+        # crafted URL ask the database for every row in the queue at once.
+        for value in ('10000', '0', '-5', 'all', ''):
+            with self.subTest(value=value):
+                response = self.client.get(
+                    reverse('triage_queue'), {'per_page': value},
+                )
+                self.assertEqual(response.context['per_page'], 25)
+
+    def test_page_size_survives_a_filter_change(self):
+        response = self.client.get(
+            reverse('triage_queue'), {'per_page': 100, 'claim': 'unclaimed'},
+        )
+
+        self.assertEqual(response.context['per_page'], 100)
+        self.assertEqual(response.context['claim_filter'], 'unclaimed')
+
+
+class PurgeVulnerabilityAlertsTest(TestCase):
+    """The one-off cleanup for vulnerability alerts stored before ingestion
+    started dropping them."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.reporter = _make_user('purge_vuln_soc', UserProfile.ROLE_SOC_STAFF)
+
+    def _vuln(self, opensearch_id, cve='CVE-2021-3773'):
+        return _make_alert(
+            rule_level=13,
+            opensearch_id=opensearch_id,
+            kind=WazuhAlert.KIND_VULNERABILITY,
+            rule_id='23506',
+            rule_groups=['vulnerability-detector'],
+            rule_description=f'{cve} affects linux-image-5.15.0-191-generic',
+        )
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command('purge_vulnerability_alerts', *args, stdout=out)
+        return out.getvalue()
+
+    def test_deletes_vulnerability_alerts(self):
+        self._vuln('purge-v1')
+        self._vuln('purge-v2', cve='CVE-2023-53751')
+
+        output = self._run()
+
+        self.assertEqual(WazuhAlert.objects.count(), 0)
+        self.assertIn('Deleted 2', output)
+
+    def test_detections_are_never_touched(self):
+        detection = _make_alert(rule_level=12, opensearch_id='purge-keep')
+        self._vuln('purge-v1')
+
+        self._run()
+
+        self.assertEqual(
+            list(WazuhAlert.objects.values_list('pk', flat=True)), [detection.pk],
+        )
+
+    def test_dry_run_changes_nothing(self):
+        self._vuln('purge-v1')
+
+        output = self._run('--dry-run')
+
+        self.assertEqual(WazuhAlert.objects.count(), 1)
+        self.assertIn('DRY RUN', output)
+        self.assertIn('1 alert(s) would be deleted', output)
+
+    def test_batching_clears_more_rows_than_one_batch(self):
+        for index in range(7):
+            self._vuln(f'purge-batch-{index}', cve=f'CVE-2026-{index:05d}')
+
+        output = self._run('--batch-size', '2')
+
+        self.assertEqual(WazuhAlert.objects.count(), 0)
+        self.assertIn('Deleted 7', output)
+
+    def test_a_linked_alert_is_kept_not_deleted(self):
+        # Should never happen — claim_alert refuses vulnerability alerts — but
+        # deletion is irreversible, and Ticket.wazuh_alert is SET_NULL while
+        # TicketAlertLink.alert CASCADEs, so a linked row must survive.
+        linked = self._vuln('purge-linked')
+        Ticket.objects.create(
+            device_name='KERNEL-PATCH-HOST',
+            ip_address='192.0.2.10',
+            issue_description='linked to a vulnerability alert',
+            severity='Critical',
+            created_by=self.reporter,
+            wazuh_alert=linked,
+        )
+
+        output = self._run()
+
+        self.assertTrue(WazuhAlert.objects.filter(pk=linked.pk).exists())
+        self.assertIn('1 kept', output)
+
+    def test_rejects_a_nonsense_batch_size(self):
+        with self.assertRaises(CommandError):
+            self._run('--batch-size', '0')
+
+    def test_is_safe_to_run_twice(self):
+        self._vuln('purge-v1')
+        self._run()
+
+        output = self._run()
+
+        self.assertIn('Nothing to delete', output)

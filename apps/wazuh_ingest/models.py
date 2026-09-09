@@ -52,6 +52,36 @@ class WazuhAlert(models.Model):
         (CATEGORY_OTHER, 'Other'),
     ]
 
+    # ── Alert kind ──────────────────────────────────────────────────── #
+    # Wazuh's vulnerability detector emits one alert per (host, package, CVE)
+    # on every scan, so a single unpatched kernel lands as hundreds of level-13
+    # alerts — 771 of 849 rows in the 2026-09 production queue were 188 CVEs on
+    # two kernel packages across five hosts. Those are a standing vulnerability
+    # inventory, not discrete events: there is no per-row triage decision to
+    # make, the 4-hour triage OLA (OLA_HOURS) is meaningless against them, and
+    # rule_level 13 would open every one as a Critical ticket.
+    #
+    # They are still ingested and kept — vulnerability state is SOC business —
+    # but they are routed out of the Tier 1 triage queue. Only KIND_DETECTION
+    # rows are triage work.
+    KIND_DETECTION = 'DETECTION'
+    KIND_VULNERABILITY = 'VULNERABILITY'
+    KIND_CHOICES = [
+        (KIND_DETECTION, 'Detection'),
+        (KIND_VULNERABILITY, 'Vulnerability'),
+    ]
+
+    # The rule group Wazuh tags every vulnerability-detector alert with. This is
+    # the classifier input, deliberately NOT rule_id: 23506 is the rule seen in
+    # production, but the group is the stable contract across Wazuh versions and
+    # covers the sibling vulnerability rules too.
+    VULNERABILITY_RULE_GROUP = 'vulnerability-detector'
+
+    kind = models.CharField(
+        max_length=16, choices=KIND_CHOICES, default=KIND_DETECTION, db_index=True,
+        help_text='Whether this alert is triage work or vulnerability inventory.',
+    )
+
     opensearch_id = models.CharField(
         max_length=64, unique=True, db_index=True,
         help_text='OpenSearch document _id — used for deduplication.',
@@ -127,6 +157,17 @@ class WazuhAlert(models.Model):
 
     def __str__(self):
         return f'[{self.rule_level}] {self.rule_description} ({self.agent_name})'
+
+    @classmethod
+    def classify_kind(cls, rule_groups):
+        """Which queue an alert belongs to, derived from its Wazuh rule groups.
+
+        Kept a classmethod on the model so ingestion and the 0007 backfill
+        cannot drift apart on what counts as a vulnerability alert.
+        """
+        if cls.VULNERABILITY_RULE_GROUP in (rule_groups or []):
+            return cls.KIND_VULNERABILITY
+        return cls.KIND_DETECTION
 
     # ------------------------------------------------------------------ #
     # OLA — clock runs from the alert appearing until it is triaged       #

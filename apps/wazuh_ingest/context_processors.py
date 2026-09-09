@@ -27,7 +27,11 @@ def pending_triage_count(request):
         return {}
 
     context = {
+        # Scoped to DETECTION to match the triage queue this badge links to —
+        # a badge counting vulnerability alerts the page will never show is a
+        # number nobody can ever work down to zero.
         'pending_triage_count': WazuhAlert.objects.filter(
+            kind=WazuhAlert.KIND_DETECTION,
             triage_status=WazuhAlert.TRIAGE_PENDING,
         ).count(),
     }

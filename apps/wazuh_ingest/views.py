@@ -16,6 +16,86 @@ from .models import WazuhAlert
 
 ESCALATE_TIER_CHOICES = dict(WazuhAlert.TIER_CHOICES)
 
+# Page sizes offered on the triage queue. 25 stays the default; the larger
+# steps exist because scanning one screen beats paging when an analyst is
+# looking for related alerts across a burst.
+PER_PAGE_CHOICES = (25, 50, 100)
+DEFAULT_PER_PAGE = 25
+
+# Every ordering the queue table offers, as (label, ascending key, descending
+# key). A None pair is a column that cannot be sorted: OLA is a pure function
+# of timestamp (see ola_deadline), so it sorts with เวลา rather than on its own,
+# and the action column holds buttons.
+QUEUE_COLUMNS = (
+    ('เวลา', 'ola', 'newest'),
+    ('OLA', None, None),
+    ('Agent', 'agent', '-agent'),
+    ('Agent IP', 'ip', '-ip'),
+    ('Level', 'level_asc', 'level'),
+    ('Rule', 'rule', '-rule'),
+    ('สถานะ', 'status', '-status'),
+    ('ผู้รับเรื่อง', 'owner', '-owner'),
+    ('ดำเนินการ', None, None),
+)
+
+# Second key is always the tie-break, so equal values stay in a stable, useful
+# order (oldest first — the OLA reading) instead of whatever the planner picks.
+#
+# nulls_last on agent_ip and claimed_by: an alert with no IP or no owner is
+# missing information, and burying it at the top of an ascending sort would
+# push real rows off the first screen.
+#
+# rule_id sorts lexically because it is a CharField of digits ('100888' before
+# '204'). Left alone deliberately: this sort exists to gather identical rules
+# together, and grouping is unaffected by the numeric ordering being odd.
+SORT_MAP = {
+    'ola': ('timestamp', '-rule_level'),
+    'newest': ('-timestamp', '-rule_level'),
+    'level': ('-rule_level', 'timestamp'),
+    'level_asc': ('rule_level', 'timestamp'),
+    'agent': ('agent_name', 'timestamp'),
+    '-agent': ('-agent_name', 'timestamp'),
+    'ip': (F('agent_ip').asc(nulls_last=True), 'timestamp'),
+    '-ip': (F('agent_ip').desc(nulls_last=True), 'timestamp'),
+    'rule': ('rule_id', 'timestamp'),
+    '-rule': ('-rule_id', 'timestamp'),
+    'status': ('triage_status', 'timestamp'),
+    '-status': ('-triage_status', 'timestamp'),
+    'owner': (F('claimed_by__username').asc(nulls_last=True), 'timestamp'),
+    '-owner': (F('claimed_by__username').desc(nulls_last=True), 'timestamp'),
+}
+
+# The three the sort dropdown offers. Anything else came from a column header,
+# and the dropdown says so rather than silently showing the wrong option.
+DROPDOWN_SORTS = ('ola', 'level', 'newest')
+
+
+def _sort_headers(current_sort):
+    """Header cells for the queue table, each carrying the sort it links to.
+
+    Clicking a header applies its ascending sort; clicking the one already
+    active flips it. Built here rather than in the template so the arrow shown
+    and the link followed cannot disagree.
+    """
+    headers = []
+    for label, asc_key, desc_key in QUEUE_COLUMNS:
+        if asc_key is None:
+            headers.append({'label': label, 'sortable': False})
+            continue
+        if current_sort == asc_key:
+            next_sort, direction = desc_key, 'asc'
+        elif current_sort == desc_key:
+            next_sort, direction = asc_key, 'desc'
+        else:
+            next_sort, direction = asc_key, None
+        headers.append({
+            'label': label,
+            'sortable': True,
+            'next_sort': next_sort,
+            'direction': direction,
+        })
+    return headers
+
 # Triage no longer collects an incident category — the ticket form owns the
 # threat taxonomy (Ticket.DETAILED_ISSUE_HIERARCHY), so the coarse alert-side
 # mapping that used to pre-fill detailed_issue2 from it is gone. The
@@ -74,7 +154,12 @@ def triage_queue(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถเข้าถึง Triage Queue ได้')
         return redirect('ticket_list')
 
+    # kind=DETECTION scopes the whole page, facet counts included. Vulnerability
+    # alerts are ingested and kept but are not triage work — see
+    # WazuhAlert.KIND_VULNERABILITY. Without this the queue is ~90% kernel CVEs
+    # and every OLA facet reads as breached.
     queue = WazuhAlert.objects.filter(
+        kind=WazuhAlert.KIND_DETECTION,
         triage_status__in=[WazuhAlert.TRIAGE_PENDING, WazuhAlert.TRIAGE_TRIAGING],
     )
     queue_total = queue.count()
@@ -164,17 +249,18 @@ def triage_queue(request):
     # ola_deadline is timestamp + a flat OLA_HOURS, so ordering by timestamp
     # ascending is the OLA order — no annotation needed.
     sort = request.GET.get('sort', 'ola').strip()
-    if sort not in ('ola', 'level', 'newest'):
+    if sort not in SORT_MAP:
         sort = 'ola'
-    sort_map = {
-        'ola': ('timestamp', '-rule_level'),
-        'level': ('-rule_level', 'timestamp'),
-        'newest': ('-timestamp', '-rule_level'),
-    }
-    order = sort_map[sort]
-    alerts = alerts.select_related('claimed_by').order_by(*order)
+    alerts = alerts.select_related('claimed_by').order_by(*SORT_MAP[sort])
 
-    paginator = Paginator(alerts, 25)
+    try:
+        per_page = int(request.GET.get('per_page', DEFAULT_PER_PAGE))
+    except (TypeError, ValueError):
+        per_page = DEFAULT_PER_PAGE
+    if per_page not in PER_PAGE_CHOICES:
+        per_page = DEFAULT_PER_PAGE
+
+    paginator = Paginator(alerts, per_page)
     page_obj = paginator.get_page(request.GET.get('page'))
 
     # Facets are cross-filtered: each count says what clicking that pill would
@@ -269,6 +355,10 @@ def triage_queue(request):
         'rule_level_filter': rule_level_filter,
         'search_query': search_query,
         'sort': sort,
+        'sort_headers': _sort_headers(sort),
+        'sort_is_from_column': sort not in DROPDOWN_SORTS,
+        'per_page': per_page,
+        'per_page_choices': PER_PAGE_CHOICES,
     })
 
 
@@ -282,8 +372,14 @@ def claim_alert(request):
         return redirect('triage_queue')
 
     alert_id = request.POST.get('alert_id')
+    # kind is re-checked here, not just in the queue's SELECT: claiming is the
+    # only door into TRIAGING, and everything downstream (triage_action, the
+    # ticket form's alert selector) gates on "claimed by me". Guarding this one
+    # UPDATE therefore keeps a vulnerability alert out of every later step, even
+    # from a hand-crafted POST carrying an id that was never rendered.
     updated = WazuhAlert.objects.filter(
         pk=alert_id,
+        kind=WazuhAlert.KIND_DETECTION,
         triage_status=WazuhAlert.TRIAGE_PENDING,
         claimed_by__isnull=True,
     ).update(

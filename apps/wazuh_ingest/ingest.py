@@ -16,6 +16,10 @@ Rules
   must be re-fetched — the unique opensearch_id makes re-ingestion a no-op.
   Bursts larger than one batch are drained by paginating within the run
   (see fetch_and_store_alerts).
+• Vulnerability-detector alerts are never stored. Wazuh owns vulnerability
+  state and has its own dashboard for it; this system is for triage work. They
+  are excluded in the OpenSearch query AND dropped again in store_alert_hits —
+  see _build_query.
 """
 
 import logging
@@ -50,21 +54,30 @@ def _build_query(min_level, since, batch_size, exclude_ids=None):
     # ``exclude_ids`` lets the pagination loop skip docs already fetched at
     # ``since`` this run, so a timestamp group larger than batch_size still
     # drains instead of returning the same full page forever.
-    query = {
+    #
+    # The vulnerability-detector exclusion lives in the query so those alerts
+    # are never transferred at all: they were 91% of the 2026-09 production
+    # queue (771 of 849 rows — 188 CVEs on two kernel packages across five
+    # hosts), and fetching them only to discard them would make every run pay
+    # for data nobody wants. rule.groups is a keyword field in Wazuh's alert
+    # template, so `term` matches one whole group name.
+    must_not = [{'term': {'rule.groups': WazuhAlert.VULNERABILITY_RULE_GROUP}}]
+    if exclude_ids:
+        must_not.append({'ids': {'values': list(exclude_ids)}})
+
+    return {
         'query': {
             'bool': {
                 'filter': [
                     {'range': {'rule.level': {'gte': min_level}}},
                     {'range': {'@timestamp': {'gte': since.isoformat()}}},
-                ]
+                ],
+                'must_not': must_not,
             }
         },
         'size': batch_size,
         'sort': [{'@timestamp': 'asc'}],
     }
-    if exclude_ids:
-        query['query']['bool']['must_not'] = [{'ids': {'values': list(exclude_ids)}}]
-    return query
 
 
 def _parse_hit(hit):
@@ -80,8 +93,13 @@ def _parse_hit(hit):
     if timestamp is None:
         raise ValueError(f"Could not parse @timestamp: {source.get('@timestamp')!r}")
 
+    # Classified at ingest, not at read time: the queue filters on `kind` on
+    # every page load, so this has to be an indexed column, not a JSON scan.
+    rule_groups = rule.get('groups', []) or []
+
     return dict(
         opensearch_id=hit['_id'],
+        kind=WazuhAlert.classify_kind(rule_groups),
         alert_id=str(source.get('id', '')),
         timestamp=timestamp,
         agent_id=agent.get('id', ''),
@@ -90,7 +108,7 @@ def _parse_hit(hit):
         rule_id=str(rule.get('id', '')),
         rule_level=rule.get('level', 0),
         rule_description=rule.get('description', ''),
-        rule_groups=rule.get('groups', []) or [],
+        rule_groups=rule_groups,
         mitre_techniques=mitre.get('technique', []) or [],
         mitre_tactics=mitre.get('tactic', []) or [],
         mitre_ids=mitre.get('id', []) or [],
@@ -103,6 +121,12 @@ def store_alert_hits(hits, min_level=10, advance_watermark=True):
     """
     Parse and store OpenSearch hit dictionaries.
 
+    Vulnerability-detector alerts are dropped here as well as excluded in the
+    query. Two gates on purpose: the query filter depends on rule.groups being
+    mapped as a keyword field, and if that assumption is ever wrong the alerts
+    would flow in silently and accumulate — which is the exact failure this
+    change exists to end. Anything dropped here is counted as skipped.
+
     Offline fixtures disable watermark updates so demo timestamps cannot
     affect the next production OpenSearch fetch.
     """
@@ -113,8 +137,13 @@ def store_alert_hits(hits, min_level=10, advance_watermark=True):
     for hit in hits:
         try:
             source = hit['_source']
-            rule_level = int(source.get('rule', {}).get('level', 0))
+            rule = source.get('rule', {})
+            rule_level = int(rule.get('level', 0))
             if rule_level < min_level:
+                result['skipped'] += 1
+                continue
+
+            if WazuhAlert.classify_kind(rule.get('groups') or []) != WazuhAlert.KIND_DETECTION:
                 result['skipped'] += 1
                 continue
 
