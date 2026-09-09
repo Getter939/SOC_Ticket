@@ -7,6 +7,110 @@ from .models import (
     Ticket, TicketAttachment, TicketSubtask, TriageRecord,
     validate_attachment, validate_attachment_batch,
 )
+from django.core.exceptions import ValidationError
+
+from .ioc_values import (
+    CAT_DOMAIN, CAT_FILE_NAME, CAT_FILE_PATH, CAT_HASH, CAT_IP, CAT_URL,
+    normalize_for_category,
+)
+from .ti_platform import validate_import_file
+from .ip_addresses import IPAddressListField
+
+
+class AnalystIOCImportForm(forms.Form):
+    file = forms.FileField(
+        label='CSV / XLSX', validators=[validate_import_file],
+        widget=forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': '.csv,.xlsx'}),
+    )
+
+
+# POST field name → (category code, label, placeholder). Each field is
+# multi-valued: the same name repeats once per "+ add" box the analyst opens.
+TICKET_IOC_FIELDS = [
+    ('ioc_file_name', CAT_FILE_NAME, 'File Name', 'เช่น invoice.exe'),
+    ('ioc_hash',      CAT_HASH,      'Hash (SHA-256)', '64 hex characters'),
+    ('ioc_domain',    CAT_DOMAIN,    'Domain', 'เช่น malicious.example.com'),
+    ('ioc_ip',        CAT_IP,        'IP Address', 'เช่น 79[.]124[.]59[.]146'),
+    ('ioc_url',       CAT_URL,       'URL', 'เช่น https://bad.example.com/x'),
+    ('ioc_file_path', CAT_FILE_PATH, 'File Path', r'เช่น C:\Users\...\invoice.exe'),
+]
+
+
+class _TicketIOCForm:
+    """Mixin adding the six multi-valued structured IOC fields to a ticket form.
+
+    The values arrive as repeated POST inputs (not ModelForm fields), so they are
+    read from the raw data in clean(), normalized per category, and written to the
+    related TicketIOC table by save_iocs() once the ticket has a primary key.
+    ``ioc_render`` feeds the template (submitted values on a bound form, existing
+    rows on an unbound edit form) and ``ioc_errors`` carries per-field messages.
+    """
+
+    def _init_iocs(self):
+        submitted = hasattr(self.data, 'getlist') and any(
+            name in self.data for name, *_ in TICKET_IOC_FIELDS
+        )
+        existing = {}
+        if not submitted and getattr(self.instance, 'pk', None):
+            for row in self.instance.iocs.all():
+                existing.setdefault(row.category, []).append(row.value)
+        self.ioc_errors = {}
+        self._ioc_values = {}
+        for name, category, _label, _placeholder in TICKET_IOC_FIELDS:
+            if submitted:
+                values = [v.strip() for v in self.data.getlist(name)]
+            else:
+                values = list(existing.get(category, []))
+            self._ioc_values[name] = [v for v in values if v]
+
+    def ioc_fields(self):
+        """Render model for the template: one entry per category, with current
+        values (at least one empty box) and any per-field validation errors.
+        Called after clean(), so ``ioc_errors`` is populated on a bound form."""
+        rendered = []
+        for name, category, label, placeholder in TICKET_IOC_FIELDS:
+            rendered.append({
+                'name': name, 'category': category, 'label': label,
+                'placeholder': placeholder,
+                'values': self._ioc_values.get(name) or [''],
+                'errors': self.ioc_errors.get(name, []),
+            })
+        return rendered
+
+    def clean(self):
+        cleaned = super().clean()
+        self._cleaned_iocs = []
+        if not hasattr(self.data, 'getlist'):
+            return cleaned
+        for name, category, label, _placeholder in TICKET_IOC_FIELDS:
+            for raw in self.data.getlist(name):
+                raw = (raw or '').strip()
+                if not raw:
+                    continue
+                try:
+                    value = normalize_for_category(category, raw)
+                except ValidationError as exc:
+                    self.ioc_errors.setdefault(name, []).append(
+                        f'"{raw}" — ' + '; '.join(exc.messages))
+                    continue
+                if value:
+                    self._cleaned_iocs.append((category, value))
+        if self.ioc_errors:
+            self.add_error(None, 'ตรวจสอบค่า IOC ที่ไม่ถูกต้อง / Fix the invalid IOC values below.')
+        return cleaned
+
+    def save_iocs(self, ticket):
+        """Replace ``ticket``'s structured IOC rows with the cleaned values."""
+        from .models import TicketIOC
+        ticket.iocs.all().delete()
+        order = {}
+        rows = []
+        for category, value in getattr(self, '_cleaned_iocs', []):
+            index = order.get(category, 0)
+            order[category] = index + 1
+            rows.append(TicketIOC(ticket=ticket, category=category, value=value, order=index))
+        if rows:
+            TicketIOC.objects.bulk_create(rows)
 
 
 class UserChoiceField(forms.ModelChoiceField):
@@ -134,7 +238,9 @@ class _ReportFields:
         return ','.join(self.cleaned_data.get('mitre_tactics') or [])
 
 
-class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
+class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.ModelForm):
+    ip_address = IPAddressListField()
+
     # ── Tier 1 disposition (set at creation) ─────────────────────────────── #
     # The Event/Incident decision IS the disposition. Required — every ticket
     # carries an explicit value; it is never derived.
@@ -210,9 +316,8 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'asset_owner',
             'asset_owner_name',
             'spread_to_others',
-            # Section 5
-            'destination_ip',
-            'ioc_details',
+            # Section 5 — the six structured indicators live in TicketIOC and are
+            # handled by _TicketIOCForm; ioc_user is the report's separate "User".
             'ioc_user',
             # Section 6
             'mitre_tactics',
@@ -242,16 +347,10 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
                 'class': 'form-control', 'rows': 5,
                 'placeholder': 'สรุปรายละเอียดเหตุการณ์ที่ตรวจพบ เช่น ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบเหตุการณ์ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น',
             }),
-            'ip_address':         forms.TextInput(attrs={'class': 'form-control', 'placeholder': '0.0.0.0'}),
             'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
             'asset_owner':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น ฝ่ายเทคโนโลยีสารสนเทศ / กองระบบงาน HR'}),
             'asset_owner_name':   forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
-            'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
-            'ioc_details':        forms.Textarea(attrs={
-                'class': 'form-control', 'rows': 3,
-                'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ ที่พบ',
-            }),
             'ioc_user':           forms.TextInput(attrs={
                 'class': 'form-control',
                 'placeholder': 'เช่น administrator หรือ DOMAIN\\svc_backup',
@@ -311,6 +410,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         self.fields['incident_datetime'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
+        self._init_iocs()
 
     def clean(self):
         cleaned = super().clean()
@@ -335,7 +435,7 @@ class TicketForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         return cleaned
 
 
-class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
+class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """Shared fields for a multi-system case bundle.
 
     Classification belongs to each generated member Ticket, so this shared
@@ -365,7 +465,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
             'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
-            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_tactics',
+            'ioc_user', 'mitre_tactics',
             'spread_to_others',
             'action_required', 'action_precautions',
             'actions_taken_summary', 'next_steps_summary',
@@ -385,8 +485,6 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
                 'class': 'form-control', 'rows': 5,
                 'placeholder': 'สรุปเหตุการณ์โดยรวมที่กระทบหลายระบบ — เนื้อหานี้จะถูกใช้ร่วมกันในทุก Ticket ของกลุ่ม',
             }),
-            'destination_ip':     forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น 79[.]124[.]59[.]146'}),
-            'ioc_details':        forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'IP, Domain, Hash, หรือ IoC อื่น ๆ'}),
             'ioc_user':           forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'บัญชีผู้ใช้ที่เกี่ยวข้อง'}),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -416,6 +514,7 @@ class ProjectIncidentForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm)
         self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
+        self._init_iocs()
 
     def clean(self):
         cleaned = super().clean()
@@ -431,6 +530,8 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     target may have no single IP) even though single-ticket creation requires
     one.
     """
+
+    ip_address = IPAddressListField(required=False)
 
     assigned_admin = UserChoiceField(
         queryset=User.objects.filter(
@@ -465,7 +566,6 @@ class ProjectIncidentTargetForm(forms.ModelForm):
                 'class': 'form-control form-control-sm', 'rows': 3,
                 'placeholder': 'รายละเอียดเฉพาะของระบบนี้',
             }),
-            'ip_address':  forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': '0.0.0.0'}),
             'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
             'asset_owner': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ฝ่ายไอที'}),
@@ -499,9 +599,10 @@ ProjectIncidentTargetFormSet = forms.formset_factory(
 )
 
 
-class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
+class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
 
+    ip_address = IPAddressListField()
     ncsa_severity = _ncsa_severity_field()
     mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
@@ -515,7 +616,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'spread_to_others',
-            'destination_ip', 'ioc_details', 'ioc_user', 'mitre_tactics', 'action_required',
+            'ioc_user', 'mitre_tactics', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
         ]
         widgets = {
@@ -524,7 +625,6 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
                 attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
             ),
             'issue_description': forms.Textarea(attrs={'rows': 4}),
-            'ioc_details': forms.Textarea(attrs={'rows': 3}),
             'action_required': forms.Textarea(attrs={'rows': 3}),
             'action_precautions': forms.Textarea(attrs={'rows': 3}),
             'actions_taken_summary': forms.Textarea(attrs={'rows': 3}),
@@ -546,6 +646,7 @@ class TicketReviewForm(_DetailedIssueCascade, _ReportFields, forms.ModelForm):
         self.fields['log_source'].required = True
         self._restrict_detailed_issue_fields()
         self._init_report_fields()
+        self._init_iocs()
 
     def clean(self):
         cleaned = super().clean()

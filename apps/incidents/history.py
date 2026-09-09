@@ -160,3 +160,32 @@ def record_subtask_status_change(
         changed_by=user,
         source=source,
     )
+
+
+def ioc_snapshot(ticket):
+    """A stable, human-readable list of the ticket's structured indicators.
+
+    Multi-valued IOCs are not scalar fields, so they are tracked as a single
+    before/after set rather than through the field-diff machinery.
+    """
+    if not ticket.pk:
+        return []
+    return sorted(
+        f'{row.get_category_display()}: {row.value}'
+        for row in ticket.iocs.all()
+    )
+
+
+def record_ioc_change(ticket, before, after, user, source=''):
+    """Record one audit row if the structured IOC set changed. Returns it or None."""
+    if before == after:
+        return None
+    return TicketFieldChange.objects.create(
+        ticket=ticket,
+        field_name='iocs',
+        field_label='Indicators of Compromise (IOC)',
+        old_value='\n'.join(before) or '—',
+        new_value='\n'.join(after) or '—',
+        changed_by=user,
+        source=source,
+    )

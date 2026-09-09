@@ -46,8 +46,13 @@ def complete_t2_review(*, ticket, actor, review_form, next_status, decision_note
     """Save Tier 2 corrections, record field history, and transition the ticket."""
     with transaction.atomic():
         before = history.snapshot_saved(ticket)
+        before_iocs = history.ioc_snapshot(ticket)
         ticket = review_form.save()
+        if hasattr(review_form, 'save_iocs'):
+            review_form.save_iocs(ticket)
         history.record_changes(ticket, before, actor, source='t2_review')
+        history.record_ioc_change(
+            ticket, before_iocs, history.ioc_snapshot(ticket), actor, source='t2_review')
         ticket.transition_to(next_status, actor, decision_note or fallback_label)
 
     warnings = _owner_closed_warnings(ticket) if next_status == Ticket.STATUS_CLOSED_EVENT else ()

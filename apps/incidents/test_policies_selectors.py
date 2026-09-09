@@ -152,7 +152,12 @@ class IncidentPolicyMatrixTest(SimpleTestCase):
                 self.t2,
             )
         )
-        self.assertFalse(can_edit_ticket(_ticket(Ticket.STATUS_APPROVED), self.superuser))
+        # A terminal ticket is frozen for every workflow role...
+        self.assertFalse(can_edit_ticket(_ticket(Ticket.STATUS_APPROVED), self.t1))
+        # ...but the superuser correction path survives closure on purpose, so
+        # wrong data entered anywhere in a ticket's life can be fixed without
+        # touching the database by hand.
+        self.assertTrue(can_edit_ticket(_ticket(Ticket.STATUS_APPROVED), self.superuser))
 
     def test_manual_triage_conversion_policy_matrix(self):
         claimed = SimpleNamespace(

@@ -36,10 +36,20 @@ def save_ticket_edit(*, ticket, actor, edit_form, reason):
     """Save a validated TicketEditForm with field-level and summary audit rows."""
     with transaction.atomic():
         before = history.snapshot_saved(ticket)
+        before_iocs = history.ioc_snapshot(ticket)
         updated_ticket = edit_form.save()
-        changes = tuple(
+        if hasattr(edit_form, 'save_iocs'):
+            edit_form.save_iocs(updated_ticket)
+        changes = list(
             history.record_changes(updated_ticket, before, actor, source='edit')
         )
+        ioc_change = history.record_ioc_change(
+            updated_ticket, before_iocs, history.ioc_snapshot(updated_ticket),
+            actor, source='edit',
+        )
+        if ioc_change:
+            changes.append(ioc_change)
+        changes = tuple(changes)
         if changes:
             summary = ', '.join(change.field_label for change in changes)
             TicketLog.objects.create(

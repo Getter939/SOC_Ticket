@@ -64,6 +64,10 @@
             {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
           </div>
           {% endfor %}
+          <div class="col-12">
+            <h3 class="h6 fw-semibold mt-2 mb-2">Indicators of Compromise (IOC)</h3>
+            {% include 'incidents/_structured_ioc_fields.html' %}
+          </div>
         </div>
       </div>
     </div>

@@ -712,6 +712,11 @@
        class="nav-link {% if request.resolver_match.url_name == 'global_search' %}active{% endif %}">
         <i class="bi bi-search"></i> <span class="nav-label">IOC Search</span>
     </a>
+    {% if request.user.is_superuser or profile.is_forensic %}
+    <a href="{% url 'ioc_database' %}" data-label="IOC Database" class="nav-link {% if request.resolver_match.url_name == 'ioc_database' %}active{% endif %}">
+        <i class="bi bi-database-fill-check"></i> <span class="nav-label">IOC Database</span>
+    </a>
+    {% endif %}
     {% endif %}
     {% endif %}
 

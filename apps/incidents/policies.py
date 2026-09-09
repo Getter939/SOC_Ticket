@@ -209,11 +209,20 @@ def can_edit_ticket(ticket, user):
     their own earlier mistake once the ticket moved on would cost more than it
     protects. ``edit_ticket`` warns when the ticket is in someone else's court
     instead, and every edit is attributed and diffed either way.
+
+    The superuser bypass sits ABOVE the terminal-status freeze on purpose, and
+    is the one edit right that survives closure. A superuser is the operator of
+    record, not a workflow party: they need to correct a wrong data entry at any
+    point in a ticket's life — including on a closed case — without dropping to
+    the database by hand. Every such edit is still recorded field-by-field with
+    an actor and a reason (see apps.incidents.history), so this is an audited
+    correction path, not a silent one. For every other role a terminal ticket
+    stays frozen.
     """
-    if ticket.status in Ticket.TERMINAL_STATUSES:
-        return False
     if user.is_superuser:
         return True
+    if ticket.status in Ticket.TERMINAL_STATUSES:
+        return False
     profile = getattr(user, 'profile', None)
     if profile is None:
         return False

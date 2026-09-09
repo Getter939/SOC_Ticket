@@ -84,6 +84,9 @@ def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(),
             alert_bundle_ids=alert_bundle_ids,
         )
         ticket.save()
+        # Structured indicators (multi-valued TicketIOC rows) need the ticket pk.
+        if hasattr(form, 'save_iocs'):
+            form.save_iocs(ticket)
 
         source_alerts = locked_alerts or ([locked_alert] if locked_alert else [])
         _link_alerts(ticket, source_alerts, actor)
@@ -137,7 +140,7 @@ def create_project_incident_from_forms(
             actions_taken_summary=shared.get('actions_taken_summary', ''),
             next_steps_summary=shared.get('next_steps_summary', ''),
         )
-        tickets = _create_project_members(project, shared, target_formset, actor)
+        tickets = _create_project_members(project, shared, target_formset, actor, shared_form)
         if len(tickets) < 2:
             raise ValidationError('ต้องระบุระบบเป้าหมายอย่างน้อย 2 ระบบสำหรับ Project Incident')
 
@@ -361,7 +364,7 @@ def _log_alert_bundle(ticket, source_alerts, actor):
     )
 
 
-def _create_project_members(project, shared, target_formset, actor):
+def _create_project_members(project, shared, target_formset, actor, shared_form=None):
     tickets = []
     for target_form in target_formset:
         cleaned_data = getattr(target_form, 'cleaned_data', None)
@@ -383,6 +386,9 @@ def _create_project_members(project, shared, target_formset, actor):
         ticket.project_incident = project
         ticket.bundle_suffix = bundle_suffix_for_index(len(tickets))
         ticket.save()
+        # Copy the bundle's shared structured indicators onto each member ticket.
+        if shared_form is not None and hasattr(shared_form, 'save_iocs'):
+            shared_form.save_iocs(ticket)
         if is_event:
             ticket.transition_to(
                 Ticket.STATUS_ESCALATED_T2,

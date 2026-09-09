@@ -1,7 +1,14 @@
 from django.urls import path
 from . import views
+from . import ti_platform_views as ti_views
 
 urlpatterns = [
+    path('ioc-database/', ti_views.ioc_database, name='ioc_database'),
+    path('ioc-database/import/', ti_views.ioc_database_import, name='ioc_database_import'),
+    path('ioc-database/template/', ti_views.ioc_database_template, name='ioc_database_template'),
+    path('ioc-database/import/<int:pk>/download/', ti_views.analyst_ioc_download, name='analyst_ioc_download'),
+    path('ioc-database/status/', ti_views.ioc_status_toggle, name='ioc_status_toggle'),
+    path('ioc-database/remove/', ti_views.analyst_ioc_remove, name='analyst_ioc_remove'),
     # Tickets
     path('', views.ticket_list, name='ticket_list'),
     path('manager-queue/', views.manager_queue, name='manager_queue'),

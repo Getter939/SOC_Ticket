@@ -251,8 +251,9 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.ip_address.id_for_label }}">IP Address <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.ip_address.id_for_label }}">IP Addresses <span class="required-star">*</span></label>
           {{ form.ip_address }}
+          <div class="field-hint">{{ form.ip_address.help_text }}</div>
           {% if form.ip_address.errors %}<div class="text-danger small">{{ form.ip_address.errors }}</div>{% endif %}
         </div>
 
@@ -306,13 +307,6 @@
           {% if form.asset_type.errors %}<div class="text-danger small mt-1">{{ form.asset_type.errors }}</div>{% endif %}
         </div>
 
-        <div class="col-md-5">
-          <label class="form-label fw-semibold" for="{{ form.destination_ip.id_for_label }}">IP Address ปลายทางที่น่าสงสัย</label>
-          {{ form.destination_ip }}
-          <div class="field-hint">รองรับรูปแบบ defanged เช่น 79[.]124[.]59[.]146</div>
-          {% if form.destination_ip.errors %}<div class="text-danger small">{{ form.destination_ip.errors }}</div>{% endif %}
-        </div>
-
         <div class="col-12">
           <div class="form-label fw-semibold" id="mitre-group-label">MITRE ATT&CK Tactics (ยุทธวิธีการโจมตี)</div>
           <div class="mitre-grid" role="group" aria-labelledby="mitre-group-label">
@@ -322,12 +316,6 @@
           </div>
           <div class="field-hint">เลือกได้หลาย Tactic — เหตุการณ์หนึ่งอาจเกี่ยวข้องกับหลายเป้าหมายเชิงยุทธวิธีของ MITRE ATT&CK</div>
           {% if form.mitre_tactics.errors %}<div class="text-danger small">{{ form.mitre_tactics.errors }}</div>{% endif %}
-        </div>
-
-        <div class="col-12">
-          <label class="form-label fw-semibold" for="{{ form.ioc_details.id_for_label }}">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
-          {{ form.ioc_details }}
-          {% if form.ioc_details.errors %}<div class="text-danger small">{{ form.ioc_details.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">
@@ -344,9 +332,15 @@
       </div>
     </div>
 
-    <!-- ── Block 3: Response Guidance ── -->
+    <!-- ── Block 3: Indicators of Compromise ── -->
     <div class="form-section">
-      <div class="section-header">3. แนวทางการดำเนินการ <small>Recommended Actions</small></div>
+      <div class="section-header">3. Indicators of Compromise (IOC) <small>ตัวบ่งชี้การโจมตีที่พบ</small></div>
+      {% include 'incidents/_structured_ioc_fields.html' %}
+    </div>
+
+    <!-- ── Block 4: Response Guidance ── -->
+    <div class="form-section">
+      <div class="section-header">4. แนวทางการดำเนินการ <small>Recommended Actions</small></div>
       <div class="row g-3">
         <div class="col-12 d-flex align-items-center gap-2">
           <button type="button" class="btn btn-outline-primary btn-sm" id="insert-guidance-btn" disabled>
@@ -381,7 +375,7 @@
 
     <!-- ── Block 4: Disposition (Event or Incident?) ── -->
     <div class="form-section border-danger">
-      <div class="section-header">4. Event หรือ Incident? <small>จัดประเภทและเลือกเส้นทาง</small></div>
+      <div class="section-header">5. Event หรือ Incident? <small>จัดประเภทและเลือกเส้นทาง</small></div>
       {% if form.classification.errors %}<div class="alert alert-danger py-2">{{ form.classification.errors }}</div>{% endif %}
       <div class="row g-3" id="classification-options">
         {% for radio in form.classification %}

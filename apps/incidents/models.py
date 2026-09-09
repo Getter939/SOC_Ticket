@@ -7,6 +7,8 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from . import ola
+from .ioc_values import INVENTORY_CATEGORY_CHOICES, TICKET_CATEGORY_CHOICES
+from .ip_addresses import IP_ADDRESSES_HELP, validate_ip_addresses
 from datetime import timedelta
 
 
@@ -943,8 +945,9 @@ class Ticket(models.Model):
     # ── Section 4: Scope / Affected Asset ───────────────────────────── #
     # null=True with blank=False: forms still require an IP, but tickets
     # imported from the pre-system TrendMicro tracker have none to give.
-    ip_address = models.GenericIPAddressField(
-        null=True, verbose_name='IP Address ของทรัพย์สิน',
+    ip_address = models.TextField(
+        null=True, verbose_name='IP Addresses ของทรัพย์สิน',
+        validators=[validate_ip_addresses], help_text=IP_ADDRESSES_HELP,
     )
     mac_address = models.CharField(
         max_length=50, blank=True, default='',
@@ -980,6 +983,10 @@ class Ticket(models.Model):
     )
 
     # ── Section 5: IoC ──────────────────────────────────────────────── #
+    # Structured indicators live in the related TicketIOC table (multi-valued,
+    # per category). The fields below are legacy: destination_ip and ioc_details
+    # predate that table and are preserved read-only for historical tickets; the
+    # 0067 data migration lifts what it can from them into TicketIOC rows.
     destination_ip = models.CharField(
         max_length=100, blank=True, default='',
         verbose_name='IP Address ปลายทางที่น่าสงสัย',
@@ -3095,3 +3102,93 @@ class ThreatGuidance(models.Model):
 
     def __str__(self):
         return self.get_detailed_issue_display()
+
+
+class TicketIOC(models.Model):
+    """One structured indicator on a ticket. Multi-valued: a ticket may hold
+    several rows of the same category (e.g. three IP addresses)."""
+
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='iocs')
+    category = models.CharField(max_length=20, choices=TICKET_CATEGORY_CHOICES, db_index=True)
+    value = models.CharField(max_length=500)
+    # Preserves the analyst's entry order within a category for stable rendering.
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['category', 'order', 'pk']
+
+    def __str__(self):
+        return f'{self.get_category_display()}: {self.value}'
+
+
+def ti_import_upload_path(instance, filename):
+    from pathlib import Path
+    from uuid import uuid4
+    return f'ti_platform/{uuid4().hex}{Path(filename).suffix.lower()}'
+
+
+class AnalystIOCImport(models.Model):
+    """A file batch the Forensic Analyst uploaded with IOCs they found externally."""
+
+    file = models.FileField(upload_to=ti_import_upload_path)
+    original_name = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    row_count = models.PositiveIntegerField(default=0)
+    added_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-uploaded_at', '-pk']
+
+
+class AnalystIOC(models.Model):
+    """A single IOC the Forensic Analyst found through their own external research
+    and uploaded here — NOT the MISP/TI-platform registered set. ``ext_id`` is the
+    analyst's own identifier and the dedup key; ``ioc_detail`` is the value and
+    ``file_name`` is context (never an indicator on its own).
+    """
+
+    ext_id = models.CharField(max_length=100, unique=True)
+    category = models.CharField(max_length=20, choices=INVENTORY_CATEGORY_CHOICES, db_index=True)
+    file_name = models.CharField(max_length=255, blank=True, db_index=True)
+    ioc_detail = models.CharField(max_length=500, db_index=True)
+    note = models.TextField(blank=True, default='')
+    source_import = models.ForeignKey(
+        AnalystIOCImport, null=True, blank=True, on_delete=models.PROTECT, related_name='added_iocs')
+    last_seen_import = models.ForeignKey(
+        AnalystIOCImport, null=True, blank=True, on_delete=models.PROTECT, related_name='seen_iocs')
+    added_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    # Soft-remove: a mistaken upload is hidden from the database but kept for audit.
+    is_active = models.BooleanField(default=True)
+    removed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    removed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-pk']
+
+    def __str__(self):
+        return f'{self.ext_id} ({self.get_category_display()})'
+
+
+class IOCReviewStatus(models.Model):
+    """The Forensic Analyst's manual "reviewed against MISP" flag for one indicator.
+
+    Keyed by (category, value) so a ticket IOC and an uploaded IOC of the same value
+    share one status. An absent row means Not Checked.
+    """
+
+    category = models.CharField(max_length=20, choices=TICKET_CATEGORY_CHOICES, db_index=True)
+    value = models.CharField(max_length=500)
+    checked = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('category', 'value')]
+        ordering = ['-updated_at', '-pk']
+
+    def __str__(self):
+        state = 'checked' if self.checked else 'not checked'
+        return f'{self.category}:{self.value} = {state}'

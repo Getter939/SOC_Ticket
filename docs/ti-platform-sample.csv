@@ -1,0 +1,13 @@
+ID,Category,File name,IOC detail,Note
+TI-0001,Hash,invoice.exe,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,Emotet loader sample
+TI-0002,Hash,update.dll,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,Cobalt Strike beacon
+TI-0003,Hash,readme.txt,cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc,Ransom note
+TI-0004,IP,,185.220.101.1,Tor exit node
+TI-0005,IP,,45.83.64.10,Known C2 server
+TI-0006,IP,,2001:db8::1,Test IPv6 indicator
+TI-0007,Domain,,malicious-example.com,Phishing domain
+TI-0008,Domain,,c2.badactor.net,C2 domain
+TI-0009,Domain,,login-secure-update.com,Credential phishing
+TI-0010,URL,,http://malicious-example.com/payload.bin,Payload delivery URL
+TI-0011,URL,,https://c2.badactor.net/gate.php,C2 gateway
+TI-0012,File Path,invoice.exe,C:\Users\Public\invoice.exe,Common dropped path

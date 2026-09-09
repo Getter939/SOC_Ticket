@@ -1,0 +1,55 @@
+<div class="row g-3 ioc-fields" data-ioc-fields>
+  <div class="col-12 field-hint mb-0">
+    กรอกได้หลายค่าในแต่ละช่อง — กด “＋ เพิ่ม” เพื่อเพิ่มกล่องข้อความสำหรับหลักฐานแยกแต่ละรายการ /
+    Each field accepts multiple values — use “＋ add” for a separate box per indicator.
+  </div>
+  {% for f in form.ioc_fields %}
+  <div class="col-md-6 ioc-field" data-ioc-field>
+    <label class="form-label fw-semibold">{{ f.label }}</label>
+    <div class="ioc-inputs">
+      {% for value in f.values %}
+      <div class="input-group input-group-sm mb-1 ioc-input-row">
+        <input type="text" name="{{ f.name }}" class="form-control" value="{{ value }}"
+               placeholder="{{ f.placeholder }}" maxlength="500" autocomplete="off">
+        <button type="button" class="btn btn-outline-secondary ioc-remove" tabindex="-1"
+                aria-label="ลบค่านี้ / remove">&times;</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm ioc-add" data-field-name="{{ f.name }}">
+      <i class="bi bi-plus-lg"></i> เพิ่ม / add
+    </button>
+    {% for error in f.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+  </div>
+  {% endfor %}
+</div>
+<script nonce="{{ request.csp_nonce }}">
+// Multi-value IOC fields: each category's "+ add" clones its box; every box past
+// the first gets a working × (remove). Empty boxes are ignored server-side.
+(() => {
+  function addRow(field) {
+    const row = field.querySelector('.ioc-input-row').cloneNode(true);
+    const input = row.querySelector('input');
+    input.value = '';
+    field.querySelector('.ioc-inputs').appendChild(row);
+    input.focus();
+  }
+  document.querySelectorAll('[data-ioc-fields]').forEach((container) => {
+    if (container.dataset.initialized) return;
+    container.dataset.initialized = 'true';
+    container.addEventListener('click', (event) => {
+      const add = event.target.closest('.ioc-add');
+      if (add) { addRow(add.closest('[data-ioc-field]')); return; }
+      const remove = event.target.closest('.ioc-remove');
+      if (remove) {
+        const field = remove.closest('[data-ioc-field]');
+        if (field.querySelectorAll('.ioc-input-row').length > 1) {
+          remove.closest('.ioc-input-row').remove();
+        } else {
+          remove.closest('.ioc-input-row').querySelector('input').value = '';
+        }
+      }
+    });
+  });
+})();
+</script>

@@ -216,11 +216,21 @@ onto its own wrapped row, which space-between then left-aligned.
           </div>
           <div class="col-md-6">
             <dl class="detail-grid mb-3">
-              <dt>IP Address</dt><dd class="font-monospace">{{ ticket.ip_address|default:"-" }}</dd>
+              <dt>IP Addresses</dt><dd class="font-monospace">{{ ticket.ip_address|default:"-" }}</dd>
               <dt>Destination</dt><dd class="font-monospace">{{ ticket.destination_ip|default:"-" }}</dd>
               <dt>MAC Address</dt><dd class="font-monospace">{{ ticket.mac_address|default:"-" }}</dd>
             </dl>
-            {% if ticket.ioc_details %}<div class="snapshot-label mb-2">Indicators of Compromise</div><div class="ioc-panel">{{ ticket.ioc_details }}</div>{% endif %}
+            {% regroup ticket.iocs.all by get_category_display as ioc_groups %}
+            {% if ioc_groups %}
+            <div class="snapshot-label mb-2">Indicators of Compromise (IOC)</div>
+            <dl class="small text-break ioc-detail-list mb-2">
+              {% for group in ioc_groups %}
+              <dt>{{ group.grouper }}</dt>
+              <dd>{% for row in group.list %}<div class="font-monospace">{{ row.value }}</div>{% endfor %}</dd>
+              {% endfor %}
+            </dl>
+            {% endif %}
+            {% if ticket.ioc_details %}<div class="snapshot-label mb-2">IoC เดิม (legacy) / Legacy notes</div><div class="ioc-panel">{{ ticket.ioc_details }}</div>{% endif %}
             {% if ticket.ioc_user %}<div class="snapshot-label mb-2 mt-2">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</div><div class="ioc-panel">{{ ticket.ioc_user }}</div>{% endif %}
           </div>
         </div>
@@ -627,7 +637,7 @@ onto its own wrapped row, which space-between then left-aligned.
       {% if is_terminal %}
       <div class="alert alert-light border text-center text-muted small workflow-primary">ไม่มี action เพิ่มเติมสำหรับ workflow นี้ แต่ยังเปลี่ยนสถานะ Emergency ได้ตามสิทธิ์</div>
       {% elif can_t2_review %}
-      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดย Tier 2</h5><small>ตรวจสอบข้อมูลและยืนยันการจัดประเภท</small></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div>{% if can_monitor and ticket.monitoring_proposed %}<div class="alert alert-info small py-2 mb-2"><i class="bi bi-hand-thumbs-up me-1"></i>Tier 1 แนะนำให้เฝ้าระวังเคสนี้</div>{% endif %}<label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}{% if can_monitor %}<button class="btn btn-outline-primary" type="submit" name="status" value="MONITORING" style="border-color:#4c6ef5;color:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>เฝ้าระวัง {{ monitoring_duration_days }} วัน (ยังไม่ชี้ขาด)</button>{% endif %}</div></form></div></div>
+      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดย Tier 2</h5><small>ตรวจสอบข้อมูลและยืนยันการจัดประเภท</small></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><div class="mb-3"><label class="form-label fw-bold">Indicators of Compromise (IOC)</label>{% include 'incidents/_structured_ioc_fields.html' with form=t2_review_form %}</div>{% if can_monitor and ticket.monitoring_proposed %}<div class="alert alert-info small py-2 mb-2"><i class="bi bi-hand-thumbs-up me-1"></i>Tier 1 แนะนำให้เฝ้าระวังเคสนี้</div>{% endif %}<label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}{% if can_monitor %}<button class="btn btn-outline-primary" type="submit" name="status" value="MONITORING" style="border-color:#4c6ef5;color:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>เฝ้าระวัง {{ monitoring_duration_days }} วัน (ยังไม่ชี้ขาด)</button>{% endif %}</div></form></div></div>
       {% include 'incidents/_detailed_issue_cascade.html' %}
       {% elif can_assign_admin %}
       <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">การเลือกเส้นทางโดย Tier 1</h5><small>Tier 2 ยืนยันว่าเป็น Incident — เลือกเส้นทางการจัดการ</small></div><div class="card-body">

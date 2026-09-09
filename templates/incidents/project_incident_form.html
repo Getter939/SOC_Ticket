@@ -183,9 +183,8 @@
           {% if form.mitre_tactics.errors %}<div class="text-danger small">{{ form.mitre_tactics.errors }}</div>{% endif %}
         </div>
         <div class="col-12">
-          <label class="form-label fw-semibold">IoC อื่น ๆ (Hash, Domain, URL, etc.)</label>
-          {{ form.ioc_details }}
-          {% if form.ioc_details.errors %}<div class="text-danger small">{{ form.ioc_details.errors }}</div>{% endif %}
+          <h3 class="h6 fw-semibold mb-2">Indicators of Compromise (IOC)</h3>
+          {% include 'incidents/_structured_ioc_fields.html' %}
         </div>
         <div class="col-12 d-flex align-items-center gap-2">
           <button type="button" class="btn btn-outline-primary btn-sm" id="insert-guidance-btn" disabled>
@@ -254,8 +253,9 @@
               {% if tform.system_detail.errors %}<div class="text-danger small">{{ tform.system_detail.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
-              <label class="form-label small fw-semibold mb-1">IP Address</label>
+              <label class="form-label small fw-semibold mb-1">IP Addresses</label>
               {{ tform.ip_address }}
+              <div class="field-hint">{{ tform.ip_address.help_text }}</div>
               {% if tform.ip_address.errors %}<div class="text-danger small">{{ tform.ip_address.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
@@ -331,8 +331,9 @@
         {{ target_formset.empty_form.system_detail }}
       </div>
       <div class="col-md-3">
-        <label class="form-label small fw-semibold mb-1">IP Address</label>
+        <label class="form-label small fw-semibold mb-1">IP Addresses</label>
         {{ target_formset.empty_form.ip_address }}
+        <div class="field-hint">{{ target_formset.empty_form.ip_address.help_text }}</div>
       </div>
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">MAC Address</label>

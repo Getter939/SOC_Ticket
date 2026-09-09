@@ -66,6 +66,7 @@ from .policies import (
     user_can_drive as _user_can_drive,
 )
 from .selectors import get_ticket_detail_read_model
+from .ioc_values import INVENTORY_CATEGORY_CHOICES, normalize_for_category
 from .case_creation import (
     create_project_incident_from_forms,
     create_ticket_from_form,
@@ -1849,6 +1850,23 @@ def _substring_match(fields, term):
     return match
 
 
+def _ticket_search_match(term):
+    # Legacy free-text fields (substring) + the structured TicketIOC rows. The
+    # IOC values are matched as a substring and, where the term normalizes for a
+    # category, as an exact normalized value so defanged input (1[.]2[.]3[.]4)
+    # finds the stored form. Callers must .distinct() — the iocs join fans out.
+    match = _substring_match(TICKET_SEARCH_FIELDS, term)
+    match |= Q(iocs__value__icontains=term)
+    for category, _label in INVENTORY_CATEGORY_CHOICES:
+        try:
+            value = normalize_for_category(category, term)
+        except ValidationError:
+            continue
+        if value and value != term:
+            match |= Q(iocs__value=value)
+    return match
+
+
 @login_required
 def global_search(request):
     query = (request.GET.get('q') or '').strip()
@@ -1867,9 +1885,13 @@ def global_search(request):
     ticket_total = triage_total = 0
 
     if query:
+        # Tickets match on their own fields and their structured IOC values, so a
+        # hash/IP/domain search surfaces the cases it appeared on (handy for
+        # triage). IOC coverage vs the TI platform lives on the IOC Database page.
         ticket_qs = (
             Ticket.objects.visible_to(request.user)
-            .filter(_substring_match(TICKET_SEARCH_FIELDS, query))
+            .filter(_ticket_search_match(query))
+            .distinct()
             .order_by('-created_at')
         )
         ticket_paginator = Paginator(ticket_qs, SEARCH_PAGE_SIZE)

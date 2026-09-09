@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+{% block title %}IOC Database — SOC Support System{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-header__title">IOC Database</h1>
+    <p class="page-header__subtitle">แหล่งรวม IOC จากสองทาง — จาก Ticket และที่ Forensic Analyst อัปโหลดเอง / IOCs from tickets and the analyst's own uploaded findings</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{% url 'global_search' %}">IOC Search</a>
+</div>
+
+<div class="alert alert-light border small">
+  <i class="bi bi-info-circle me-1"></i>
+  ตรวจสอบแต่ละ IOC กับ MISP ด้วยตนเอง แล้วติ๊ก <strong>Checked</strong> เมื่อดำเนินการแล้ว /
+  Review each IOC against MISP and tick <strong>Checked</strong> once handled. Absent = <strong>Not Checked</strong>.
+</div>
+
+<div class="card mb-3"><div class="card-body">
+  <h2 class="h6">อัปโหลด IOC ที่พบเอง / Upload analyst findings (append)</h2>
+  <p class="small text-muted mb-1">CSV (UTF-8) หรือ XLSX, สูงสุด 5 MB / 10,000 rows. คอลัมน์: ID, Category (Hash/IP/Domain/URL/File Path), File name, IOC detail, Note. ID เป็นรหัสที่กำหนดเอง ใช้ตรวจซ้ำ (dedup).</p>
+  <a href="{% url 'ioc_database_template' %}" class="small">ดาวน์โหลด CSV template</a>
+  <form method="post" enctype="multipart/form-data" action="{% url 'ioc_database_import' %}" class="mt-2">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="d-flex gap-2 flex-wrap align-items-start">{{ form.file }}<button class="btn btn-primary btn-sm" type="submit">อัปโหลด / Import</button></div>
+    {{ form.file.errors }}
+  </form>
+</div></div>
+
+{# ── Filter toolbar ── #}
+<div class="card filter-toolbar mb-3"><div class="card-body py-3">
+  <form method="GET" class="row g-2 align-items-end js-submit-loading">
+    <div class="col-md-4">
+      <label class="form-label small fw-bold mb-1">ค้นหา / Search</label>
+      <div class="input-group input-group-sm">
+        <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+        <input type="text" name="q" class="form-control" value="{{ query }}" maxlength="255" placeholder="Value, ID, or Note">
+      </div>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small fw-bold mb-1">สถานะ / Status</label>
+      <select name="status" class="form-select form-select-sm">
+        <option value="all">ทั้งหมด / All</option>
+        <option value="not_checked" {% if status_filter == 'not_checked' %}selected{% endif %}>Not Checked</option>
+        <option value="checked" {% if status_filter == 'checked' %}selected{% endif %}>Checked</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small fw-bold mb-1">แหล่งที่มา / Source</label>
+      <select name="source" class="form-select form-select-sm">
+        <option value="all">ทั้งหมด / All</option>
+        <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>Ticket</option>
+        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>FA upload</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small fw-bold mb-1">ประเภท / Category</label>
+      <select name="category" class="form-select form-select-sm">
+        <option value="all">ทั้งหมด / All</option>
+        {% for code, label in category_choices %}
+        <option value="{{ code }}" {% if category_filter == code %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-1 d-grid">
+      <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
+    </div>
+    {% if query or status_filter != 'all' or source_filter != 'all' or category_filter != 'all' %}
+    <div class="col-12"><a href="{% url 'ioc_database' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด / Clear filters</a></div>
+    {% endif %}
+  </form>
+</div></div>
+
+<div class="text-muted small mb-2">Total {{ counts.total }} · <span class="text-danger">Not Checked {{ counts.not_checked }}</span> · <span class="text-success">Checked {{ counts.checked }}</span> <span class="ms-2">(คลิกหัวตารางเพื่อเรียงลำดับหน้านี้ / click a header to sort this page)</span></div>
+
+<div class="card"><div class="card-body">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle" data-ioc-table>
+      <thead><tr>
+        <th class="sortable" data-key="category" role="button" tabindex="0">Category<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="value" role="button" tabindex="0">Indicator<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="source" role="button" tabindex="0">Source<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="tickets" data-num="1" role="button" tabindex="0">On tickets<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="last" data-num="1" role="button" tabindex="0">Last activity<span class="sort-arrow"></span></th>
+        <th>Action</th>
+      </tr></thead>
+      <tbody>
+      {% for row in database %}
+      <tr data-row data-category="{{ row.category_label }}" data-value="{{ row.value }}" data-status="{{ row.status }}" data-source="{{ row.source_label }}" data-tickets="{{ row.ticket_count }}" data-last="{{ row.last_seen|date:'U'|default:'0' }}">
+        <td>{{ row.category_label }}</td>
+        <td class="font-monospace text-break" style="max-width:320px">{{ row.value }}</td>
+        <td>
+          <form method="post" action="{% url 'ioc_status_toggle' %}" data-status-form class="form-check mb-0">
+            {% csrf_token %}
+            <input type="hidden" name="category" value="{{ row.category }}">
+            <input type="hidden" name="value" value="{{ row.value }}">
+            <input type="hidden" name="next" value="{{ current_path }}">
+            <input class="form-check-input" type="checkbox" name="checked" value="1" id="chk-{{ forloop.counter }}" {% if row.status == 'checked' %}checked{% endif %}>
+            <label class="form-check-label small {% if row.status == 'checked' %}text-success{% else %}text-danger{% endif %}" for="chk-{{ forloop.counter }}">{% if row.status == 'checked' %}Checked{% else %}Not Checked{% endif %}</label>
+          </form>
+        </td>
+        <td><span class="badge {% if 'analyst' in row.sources and 'ticket' in row.sources %}bg-primary{% elif 'analyst' in row.sources %}bg-info text-dark{% else %}bg-secondary{% endif %}">{{ row.source_label }}</span></td>
+        <td>{% if row.ticket_count %}<a href="{% url 'global_search' %}?q={{ row.value|urlencode }}">{{ row.ticket_count }} ticket{{ row.ticket_count|pluralize }}</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="small">{{ row.last_seen|date:'d/m/Y H:i'|default:'—' }}</td>
+        <td>
+          {% if row.analyst_rec %}
+          <form method="post" action="{% url 'analyst_ioc_remove' %}" class="d-inline">
+            {% csrf_token %}
+            <input type="hidden" name="pk" value="{{ row.analyst_rec.pk }}">
+            <input type="hidden" name="next" value="{{ current_path }}">
+            <button class="btn btn-sm btn-outline-danger" data-confirm="ลบ IOC ที่อัปโหลดนี้? / Remove this uploaded IOC?"><i class="bi bi-trash"></i> Remove</button>
+          </form>
+          <div class="small text-muted">ID {{ row.analyst_rec.ext_id }}</div>
+          {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+      </tr>
+      {% empty %}<tr><td colspan="7" class="text-muted py-3">ไม่พบรายการ / No IOCs found.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <nav aria-label="IOC database pages" class="d-flex gap-3 small">
+    {% if database.has_previous %}<a href="{% querystring page=database.previous_page_number %}">Previous</a>{% endif %}
+    <span>{{ database.number }} / {{ database.paginator.num_pages }}</span>
+    {% if database.has_next %}<a href="{% querystring page=database.next_page_number %}">Next</a>{% endif %}
+  </nav>
+</div></div>
+
+<div class="card mt-3"><div class="card-body">
+  <h2 class="h6">ประวัติการนำเข้า / Import history</h2>
+  <div class="table-responsive"><table class="table table-sm">
+    <thead><tr><th>File</th><th>Imported</th><th>By</th><th>Rows</th><th>Added</th><th>Skipped</th></tr></thead>
+    <tbody>{% for batch in imports %}<tr>
+      <td><a href="{% url 'analyst_ioc_download' batch.pk %}">{{ batch.original_name }}</a></td>
+      <td>{{ batch.uploaded_at|date:'d/m/Y H:i' }}</td>
+      <td>{{ batch.uploaded_by.get_full_name|default:batch.uploaded_by.username }}</td>
+      <td>{{ batch.row_count }}</td><td>{{ batch.added_count }}</td><td>{{ batch.skipped_count }}</td>
+    </tr>{% empty %}<tr><td colspan="6" class="text-muted">No imports yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <nav aria-label="Import history pages" class="d-flex gap-3 small">
+    {% if imports.has_previous %}<a href="{% querystring ip=imports.previous_page_number %}">Previous</a>{% endif %}
+    <span>{{ imports.number }} / {{ imports.paginator.num_pages }}</span>
+    {% if imports.has_next %}<a href="{% querystring ip=imports.next_page_number %}">Next</a>{% endif %}
+  </nav>
+</div></div>
+
+<style>
+  [data-ioc-table] th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+  [data-ioc-table] th.sortable:hover { background:var(--ui-hover, #f1f3f5); }
+</style>
+<script nonce="{{ request.csp_nonce }}">
+(() => {
+  const table = document.querySelector('[data-ioc-table]');
+  if (table && !table.dataset.init) {
+    table.dataset.init = '1';
+    const tbody = table.querySelector('tbody');
+    const headers = Array.from(table.querySelectorAll('th.sortable'));
+    let key = null, dir = 'asc';
+    const val = (tr, k, num) => { const v = tr.dataset[k] || ''; return num ? (parseFloat(v) || 0) : v.toLowerCase(); };
+    function sortBy(k, num) {
+      dir = (key === k && dir === 'asc') ? 'desc' : 'asc';
+      key = k;
+      const rows = Array.from(tbody.querySelectorAll('tr[data-row]'));
+      rows.sort((a, b) => { const av = val(a, k, num), bv = val(b, k, num); let c = av < bv ? -1 : av > bv ? 1 : 0; return dir === 'desc' ? -c : c; });
+      rows.forEach(tr => tbody.appendChild(tr));
+      headers.forEach(th => { const a = th.querySelector('.sort-arrow'); if (a) a.textContent = th.dataset.key === k ? (dir === 'asc' ? ' ▲' : ' ▼') : ''; });
+    }
+    headers.forEach(th => {
+      const trigger = () => sortBy(th.dataset.key, th.dataset.num === '1');
+      th.addEventListener('click', trigger);
+      th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); } });
+    });
+  }
+  document.querySelectorAll('form[data-status-form] input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => cb.closest('form').submit());
+  });
+  document.querySelectorAll('button[data-confirm]').forEach(btn => {
+    btn.addEventListener('click', e => { if (!window.confirm(btn.dataset.confirm)) e.preventDefault(); });
+  });
+})();
+</script>
+{% endblock %}

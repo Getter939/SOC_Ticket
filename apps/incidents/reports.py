@@ -32,6 +32,9 @@ from .report_content import (
     SECTION4_ROWS,
     SECTION_TITLES,
 )
+from .ioc_values import (
+    CAT_DOMAIN, CAT_FILE_NAME, CAT_FILE_PATH, CAT_HASH, CAT_IP, CAT_URL,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -220,6 +223,23 @@ def build_ticket_report_context(ticket, generated_at=None):
     asset = ticket.asset_type
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
     is_event_report = _is_event_report(ticket)
+
+    # Structured indicators, grouped by category. Hash / IP / Domain / URL each
+    # get their own Section 4 row; File Name + File Path (plus any legacy
+    # ioc_details text) fill the "Process/File Path" row.
+    ioc_map = {}
+    for row in ticket.iocs.all():
+        ioc_map.setdefault(row.category, []).append(row.value)
+
+    def _ioc(category):
+        return '\n'.join(ioc_map.get(category, []))
+
+    process_parts = []
+    for label, category in (('File Name', CAT_FILE_NAME), ('File Path', CAT_FILE_PATH)):
+        process_parts += [f'{label}: {value}' for value in ioc_map.get(category, [])]
+    if ticket.ioc_details:
+        process_parts.append(ticket.ioc_details)
+
     context = {
         # The official report number carries a presentation-only classification
         # suffix.  The Ticket Reference itself remains immutable in the database.
@@ -241,10 +261,12 @@ def build_ticket_report_context(ticket, generated_at=None):
         'host_name': _value(ticket.device_name),
         'ip_address': _value(ticket.ip_address),
         'operating_system': _value(ticket.operating_system),
-        'ioc_process': _value(ticket.ioc_details),
+        'ioc_process': _value('\n'.join(process_parts)),
         'ioc_command': '-',
-        'ioc_hash': '-',
-        'ioc_ip': _value(ticket.destination_ip),
+        'ioc_hash': _value(_ioc(CAT_HASH)),
+        'ioc_ip': _value(_ioc(CAT_IP) or ticket.destination_ip),
+        'ioc_domain': _value(_ioc(CAT_DOMAIN)),
+        'ioc_url': _value(_ioc(CAT_URL)),
         'ioc_user': _value(ticket.ioc_user),
         'evidence_log': _evidence_log(ticket),
         'action_required': _containment_checklist_flat(ticket),
@@ -528,7 +550,7 @@ def _load_ticket(ticket_id):
             'project_incident', 'created_by', 'created_by__profile',
             'verified_by', 'approved_by', 'assigned_admin',
         )
-        .prefetch_related('attachments')
+        .prefetch_related('attachments', 'iocs')
         .get(pk=ticket_id)
     )
 
@@ -536,7 +558,8 @@ def _load_ticket(ticket_id):
 _DOCX_OPTIONAL_SECTION_FIELDS = {
     f'2. {SECTION_TITLES["2"]}': ('incident_description',),
     f'4. {SECTION_TITLES["4"]}': (
-        'ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip', 'ioc_user',
+        'ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip',
+        'ioc_domain', 'ioc_url', 'ioc_user',
     ),
     f'5. {SECTION_TITLES["5"]}': ('evidence_log',),
     f'6. {SECTION_TITLES["6"]}': ('action_required',),

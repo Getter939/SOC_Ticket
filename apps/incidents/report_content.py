@@ -148,6 +148,8 @@ SECTION4_ROWS = [
     ('kv', 'Process/File Path', 'ioc_process'),
     ('kv', 'คำสั่ง', 'ioc_command'),
     ('kv', 'Hash', 'ioc_hash'),
+    ('kv', 'Domain', 'ioc_domain'),
+    ('kv', 'URL', 'ioc_url'),
     ('kv', 'IP', 'ioc_ip'),
     ('kv', 'User', 'ioc_user'),
 ]

@@ -21,6 +21,7 @@ waitress==3.0.2
 
 # Word report export (apps/incidents/reports.py → DOCX incident reports)
 python-docx==1.2.0
+openpyxl==3.1.5         # Fixed-column TI inventory XLSX imports
 lxml==6.1.1              # required by python-docx
 typing_extensions==4.16.0 # required by python-docx
 
