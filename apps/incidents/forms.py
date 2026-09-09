@@ -11,17 +11,69 @@ from django.core.exceptions import ValidationError
 
 from .ioc_values import (
     CAT_DOMAIN, CAT_FILE_NAME, CAT_FILE_PATH, CAT_HASH, CAT_IP, CAT_URL,
-    normalize_for_category,
+    INVENTORY_CATEGORY_CHOICES, normalize_for_category,
 )
-from .ti_platform import validate_import_file
 from .ip_addresses import IPAddressListField
 
 
-class AnalystIOCImportForm(forms.Form):
-    file = forms.FileField(
-        label='CSV / XLSX', validators=[validate_import_file],
-        widget=forms.ClearableFileInput(attrs={'class': 'form-control', 'accept': '.csv,.xlsx'}),
+class ManualIOCEntryForm(forms.Form):
+    """One IOC typed into the IOC Database's manual-entry section.
+
+    The category select carries a blank first option deliberately: it keeps an
+    untouched extra row "unchanged" so the formset skips it instead of demanding
+    a value.
+    """
+
+    # The entry grid has no header row, so each control is labelled by its own
+    # placeholder plus an aria-label for screen readers.
+    category = forms.ChoiceField(
+        choices=[('', '— ประเภท —')] + list(INVENTORY_CATEGORY_CHOICES),
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm',
+                                   'data-ioc-category': '', 'aria-label': 'ประเภท / Category'}),
     )
+    value = forms.CharField(
+        max_length=500, label='IOC detail',
+        widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'IOC detail',
+                                      'autocomplete': 'off', 'aria-label': 'IOC detail'}),
+    )
+    file_name = forms.CharField(
+        max_length=255, required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'File name',
+                                      'autocomplete': 'off', 'aria-label': 'File name'}),
+    )
+    note = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Note',
+                                      'autocomplete': 'off', 'aria-label': 'Note'}),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        category, value = cleaned.get('category'), cleaned.get('value')
+        if category and value:
+            try:
+                cleaned['value'] = normalize_for_category(category, value)
+            except ValidationError as exc:
+                self.add_error('value', exc)
+        # File name is context for hashes only — the form hides it for other kinds.
+        if category != CAT_HASH:
+            cleaned['file_name'] = ''
+        return cleaned
+
+
+ManualIOCFormSet = forms.formset_factory(ManualIOCEntryForm, extra=1)
+
+
+class ManualIOCEditForm(forms.Form):
+    """Edit one existing manual IOC in place. Normalisation and the duplicate
+    check happen in ti_platform.update_manual_ioc."""
+
+    category = forms.ChoiceField(
+        choices=INVENTORY_CATEGORY_CHOICES,
+        widget=forms.Select(attrs={'class': 'form-select form-select-sm'}),
+    )
+    value = forms.CharField(max_length=500)
+    file_name = forms.CharField(max_length=255, required=False)
 
 
 # POST field name → (category code, label, placeholder). Each field is

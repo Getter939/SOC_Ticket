@@ -4,26 +4,48 @@
 <div class="page-header">
   <div>
     <h1 class="page-header__title">IOC Database</h1>
-    <p class="page-header__subtitle">แหล่งรวม IOC จาก Ticket และที่ Forensic Analyst อัปโหลดเอง</p>
+    <p class="page-header__subtitle">แหล่งรวม IOC จาก Ticket และที่ Forensic Analyst บันทึกเอง</p>
   </div>
   <a class="btn btn-outline-secondary btn-sm" href="{% url 'global_search' %}">IOC Search</a>
 </div>
 
-<div class="alert alert-light border small">
-  <i class="bi bi-info-circle me-1"></i>
-  ตรวจสอบแต่ละ IOC กับ MISP ด้วยตนเอง แล้วติ๊ก <strong>Checked</strong> เมื่อดำเนินการแล้ว
-</div>
-
+{# ── Manual entry (collapsed by default) ── #}
 <div class="card mb-3"><div class="card-body">
-  <h2 class="h6">อัปโหลด IOC ที่พบเอง</h2>
-  <p class="small text-muted mb-1">CSV (UTF-8) หรือ XLSX, สูงสุด 5 MB / 10,000 rows. คอลัมน์: ID, Category (Hash/IP/Domain/URL/File Path), File name, IOC detail, Note. ID เป็นรหัสที่กำหนดเอง</p>
-  <a href="{% url 'ioc_database_template' %}" class="small">ดาวน์โหลด CSV template</a>
-  <form method="post" enctype="multipart/form-data" action="{% url 'ioc_database_import' %}" class="mt-2">
-    {% csrf_token %}
-    {{ form.non_field_errors }}
-    <div class="d-flex gap-2 flex-wrap align-items-start">{{ form.file }}<button class="btn btn-primary btn-sm" type="submit">อัปโหลด / Import</button></div>
-    {{ form.file.errors }}
-  </form>
+  <button type="button" class="btn btn-outline-primary btn-sm" data-entry-toggle aria-expanded="{% if entry_open %}true{% else %}false{% endif %}">
+    <i class="bi bi-plus-lg me-1"></i>เพิ่ม IOC เอง / Add IOC manually
+  </button>
+  <div class="mt-3" data-entry-section {% if not entry_open %}hidden{% endif %}>
+    <form method="post" action="{% url 'ioc_manual_add' %}">
+      {% csrf_token %}
+      {{ manual_formset.management_form }}
+      {% if manual_formset.non_form_errors %}<div class="alert alert-danger py-2 small">{{ manual_formset.non_form_errors }}</div>{% endif %}
+      <div data-entry-rows>
+        {% for entry in manual_formset %}
+        <div class="row g-2 align-items-start mb-2" data-entry-row>
+          <div class="col-md-2">{{ entry.category }}{% if entry.category.errors %}<div class="text-danger small">{{ entry.category.errors }}</div>{% endif %}</div>
+          <div class="col-md-3">{{ entry.value }}{% if entry.value.errors %}<div class="text-danger small">{{ entry.value.errors }}</div>{% endif %}</div>
+          <div class="col-md-2"><div data-file-name-col {% if entry.category.value != 'hash' %}hidden{% endif %}>{{ entry.file_name }}</div></div>
+          <div class="col-md-4">{{ entry.note }}</div>
+          <div class="col-md-1 d-grid"><button type="button" class="btn btn-outline-secondary btn-sm" data-entry-remove aria-label="ลบแถวนี้">&times;</button></div>
+        </div>
+        {% endfor %}
+      </div>
+      <template data-entry-template>
+        <div class="row g-2 align-items-start mb-2" data-entry-row>
+          <div class="col-md-2">{{ manual_formset.empty_form.category }}</div>
+          <div class="col-md-3">{{ manual_formset.empty_form.value }}</div>
+          <div class="col-md-2"><div data-file-name-col hidden>{{ manual_formset.empty_form.file_name }}</div></div>
+          <div class="col-md-4">{{ manual_formset.empty_form.note }}</div>
+          <div class="col-md-1 d-grid"><button type="button" class="btn btn-outline-secondary btn-sm" data-entry-remove aria-label="ลบแถวนี้">&times;</button></div>
+        </div>
+      </template>
+      <div class="d-flex gap-2 mt-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" data-entry-add><i class="bi bi-plus-lg"></i> เพิ่มแถว / Add row</button>
+        <button type="submit" class="btn btn-primary btn-sm">บันทึก / Save</button>
+      </div>
+      <div class="field-hint mt-1">File name ใช้เฉพาะประเภท Hash · ค่าที่มีอยู่แล้วในฐานข้อมูลจะไม่ถูกเพิ่มซ้ำ · ID สร้างให้อัตโนมัติ</div>
+    </form>
+  </div>
 </div></div>
 
 {# ── Filter toolbar ── #}
@@ -49,7 +71,7 @@
       <select name="source" class="form-select form-select-sm">
         <option value="all">ทั้งหมด / All</option>
         <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>Ticket</option>
-        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>FA upload</option>
+        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>Manual</option>
       </select>
     </div>
     <div class="col-md-2">
@@ -78,6 +100,7 @@
       <thead><tr>
         <th class="sortable" data-key="category" role="button" tabindex="0">Category<span class="sort-arrow"></span></th>
         <th class="sortable" data-key="value" role="button" tabindex="0">Indicator<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="note" role="button" tabindex="0">Note<span class="sort-arrow"></span></th>
         <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-arrow"></span></th>
         <th class="sortable" data-key="source" role="button" tabindex="0">Source<span class="sort-arrow"></span></th>
         <th class="sortable" data-key="tickets" data-num="1" role="button" tabindex="0">On tickets<span class="sort-arrow"></span></th>
@@ -86,9 +109,15 @@
       </tr></thead>
       <tbody>
       {% for row in database %}
-      <tr data-row data-category="{{ row.category_label }}" data-value="{{ row.value }}" data-status="{{ row.status }}" data-source="{{ row.source_label }}" data-tickets="{{ row.ticket_count }}" data-last="{{ row.last_seen|date:'U'|default:'0' }}">
+      <tr data-row data-category="{{ row.category_label }}" data-value="{{ row.value }}" data-note="{{ row.note }}" data-status="{{ row.status }}" data-source="{{ row.source_label }}" data-tickets="{{ row.ticket_count }}" data-last="{{ row.last_seen|date:'U'|default:'0' }}">
         <td>{{ row.category_label }}</td>
-        <td class="font-monospace text-break" style="max-width:320px">{{ row.value }}</td>
+        <td class="font-monospace text-break" style="max-width:300px">{{ row.value }}</td>
+        <td class="text-break" style="max-width:220px">
+          <span class="small">{% if row.note %}{{ row.note|truncatechars:60 }}{% else %}<span class="text-muted">—</span>{% endif %}</span>
+          <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-note-open
+                  data-note-category="{{ row.category }}" data-note-value="{{ row.value }}"
+                  data-note-text="{{ row.note }}" aria-label="แก้ไข Note"><i class="bi bi-pencil"></i></button>
+        </td>
         <td>
           <form method="post" action="{% url 'ioc_status_toggle' %}" data-status-form class="form-check mb-0">
             {% csrf_token %}
@@ -104,17 +133,20 @@
         <td class="small">{{ row.last_seen|date:'d/m/Y H:i'|default:'—' }}</td>
         <td>
           {% if row.analyst_rec %}
-          <form method="post" action="{% url 'analyst_ioc_remove' %}" class="d-inline">
-            {% csrf_token %}
-            <input type="hidden" name="pk" value="{{ row.analyst_rec.pk }}">
-            <input type="hidden" name="next" value="{{ current_path }}">
-            <button class="btn btn-sm btn-outline-danger" data-confirm="ลบ IOC ที่อัปโหลดนี้? / Remove this uploaded IOC?"><i class="bi bi-trash"></i> Remove</button>
-          </form>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-open
+                    data-edit-pk="{{ row.analyst_rec.pk }}" data-edit-category="{{ row.category }}"
+                    data-edit-value="{{ row.value }}" data-edit-file-name="{{ row.analyst_rec.file_name }}"
+                    aria-label="แก้ไข"><i class="bi bi-pencil-square"></i></button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-remove-open
+                    data-remove-pk="{{ row.analyst_rec.pk }}" data-remove-id="{{ row.analyst_rec.ext_id }}"
+                    aria-label="ลบ"><i class="bi bi-trash"></i></button>
+          </div>
           <div class="small text-muted">ID {{ row.analyst_rec.ext_id }}</div>
           {% else %}<span class="text-muted">—</span>{% endif %}
         </td>
       </tr>
-      {% empty %}<tr><td colspan="7" class="text-muted py-3">ไม่พบรายการ / No IOCs found.</td></tr>{% endfor %}
+      {% empty %}<tr><td colspan="8" class="text-muted py-3">ไม่พบรายการ / No IOCs found.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -125,30 +157,75 @@
   </nav>
 </div></div>
 
-<div class="card mt-3"><div class="card-body">
-  <h2 class="h6">ประวัติการนำเข้า / Import history</h2>
-  <div class="table-responsive"><table class="table table-sm">
-    <thead><tr><th>File</th><th>Imported</th><th>By</th><th>Rows</th><th>Added</th><th>Skipped</th></tr></thead>
-    <tbody>{% for batch in imports %}<tr>
-      <td><a href="{% url 'analyst_ioc_download' batch.pk %}">{{ batch.original_name }}</a></td>
-      <td>{{ batch.uploaded_at|date:'d/m/Y H:i' }}</td>
-      <td>{{ batch.uploaded_by.get_full_name|default:batch.uploaded_by.username }}</td>
-      <td>{{ batch.row_count }}</td><td>{{ batch.added_count }}</td><td>{{ batch.skipped_count }}</td>
-    </tr>{% empty %}<tr><td colspan="6" class="text-muted">No imports yet.</td></tr>{% endfor %}</tbody>
-  </table></div>
-  <nav aria-label="Import history pages" class="d-flex gap-3 small">
-    {% if imports.has_previous %}<a href="{% querystring ip=imports.previous_page_number %}">Previous</a>{% endif %}
-    <span>{{ imports.number }} / {{ imports.paginator.num_pages }}</span>
-    {% if imports.has_next %}<a href="{% querystring ip=imports.next_page_number %}">Next</a>{% endif %}
-  </nav>
-</div></div>
+{# ── Modals ── #}
+<div class="ioc-modal" id="ioc-note-modal" hidden>
+  <div class="ioc-modal__dialog card"><div class="card-body">
+    <h2 class="h6">Note</h2>
+    <p class="small text-muted mb-2 font-monospace text-break" id="ioc-note-target"></p>
+    <form method="post" action="{% url 'ioc_note_save' %}" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="category" id="ioc-note-category">
+      <input type="hidden" name="value" id="ioc-note-value">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <textarea name="note" id="ioc-note-text" class="form-control form-control-sm" rows="3" maxlength="2000"></textarea>
+      <div class="d-flex gap-2 justify-content-end mt-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-cancel>ยกเลิก / Cancel</button>
+        <button type="submit" class="btn btn-sm btn-primary">บันทึก / Save</button>
+      </div>
+    </form>
+  </div></div>
+</div>
+
+<div class="ioc-modal" id="ioc-edit-modal" hidden>
+  <div class="ioc-modal__dialog card"><div class="card-body">
+    <h2 class="h6">แก้ไข IOC / Edit IOC</h2>
+    <form method="post" action="{% url 'ioc_manual_edit' %}" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="pk" id="ioc-edit-pk">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <label class="form-label small fw-bold mb-1">ประเภท / Category</label>
+      <select name="category" id="ioc-edit-category" class="form-select form-select-sm mb-2" data-edit-category-select>
+        {% for code, label in manual_category_choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+      </select>
+      <label class="form-label small fw-bold mb-1">IOC detail</label>
+      <input type="text" name="value" id="ioc-edit-value" class="form-control form-control-sm mb-2" maxlength="500" autocomplete="off">
+      <div id="ioc-edit-file-name-wrap" hidden>
+        <label class="form-label small fw-bold mb-1">File name</label>
+        <input type="text" name="file_name" id="ioc-edit-file-name" class="form-control form-control-sm mb-2" maxlength="255" autocomplete="off">
+      </div>
+      <div class="d-flex gap-2 justify-content-end mt-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-cancel>ยกเลิก / Cancel</button>
+        <button type="submit" class="btn btn-sm btn-primary">บันทึก / Save</button>
+      </div>
+    </form>
+  </div></div>
+</div>
+
+<div class="ioc-modal" id="ioc-remove-modal" hidden>
+  <div class="ioc-modal__dialog card border-danger"><div class="card-body">
+    <h2 class="h6 text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>ลบ IOC นี้?</h2>
+    <p class="small text-muted mb-2">รายการจะถูกซ่อนจากฐานข้อมูล — พิมพ์ค่าเดิมอีกครั้งเพื่อนำกลับได้ / Hidden from the database; re-typing the value restores it.</p>
+    <p class="small mb-3">ID <span id="ioc-remove-id" class="font-monospace"></span></p>
+    <form method="post" action="{% url 'analyst_ioc_remove' %}" class="d-flex gap-2 justify-content-end mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="pk" id="ioc-remove-pk" value="">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-cancel>ยกเลิก / Cancel</button>
+      <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash me-1"></i>ยืนยันลบ / Remove</button>
+    </form>
+  </div></div>
+</div>
 
 <style>
   [data-ioc-table] th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
   [data-ioc-table] th.sortable:hover { background:var(--ui-hover, #f1f3f5); }
+  .ioc-modal { position:fixed; inset:0; z-index:1080; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.45); }
+  .ioc-modal[hidden] { display:none; }
+  .ioc-modal__dialog { width:100%; max-width:460px; margin:1rem; }
 </style>
 <script nonce="{{ request.csp_nonce }}">
 (() => {
+  // ── Client-side sort of the current page ──
   const table = document.querySelector('[data-ioc-table]');
   if (table && !table.dataset.init) {
     table.dataset.init = '1';
@@ -170,11 +247,102 @@
       th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); } });
     });
   }
+
+  // ── Status checkbox saves immediately ──
   document.querySelectorAll('form[data-status-form] input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', () => cb.closest('form').submit());
   });
-  document.querySelectorAll('button[data-confirm]').forEach(btn => {
-    btn.addEventListener('click', e => { if (!window.confirm(btn.dataset.confirm)) e.preventDefault(); });
+
+  // ── Manual entry section ──
+  const toggle = document.querySelector('[data-entry-toggle]');
+  const section = document.querySelector('[data-entry-section]');
+  if (toggle && section) {
+    toggle.addEventListener('click', () => {
+      section.hidden = !section.hidden;
+      toggle.setAttribute('aria-expanded', String(!section.hidden));
+    });
+  }
+  const rowsBox = document.querySelector('[data-entry-rows]');
+  const tmpl = document.querySelector('[data-entry-template]');
+  const totalForms = document.querySelector('#id_form-TOTAL_FORMS');
+  // File name is context for hashes only.
+  const syncFileName = row => {
+    const cat = row.querySelector('[data-ioc-category]');
+    const col = row.querySelector('[data-file-name-col]');
+    if (cat && col) col.hidden = cat.value !== 'hash';
+  };
+  if (rowsBox) {
+    rowsBox.querySelectorAll('[data-entry-row]').forEach(syncFileName);
+    rowsBox.addEventListener('change', e => {
+      const row = e.target.closest('[data-entry-row]');
+      if (row && e.target.matches('[data-ioc-category]')) syncFileName(row);
+    });
+    rowsBox.addEventListener('click', e => {
+      const btn = e.target.closest('[data-entry-remove]');
+      if (!btn) return;
+      const rows = rowsBox.querySelectorAll('[data-entry-row]');
+      const row = btn.closest('[data-entry-row]');
+      if (rows.length > 1) { row.remove(); }
+      else { row.querySelectorAll('input, select').forEach(f => { f.value = ''; }); syncFileName(row); }
+    });
+  }
+  const addBtn = document.querySelector('[data-entry-add]');
+  if (addBtn && rowsBox && tmpl && totalForms) {
+    addBtn.addEventListener('click', () => {
+      const index = parseInt(totalForms.value, 10) || 0;
+      const holder = document.createElement('div');
+      holder.innerHTML = tmpl.innerHTML.replace(/__prefix__/g, index);
+      const row = holder.firstElementChild;
+      rowsBox.appendChild(row);
+      totalForms.value = index + 1;
+      syncFileName(row);
+      const first = row.querySelector('[data-ioc-category]');
+      if (first) first.focus();
+    });
+  }
+
+  // ── Modals (shared close behaviour) ──
+  const modals = Array.from(document.querySelectorAll('.ioc-modal'));
+  const closeAll = () => modals.forEach(m => { m.hidden = true; });
+  modals.forEach(m => {
+    m.addEventListener('click', e => { if (e.target === m) m.hidden = true; });
+    m.querySelectorAll('[data-modal-cancel]').forEach(b => b.addEventListener('click', () => { m.hidden = true; }));
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
+  const show = id => { const m = document.getElementById(id); if (m) m.hidden = false; };
+
+  document.querySelectorAll('[data-note-open]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('ioc-note-category').value = btn.dataset.noteCategory || '';
+      document.getElementById('ioc-note-value').value = btn.dataset.noteValue || '';
+      document.getElementById('ioc-note-target').textContent = btn.dataset.noteValue || '';
+      document.getElementById('ioc-note-text').value = btn.dataset.noteText || '';
+      show('ioc-note-modal');
+      document.getElementById('ioc-note-text').focus();
+    });
+  });
+
+  const editCat = document.getElementById('ioc-edit-category');
+  const editFileWrap = document.getElementById('ioc-edit-file-name-wrap');
+  const syncEditFileName = () => { if (editCat && editFileWrap) editFileWrap.hidden = editCat.value !== 'hash'; };
+  if (editCat) editCat.addEventListener('change', syncEditFileName);
+  document.querySelectorAll('[data-edit-open]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('ioc-edit-pk').value = btn.dataset.editPk || '';
+      if (editCat) editCat.value = btn.dataset.editCategory || '';
+      document.getElementById('ioc-edit-value').value = btn.dataset.editValue || '';
+      document.getElementById('ioc-edit-file-name').value = btn.dataset.editFileName || '';
+      syncEditFileName();
+      show('ioc-edit-modal');
+    });
+  });
+
+  document.querySelectorAll('[data-remove-open]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('ioc-remove-pk').value = btn.dataset.removePk || '';
+      document.getElementById('ioc-remove-id').textContent = btn.dataset.removeId || '';
+      show('ioc-remove-modal');
+    });
   });
 })();
 </script>

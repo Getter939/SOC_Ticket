@@ -1,51 +1,24 @@
-"""IOC Database: analyst-IOC imports, the two-source unified view, manual review
-status, removal, filters, access boundaries and ticket IOC integration."""
+"""IOC Database: manual entry, the two-source unified view, per-indicator
+annotations (status + note), edit/remove, access boundaries and ticket integration."""
 
-import csv
-import io
-import tempfile
-from datetime import timedelta
-from pathlib import Path
-from unittest.mock import patch
+import re
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
 from django.http import QueryDict
-from django.test import override_settings
 from django.urls import NoReverseMatch, reverse
-from django.utils import timezone
-from openpyxl import Workbook
 
 from apps.accounts.models import UserProfile
 from apps.accounts.testing import MFATestCase
 from .forms import ProjectIncidentForm, TicketEditForm, TicketForm
-from .models import AnalystIOC, AnalystIOCImport, IOCReviewStatus, Ticket, TicketIOC
+from .models import AnalystIOC, IOCReviewStatus, Ticket, TicketIOC
 from .reports import build_ticket_report_context
 from .tests import _pi_post_data, _ticket_post_data
 from .ticket_updates import save_ticket_edit
-from .ti_platform import HEADERS, build_ioc_database, import_inventory, parse_import
+from .ti_platform import build_ioc_database, create_manual_iocs
 
 HASH = 'ab' * 32
-
-
-def csv_upload(rows, header=HEADERS):
-    stream = io.StringIO()
-    writer = csv.writer(stream)
-    writer.writerow(header)
-    writer.writerows(rows)
-    return SimpleUploadedFile('inventory.csv', stream.getvalue().encode('utf-8-sig'))
-
-
-def xlsx_upload(rows):
-    workbook = Workbook()
-    for row in rows:
-        workbook.active.append(row)
-    stream = io.BytesIO()
-    workbook.save(stream)
-    workbook.close()
-    return SimpleUploadedFile('inventory.xlsx', stream.getvalue())
+OTHER_HASH = 'cd' * 32
 
 
 def user(name, role, tier=''):
@@ -63,6 +36,19 @@ def _qd(base, **iocs):
     return qd
 
 
+def entry_post(entries, **extra):
+    """Build a POST payload for the manual-entry formset."""
+    data = {
+        'form-TOTAL_FORMS': str(len(entries)), 'form-INITIAL_FORMS': '0',
+        'form-MIN_NUM_FORMS': '0', 'form-MAX_NUM_FORMS': '1000',
+    }
+    for index, entry in enumerate(entries):
+        for field in ('category', 'value', 'file_name', 'note'):
+            data[f'form-{index}-{field}'] = entry.get(field, '')
+    data.update(extra)
+    return data
+
+
 class IOCDatabaseTests(MFATestCase):
     @classmethod
     def setUpTestData(cls):
@@ -70,161 +56,154 @@ class IOCDatabaseTests(MFATestCase):
         cls.soc = user('ti-soc', UserProfile.ROLE_SOC_STAFF, UserProfile.TIER_T1)
         cls.admin = user('ti-admin', UserProfile.ROLE_SYSTEM_ADMIN)
 
-    def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix='soc-ti-test-', ignore_cleanup_errors=True)
-        self.addCleanup(directory.cleanup)
-        self.media = Path(directory.name)
-        setting = override_settings(MEDIA_ROOT=directory.name)
-        setting.enable()
-        self.addCleanup(setting.disable)
-
-    def import_rows(self, rows):
-        return import_inventory(csv_upload(rows), self.forensic)
-
     def _rows(self, **kwargs):
-        return {r['value']: r for r in build_ioc_database(**kwargs)[0]}
+        return {row['value']: row for row in build_ioc_database(**kwargs)[0]}
 
-    # ── Import & dedup ─────────────────────────────────────────────────── #
+    def add_manual(self, **entry):
+        entry.setdefault('file_name', '')
+        entry.setdefault('note', '')
+        return create_manual_iocs([entry], self.forensic)[0][1]
 
-    def test_import_normalizes_values_and_dedups_on_id(self):
-        first = self.import_rows([
-            ['TI-1', 'Hash', 'malware.exe', HASH, 'Loader'],
-            ['TI-2', 'IP', '', '203.0.113.1', 'C2'],
-        ])
-        self.assertEqual((first.row_count, first.added_count, first.skipped_count), (2, 2, 0))
-        second = import_inventory(csv_upload([
-            ['TI-1', 'Hash', 'malware.exe', HASH.upper(), 'Loader'],
-            ['TI-2', 'IP', '', '203[.]0[.]113[.]1', 'C2'],
-            ['TI-5', 'IP', '', '2001:0db8:0:0:0:0:0:1', 'IPv6'],
-        ]), self.forensic)
-        self.assertEqual((second.added_count, second.skipped_count), (1, 2))
-        self.assertEqual(AnalystIOC.objects.count(), 3)
-        self.assertEqual(AnalystIOC.objects.get(ext_id='TI-1').ioc_detail, HASH)
-        self.assertTrue(AnalystIOC.objects.filter(ioc_detail='2001:db8::1').exists())
-        self.assertEqual(AnalystIOC.objects.get(ext_id='TI-1').source_import, first)
-        self.assertEqual(AnalystIOC.objects.get(ext_id='TI-1').last_seen_import, second)
+    # ── Manual entry ───────────────────────────────────────────────────── #
 
-    def test_duplicate_id_keeps_original_values(self):
-        self.import_rows([['TI-1', 'Domain', '', 'example.org', 'first']])
-        self.import_rows([['TI-1', 'IP', '', '203.0.113.9', 'changed']])
-        row = AnalystIOC.objects.get(ext_id='TI-1')
-        self.assertEqual((row.category, row.ioc_detail, row.note), ('domain', 'example.org', 'first'))
+    def test_manual_add_creates_rows_with_generated_ids(self):
+        self.client.force_login(self.forensic)
+        response = self.client.post(reverse('ioc_manual_add'), entry_post([
+            {'category': 'hash', 'value': HASH.upper(), 'file_name': 'invoice.exe', 'note': 'Loader'},
+            {'category': 'ip', 'value': '203[.]0[.]113[.]1', 'note': 'C2'},
+        ]))
+        self.assertRedirects(response, reverse('ioc_database'))
+        self.assertEqual(AnalystIOC.objects.count(), 2)
+        by_value = {rec.ioc_detail: rec for rec in AnalystIOC.objects.all()}
+        self.assertEqual(set(by_value), {HASH, '203.0.113.1'})          # normalized
+        self.assertEqual(by_value[HASH].file_name, 'invoice.exe')
+        self.assertEqual(by_value[HASH].added_by, self.forensic)
+        for rec in by_value.values():
+            self.assertRegex(rec.ext_id, r'^MAN-\d{4,}$')
+        self.assertEqual(len({rec.ext_id for rec in by_value.values()}), 2)
+        # Notes land on the shared annotation and surface on the row.
+        self.assertEqual(self._rows()[HASH]['note'], 'Loader')
 
-    def test_unique_id_enforced_by_database(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, '']])
-        dup = AnalystIOC.objects.get()
-        dup.pk = None
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            dup.save(force_insert=True)
+    def test_file_name_is_ignored_for_non_hash_categories(self):
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('ioc_manual_add'), entry_post([
+            {'category': 'ip', 'value': '198.51.100.7', 'file_name': 'should-be-dropped.exe'},
+        ]))
+        self.assertEqual(AnalystIOC.objects.get().file_name, '')
 
-    def test_thai_headers_and_categories(self):
-        upload = xlsx_upload([
-            ['รหัส', 'ประเภท', 'ชื่อไฟล์', 'รายละเอียด IOC', 'หมายเหตุ'],
-            ['TI-TH', 'โดเมน', '', 'EXAMPLE.ORG', 'โดเมนอันตราย'],
-        ])
-        import_inventory(upload, self.forensic)
-        row = AnalystIOC.objects.get()
-        self.assertEqual((row.category, row.ioc_detail), ('domain', 'example.org'))
-
-    def test_invalid_rows_are_reported_together(self):
-        upload = csv_upload([
-            ['TI-A', 'Hash', '', 'bad-hash', ''],
-            ['TI-B', 'Domain', '', 'https://x.example', ''],
-            ['TI-C', 'Hash', '', HASH, ''],
-            ['TI-D', 'Nope', '', 'x', ''],
-        ])
-        with self.assertRaises(ValidationError) as ctx:
-            parse_import(upload)
-        joined = ' '.join(ctx.exception.messages)
-        for marker in ('Row 2', 'Row 3', 'Row 5'):
-            self.assertIn(marker, joined)
+    def test_manual_add_reports_an_invalid_value(self):
+        self.client.force_login(self.forensic)
+        response = self.client.post(reverse('ioc_manual_add'), entry_post([
+            {'category': 'hash', 'value': 'not-a-hash'},
+        ]))
+        self.assertEqual(response.status_code, 400)
         self.assertFalse(AnalystIOC.objects.exists())
+        self.assertTrue(response.context['entry_open'])   # section re-opens on errors
 
-    def test_missing_id_detail_and_bad_header(self):
-        for rows, header in [
-            ([['', 'Hash', '', HASH, '']], HEADERS),
-            ([['TI-1', 'Hash', '', '', '']], HEADERS),
-            ([['TI-1', 'Hash', '', HASH, '']], ('ID', 'Category')),
-            ([], HEADERS),
-        ]:
-            with self.subTest(rows=rows), self.assertRaises(ValidationError):
-                parse_import(csv_upload(rows, header=header))
-
-    def test_rejects_formulas_and_corrupt_workbook(self):
-        for upload in [xlsx_upload([HEADERS, ['=1+1', 'Hash', '', HASH, '']]),
-                       SimpleUploadedFile('fake.xlsx', b'not a workbook')]:
-            with self.subTest(name=upload.name), self.assertRaises(ValidationError):
-                parse_import(upload)
-
-    def test_import_limits(self):
-        with patch('apps.incidents.ti_platform.MAX_IMPORT_ROWS', 1):
-            with self.assertRaisesMessage(ValidationError, 'at most 1'):
-                parse_import(csv_upload([['TI-1', 'Hash', '', HASH, ''],
-                                         ['TI-2', 'Hash', '', HASH, '']]))
-        with patch('apps.incidents.ti_platform.MAX_IMPORT_BYTES', 10):
-            with self.assertRaises(ValidationError):
-                parse_import(csv_upload([['TI-1', 'Hash', '', HASH, '']]))
-
-    def test_database_failure_cleans_raw_file_and_batch(self):
-        with patch.object(AnalystIOC.objects, 'get_or_create', side_effect=IntegrityError):
-            with self.assertRaises(IntegrityError):
-                self.import_rows([['TI-1', 'Hash', '', HASH, '']])
-        self.assertFalse(AnalystIOCImport.objects.exists())
-        self.assertEqual([p for p in self.media.rglob('*') if p.is_file()], [])
-
-    def test_older_import_does_not_regress_last_seen(self):
-        newer = self.import_rows([['TI-1', 'Hash', '', HASH, '']])
-        row = AnalystIOC.objects.get()
-        self.assertEqual(row.last_seen_import, newer)
-        with patch('django.utils.timezone.now', return_value=timezone.now() - timedelta(hours=1)):
-            self.import_rows([['TI-1', 'Hash', '', HASH, '']])
-        row.refresh_from_db()
-        self.assertEqual(row.last_seen_import, newer)
-
-    # ── Unified view, status & removal ─────────────────────────────────── #
-
-    def test_database_unifies_both_sources(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, ''], ['TI-2', 'IP', '', '198.51.100.7', '']])
+    def test_duplicates_blocked_against_ticket_and_manual(self):
         ticket = Ticket.objects.create(created_by=self.soc)
-        TicketIOC.objects.create(ticket=ticket, category='hash', value=HASH)          # both
-        TicketIOC.objects.create(ticket=ticket, category='domain', value='t.example')  # ticket only
-        rows = self._rows()
-        self.assertEqual(set(rows[HASH]['sources']), {'ticket', 'analyst'})
-        self.assertEqual(rows['198.51.100.7']['sources'], ['analyst'])
-        self.assertEqual(rows['t.example']['sources'], ['ticket'])
-        self.assertEqual(rows[HASH]['status'], 'not_checked')       # default
-        self.assertEqual(rows[HASH]['ticket_count'], 1)
+        TicketIOC.objects.create(ticket=ticket, category='domain', value='ticket.example')
+        self.assertEqual(self.add_manual(category='hash', value=HASH), 'created')
+        # Same value as a ticket IOC, and same value as an existing manual one.
+        self.assertEqual(self.add_manual(category='domain', value='ticket.example'), 'duplicate')
+        self.assertEqual(self.add_manual(category='hash', value=HASH), 'duplicate')
+        self.assertEqual(AnalystIOC.objects.count(), 1)
 
-    def test_status_toggle_persists_and_is_shared_across_sources(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, '']])
+    def test_removed_value_is_restored_when_retyped(self):
+        self.add_manual(category='hash', value=HASH)
+        rec = AnalystIOC.objects.get()
+        original_id = rec.ext_id
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('analyst_ioc_remove'), {'pk': rec.pk})
+        rec.refresh_from_db()
+        self.assertFalse(rec.is_active)
+        self.assertNotIn(HASH, self._rows())
+        self.assertEqual(self.add_manual(category='hash', value=HASH), 'restored')
+        rec.refresh_from_db()
+        self.assertTrue(rec.is_active)
+        self.assertIsNone(rec.removed_by)
+        self.assertEqual(rec.ext_id, original_id)          # same record, same id
+        self.assertEqual(AnalystIOC.objects.count(), 1)
+
+    # ── Annotations: status + note on any row ──────────────────────────── #
+
+    def test_status_toggle_is_shared_across_sources(self):
+        self.add_manual(category='hash', value=HASH)
         ticket = Ticket.objects.create(created_by=self.soc)
         TicketIOC.objects.create(ticket=ticket, category='hash', value=HASH)
         self.client.force_login(self.forensic)
-        response = self.client.post(reverse('ioc_status_toggle'),
-                                    {'category': 'hash', 'value': HASH, 'checked': '1'})
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(IOCReviewStatus.objects.get(category='hash', value=HASH).checked)
-        self.assertEqual(self._rows()[HASH]['status'], 'checked')   # shared across both sources
-        # Unticking (checkbox absent) sets it back to Not Checked.
+        self.client.post(reverse('ioc_status_toggle'),
+                         {'category': 'hash', 'value': HASH, 'checked': '1'})
+        row = self._rows()[HASH]
+        self.assertEqual(row['status'], 'checked')
+        self.assertEqual(set(row['sources']), {'ticket', 'analyst'})
         self.client.post(reverse('ioc_status_toggle'), {'category': 'hash', 'value': HASH})
         self.assertEqual(self._rows()[HASH]['status'], 'not_checked')
 
-    def test_remove_soft_deletes_analyst_ioc_but_keeps_ticket_twin(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, '']])
+    def test_note_can_be_saved_on_a_ticket_sourced_row(self):
+        ticket = Ticket.objects.create(created_by=self.soc)
+        TicketIOC.objects.create(ticket=ticket, category='domain', value='only.ticket')
+        self.client.force_login(self.forensic)
+        response = self.client.post(reverse('ioc_note_save'), {
+            'category': 'domain', 'value': 'only.ticket', 'note': 'Seen in phishing kit'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._rows()['only.ticket']['note'], 'Seen in phishing kit')
+        self.assertContains(self.client.get(reverse('ioc_database')), 'Seen in phishing kit')
+
+    def test_note_and_status_survive_each_other(self):
+        ticket = Ticket.objects.create(created_by=self.soc)
+        TicketIOC.objects.create(ticket=ticket, category='ip', value='203.0.113.9')
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('ioc_note_save'),
+                         {'category': 'ip', 'value': '203.0.113.9', 'note': 'keep me'})
+        self.client.post(reverse('ioc_status_toggle'),
+                         {'category': 'ip', 'value': '203.0.113.9', 'checked': '1'})
+        annotation = IOCReviewStatus.objects.get(category='ip', value='203.0.113.9')
+        self.assertEqual((annotation.note, annotation.checked), ('keep me', True))
+
+    # ── Edit / remove ──────────────────────────────────────────────────── #
+
+    def test_edit_moves_the_annotation_to_the_new_value(self):
+        self.add_manual(category='ip', value='203.0.113.1', note='first note')
+        rec = AnalystIOC.objects.get()
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('ioc_status_toggle'),
+                         {'category': 'ip', 'value': '203.0.113.1', 'checked': '1'})
+        response = self.client.post(reverse('ioc_manual_edit'), {
+            'pk': rec.pk, 'category': 'ip', 'value': '203.0.113.2', 'file_name': ''})
+        self.assertEqual(response.status_code, 302)
+        rec.refresh_from_db()
+        self.assertEqual(rec.ioc_detail, '203.0.113.2')
+        row = self._rows()['203.0.113.2']
+        self.assertEqual((row['note'], row['status']), ('first note', 'checked'))
+        self.assertFalse(IOCReviewStatus.objects.filter(value='203.0.113.1').exists())
+
+    def test_edit_rejects_a_duplicate_value(self):
+        self.add_manual(category='ip', value='203.0.113.1')
+        self.add_manual(category='ip', value='203.0.113.2')
+        rec = AnalystIOC.objects.get(ioc_detail='203.0.113.1')
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('ioc_manual_edit'), {
+            'pk': rec.pk, 'category': 'ip', 'value': '203.0.113.2', 'file_name': ''})
+        rec.refresh_from_db()
+        self.assertEqual(rec.ioc_detail, '203.0.113.1')    # unchanged
+
+    def test_remove_keeps_a_ticket_twin(self):
+        self.add_manual(category='hash', value=HASH)
         ticket = Ticket.objects.create(created_by=self.soc)
         TicketIOC.objects.create(ticket=ticket, category='hash', value=HASH)
         rec = AnalystIOC.objects.get()
         self.client.force_login(self.forensic)
-        response = self.client.post(reverse('analyst_ioc_remove'), {'pk': rec.pk})
-        self.assertEqual(response.status_code, 302)
+        self.client.post(reverse('analyst_ioc_remove'), {'pk': rec.pk})
         rec.refresh_from_db()
         self.assertFalse(rec.is_active)
         self.assertEqual(rec.removed_by, self.forensic)
-        # Still present via its ticket source, now analyst-less.
         self.assertEqual(self._rows()[HASH]['sources'], ['ticket'])
 
+    # ── View, filters, access ──────────────────────────────────────────── #
+
     def test_filters_status_source_category(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, '']])
+        self.add_manual(category='hash', value=HASH)
         ticket = Ticket.objects.create(created_by=self.soc)
         TicketIOC.objects.create(ticket=ticket, category='domain', value='only.ticket')
         IOCReviewStatus.objects.create(category='hash', value=HASH, checked=True)
@@ -234,26 +213,19 @@ class IOCDatabaseTests(MFATestCase):
         self.assertEqual(list(self._rows(source='ticket')), ['only.ticket'])
         self.assertEqual(list(self._rows(category='domain')), ['only.ticket'])
 
-    # ── Access boundaries ──────────────────────────────────────────────── #
-
-    def test_forensic_can_manage_and_download(self):
+    def test_page_shows_entry_section_note_column_and_manual_badge(self):
+        self.add_manual(category='hash', value=HASH, note='a note')
         self.client.force_login(self.forensic)
-        response = self.client.post(reverse('ioc_database_import'),
-                                    {'file': csv_upload([['TI-1', 'Hash', '', HASH, '']])})
-        self.assertRedirects(response, reverse('ioc_database'))
         page = self.client.get(reverse('ioc_database'))
-        self.assertContains(page, 'IOC Database')
-        self.assertContains(page, 'TI-1')
-        self.assertContains(page, 'Upload analyst findings')
-        self.assertContains(self.client.get(reverse('ioc_database_template')),
-                            'ID,Category,File name,IOC detail,Note')
-        download = self.client.get(reverse('analyst_ioc_download',
-                                           args=[AnalystIOCImport.objects.get().pk]))
-        self.assertEqual(download.status_code, 200)
-        self.assertEqual(download['X-Content-Type-Options'], 'nosniff')
+        self.assertContains(page, reverse('ioc_manual_add'))     # entry form present
+        self.assertContains(page, 'form-0-category')             # formset row rendered
+        self.assertContains(page, 'data-entry-add')              # + row button
+        self.assertContains(page, 'a note')                      # Note column
+        self.assertContains(page, '>Manual<')                    # source badge relabelled
+        self.assertRegex(page.content.decode(), r'MAN-\d{4,}')
 
     def test_database_restricted_to_forensic_and_superuser(self):
-        self.import_rows([['TI-1', 'Hash', '', HASH, '']])
+        self.add_manual(category='hash', value=HASH)
         rec = AnalystIOC.objects.get()
         for account in [self.soc, self.admin,
                         user('ti-owner', UserProfile.ROLE_SYSTEM_OWNER),
@@ -263,27 +235,27 @@ class IOCDatabaseTests(MFATestCase):
             with self.subTest(account=account.username):
                 self.client.force_login(account)
                 self.assertEqual(self.client.get(reverse('ioc_database')).status_code, 403)
-                self.assertEqual(self.client.post(reverse('ioc_database_import')).status_code, 403)
-                self.assertEqual(self.client.post(reverse('ioc_status_toggle'),
-                                                  {'category': 'hash', 'value': HASH}).status_code, 403)
-                self.assertEqual(self.client.post(reverse('analyst_ioc_remove'),
-                                                  {'pk': rec.pk}).status_code, 403)
+                self.assertEqual(self.client.post(reverse('ioc_manual_add'), entry_post([])).status_code, 403)
+                self.assertEqual(self.client.post(reverse('ioc_note_save'), {
+                    'category': 'hash', 'value': HASH, 'note': 'x'}).status_code, 403)
+                self.assertEqual(self.client.post(reverse('ioc_manual_edit'), {
+                    'pk': rec.pk, 'category': 'hash', 'value': OTHER_HASH}).status_code, 403)
+                self.assertEqual(self.client.post(reverse('ioc_status_toggle'), {
+                    'category': 'hash', 'value': HASH}).status_code, 403)
+                self.assertEqual(self.client.post(reverse('analyst_ioc_remove'), {
+                    'pk': rec.pk}).status_code, 403)
                 self.assertNotContains(self.client.get(reverse('global_search')), 'data-label="IOC Database"')
 
-    def test_login_required_and_bad_import_reports_row(self):
+    def test_login_required(self):
         self.assertEqual(self.client.get(reverse('ioc_database')).status_code, 302)
-        self.client.force_login(self.forensic)
-        response = self.client.post(reverse('ioc_database_import'),
-                                    {'file': csv_upload([['TI-1', 'Hash', '', 'bad', '']])})
-        self.assertContains(response, 'Row 2', status_code=400)
-        self.assertFalse(AnalystIOCImport.objects.exists())
 
-    def test_old_routes_are_gone(self):
-        for name in ('ti_platform', 'ti_platform_status', 'ti_platform_mark', 'ioc_check'):
+    def test_removed_routes_are_gone(self):
+        for name in ('ti_platform', 'ti_platform_status', 'ti_platform_mark', 'ioc_check',
+                     'ioc_database_import', 'ioc_database_template', 'analyst_ioc_download'):
             with self.subTest(name=name), self.assertRaises(NoReverseMatch):
                 reverse(name)
 
-    # ── Ticket IOC integration ─────────────────────────────────────────── #
+    # ── Ticket IOC integration (unchanged behaviour) ───────────────────── #
 
     def test_create_ticket_saves_multi_value_structured_iocs(self):
         self.client.force_login(self.soc)
@@ -294,8 +266,7 @@ class IOCDatabaseTests(MFATestCase):
         response = self.client.post(reverse('create_ticket'), data)
         self.assertEqual(response.status_code, 302)
         ticket = Ticket.objects.latest('id')
-        values = {(r.category, r.value) for r in ticket.iocs.all()}
-        self.assertEqual(values, {
+        self.assertEqual({(r.category, r.value) for r in ticket.iocs.all()}, {
             ('ip', '203.0.113.1'), ('ip', '10.0.0.5'),
             ('hash', HASH), ('url', 'https://bad.example.com/x'),
         })
@@ -314,15 +285,13 @@ class IOCDatabaseTests(MFATestCase):
         change = ticket.field_changes.get(field_name='iocs')
         self.assertIn('Hash', change.old_value)
         self.assertIn('203.0.113.1', change.new_value)
-        self.assertEqual({(r.category, r.value) for r in ticket.iocs.all()}, {('ip', '203.0.113.1')})
 
     def test_project_incident_copies_iocs_to_all_members(self):
         self.client.force_login(self.soc)
         data = _pi_post_data(self.admin, self.admin)
         data['ioc_hash'] = [HASH]
         data['ioc_domain'] = ['example.org']
-        response = self.client.post(reverse('create_project_incident'), data)
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.post(reverse('create_project_incident'), data).status_code, 302)
         members = Ticket.objects.filter(project_incident__isnull=False)
         self.assertEqual(members.count(), 2)
         for ticket in members:

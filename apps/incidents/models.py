@@ -3121,45 +3121,31 @@ class TicketIOC(models.Model):
         return f'{self.get_category_display()}: {self.value}'
 
 
+# Retained only because historical migrations reference it by path; the CSV import
+# it served was removed when manual entry replaced file uploads.
 def ti_import_upload_path(instance, filename):
     from pathlib import Path
     from uuid import uuid4
     return f'ti_platform/{uuid4().hex}{Path(filename).suffix.lower()}'
 
 
-class AnalystIOCImport(models.Model):
-    """A file batch the Forensic Analyst uploaded with IOCs they found externally."""
-
-    file = models.FileField(upload_to=ti_import_upload_path)
-    original_name = models.CharField(max_length=255)
-    uploaded_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    row_count = models.PositiveIntegerField(default=0)
-    added_count = models.PositiveIntegerField(default=0)
-    skipped_count = models.PositiveIntegerField(default=0)
-
-    class Meta:
-        ordering = ['-uploaded_at', '-pk']
-
-
 class AnalystIOC(models.Model):
     """A single IOC the Forensic Analyst found through their own external research
-    and uploaded here — NOT the MISP/TI-platform registered set. ``ext_id`` is the
-    analyst's own identifier and the dedup key; ``ioc_detail`` is the value and
-    ``file_name`` is context (never an indicator on its own).
+    and entered by hand — NOT the MISP/TI-platform registered set. ``ext_id`` is a
+    generated ``MAN-####`` reference, ``ioc_detail`` is the value, and ``file_name``
+    is context for hashes (never an indicator on its own).
+
+    The note and the reviewed-against-MISP flag are NOT here: they live on
+    IOCReviewStatus, keyed by (category, value), so ticket-sourced indicators can
+    carry them too.
     """
 
     ext_id = models.CharField(max_length=100, unique=True)
     category = models.CharField(max_length=20, choices=INVENTORY_CATEGORY_CHOICES, db_index=True)
     file_name = models.CharField(max_length=255, blank=True, db_index=True)
     ioc_detail = models.CharField(max_length=500, db_index=True)
-    note = models.TextField(blank=True, default='')
-    source_import = models.ForeignKey(
-        AnalystIOCImport, null=True, blank=True, on_delete=models.PROTECT, related_name='added_iocs')
-    last_seen_import = models.ForeignKey(
-        AnalystIOCImport, null=True, blank=True, on_delete=models.PROTECT, related_name='seen_iocs')
     added_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
-    # Soft-remove: a mistaken upload is hidden from the database but kept for audit.
+    # Soft-remove: a mistaken entry is hidden from the database but kept for audit.
     is_active = models.BooleanField(default=True)
     removed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     removed_at = models.DateTimeField(null=True, blank=True)
@@ -3173,15 +3159,18 @@ class AnalystIOC(models.Model):
 
 
 class IOCReviewStatus(models.Model):
-    """The Forensic Analyst's manual "reviewed against MISP" flag for one indicator.
+    """The Forensic Analyst's annotation for one indicator: the manual
+    "reviewed against MISP" flag AND its note.
 
-    Keyed by (category, value) so a ticket IOC and an uploaded IOC of the same value
-    share one status. An absent row means Not Checked.
+    Keyed by (category, value) so a ticket-sourced IOC and a manually added one of
+    the same value share a single annotation. An absent row means Not Checked with
+    no note.
     """
 
     category = models.CharField(max_length=20, choices=TICKET_CATEGORY_CHOICES, db_index=True)
     value = models.CharField(max_length=500)
     checked = models.BooleanField(default=False)
+    note = models.TextField(blank=True, default='')
     updated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     updated_at = models.DateTimeField(auto_now=True)
 
