@@ -6,6 +6,65 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
+## [Unreleased]
+
+### Changed
+- **The Forensic Analyst now reads every ticket.** Correlating an indicator
+  across incidents was impossible through the previous keyhole of "only cases
+  with a response request assigned to me". Access is **read-only**: every write
+  gate is an independent role test that excludes them (edit, attachment upload,
+  attachment restore, status transitions, report export), so wider reading grants
+  no new action. Their one write path is unchanged — the deliverable on a
+  response request assigned to them. The Red Team Manager keeps response-only
+  visibility.
+
+## [v1.3.0] — 2026-09-09
+
+Adds the **IOC Database** — a single place where indicators from tickets and the
+Forensic Analyst's own research are collected, reviewed against MISP and tracked
+— and lets a ticket record **multiple IP addresses**.
+
+### Added
+- **IOC Database** (sidebar; Forensic Analyst / superuser only). Unifies IOCs
+  from **two sources** — indicators entered on tickets by T1/T2, and indicators
+  the FA found externally and **types in by hand** — keyed by *(category, value)*
+  so the same indicator from both sources is one row showing Source
+  `Ticket` / `Manual` / both. Each indicator carries the FA's annotation: a
+  two-state **Checked / Not Checked** review flag ("reviewed against MISP") and a
+  free-text **Note**, both editable on **any** row including ticket-sourced ones.
+  Manual entry adds several IOCs at once (a row per indicator, mixed categories),
+  generates its own `MAN-####` reference, hides **File name** unless the category
+  is Hash, never adds a value that already exists anywhere, and **restores** a
+  previously removed record if its value is typed again. Manual rows can be
+  edited in place or soft-removed. Filter toolbar (search / status / source /
+  category) plus click-to-sort column headers.
+- **Structured IOCs on tickets.** Ticket creation, Project Incident creation,
+  Tier 2 review and ticket edit gain an **Indicators of Compromise** section with
+  six multi-valued fields — File Name, Hash (SHA-256), Domain, IP Address, URL,
+  File Path — each with a "＋ add" button. Values are validated and normalised per
+  category (defanged input, case, IDNA and IPv6 all handled). They feed ticket
+  search, the change history (one IOC-set audit entry per edit) and the incident
+  report, which gains dedicated **Domain** and **URL** rows in section 4.
+- **Multiple IP addresses per ticket.** `ip_address` accepts a list (comma,
+  semicolon or newline separated), normalised and de-duplicated on save.
+
+### Changed
+- **IOC Search** keeps its ticket and triage results and now also matches a
+  ticket by its structured IOC values, so a hash or defanged IP finds the cases
+  it appeared on.
+- The free-text *IoC อื่น ๆ* box is gone from the ticket forms; existing text is
+  preserved read-only on tickets that have it.
+
+### Database
+- `incidents.0066`–`0072`. `0067` **backfills** structured IOC rows from existing
+  tickets' `destination_ip` / `ioc_details` (both columns are left intact).
+  Rolling back to v1.2.3 requires `migrate incidents 0065` first, which drops the
+  IOC tables and everything entered in the IOC Database — restore from the
+  pre-deploy backup instead if that data matters.
+
+### Docs
+- `docs/ti-platform-inventory.md` rewritten for the IOC Database.
+
 ## [v1.2.3] — 2026-09-07
 
 Adds the **Monitoring (กำลังเฝ้าระวัง)** watch-and-wait state for cases that are

@@ -292,9 +292,21 @@ class TicketVisibilityQuerysetTest(TestCase):
     def test_no_profile_sees_no_tickets(self):
         self.assertEqual(Ticket.objects.visible_to(self.no_profile).count(), 0)
 
-    def test_forensic_sees_only_ticket_with_their_request(self):
-        qs = Ticket.objects.visible_to(self.forensic)
-        self.assertEqual(list(qs), [self.ticket_a])
+    def test_forensic_sees_every_ticket_but_can_act_on_none(self):
+        # Correlating an indicator across incidents needs the whole case load, so
+        # the Forensic Analyst reads everything. It stays READ-ONLY because every
+        # write gate is a role test that excludes them rather than a "can you see
+        # it" test — ticket_b carries no request of theirs.
+        from apps.incidents import policies
+        self.assertEqual(Ticket.objects.visible_to(self.forensic).count(), 3)
+        other = self.ticket_b
+        self.assertFalse(policies.can_edit_ticket(other, self.forensic))
+        self.assertFalse(policies.holds_ticket_court(other, self.forensic))
+        self.assertFalse(policies.can_upload_ticket_attachment(other, self.forensic))
+        self.assertFalse(policies.can_restore_ticket_attachment(self.forensic))
+        self.assertFalse(policies.can_access_ticket_report(self.forensic))
+        for permission in ('TIER1_CREATOR', 'TIER2', 'MANAGER'):
+            self.assertFalse(policies.user_can_drive(other, self.forensic, permission))
 
     def test_redteam_manager_sees_only_ticket_with_their_request(self):
         qs = Ticket.objects.visible_to(self.redteam)
@@ -303,13 +315,15 @@ class TicketVisibilityQuerysetTest(TestCase):
     def test_response_team_visibility_is_not_duplicated(self):
         # A second request assigned to the same responder must not double-count.
         # It has to be a type their role actually receives, or visible_to()
-        # filters it out and the distinct() guard never gets exercised.
+        # filters it out and the distinct() guard never gets exercised. Checked on
+        # the Red Team Manager — the Forensic Analyst now reads every ticket, so
+        # only the red-team path still exercises distinct().
         TicketSubtask.objects.create(
-            ticket=self.ticket_a, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
-            title='Second RCA', assigned_to=self.forensic,
+            ticket=self.ticket_b, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Second pentest', assigned_to=self.redteam,
         )
-        self.assertEqual(self.ticket_a.subtasks.filter(assigned_to=self.forensic).count(), 2)
-        self.assertEqual(Ticket.objects.visible_to(self.forensic).count(), 1)
+        self.assertEqual(self.ticket_b.subtasks.filter(assigned_to=self.redteam).count(), 2)
+        self.assertEqual(Ticket.objects.visible_to(self.redteam).count(), 1)
 
     def test_mismatched_response_type_does_not_expose_ticket(self):
         # K9. Assignment alone must not be a key to the ticket: the request also
@@ -354,15 +368,16 @@ class TicketVisibilityQuerysetTest(TestCase):
     def test_response_team_legacy_subtask_does_not_expose_ticket(self):
         # Response-only access: being handed an ordinary Investigation subtask on
         # an unrelated ticket must NOT expose that ticket. Regression for the
-        # over-broad visible_to filter (was: any assigned subtask).
+        # over-broad visible_to filter (was: any assigned subtask). Checked on the
+        # Red Team Manager — the Forensic Analyst reads every ticket by design.
         TicketSubtask.objects.create(
             ticket=self.ticket_unassigned,
             subtask_type=TicketSubtask.TYPE_INVESTIGATION,
-            title='Dig into logs', assigned_to=self.forensic,
+            title='Dig into logs', assigned_to=self.redteam,
         )
-        visible = Ticket.objects.visible_to(self.forensic)
+        visible = Ticket.objects.visible_to(self.redteam)
         self.assertNotIn(self.ticket_unassigned, visible)
-        self.assertEqual(list(visible), [self.ticket_a])  # only the response one
+        self.assertEqual(list(visible), [self.ticket_b])  # only the response one
 
 
 # ──────────────────────────────────────────────────────────────────────────── #

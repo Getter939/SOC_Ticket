@@ -47,8 +47,9 @@ class TicketQuerySet(models.QuerySet):
         Rules (single authoritative place — never bypass this):
           - SOC staff / SOC manager       → all tickets
           - System admin                  → only tickets where assigned_admin == user
-          - Forensic Analyst / Red Team   → only tickets carrying a RESPONSE
-            Manager                         request OF THEIR OWN TYPE assigned
+          - Forensic Analyst              → all tickets, READ-ONLY (see below)
+          - Red Team Manager              → only tickets carrying a RESPONSE
+                                            request OF THEIR OWN TYPE assigned
                                             to them
           - No profile / unknown role     → empty queryset (safest default)
         """
@@ -63,7 +64,22 @@ class TicketQuerySet(models.QuerySet):
             return self.filter(assigned_admin=user)
         if profile.is_system_owner:
             return self.filter(system_owner=user)
-        # Response-team members get response-only access: a ticket is visible
+        # The Forensic Analyst reads the whole case load — correlating an
+        # indicator across incidents is the job, and that is impossible through
+        # a keyhole of only the cases assigned to them.
+        #
+        # This grants READING only, and deliberately needs no extra guard: every
+        # write gate is an independent ROLE test that excludes Forensic, not a
+        # "can you see it" test — can_edit_ticket (ends at is_soc),
+        # holds_ticket_court (no Forensic branch, so no attachment upload),
+        # user_can_drive (tier1-creator/tier2/manager only),
+        # can_restore_ticket_attachment (is_soc_manager) and
+        # can_access_ticket_report (is_soc). Their single write path is
+        # unchanged: the deliverable on a response request assigned to them
+        # (can_upload_subtask_result), which is keyed to the SUBTASK.
+        if profile.is_forensic:
+            return self
+        # Red Team Manager gets response-only access: a ticket is visible
         # solely because it carries a RESPONSE-type request assigned to them —
         # never because they were handed an ordinary Investigation/Countermeasure
         # subtask. distinct() guards against duplicates when several are assigned.
