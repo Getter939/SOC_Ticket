@@ -4,20 +4,19 @@
 <div class="page-header">
   <div>
     <h1 class="page-header__title">IOC Database</h1>
-    <p class="page-header__subtitle">แหล่งรวม IOC จากสองทาง — จาก Ticket และที่ Forensic Analyst อัปโหลดเอง / IOCs from tickets and the analyst's own uploaded findings</p>
+    <p class="page-header__subtitle">แหล่งรวม IOC จาก Ticket และที่ Forensic Analyst อัปโหลดเอง</p>
   </div>
   <a class="btn btn-outline-secondary btn-sm" href="{% url 'global_search' %}">IOC Search</a>
 </div>
 
 <div class="alert alert-light border small">
   <i class="bi bi-info-circle me-1"></i>
-  ตรวจสอบแต่ละ IOC กับ MISP ด้วยตนเอง แล้วติ๊ก <strong>Checked</strong> เมื่อดำเนินการแล้ว /
-  Review each IOC against MISP and tick <strong>Checked</strong> once handled. Absent = <strong>Not Checked</strong>.
+  ตรวจสอบแต่ละ IOC กับ MISP ด้วยตนเอง แล้วติ๊ก <strong>Checked</strong> เมื่อดำเนินการแล้ว
 </div>
 
 <div class="card mb-3"><div class="card-body">
-  <h2 class="h6">อัปโหลด IOC ที่พบเอง / Upload analyst findings (append)</h2>
-  <p class="small text-muted mb-1">CSV (UTF-8) หรือ XLSX, สูงสุด 5 MB / 10,000 rows. คอลัมน์: ID, Category (Hash/IP/Domain/URL/File Path), File name, IOC detail, Note. ID เป็นรหัสที่กำหนดเอง ใช้ตรวจซ้ำ (dedup).</p>
+  <h2 class="h6">อัปโหลด IOC ที่พบเอง</h2>
+  <p class="small text-muted mb-1">CSV (UTF-8) หรือ XLSX, สูงสุด 5 MB / 10,000 rows. คอลัมน์: ID, Category (Hash/IP/Domain/URL/File Path), File name, IOC detail, Note. ID เป็นรหัสที่กำหนดเอง</p>
   <a href="{% url 'ioc_database_template' %}" class="small">ดาวน์โหลด CSV template</a>
   <form method="post" enctype="multipart/form-data" action="{% url 'ioc_database_import' %}" class="mt-2">
     {% csrf_token %}
@@ -71,7 +70,7 @@
   </form>
 </div></div>
 
-<div class="text-muted small mb-2">Total {{ counts.total }} · <span class="text-danger">Not Checked {{ counts.not_checked }}</span> · <span class="text-success">Checked {{ counts.checked }}</span> <span class="ms-2">(คลิกหัวตารางเพื่อเรียงลำดับหน้านี้ / click a header to sort this page)</span></div>
+<div class="text-muted small mb-2">Total {{ counts.total }} · <span class="text-danger">Not Checked {{ counts.not_checked }}</span> · <span class="text-success">Checked {{ counts.checked }}</span></div>
 
 <div class="card"><div class="card-body">
   <div class="table-responsive">
