@@ -8,6 +8,46 @@ release (tag) dates.
 
 ## [Unreleased]
 
+## [v1.4.0] — 2026-09-09
+
+Takes Wazuh **vulnerability-detector alerts out of the triage queue entirely**
+and makes the queue table workable at a glance.
+
+The production queue held 849 alerts, of which **771 (91%) were vulnerability
+scan output** — 188 CVEs on two kernel packages across five hosts, every one at
+`rule_level` 13 and every one past its 4-hour triage OLA. One problem ("patch
+two kernels") was being presented as 771 pieces of work, at 25 rows to a page,
+burying the 78 real detections beneath it. Vulnerability management belongs in
+Wazuh, which has its own dashboard for it.
+
+### Added
+- **`purge_vulnerability_alerts`** management command — one-off cleanup for the
+  vulnerability alerts stored before ingestion started dropping them. Supports
+  `--dry-run` and `--batch-size`; refuses to delete any alert linked to a
+  ticket, alert link, or bundle, because `Ticket.wazuh_alert` is `SET_NULL` and
+  `TicketAlertLink.alert` cascades.
+- **`WazuhAlert.kind`** (`DETECTION` / `VULNERABILITY`), classified at ingest
+  from the Wazuh rule group. Migration `0007` backfills existing rows.
+- **Agent IP column** on the triage queue. The field was already ingested and
+  already searchable — it was simply never displayed.
+- **Click-to-sort column headers** on the triage queue (time, agent, agent IP,
+  level, rule, status, owner). Rows with no IP or no owner sort last in either
+  direction: an absent value is missing information and must not take the top
+  of the first screen.
+- **Rows-per-page selector** (25 / 50 / 100), replacing a hardcoded 25.
+
+### Changed
+- **Vulnerability-detector alerts are no longer ingested.** Excluded in the
+  OpenSearch query so they are never transferred, and dropped again in
+  `store_alert_hits` — two gates, because the query filter depends on
+  `rule.groups` being mapped as a keyword field, and a silent failure there is
+  the exact accumulation this release exists to end.
+- The triage queue and its sidebar badge are scoped to `kind=DETECTION`, so a
+  vulnerability alert reaching the database by any other route still cannot
+  flood triage. `claim_alert` rejects them outright.
+
+## [v1.3.1] — 2026-09-09
+
 ### Changed
 - **The Forensic Analyst now reads every ticket.** Correlating an indicator
   across incidents was impossible through the previous keyhole of "only cases
