@@ -219,6 +219,8 @@ def can_edit_ticket(ticket, user):
     correction path, not a silent one. For every other role a terminal ticket
     stays frozen.
     """
+    if ticket.status == Ticket.STATUS_CANCELLED:
+        return False
     if user.is_superuser:
         return True
     if ticket.status in Ticket.TERMINAL_STATUSES:

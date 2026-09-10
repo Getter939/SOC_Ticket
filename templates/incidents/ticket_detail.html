@@ -372,6 +372,7 @@ onto its own wrapped row, which space-between then left-aligned.
           </div>
           <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span><div class="text-muted mb-2" style="font-size:.68rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
         </div>
+        {% if not is_terminal %}
         {% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
         <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="row g-2 mb-3 px-1 py-2" style="background:#f6f8fb;border-radius:.5rem;">{% csrf_token %}
           <div class="col-md-3">{{ subtask_update_form.status.label_tag }}
@@ -380,6 +381,7 @@ onto its own wrapped row, which space-between then left-aligned.
           <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
           <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-outline-primary w-100" type="submit"><i class="bi bi-save"></i></button></div>
         </form>
+        {% endif %}
         {% endif %}
         {% endwith %}
         {% empty %}
@@ -507,7 +509,8 @@ onto its own wrapped row, which space-between then left-aligned.
 
   <div class="col-xl-4">
     <div class="action-stack" id="workflow-actions">
-      {% if is_terminal %}
+      {% include 'incidents/_ticket_cancellation.html' %}
+      {% if is_terminal and ticket.status != 'CANCELLED' %}
       <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 verify</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
       {% endif %}
 
@@ -709,5 +712,6 @@ onto its own wrapped row, which space-between then left-aligned.
   </div>
 </div>
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
+{% if can_t2_review %}{% include 'incidents/_occurred_copy_script.html' %}{% endif %}
 {% if clear_draft_key %}<script nonce="{{ request.csp_nonce }}">try{localStorage.removeItem("{{ clear_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
 {% endblock %}

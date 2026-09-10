@@ -191,7 +191,7 @@ def dashboard(request):
         all_tickets = all_tickets.filter(status=status_filter)
 
     active_qs   = all_tickets.exclude(status__in=terminal)
-    closed_qs   = all_tickets.filter(status__in=terminal)
+    closed_qs   = all_tickets.filter(status__in=Ticket.RESOLVED_STATUSES)
 
     # ── Resolution timestamp (no resolved_at field — derive from TicketLog) ─ #
     # First time the ticket entered a terminal state. Coalesced with
@@ -204,6 +204,7 @@ def dashboard(request):
     mttr_stats = _mttr_stats(resolved_qs, now)
 
     stats = {
+        'cancelled': all_tickets.filter(status=Ticket.STATUS_CANCELLED).count(),
         'active': active_qs.count(),
         **mttr_stats,
     }
@@ -575,6 +576,7 @@ _IR_PHASES = [
     # 2026-07-16, which read as "still recovering" for a closed case.
     ('LESSONS',        'Lessons Learned',         [Ticket.STATUS_APPROVED,
                                                    Ticket.STATUS_CLOSED_EVENT]),
+    ('CANCELLED',      'ยกเลิกแล้ว',              [Ticket.STATUS_CANCELLED]),
 ]
 
 
@@ -665,7 +667,7 @@ def executive_dashboard(request):
     # following the dashboard's date-range control. This matches the SOC
     # dashboard definition and keeps the executive KPI comparable over time.
     executive_resolved_qs = _with_resolved_at(
-        all_tickets.filter(status__in=terminal)
+        all_tickets.filter(status__in=Ticket.RESOLVED_STATUSES)
     )
     mttr_stats = _mttr_stats(executive_resolved_qs, now)
 
@@ -683,7 +685,7 @@ def executive_dashboard(request):
     total_hc_delta = total_hc - prev_total_hc
 
     # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
-    hc_range = range_tickets.filter(severity__in=HIGH_CRIT)
+    hc_range = range_tickets.filter(severity__in=HIGH_CRIT).exclude(status=Ticket.STATUS_CANCELLED)
     hc_total = _incident_count(hc_range)
     # A bundle counts as closed only when EVERY member is (matches
     # ProjectIncident.all_closed) — otherwise a partly-contained bundle would
@@ -872,6 +874,7 @@ def executive_dashboard(request):
     table_tickets = page_obj
 
     return render(request, 'dashboard/executive.html', {
+        'cancelled_count': range_tickets.filter(status=Ticket.STATUS_CANCELLED).count(),
         'now': now,
         'total_hc': total_hc,
         'total_hc_delta': total_hc_delta,

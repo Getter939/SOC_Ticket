@@ -109,11 +109,11 @@ class LifecycleDocMatchesStateMachine(SimpleTestCase):
         )
 
     def test_transition_table_matches_allowed_transitions(self):
-        """Every non-terminal state's documented targets == its code targets.
+        """Every forward target is documented; optional step-back rows are legal.
 
         Parses the "Transition reference" markdown table: for each row whose
         first cell names exactly one status code (the FROM), the set of status
-        codes in the second cell (the TO) must equal ALLOWED_TRANSITIONS[FROM].
+        codes in the second cell (the TO) are collected across all rows for FROM.
         Catches a missing edge (drift) or a documented edge the code dropped.
         """
         # Scope to the one authoritative "Transition reference" table — the doc
@@ -137,7 +137,7 @@ class LifecycleDocMatchesStateMachine(SimpleTestCase):
             if len(from_codes) != 1:
                 continue  # header, separator, or prose row — not a FROM row
             (frm,) = tuple(from_codes)
-            documented[frm] = _codes_in(cells[1])
+            documented.setdefault(frm, set()).update(_codes_in(cells[1]))
 
         for frm in Ticket.ALLOWED_TRANSITIONS:
             expected = set(_forward_targets(frm))
@@ -147,8 +147,17 @@ class LifecycleDocMatchesStateMachine(SimpleTestCase):
                 frm, documented,
                 f"transition table has no row for {frm}",
             )
+            self.assertFalse(
+                documented[frm] - set(Ticket.ALLOWED_TRANSITIONS[frm]),
+                f"{frm}: doc contains a transition the state machine does not allow",
+            )
+            # A separate manager step-back row must not overwrite the forward
+            # row. Validate its edges above, then compare mandatory forward edges.
+            step_back_targets = {
+                target for source, target in Ticket.STEP_BACK_EDGES if source == frm
+            }
             self.assertEqual(
-                documented[frm], expected,
+                documented[frm] - step_back_targets, expected,
                 f"{frm}: doc lists targets {sorted(documented[frm])} but "
                 f"ALLOWED_TRANSITIONS says {sorted(expected)}",
             )

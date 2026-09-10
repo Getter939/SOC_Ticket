@@ -8,6 +8,7 @@ removal of TicketAttachment records and their required audit history.
 from dataclasses import dataclass, field
 
 from django.db import transaction
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from .models import Ticket, TicketAttachment, TicketLog
@@ -25,6 +26,9 @@ def add_ticket_attachments(*, ticket, actor, uploads, description='', subtask=No
     """Persist validated ticket evidence, optionally as a subtask deliverable."""
     uploads = tuple(uploads)
     with transaction.atomic():
+        current = Ticket.objects.select_for_update().get(pk=ticket.pk)
+        if current.status == Ticket.STATUS_CANCELLED:
+            raise ValidationError('รายการนี้ยกเลิกแล้ว ไม่สามารถเพิ่มหลักฐานได้')
         attachments = tuple(
             TicketAttachment.objects.create(
                 ticket=ticket,
@@ -42,10 +46,12 @@ def add_ticket_attachments(*, ticket, actor, uploads, description='', subtask=No
 def delete_ticket_attachment(*, attachment, actor, reason):
     """Soft-delete evidence while retaining the file and full audit reason."""
     with transaction.atomic():
+        ticket = Ticket.objects.select_for_update().get(pk=attachment.ticket_id)
+        if ticket.status == Ticket.STATUS_CANCELLED:
+            raise ValidationError('รายการนี้ยกเลิกแล้ว ไม่สามารถลบหลักฐานได้')
         locked_attachment = TicketAttachment.objects.select_for_update().get(
             pk=attachment.pk,
         )
-        ticket = Ticket.objects.select_for_update().get(pk=locked_attachment.ticket_id)
         locked_attachment.deleted_by = actor
         locked_attachment.deleted_at = timezone.now()
         locked_attachment.deleted_reason = reason[:255]
@@ -62,10 +68,10 @@ def delete_ticket_attachment(*, attachment, actor, reason):
 def restore_ticket_attachment(*, attachment, actor):
     """Restore soft-deleted evidence and preserve its prior remover in the log."""
     with transaction.atomic():
+        ticket = Ticket.objects.select_for_update().get(pk=attachment.ticket_id)
         locked_attachment = TicketAttachment.all_objects.select_for_update().get(
             pk=attachment.pk,
         )
-        ticket = Ticket.objects.select_for_update().get(pk=locked_attachment.ticket_id)
         removed_by = (
             locked_attachment.deleted_by.get_full_name()
             or locked_attachment.deleted_by.username

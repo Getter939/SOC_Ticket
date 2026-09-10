@@ -4,6 +4,7 @@
 {% block title %}Dashboard — SOC Support System{% endblock %}
 
 {% block content %}
+{% if stats.cancelled %}<div class="alert alert-secondary">ยกเลิกแล้ว {{ stats.cancelled }} รายการ — แยกจากจำนวนงานที่แก้ไขสำเร็จและระยะเวลาเฉลี่ยในการแก้ไข</div>{% endif %}
 
 <style>
     /* ── Sticky filter bar (sits just under the fixed topbar) ── */

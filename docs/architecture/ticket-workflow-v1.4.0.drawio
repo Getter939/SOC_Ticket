@@ -1,0 +1,503 @@
+<mxfile host="app.diagrams.net" agent="Claude Code" type="device" version="24.7.17">
+  <diagram id="lifecycle" name="1 · Ticket lifecycle (v1.4.0)">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="SOC Ticket — full workflow at v1.4.0 (+ ticket cancellation, in flight)" style="text;html=1;fontSize=20;fontStyle=1;fontColor=#212529;" vertex="1" parent="1">
+          <mxGeometry x="60" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Source of truth: apps/incidents/models.py → Ticket.ALLOWED_TRANSITIONS · 15 statuses (13 live + legacy OWNER_REMEDIATED + CANCELLED). Page 2 = cancellation, page 3 = gates &amp; parallel work." style="text;html=1;fontSize=11;fontColor=#6C757D;" vertex="1" parent="1">
+          <mxGeometry x="60" y="54" width="1100" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_ingest" value="&lt;b&gt;Wazuh ingest&lt;/b&gt;&lt;br&gt;OpenSearch wazuh-alerts-*&lt;br&gt;&lt;i&gt;v1.4.0: DETECTION only — vulnerability-detector alerts are never transferred&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="90" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="n_triage" value="&lt;b&gt;Alert Triage Queue&lt;/b&gt;&lt;br&gt;PENDING → TRIAGING (claim)&lt;br&gt;Tier 1 · OLA 4 ชม. · kind=DETECTION" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="340" y="90" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="n_manual" value="&lt;b&gt;Manual intake&lt;/b&gt;&lt;br&gt;แจ้งเหตุด้วยตนเอง / อีเมล / โทรศัพท์" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="90" width="230" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="n_project" value="&lt;b&gt;Project Incident (รวมเคส)&lt;/b&gt;&lt;br&gt;fan-out 1 เหตุ → member tickets (bundle_suffix)&lt;br&gt;แต่ละใบเดินตาม lifecycle นี้อย่างอิสระ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="142" width="230" height="68" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_new" value="&lt;b&gt;NEW&lt;/b&gt; — แจ้งเหตุใหม่&lt;br&gt;Tier 1 บันทึก severity · category · IOCs" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="240" width="230" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d1" value="Tier 1 verdict&lt;br&gt;Event หรือ Incident?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="355" y="340" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_esc" value="&lt;b&gt;ESCALATED_T2&lt;/b&gt;&lt;br&gt;ส่งต่อให้ Tier 2 — ต้อง claim ก่อนดำเนินการ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="470" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="d2" value="Tier 2 verdict&lt;br&gt;(ผู้ถือ claim เท่านั้น)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="75" y="590" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="n_mon" value="&lt;b&gt;MONITORING&lt;/b&gt; — กำลังเฝ้าระวัง&lt;br&gt;หน้าต่างคงที่ 30 วัน · ครั้งเดียวต่อเคส&lt;br&gt;อยู่ในมือ Tier 1 · นับถอยหลังตอนอ่าน (ไม่มี cron)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="750" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="n_pmer" value="&lt;b&gt;PENDING_MGR_EVENT_REVIEW&lt;/b&gt;&lt;br&gt;ผู้จัดการ SOC ตรวจการปรับลด Incident → Event" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="230" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_t1r" value="&lt;b&gt;T1_REVIEW&lt;/b&gt;&lt;br&gt;คืนให้ Tier 1 &lt;i&gt;เจ้าของเคส&lt;/i&gt; เลือกเส้นทาง" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="610" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_pmt" value="&lt;b&gt;PENDING_MGR_TRIAGE&lt;/b&gt;&lt;br&gt;ผู้จัดการ SOC ตรวจก่อนมอบหมาย&lt;br&gt;ประเมิน Normal / Emergency (บังคับ, write-once)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="620" y="470" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="d_route" value="t1_route ?&lt;br&gt;(Tier 1 ล็อกไว้แล้ว — ผู้จัดการสลับเลนไม่ได้)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="635" y="620" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_ac" value="&lt;b&gt;AWAITING_CONTAINMENT&lt;/b&gt;&lt;br&gt;ผู้ดูแลระบบที่ได้รับมอบหมาย:&lt;br&gt;contain / eradicate / recover" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF3E2;strokeColor=#F59E0B;fontColor=#8A4D0A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="780" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="n_cr" value="&lt;b&gt;CONTAINMENT_REPORTED&lt;/b&gt;&lt;br&gt;ส่งรายงานการควบคุม — รอ Tier 2 ตรวจ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="910" width="230" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_ao" value="&lt;b&gt;AWAITING_OWNER&lt;/b&gt;&lt;br&gt;เจ้าของระบบแก้เอง (ติดต่อนอกระบบ)&lt;br&gt;Tier 1 เป็นตัวแทนบันทึกผล" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="780" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="n_or" value="&lt;b&gt;OWNER_REMEDIATED&lt;/b&gt; — LEGACY&lt;br&gt;ไม่มีเส้นทางเข้าอีกแล้ว เหลือไว้ให้ตั๋วเก่าเดินจบ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;dashed=1;fillColor=#F3F4F6;strokeColor=#9CA3AF;fontColor=#6B7280;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="700" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_pt2" value="&lt;b&gt;PENDING_T2_REVIEW&lt;/b&gt;&lt;br&gt;Tier 2 ตรวจผลการแก้ไขของเจ้าของระบบ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="910" width="230" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d_emg" value="Emergency flag?&lt;br&gt;(ผู้จัดการเท่านั้นที่ตั้ง/แก้)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="1060" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="n_pm" value="&lt;b&gt;PENDING_MANAGER&lt;/b&gt;&lt;br&gt;ผู้จัดการ SOC อนุมัติปิด (เฉพาะ Emergency)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1060" width="230" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_approved" value="&lt;b&gt;APPROVED&lt;/b&gt; — อนุมัติแล้ว&lt;br&gt;ปิดสำเร็จ · approved_by + verified_by" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E6F6EC;strokeColor=#34D399;fontColor=#065F46;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="1060" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_ce" value="&lt;b&gt;CLOSED_EVENT&lt;/b&gt; — ปิด (Event)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E6F6EC;strokeColor=#34D399;fontColor=#065F46;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1180" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="n_cancelled" value="&lt;b&gt;CANCELLED&lt;/b&gt; — ยกเลิกแล้ว&lt;br&gt;terminal · frozen · ดูหน้า 2" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="1300" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note_cancel" value="ยกเลิกรายการได้จาก&lt;b&gt;ทุกสถานะที่ยังทำงานอยู่&lt;/b&gt; (รวม MONITORING และ legacy OWNER_REMEDIATED) — เป็นกระบวนการแยกที่ต้องมีเหตุผลและการอนุมัติ ไม่ใช่ dropdown สถานะ" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="530" y="1290" width="310" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="note_response" value="&lt;b&gt;Response Request gate&lt;/b&gt;&lt;br&gt;ขณะมีคำขอทีมตอบสนอง (VA/PT · InfraSec · Forensics) ที่ยังไม่ DONE ทุกเส้นทางเข้า APPROVED ถูกบล็อก และปุ่มปิดเคสจะหายไป — CLOSED_EVENT ได้รับการยกเว้น (ดูหน้า 3)" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#FFF9E6;strokeColor=#E0B100;fontColor=#6B4E00;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="1180" width="270" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg_title" value="คำอธิบายสี / Legend" style="text;html=1;fontSize=13;fontStyle=1;fontColor=#212529;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="90" width="300" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="Tier 1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="120" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="Tier 2" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="120" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="System Admin" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF3E2;strokeColor=#F59E0B;fontColor=#8A4D0A;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="120" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="SOC Manager" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="120" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="ปิดเคส (terminal)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E6F6EC;strokeColor=#34D399;fontColor=#065F46;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="164" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="ยกเลิก" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="164" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg7" value="LEGACY" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;dashed=1;fillColor=#F3F4F6;strokeColor=#9CA3AF;fontColor=#6B7280;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="164" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg8" value="จุดตัดสินใจ" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="164" width="110" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_edges" value="เส้นทึบเทา = การเดินหน้าตามปกติ&#10;เส้นประชมพู ↩ = manager step-back (แก้เส้นทางที่มอบหมายผิด)&#10;⚠ = ปิดแบบ Event ที่ข้ามผู้จัดการโดยเจตนา (asymmetry 2026-07-23)&#10;เส้นประเทา = เส้นทาง legacy" style="text;html=1;whiteSpace=wrap;fontSize=10;fontColor=#495057;align=left;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="210" width="510" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_ingest" target="n_triage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="claim → สร้าง Ticket" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_triage" target="n_new">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_manual" target="n_new">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_project" target="n_new">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_new" target="d1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="Event (ให้ T2 ยืนยัน)&#10;หรือ Incident ที่ต้องส่ง T2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="d1" target="n_esc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="175" y="385" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="Incident + เลือกเลน&#10;t1_route = ADMIN / OWNER" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="d1" target="n_pmt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="735" y="385" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_esc" target="d2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="Event ที่ Tier 1 จัดไว้แล้ว — T2 ยืนยันและปิด" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d2" target="n_ce">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="315" y="640" /><mxPoint x="315" y="1215" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="Event ที่ T2 ปรับลดจาก Incident" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d2" target="n_pmer">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="45" y="640" /><mxPoint x="45" y="940" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="ยังไม่ใช่ทั้ง Event และ Incident&#10;→ เฝ้าระวัง 30 วัน (ครั้งเดียว)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d2" target="n_mon">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="Incident → คืน Tier 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d2" target="n_t1r">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="มีเหตุเกิดขึ้น → ออกเป็น Incident&#10;(Tier 1 เจ้าของเคส)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_mon" target="n_pmt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="325" y="795" /><mxPoint x="325" y="440" /><mxPoint x="735" y="440" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" value="ครบกำหนดโดยเงียบ → สรุปเป็น Event&#10;(T2 ยืนยันการปิด)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_mon" target="n_esc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="30" y="795" /><mxPoint x="30" y="505" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" value="ผู้จัดการยืนยัน — ปิดเคส" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pmer" target="n_ce">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="305" y="940" /><mxPoint x="305" y="1215" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e16" value="ไม่เห็นด้วย → กลับเป็น Incident ที่ Tier 2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pmer" target="n_esc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="15" y="940" /><mxPoint x="15" y="490" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" value="เลือก Admin / Owner" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_t1r" target="n_pmt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="595" y="645" /><mxPoint x="595" y="515" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_pmt" target="d_route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" value="ADMIN" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d_route" target="n_ac">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="870" y="670" /><mxPoint x="870" y="820" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e20" value="OWNER" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d_route" target="n_ao">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1155" y="670" /><mxPoint x="1155" y="820" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e21" value="ผู้ดูแลระบบส่งรายงาน" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n_ac" target="n_cr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e22" value="T2: ยังไม่สำเร็จ — ตีกลับ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_cr" target="n_ac">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1155" y="970" /><mxPoint x="1155" y="840" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e23" value="T2 ยืนยันการควบคุม (verified_by)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_cr" target="d_emg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e24" value="⚠ T2 ปรับเป็น Event — ปิดโดยไม่ผ่านผู้จัดการ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_cr" target="n_ce">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="660" y="950" /><mxPoint x="660" y="1215" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e25" value="Tier 1 บันทึกผลของเจ้าของ + แนบหลักฐาน (คลิกเดียว)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_ao" target="n_pt2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e26" value="เฉพาะตั๋วเก่าที่ค้างอยู่" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#9CA3AF;fontColor=#6B7280;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_or" target="n_pt2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1575" y="930" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e27" value="T2 ยืนยันการแก้ไข (verified_by)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pt2" target="d_emg">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1150" y="950" /><mxPoint x="1150" y="1105" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e28" value="T2 ปฏิเสธ — กลับไปหาเจ้าของระบบ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pt2" target="n_ao">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e29" value="⚠ T2 ปรับเป็น Event — ปิด" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pt2" target="n_ce">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1295" y="1255" /><mxPoint x="455" y="1255" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e30" value="ไม่ฉุกเฉิน → Tier 2 ปิดเคสเอง" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d_emg" target="n_approved">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e31" value="ฉุกเฉิน (Emergency)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="d_emg" target="n_pm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e32" value="ผู้จัดการอนุมัติ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pm" target="n_approved">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="675" y="1020" /><mxPoint x="1575" y="1020" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e33" value="↩ step-back" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#FB7185;fontColor=#9F1239;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_ac" target="n_pmt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1015" y="600" /><mxPoint x="890" y="600" /><mxPoint x="890" y="538" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e34" value="↩ step-back" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#FB7185;fontColor=#9F1239;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_ao" target="n_pmt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1295" y="580" /><mxPoint x="880" y="580" /><mxPoint x="880" y="493" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e35" value="↩ step-back" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#FB7185;fontColor=#9F1239;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_or" target="n_ao">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1295" y="735" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e36" value="↩ step-back (เลน Admin)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#FB7185;fontColor=#9F1239;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pm" target="n_cr">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="860" y="1080" /><mxPoint x="860" y="1010" /><mxPoint x="900" y="1010" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e37" value="↩ step-back (เลน Owner)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#FB7185;fontColor=#9F1239;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0.25;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_pm" target="n_pt2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="840" y="1170" /><mxPoint x="1237" y="1170" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e38" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#DC3545;endArrow=none;" edge="1" parent="1" source="note_cancel" target="n_cancelled">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e39" value="บล็อก" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#E0B100;fontColor=#6B4E00;fontSize=9;labelBackgroundColor=#FFFFFF;endArrow=cross;endSize=8;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="note_response" target="n_approved">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="cancellation" name="2 · Cancellation (v1.4.0+)">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="c0" />
+        <mxCell id="c1" parent="c0" />
+
+        <mxCell id="c_title" value="การยกเลิกรายการ (Ticket cancellation) — กระบวนการตรวจสอบได้ที่แยกจากการปิดเคส" style="text;html=1;fontSize=18;fontStyle=1;fontColor=#212529;" vertex="1" parent="c1">
+          <mxGeometry x="60" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="c_sub" value="เข้าทาง Ticket.cancellation_action เท่านั้น — เปลี่ยนสถานะทั่วไปเข้าสู่ CANCELLED ไม่ได้ · ADR-0005 · apps/incidents/cancellation.py" style="text;html=1;fontSize=11;fontColor=#6C757D;" vertex="1" parent="c1">
+          <mxGeometry x="60" y="54" width="1000" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_any" value="&lt;b&gt;รายการอยู่ในสถานะที่ยังทำงานอยู่&lt;/b&gt;&lt;br&gt;NEW · ESCALATED_T2 · MONITORING · T1_REVIEW · PENDING_MGR_TRIAGE · AWAITING_CONTAINMENT · CONTAINMENT_REPORTED · AWAITING_OWNER · PENDING_T2_REVIEW · PENDING_MANAGER · PENDING_MGR_EVENT_REVIEW · (legacy OWNER_REMEDIATED)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="60" y="100" width="420" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c_d1" value="ใครเป็นผู้ดำเนินการ?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="170" y="250" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_creator" value="&lt;b&gt;Tier 1 ผู้เปิดรายการ + สถานะยังเป็น NEW&lt;/b&gt;&lt;br&gt;ยกเลิกได้เอง (mode = CREATOR)&lt;br&gt;&lt;i&gt;ฟอร์มสร้างปกติจะส่งรายการต่อทันทีที่บันทึก จึงเกิดกรณีนี้ไม่บ่อย&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#E7F0FF;strokeColor=#3B82F6;fontColor=#1E3A8A;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="100" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="c_mgr" value="&lt;b&gt;ผู้จัดการ SOC (หรือ superuser override)&lt;/b&gt;&lt;br&gt;ยกเลิกโดยตรง (mode = MANAGER)&lt;br&gt;ต้องมีเหตุผลและบันทึกตรวจสอบเหมือนกัน" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="215" width="290" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="c_req" value="&lt;b&gt;ผู้เปิดรายการ หรือ ผู้ถือขั้นตอนปัจจุบัน&lt;/b&gt;&lt;br&gt;ยื่นคำขอยกเลิก (mode = REVIEW)&lt;br&gt;· claim ของ Tier 2 คนอื่นบล็อกการยื่น&lt;br&gt;· การถูกมอบหมาย Response Request อย่างเดียว &lt;u&gt;ไม่&lt;/u&gt; ให้สิทธิ์" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="320" width="290" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_form" value="&lt;b&gt;แบบฟอร์มเหตุผล (บังคับ)&lt;/b&gt;&lt;br&gt;รายการซ้ำ (DUPLICATE) · สร้างรายการผิด (CREATED_IN_ERROR) · เหตุผลอื่น (OTHER)&lt;br&gt;+ คำอธิบายเป็นข้อความ&lt;br&gt;&lt;i&gt;DUPLICATE ต้องอ้างรายการต้นฉบับที่เข้าถึงได้และยังไม่ถูกยกเลิก — ตรวจซ้ำอีกครั้งตอนอนุมัติ&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFF9E6;strokeColor=#E0B100;fontColor=#6B4E00;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="460" width="290" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_pending" value="&lt;b&gt;คำขอสถานะ PENDING — รออนุมัติ&lt;/b&gt;&lt;br&gt;ค้างได้ครั้งละ 1 คำขอต่อรายการ (unique constraint)&lt;br&gt;สถานะรายการและนาฬิกา OLA ไม่เปลี่ยน — งานเดินต่อตามปกติ" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="630" width="290" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_d2" value="ผู้จัดการ SOC พิจารณา" style="rhombus;whiteSpace=wrap;html=1;fillColor=#EEF0F2;strokeColor=#ADB5BD;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="645" y="780" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_subtask" value="&lt;b&gt;เงื่อนไขก่อนอนุมัติ&lt;/b&gt;&lt;br&gt;งานย่อย / Response Request ที่ยังไม่จบ ต้อง &lt;i&gt;เสร็จสิ้น&lt;/i&gt; หรือถูกผู้จัดการ &lt;i&gt;เลือกให้ยกเลิก&lt;/i&gt; ทีละรายการ (ตรวจซ้ำกับงานจริงตอนอนุมัติ) → งานเหล่านั้นได้สถานะ CANCELLED ไม่ใช่ DONE" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#FFF9E6;strokeColor=#E0B100;fontColor=#6B4E00;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="c1">
+          <mxGeometry x="180" y="770" width="330" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_reject" value="&lt;b&gt;REJECTED — ไม่อนุมัติ&lt;/b&gt;&lt;br&gt;ขั้นตอนปัจจุบันคงเดิม ยื่นคำขอใหม่ได้" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="1000" y="630" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c_withdraw" value="&lt;b&gt;WITHDRAWN — ถอนคำขอ&lt;/b&gt;&lt;br&gt;เฉพาะผู้ยื่นเท่านั้น" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="1000" y="710" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c_super" value="&lt;b&gt;SUPERSEDED&lt;/b&gt;&lt;br&gt;รายการปิดตามปกติ (APPROVED / CLOSED_EVENT) ก่อนมีคำตัดสิน" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="c1">
+          <mxGeometry x="1000" y="790" width="250" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_cancelled" value="&lt;b&gt;CANCELLED — ยกเลิกแล้ว&lt;/b&gt;&lt;br&gt;terminal · frozen · เปิดใหม่ไม่ได้&lt;br&gt;stamp closed_at แต่ &lt;u&gt;ไม่&lt;/u&gt; stamp approved_by / verified_by" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=11;" vertex="1" parent="c1">
+          <mxGeometry x="600" y="950" width="290" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c_effect" value="&lt;b&gt;ผลหลังยกเลิก&lt;/b&gt;&lt;br&gt;· ออกจากคิวงานและแรงกดดัน OLA&lt;br&gt;· แสดงแยกในประวัติ / แดชบอร์ด / รายงาน (พร้อมคำตัดสิน)&lt;br&gt;· ไม่ถูกนับใน MTTR และอัตราการปิดสำเร็จ (mart)&lt;br&gt;· เก็บ ผู้ขอ · ผู้ตัดสิน · เหตุผล · เวลา · id งานที่ถูกยกเลิก · TicketLog ไว้ครบ&lt;br&gt;· หลักฐาน, Alert links, สมาชิก Project Incident และ classification ยังอยู่เหมือนเดิม&lt;br&gt;· Alert ที่ผูกไว้ &lt;u&gt;ไม่&lt;/u&gt; ถูกส่งกลับคิว triage" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#E6F6EC;strokeColor=#34D399;fontColor=#065F46;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="c1">
+          <mxGeometry x="1000" y="930" width="420" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ce1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="c1" source="c_any" target="c_d1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_d1" target="c_creator">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="540" y="295" /><mxPoint x="540" y="145" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_d1" target="c_mgr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_d1" target="c_req">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="540" y="295" /><mxPoint x="540" y="370" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_creator" target="c_form">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="560" y="145" /><mxPoint x="560" y="490" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_mgr" target="c_form">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="570" y="255" /><mxPoint x="570" y="520" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="c1" source="c_req" target="c_form">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce8" value="mode = REVIEW" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="c1" source="c_form" target="c_pending">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce9" value="mode = CREATOR / MANAGER&#10;ยกเลิกทันที ไม่ผ่านคำขอ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_form" target="c_cancelled">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="530" y="550" /><mxPoint x="530" y="995" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="c1" source="c_pending" target="c_d2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce11" value="อนุมัติ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="c1" source="c_d2" target="c_cancelled">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce12" value="ไม่อนุมัติ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_d2" target="c_reject">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="930" y="825" /><mxPoint x="930" y="660" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce13" value="ผู้ยื่นถอนคำขอ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_pending" target="c_withdraw">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="950" y="675" /><mxPoint x="950" y="740" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce14" value="รายการปิดตามปกติก่อน" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;fontSize=9;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="c1" source="c_pending" target="c_super">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="940" y="698" /><mxPoint x="940" y="825" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ce15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#E0B100;endArrow=none;" edge="1" parent="c1" source="c_subtask" target="c_d2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce16" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#34D399;endArrow=none;" edge="1" parent="c1" source="c_cancelled" target="c_effect">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="gates" name="3 · Gates &amp; parallel work">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="g0" />
+        <mxCell id="g1" parent="g0" />
+
+        <mxCell id="g_title" value="Response Requests (งานคู่ขนาน) และ ประตูควบคุมของ state machine" style="text;html=1;fontSize=18;fontStyle=1;fontColor=#212529;" vertex="1" parent="g1">
+          <mxGeometry x="60" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_spawn" value="&lt;b&gt;ผู้จัดการ SOC เปิด Response Request&lt;/b&gt;&lt;br&gt;ได้ทุกขั้นตอนที่ยังทำงานอยู่ (TicketSubtask ชนิดพิเศษ)&lt;br&gt;auto-assign ให้ผู้ถือ role นั้น (ถ้ามีหลายคนจะให้เลือก)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFECE7;strokeColor=#FB7185;fontColor=#9F1239;fontSize=11;" vertex="1" parent="g1">
+          <mxGeometry x="60" y="90" width="320" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_vapt" value="&lt;b&gt;VA / Pentest&lt;/b&gt; (VA_PT)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF3E2;strokeColor=#F59E0B;fontColor=#8A4D0A;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="450" y="80" width="230" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="g_infra" value="&lt;b&gt;Infrastructure Security&lt;/b&gt; (INFRA_SEC)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF3E2;strokeColor=#F59E0B;fontColor=#8A4D0A;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="450" y="135" width="230" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="g_forensic" value="&lt;b&gt;Forensics / RCA&lt;/b&gt; (FORENSIC_RCA)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF3E2;strokeColor=#F59E0B;fontColor=#8A4D0A;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="450" y="190" width="230" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_rtm" value="&lt;b&gt;Red Team Manager&lt;/b&gt;&lt;br&gt;เห็นเฉพาะเคสที่มีคำขอของตน" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="750" y="90" width="230" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="g_fa" value="&lt;b&gt;Forensic Analyst&lt;/b&gt;&lt;br&gt;อ่านทุกเคสได้ (read-only, v1.3.1)&lt;br&gt;เขียนได้เฉพาะผลงานในคำขอของตน" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F1EBFE;strokeColor=#8B5CF6;fontColor=#5B21B6;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="750" y="175" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_flow" value="&lt;b&gt;คิว Response Requests&lt;/b&gt; (/incidents/response-requests/)&lt;br&gt;OPEN → IN_PROGRESS → DONE&lt;br&gt;(หรือ CANCELLED เมื่อยกเลิกรายการ — ดูหน้า 2)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8F9FA;strokeColor=#6C757D;fontColor=#343A40;fontSize=10;" vertex="1" parent="g1">
+          <mxGeometry x="1050" y="120" width="290" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_gate" value="&lt;b&gt;ประตูปิดเคส&lt;/b&gt;&lt;br&gt;ขณะยังมีคำขอที่ไม่ใช่ DONE — ทุกเส้นทางเข้า APPROVED ถูกบล็อก&lt;br&gt;(ทั้งเส้นที่ Tier 2 ปิดเอง และเส้นที่ผู้จัดการอนุมัติ) และปุ่ม Verify/ปิดเคสจะ &lt;i&gt;หายไป&lt;/i&gt; ไม่ใช่แค่ถูกปฏิเสธตอนกด&lt;br&gt;&lt;b&gt;ข้อยกเว้น:&lt;/b&gt; CLOSED_EVENT ยังปิดได้ — คำขอที่ค้างอยู่จะอยู่ต่อไป" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FDECEC;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=11;" vertex="1" parent="g1">
+          <mxGeometry x="1050" y="250" width="290" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_rules" value="&lt;b&gt;ประตูควบคุมอื่น ๆ ที่ state machine บังคับ&lt;/b&gt;&#10;&#10;1. Tier 2 claim — ต้อง claim ก่อนดำเนินการ; claim ของคนอื่นบล็อกใน transition_to; claim ถูกล้างทุกครั้งที่เปลี่ยนสถานะ (คิวครอบ 3 ขั้นตอน)&#10;&#10;2. t1_route — Tier 1 กำหนดเลน (ADMIN/OWNER) ตอนส่งเข้า PENDING_MGR_TRIAGE; ผู้จัดการ &quot;ตรวจและ flag&quot; ได้ แต่สลับเลนไม่ได้&#10;&#10;3. Emergency — ผู้จัดการเท่านั้น (superuser bypass); ประเมินครั้งแรกเป็นข้อบังคับที่ PENDING_MGR_TRIAGE (write-once ทั้ง Normal และ Emergency); reassess ได้ภายหลังพร้อมเหตุผล แต่ไม่ได้ที่ PENDING_MGR_TRIAGE และไม่ได้หลังปิดเคส&#10;&#10;4. requires_manager_verification = is_emergency เท่านั้น — ความรุนแรงระดับ Critical ไม่ทำให้ต้องผ่านผู้จัดการ&#10;&#10;5. MONITORING — เข้าได้เฉพาะจาก ESCALATED_T2 โดย Tier 2, ครั้งเดียวต่อเคส (has_been_monitored), 30 วันคงที่ ปรับไม่ได้&#10;&#10;6. Event downgrade โดย Tier 2 ต้องผ่านผู้จัดการ (PENDING_MGR_EVENT_REVIEW) — แต่การปรับเป็น Event กลางเลน containment/owner ⚠ ยังข้ามผู้จัดการอยู่ (asymmetry ที่ตัดสินใจไว้ 2026-07-23)&#10;&#10;7. Manager step-back — ย้อนกลับได้เฉพาะขอบใน STEP_BACK_EDGES และผ่าน transition_to เดิม เพื่อรักษา invariant/audit ทั้งหมด&#10;&#10;8. CANCELLED เข้าได้ทาง cancellation_action เท่านั้น ไม่ใช่ dropdown สถานะ" style="shape=note;whiteSpace=wrap;html=1;size=16;fillColor=#FFF9E6;strokeColor=#E0B100;fontColor=#6B4E00;fontSize=11;align=left;spacingLeft=8;spacingTop=4;verticalAlign=top;" vertex="1" parent="g1">
+          <mxGeometry x="60" y="300" width="920" height="620" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ge1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_spawn" target="g_vapt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_spawn" target="g_infra">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_spawn" target="g_forensic">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_vapt" target="g_rtm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_infra" target="g_rtm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_forensic" target="g_fa">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_rtm" target="g_flow">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6C757D;" edge="1" parent="g1" source="g_fa" target="g_flow">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ge9" value="ยังไม่ DONE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#DC3545;fontColor=#7F1D1D;fontSize=9;labelBackgroundColor=#FFFFFF;" edge="1" parent="g1" source="g_flow" target="g_gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

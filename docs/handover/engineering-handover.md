@@ -1,7 +1,8 @@
 ﻿# Engineering Handover — SOC Ticketing System
 
 > **Audience:** the developer taking over this codebase · **Status:** Current
-> **Reviewed against:** `main` on 2026-08-27
+> **Reviewed against:** `main` on 2026-08-27 · **§3.1 lifecycle** refreshed to
+> v1.4.0 on 2026-09-10 (adds MONITORING, step-back, cancellation)
 > **Thai version:** [engineering-handover.th.md](engineering-handover.th.md)
 
 This document is the entry point for anyone taking over this project. It covers
@@ -88,7 +89,9 @@ Migration heads at time of writing: `incidents 0062`, `wazuh_ingest 0006`,
 
 ### 3.1 Ticket lifecycle (state machine)
 
-**Thirteen** states, defined in `apps/incidents/models.py` (`STATUS_CHOICES`,
+**Fifteen** states in `STATUS_CHOICES` — **14 reachable** (through the workflow
+or the cancellation process) **plus 1 legacy** (`OWNER_REMEDIATED`, nothing
+transitions into it). Defined in `apps/incidents/models.py` (`STATUS_CHOICES`,
 `ALLOWED_TRANSITIONS`) and enforced by `Ticket.transition_to`:
 
 ```
@@ -101,6 +104,11 @@ NEW
  │                                            │                       ├─(mgr confirms)──► CLOSED_EVENT
  │                                            │                       └─(mgr rejects; back to INCIDENT)
  │                                            │                            └──► ESCALATED_T2
+ │                                            ├─(T2: not yet Event or Incident)
+ │                                            │   ──► MONITORING  [30-day watch, once per case]
+ │                                            │        ├─(something happens)──► PENDING_MGR_TRIAGE
+ │                                            │        └─(window closes quietly; T2 confirms
+ │                                            │            the close)──────────► ESCALATED_T2
  │                                            └─(T2: INCIDENT)───► T1_REVIEW
  │                                                                    │
  └─(T1 commits an INCIDENT, picking t1_route)◄───────────────────────┘
@@ -123,6 +131,14 @@ NEW
         both verification queues ─┬─(verified, not emergency)────┴──► APPROVED (terminal)
                                   ├─(verified + emergency)──► PENDING_MANAGER ──► APPROVED
                                   └─(T2 reclassifies → EVENT)──────────► CLOSED_EVENT (terminal)
+
+ Cross-cutting (not drawn above, to keep the tree legible):
+ • Manager STEP-BACK (backward correction, STEP_BACK_EDGES): AWAITING_CONTAINMENT
+   & AWAITING_OWNER → PENDING_MGR_TRIAGE; PENDING_MANAGER → CONTAINMENT_REPORTED
+   (ADMIN lane) or PENDING_T2_REVIEW (OWNER lane); OWNER_REMEDIATED → AWAITING_OWNER.
+ • CANCELLED (terminal): reachable from every active state via
+   Ticket.cancellation_action — a separate audited process, NOT a status edge.
+   (Cancellation is unreleased at time of writing; see ADR-0005.)
 ```
 
 Rules that are easy to get wrong:
@@ -134,6 +150,20 @@ Rules that are easy to get wrong:
   it themselves and Tier 1 records the outcome.
 - **The manager review is blocking and Incident-only.** Every Incident passes
   `PENDING_MGR_TRIAGE` before any containment work starts.
+- **`MONITORING` is a watch-and-wait park (v1.2.3).** Only Tier 2 may grant it,
+  only from `ESCALATED_T2`, for a **fixed 30 days**, **once per case**
+  (`has_been_monitored` guards the second attempt). The case sits in the Tier 1
+  creator's court and resolves to Incident (→ `PENDING_MGR_TRIAGE`) or Event
+  (→ `ESCALATED_T2`, where Tier 2 confirms the close). Expiry is computed on
+  read (green→amber→red badge) — there is no scheduler. Tier 1 may *recommend*
+  monitoring at creation; the recommendation is advisory, Tier 2 decides.
+- **Only the SOC Manager can step a ticket backward** (`STEP_BACK_EDGES`,
+  `Ticket.step_back`). It exists to correct a mis-route (wrong admin, needs
+  re-triage) and runs through `transition_to`, so it inherits every invariant
+  and the audit log rather than a parallel hand-rolled write; the write-once
+  stamps (`verified_by`, `approved_by`, `emergency_decided_by`) are untouched
+  because no step-back target is a status those are stamped on. `can_step_back`
+  refuses terminal states, so it never reopens a closed or cancelled ticket.
 - **A Tier 2 Event *downgrade* now reaches the manager** (2026-07-23). The old
   blanket rule "the SOC Manager is never involved in an Event" is **no longer
   true** at the escalation stage: if a ticket arrived at Tier 2 as an Incident
@@ -161,7 +191,9 @@ Rules that are easy to get wrong:
   now runs `AWAITING_OWNER → PENDING_T2_REVIEW` directly. `OWNER_REMEDIATED`
   stays in `STATUS_CHOICES` with a single out-edge (`→ PENDING_T2_REVIEW`) only
   so tickets already in it can finish — nothing transitions into it. So
-  `STATUS_CHOICES` is **12 active states + 1 legacy**. See the change log §0.3.
+  `STATUS_CHOICES` is **14 reachable states + 1 legacy** (the reachable count
+  includes `CANCELLED`, reached only through the cancellation process). See the
+  change log §0.3.
 - **Mid-containment reclassification**: Tier 2 may flip an in-flight Incident
   to `EVENT` and close it from either verification queue
   (`EVENT_CLOSE_TRANSITIONS`) — this bypasses the manager *even if the

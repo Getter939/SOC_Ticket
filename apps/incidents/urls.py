@@ -1,8 +1,10 @@
 from django.urls import path
 from . import views
+from .cancellation_views import ticket_cancellation
 from . import ti_platform_views as ti_views
 
 urlpatterns = [
+    path('ticket/<int:pk>/cancellation/', ticket_cancellation, name='ticket_cancellation'),
     path('ioc-database/', ti_views.ioc_database, name='ioc_database'),
     path('ioc-database/add/', ti_views.ioc_manual_add, name='ioc_manual_add'),
     path('ioc-database/edit/', ti_views.ioc_manual_edit, name='ioc_manual_edit'),

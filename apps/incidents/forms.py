@@ -351,6 +351,7 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             'severity',
             'ncsa_severity',
             'incident_datetime',
+            'event_occurred_at',
             'reference_id',
             'log_source',
             # Section 2
@@ -385,6 +386,10 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Malware – Suspicious SoftEther signed file on SRV-DB-01'}),
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
             'incident_datetime':  forms.DateTimeInput(
+                attrs={'class': 'form-control', 'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M',
+            ),
+            'event_occurred_at':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
             ),
@@ -481,7 +486,9 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             elif route == self.ROUTE_ASSIGN_ADMIN and not cleaned.get('assigned_admin'):
                 self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
         elif classification == Ticket.CLASSIFICATION_EVENT:
-            # A benign Event is closed immediately — no route, no admin.
+            # An Event carries no lane and no admin — it goes to Tier 2 for
+            # confirmation before it can close (see _apply_initial_ticket_route),
+            # so there is nothing to route here.
             cleaned['t1_route'] = ''
             cleaned['assigned_admin'] = None
         return cleaned
@@ -513,8 +520,8 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
     class Meta:
         model = Ticket
         fields = [
-            'severity', 'ncsa_severity', 'incident_datetime', 'reference_id',
-            'log_source',
+            'severity', 'ncsa_severity', 'incident_datetime', 'event_occurred_at',
+            'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
             'ioc_user', 'mitre_tactics',
@@ -525,6 +532,10 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
         widgets = {
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
             'incident_datetime':  forms.DateTimeInput(
+                attrs={'class': 'form-control', 'type': 'datetime-local'},
+                format='%Y-%m-%dT%H:%M',
+            ),
+            'event_occurred_at':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
                 format='%Y-%m-%dT%H:%M',
             ),
@@ -663,7 +674,7 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
         model = Ticket
         fields = [
             'classification', 'incident_name', 'severity', 'ncsa_severity',
-            'incident_datetime', 'reference_id', 'log_source',
+            'incident_datetime', 'event_occurred_at', 'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address', 'mac_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
@@ -674,6 +685,9 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
         widgets = {
             'classification': forms.RadioSelect(),
             'incident_datetime': forms.DateTimeInput(
+                attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
+            ),
+            'event_occurred_at': forms.DateTimeInput(
                 attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
             ),
             'issue_description': forms.Textarea(attrs={'rows': 4}),
@@ -883,6 +897,13 @@ class ResponseRequestForm(forms.ModelForm):
 
 
 class SubtaskUpdateForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['status'].choices = [
+            choice for choice in TicketSubtask.STATUS_CHOICES
+            if choice[0] != TicketSubtask.STATUS_CANCELLED
+        ]
+
     class Meta:
         model = TicketSubtask
         fields = ['status', 'result_notes']

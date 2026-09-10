@@ -249,6 +249,18 @@ class ProjectIncident(models.Model):
         total = self.member_count
         return total > 0 and self.open_member_count == 0
 
+    @property
+    def cancelled_member_count(self):
+        return self.member_tickets.filter(status=Ticket.STATUS_CANCELLED).count()
+
+    @property
+    def resolved_member_count(self):
+        return self.member_tickets.filter(status=Ticket.STATUS_APPROVED).count()
+
+    @property
+    def event_closed_member_count(self):
+        return self.member_tickets.filter(status=Ticket.STATUS_CLOSED_EVENT).count()
+
 
 class ProjectIncidentLog(models.Model):
     """Audit history for group-level coordination decisions."""
@@ -368,6 +380,7 @@ class Ticket(models.Model):
     STATUS_MONITORING           = 'MONITORING'
     STATUS_APPROVED             = 'APPROVED'
     STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
+    STATUS_CANCELLED            = 'CANCELLED'
 
     # Fixed monitoring window. Not analyst-configurable on purpose: 30 days is
     # the absolute watch duration, with no extension and no second round.
@@ -388,10 +401,12 @@ class Ticket(models.Model):
         (STATUS_PENDING_MGR_EVENT_REVIEW, 'รอผู้จัดการตรวจสอบการปิดแบบ Event'),
         (STATUS_APPROVED,             'อนุมัติแล้ว'),
         (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
+        (STATUS_CANCELLED,            'ยกเลิกแล้ว'),
     ]
 
     # States where no further action is possible
-    TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_EVENT})
+    RESOLVED_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_EVENT})
+    TERMINAL_STATUSES = RESOLVED_STATUSES | {STATUS_CANCELLED}
 
     # ------------------------------------------------------------------ #
     # Status pill colors — SINGLE SOURCE OF TRUTH                          #
@@ -426,6 +441,7 @@ class Ticket(models.Model):
         STATUS_PENDING_MGR_EVENT_REVIEW: ('#b5651d', '#ffffff'),  # burnt orange — manager verifying an Event downgrade
         STATUS_APPROVED:             ('#198754', '#ffffff'),  # green — resolved / approved
         STATUS_CLOSED_EVENT:         ('#6c757d', '#ffffff'),  # gray — closed as event
+        STATUS_CANCELLED:            ('#495057', '#ffffff'),
     }
 
     @property
@@ -569,6 +585,7 @@ class Ticket(models.Model):
         ],
         STATUS_APPROVED:     [],
         STATUS_CLOSED_EVENT: [],
+        STATUS_CANCELLED:    [],
     }
 
     # ------------------------------------------------------------------ #
@@ -920,6 +937,17 @@ class Ticket(models.Model):
     incident_datetime = models.DateTimeField(
         null=True, blank=True,
         verbose_name='วันและเวลาที่ตรวจพบเหตุการณ์',
+    )
+    # When the incident actually happened, as distinct from when SOC detected it
+    # (``incident_datetime``). For a Wazuh case the two coincide — the alert's
+    # OpenSearch timestamp is the event time — so the form pre-fills this from the
+    # alert. Other sources (TrendMicro, Trellix, user report) carry no reliable
+    # occurrence time, so Tier 1 fills it, or copies the detection time when the
+    # true moment is unknown. Nullable: legacy tickets and non-form paths leave it
+    # blank, and the report simply drops the row when it is empty.
+    event_occurred_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='วันและเวลาที่เกิดเหตุการณ์',
     )
     reference_id = models.CharField(
         max_length=50, blank=True, default='',
@@ -1525,7 +1553,7 @@ class Ticket(models.Model):
             # class constants at definition time).
             models.Index(
                 fields=['ola_contain_deadline'],
-                condition=~models.Q(status__in=['APPROVED', 'CLOSED_EVENT']),
+                condition=~models.Q(status__in=['APPROVED', 'CLOSED_EVENT', 'CANCELLED']),
                 name='ix_ticket_open_contain_ola',
             ),
         ]
@@ -1573,6 +1601,24 @@ class Ticket(models.Model):
             self.ticket_id = f'{prefix}{seq:04d}'
 
     def save(self, *args, **kwargs):
+        # Serialize ordinary saves with cancellation, including stale ModelForms.
+        with transaction.atomic():
+            if self.pk:
+                current_status = Ticket.objects.select_for_update().filter(pk=self.pk).values_list('status', flat=True).first()
+                if current_status == self.STATUS_CANCELLED:
+                    raise ValidationError('รายการนี้ยกเลิกแล้ว ไม่สามารถแก้ไขได้')
+            if self.status == self.STATUS_CANCELLED:
+                raise ValidationError('กรุณาใช้ขั้นตอนอนุมัติยกเลิกรายการ')
+            result = self._save_ticket(*args, **kwargs)
+            fields = kwargs.get('update_fields')
+            if self.status in self.RESOLVED_STATUSES and (fields is None or 'status' in fields):
+                self.cancellation_requests.filter(status='PENDING').update(
+                    status='SUPERSEDED', decided_at=timezone.now(),
+                    decision_note='รายการปิดตามกระบวนการปกติแล้ว',
+                )
+            return result
+
+    def _save_ticket(self, *args, **kwargs):
         if not self.pk:
             # OLA clocks start when the alert/incident occurred, not when the
             # ticket is filed — fall back to now() if T1 left it blank. Targets
@@ -1627,7 +1673,7 @@ class Ticket(models.Model):
         return (
             self.subtasks
             .filter(subtask_type__in=TicketSubtask.RESPONSE_TYPES)
-            .exclude(status=TicketSubtask.STATUS_DONE)
+            .exclude(status__in=TicketSubtask.TERMINAL_STATUSES)
             .exists()
         )
 
@@ -1785,7 +1831,19 @@ class Ticket(models.Model):
             return f'หน่วยงานเจ้าของระบบ ({who})' if who else 'หน่วยงานเจ้าของระบบ'
         return None
 
+    def cancellation_action(self, *, actor, action, **kwargs):
+        """Authoritative, audited cancellation entry point for every caller."""
+        from .cancellation import perform_cancellation
+        return perform_cancellation(ticket=self, actor=actor, action=action, **kwargs)
+
     def transition_to(self, new_status, user, note=''):
+        with transaction.atomic():
+            current = Ticket.objects.select_for_update().get(pk=self.pk)
+            if current.status != self.status or current.status == self.STATUS_CANCELLED:
+                raise ValidationError('สถานะรายการเปลี่ยนแล้ว กรุณาโหลดหน้าใหม่')
+            self._transition_to(new_status, user, note)
+
+    def _transition_to(self, new_status, user, note=''):
         status_map = dict(self.STATUS_CHOICES)
 
         # ── 1. Validate new_status is a known code ────────────────────── #
@@ -2318,6 +2376,45 @@ class TicketAlertLink(models.Model):
             })
 
 
+class TicketCancellationRequest(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'รออนุมัติ'), ('APPROVED', 'อนุมัติยกเลิกแล้ว'),
+        ('REJECTED', 'ไม่อนุมัติ'), ('WITHDRAWN', 'ถอนคำขอแล้ว'),
+        ('SUPERSEDED', 'สิ้นสุดคำขอเนื่องจากรายการปิดแล้ว'),
+    ]
+    REASON_CHOICES = [
+        ('DUPLICATE', 'รายการซ้ำ'), ('CREATED_IN_ERROR', 'สร้างรายการผิด'),
+        ('OTHER', 'เหตุผลอื่น'),
+    ]
+    MODE_CHOICES = [
+        ('REVIEW', 'ผู้จัดการพิจารณาคำขอ'), ('CREATOR', 'ผู้เปิดยกเลิกรายการใหม่'),
+        ('MANAGER', 'ผู้จัดการยกเลิกโดยตรง'),
+    ]
+    ticket = models.ForeignKey(Ticket, verbose_name='รายการ', on_delete=models.PROTECT, related_name='cancellation_requests')
+    requested_by = models.ForeignKey(User, verbose_name='ผู้ขอ', on_delete=models.SET_NULL, null=True, related_name='+')
+    reason = models.CharField('ประเภทเหตุผล', max_length=24, choices=REASON_CHOICES)
+    explanation = models.TextField('รายละเอียดเหตุผล')
+    duplicate_of = models.ForeignKey(Ticket, verbose_name='รายการต้นฉบับ', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    status = models.CharField('สถานะคำขอ', max_length=16, choices=STATUS_CHOICES, default='PENDING')
+    mode = models.CharField('วิธีอนุมัติ', max_length=12, choices=MODE_CHOICES, default='REVIEW')
+    requested_at = models.DateTimeField('วันที่ขอ', auto_now_add=True)
+    decided_by = models.ForeignKey(User, verbose_name='ผู้ตัดสินใจ', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    decided_at = models.DateTimeField('วันที่ตัดสินใจ', null=True, blank=True)
+    decision_note = models.TextField('บันทึกการตัดสินใจ', blank=True)
+    cancelled_subtask_ids = models.JSONField('งานย่อยที่ยกเลิก', default=list, blank=True)
+
+    class Meta:
+        ordering = ['-requested_at', '-pk']
+        verbose_name = 'คำขอยกเลิกรายการ'
+        verbose_name_plural = 'คำขอยกเลิกรายการ'
+        constraints = [
+            models.UniqueConstraint(fields=['ticket'], condition=models.Q(status='PENDING'),
+                                    name='one_pending_ticket_cancellation'),
+            models.CheckConstraint(condition=~models.Q(ticket=models.F('duplicate_of')),
+                                   name='cancellation_duplicate_not_self'),
+        ]
+
+
 class TicketLog(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='logs')
     note = models.TextField(verbose_name='บันทึกรายละเอียด')
@@ -2604,11 +2701,14 @@ class TicketSubtask(models.Model):
     STATUS_OPEN = 'OPEN'
     STATUS_IN_PROGRESS = 'IN_PROGRESS'
     STATUS_DONE = 'DONE'
+    STATUS_CANCELLED = 'CANCELLED'
+    TERMINAL_STATUSES = frozenset({STATUS_DONE, STATUS_CANCELLED})
 
     STATUS_CHOICES = [
         (STATUS_OPEN, 'เปิด'),
         (STATUS_IN_PROGRESS, 'กำลังดำเนินการ'),
         (STATUS_DONE, 'เสร็จสิ้น'),
+        (STATUS_CANCELLED, 'ยกเลิกแล้ว'),
     ]
 
     ticket = models.ForeignKey(
@@ -2656,6 +2756,13 @@ class TicketSubtask(models.Model):
         return instance
 
     def save(self, *args, **kwargs):
+        with transaction.atomic():
+            parent = Ticket.objects.select_for_update().get(pk=self.ticket_id)
+            if parent.status == Ticket.STATUS_CANCELLED or self.status == self.STATUS_CANCELLED:
+                raise ValidationError('งานนี้ยกเลิกได้ผ่านขั้นตอนยกเลิกรายการโดยผู้จัดการ SOC เท่านั้น')
+            return self._save_subtask(*args, **kwargs)
+
+    def _save_subtask(self, *args, **kwargs):
         """Stamp ``status_changed_at`` whenever the status actually moves.
 
         This lives in save(), not in ``update_subtask``, so admin edits, seeds,

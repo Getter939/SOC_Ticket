@@ -34,6 +34,7 @@ class FactTicket(models.Model):
     # ticket itself otherwise. Lets aggregates count incidents rather than rows.
     incident_key = models.IntegerField(null=True)
     is_closed = models.BooleanField()
+    is_cancelled = models.BooleanField()
     contain_ola_applicable = models.BooleanField()
     contain_ola_met = models.BooleanField()
 

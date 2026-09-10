@@ -36,6 +36,10 @@ def reassess_emergency(*, ticket, actor, value, reason):
     return TicketWorkflowResult(ticket=ticket)
 
 
+def cancellation_action(*, ticket, actor, action, **kwargs):
+    return ticket.cancellation_action(actor=actor, action=action, **kwargs)
+
+
 def step_back(*, ticket, actor, reason):
     """Move a ticket back one approved workflow step."""
     target_status = ticket.step_back(actor, reason)

@@ -37,6 +37,20 @@
     <span class="page-header__meta">{{ result_count }} เคส</span>
 </div>
 
+{% if is_manager_queue %}
+<section class="card mb-4" aria-labelledby="cancellation-queue-heading">
+  <div class="card-header"><h2 id="cancellation-queue-heading" class="h5 mb-0">คำขอยกเลิกที่รออนุมัติ</h2></div>
+  <div class="card-body">
+    {% for entry in pending_cancellations %}
+    <div class="border-bottom py-2">
+      <a href="{% url 'ticket_detail' entry.ticket.pk %}#cancellation-heading">{{ entry.ticket.ticket_id }} — {{ entry.ticket.device_name }}</a>
+      <div>{{ entry.get_reason_display }} — {{ entry.explanation }}</div>
+      <small class="text-muted">ผู้ขอ: {{ entry.requested_by.get_full_name|default:entry.requested_by.username }} · {{ entry.requested_at|date:'d/m/Y H:i' }} · {{ entry.ticket.get_status_display }}</small>
+    </div>
+    {% empty %}<p class="text-muted mb-0">ไม่มีคำขอยกเลิกที่รออนุมัติ</p>{% endfor %}
+  </div>
+</section>
+{% endif %}
 {% if ola_breach_count %}
 <div class="alert alert-danger d-flex align-items-center mb-3 py-2" role="alert">
     <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>

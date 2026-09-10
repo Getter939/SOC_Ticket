@@ -1,0 +1,37 @@
+{% comment %}
+Wires the "เท่ากับเวลาตรวจพบ" button that copies the detection time
+(id_incident_datetime) into the occurrence field (id_event_occurred_at).
+
+Two shapes are supported:
+  * A button already in the markup with class .js-occurred-copy inside the
+    field's .input-group (see project_incident_form.html) — it is wired in place.
+  * A form that renders the field through a generic {% templatetag openblock %} for field {% templatetag closeblock %} loop with no
+    button (ticket_edit.html, the Tier 2 review panel) — a button is injected
+    right after the occurrence input.
+The create form (ticket_form.html) wires its own #occ-copy button inline and
+does not include this partial.
+{% endcomment %}
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+  function copyInto(target) {
+    var src = document.getElementById('id_incident_datetime');
+    if (src && target) { target.value = src.value; target.dispatchEvent(new Event('change')); }
+  }
+  document.querySelectorAll('.js-occurred-copy').forEach(function (btn) {
+    var group = btn.closest('.input-group');
+    var target = group ? group.querySelector('input') : null;
+    btn.addEventListener('click', function () { copyInto(target); });
+  });
+  var occ = document.getElementById('id_event_occurred_at');
+  if (occ && document.getElementById('id_incident_datetime')
+      && !occ.parentElement.querySelector('.js-occurred-copy')) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-outline-secondary btn-sm mt-1 js-occurred-copy';
+    btn.textContent = 'เท่ากับเวลาตรวจพบ';
+    btn.title = 'ใช้เวลาเดียวกับเวลาที่ตรวจพบ';
+    occ.insertAdjacentElement('afterend', btn);
+    btn.addEventListener('click', function () { copyInto(occ); });
+  }
+})();
+</script>

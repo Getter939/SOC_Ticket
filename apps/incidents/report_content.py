@@ -51,40 +51,36 @@ GUIDANCE_COORDINATION_NOTE = (
 SECTION1_ROWS = [
     ('kv', '1.1 หมายเลข Incident', 'ticket_id'),
     ('kv', '1.2 วันที่ เวลา ที่พบเหตุ', 'incident_datetime'),
-    ('kv', '1.3 วันที่ เวลา ที่เกิดเหตุ', 'incident_datetime'),
+    ('kv', '1.3 วันที่ เวลา ที่เกิดเหตุ', 'event_occurred_at'),
     ('kv', '1.4 ชื่อ incident/event', 'incident_name'),
     ('checks', '1.5 ประเภท: event หรือ incident', [
-        ('chk_class_incident', 'Incident'),
-        ('chk_class_event', 'Event')]),
-    ('checks', '1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
+        ('chk_class_event', 'Event'),
+        ('chk_class_incident', 'Incident')]),
+    ('checks', '1.6 ระดับความสำคัญ', [
+        ('chk_imp_general', 'ปกติทั่วไป'),
+        ('chk_imp_normal', 'สำคัญ'),
+        ('chk_imp_high', 'สำคัญมาก')]),
+    ('checks', '1.7 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)', [
         ('chk_sev_low', 'Low'),
         ('chk_sev_medium', 'Medium'),
         ('chk_sev_high', 'High'),
         ('chk_sev_critical', 'Critical')]),
-    ('checks', '1.7 ระดับความสำคัญ', [
-        ('chk_imp_normal', 'สำคัญ'),
-        ('chk_imp_high', 'สำคัญมาก')]),
-    ('checks', '1.8 มีการกระจายไปยังจุดอื่น', [
-        ('chk_spread_yes', 'ใช่'),
-        ('chk_spread_no', 'ไม่ใช่')]),
-    ('checks', '1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
+    ('checks', '1.8 ระดับความรุนแรง (อ้างอิงตาม สกมช.)', [
         ('chk_ncsa_nonsevere', 'ไม่ร้ายแรง'),
         ('chk_ncsa_severe', 'ร้ายแรง'),
         ('chk_ncsa_critical', 'วิกฤต')]),
-    ('kv', '1.10 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', 'category'),
-    ('kv', '1.11 ทรัพย์สินที่ได้รับผลกระทบ', 'host_ip'),
-    ('checks', '1.12 ประเภททรัพย์สินที่ได้รับผลกระทบ', [
+    ('kv', '1.9 *หมวดหมู่ของภัยคุกคามทางไซเบอร์ (Category)', 'category'),
+    ('kv', '1.10 ทรัพย์สินที่ได้รับผลกระทบ', 'host_ip'),
+    ('checks', '1.11 ประเภททรัพย์สินที่ได้รับผลกระทบ', [
         ('chk_asset_computer', 'Computer'),
         ('chk_asset_server', 'Server'),
         ('chk_asset_network', 'Network Device')]),
-    ('kv', '1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
-    ('kv', '1.14 ชื่อเจ้าของทรัพย์สิน', 'asset_owner_name'),
-    ('kv', '1.15 ระบบที่ได้รับผลกระทบ', 'system_name'),
-    ('kv', '1.16 สถานะปัจจุบัน', 'status'),
-    ('kv', '1.17 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
-    ('kv', '1.18 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
-    ('kv', '1.19 ผู้รายงาน', 'reporter'),
-    ('kv', '1.20 แหล่งข้อมูล', 'log_source'),
+    ('kv', '1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
+    ('kv', '1.13 สถานะปัจจุบัน', 'status'),
+    ('kv', '1.14 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
+    ('kv', '1.15 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
+    ('kv', '1.16 ผู้รายงาน', 'reporter'),
+    ('kv', '1.17 แหล่งข้อมูล', 'log_source'),
 ]
 
 # The Event-only form follows the shorter one-page ODT supplied by the SOC.
@@ -93,11 +89,11 @@ SECTION1_ROWS = [
 EVENT_SECTION1_ROWS = [
     ('kv', '1.1 หมายเลข Event', 'ticket_id'),
     ('kv', '1.2 วันที่ เวลา ที่พบเหตุ', 'incident_datetime'),
-    ('kv', '1.3 วันที่ เวลา ที่เกิดเหตุ', 'incident_datetime'),
+    ('kv', '1.3 วันที่ เวลา ที่เกิดเหตุ', 'event_occurred_at'),
     ('kv', '1.4 ชื่อ Event', 'incident_name'),
     ('checks', '1.5 ประเภท', [
-        ('chk_class_incident', 'Incident'),
-        ('chk_class_event', 'Event')]),
+        ('chk_class_event', 'Event'),
+        ('chk_class_incident', 'Incident')]),
     ('checks', '1.6 ระดับความสำคัญ', [
         ('chk_imp_general', 'ปกติทั่วไป'),
         ('chk_imp_normal', 'สำคัญ'),
@@ -120,11 +116,10 @@ EVENT_SECTION1_ROWS = [
     ('kv', '1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
     ('kv', '1.13 รายละเอียดของเหตุ', 'incident_description'),
     ('kv', '1.14 สถานะปัจจุบัน', 'status'),
-    ('kv', '1.15 ระบบที่ได้รับผลกระทบ', 'system_name'),
-    ('kv', '1.16 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
-    ('kv', '1.17 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
-    ('kv', '1.18 ผู้รายงาน', 'reporter'),
-    ('kv', '1.19 แหล่งข้อมูล', 'log_source'),
+    ('kv', '1.15 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
+    ('kv', '1.16 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
+    ('kv', '1.17 ผู้รายงาน', 'reporter'),
+    ('kv', '1.18 แหล่งข้อมูล', 'log_source'),
 ]
 
 SECTION3_ROWS = [

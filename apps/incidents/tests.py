@@ -832,14 +832,14 @@ class TicketReportExportTest(TestCase):
 
     def test_event_template_has_exactly_the_placeholders_its_short_form_uses(self):
         expected = {
-            'ticket_id', 'incident_datetime', 'incident_name',
+            'ticket_id', 'incident_datetime', 'event_occurred_at', 'incident_name',
             'chk_class_incident', 'chk_class_event',
             'chk_imp_general', 'chk_imp_normal', 'chk_imp_high',
             'chk_sev_low', 'chk_sev_medium', 'chk_sev_high', 'chk_sev_critical',
             'chk_ncsa_nonsevere', 'chk_ncsa_severe', 'chk_ncsa_critical',
             'category', 'host_ip',
             'chk_asset_computer', 'chk_asset_server', 'chk_asset_network',
-            'asset_owner', 'incident_description', 'status', 'system_name',
+            'asset_owner', 'incident_description', 'status',
             'actions_taken_summary', 'next_steps_summary', 'reporter', 'log_source',
         }
         self.assertEqual(self._docx_placeholders(EVENT_REPORT_TEMPLATE_PATH), expected)
@@ -854,7 +854,8 @@ class TicketReportExportTest(TestCase):
         labels = [row['label'] for row in section['rows']]
 
         self.assertNotIn('1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', labels)
-        self.assertIn('1.12 รายละเอียดของเหตุ', labels)
+        # เกิดเหตุ (1.3) is empty and asset_owner was blanked, so รายละเอียด climbs to 1.11.
+        self.assertIn('1.11 รายละเอียดของเหตุ', labels)
         self.assertEqual(
             [int(re.match(r'1\.(\d+)', label).group(1)) for label in labels],
             list(range(1, len(labels) + 1)),
@@ -5795,9 +5796,9 @@ class ReportNTFormLayoutTest(TestCase):
         rows = {r['label']: r['value'] for r in self._section('1')['rows']
                 if r.get('type') == 'kv'}
         self.assertEqual(rows['1.2 วันที่ เวลา ที่พบเหตุ'], '2 / ก.ค. / 69  11:00 น.')
-        # Still the same single field in both rows — unchanged by design.
-        self.assertEqual(rows['1.3 วันที่ เวลา ที่เกิดเหตุ'],
-                         rows['1.2 วันที่ เวลา ที่พบเหตุ'])
+        # Detection (พบเหตุ) and occurrence (เกิดเหตุ) are now independent fields:
+        # this ticket carries no event_occurred_at, so its row renders empty.
+        self.assertEqual(rows['1.3 วันที่ เวลา ที่เกิดเหตุ'], '-')
 
     def test_generated_at_stays_gregorian(self):
         """Only the section 1 date rows switched; the meta line must stay
@@ -5827,7 +5828,7 @@ class ReportNTFormLayoutTest(TestCase):
 
     def test_section_one_rows_are_numbered_sequentially(self):
         labels = [r['label'] for r in self._section('1')['rows']]
-        self.assertEqual(len(labels), 20)
+        self.assertEqual(len(labels), 17)
         for index, label in enumerate(labels, start=1):
             self.assertTrue(
                 label.startswith(f'1.{index} '),
@@ -5845,7 +5846,8 @@ class ReportNTFormLayoutTest(TestCase):
         labels = [row['label'] for row in section['rows']]
 
         self.assertNotIn('1.4 ชื่อ incident/event', labels)
-        self.assertIn('1.4 ประเภท: event หรือ incident', labels)
+        # เกิดเหตุ (1.3) and ชื่อ (1.4) are both empty here, so ประเภท climbs to 1.3.
+        self.assertIn('1.3 ประเภท: event หรือ incident', labels)
         for index, label in enumerate(labels, start=1):
             self.assertTrue(label.startswith(f'1.{index} '))
 
@@ -5855,7 +5857,7 @@ class ReportNTFormLayoutTest(TestCase):
             generate_ticket_report(self.ticket.pk, hide_empty=False).content,
         )
 
-        self.assertIn('1.4 ประเภท: event หรือ incident', compact)
+        self.assertIn('1.3 ประเภท: event หรือ incident', compact)
         self.assertNotIn('1.5 ประเภท: event หรือ incident', compact)
         self.assertIn('1.4 ชื่อ incident/event', complete)
         self.assertIn('1.5 ประเภท: event หรือ incident', complete)
@@ -5875,22 +5877,22 @@ class ReportNTFormLayoutTest(TestCase):
     def test_checkbox_options_run_low_to_high(self):
         rows = {r['label']: r for r in self._section('1')['rows']
                 if r.get('type') == 'checks'}
-        sev = [o['label'] for o in rows['1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)']['options']]
+        sev = [o['label'] for o in rows['1.7 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)']['options']]
         self.assertEqual(sev, ['Low', 'Medium', 'High', 'Critical'])
 
-        ncsa = [o['label'] for o in rows['1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)']['options']]
+        ncsa = [o['label'] for o in rows['1.8 ระดับความรุนแรง (อ้างอิงตาม สกมช.)']['options']]
         self.assertEqual(ncsa, ['ไม่ร้ายแรง', 'ร้ายแรง', 'วิกฤต'])
 
         kind = [o['label'] for o in rows['1.5 ประเภท: event หรือ incident']['options']]
-        self.assertEqual(kind, ['Incident', 'Event'])
+        self.assertEqual(kind, ['Event', 'Incident'])
 
     def test_reordering_did_not_change_which_option_is_ticked(self):
         rows = {r['label']: r for r in self._section('1')['rows']
                 if r.get('type') == 'checks'}
         ticked = lambda label: [  # noqa: E731
             o['label'] for o in rows[label]['options'] if o['checked']]
-        self.assertEqual(ticked('1.6 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)'), ['High'])
-        self.assertEqual(ticked('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)'), ['ร้ายแรง'])
+        self.assertEqual(ticked('1.7 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)'), ['High'])
+        self.assertEqual(ticked('1.8 ระดับความรุนแรง (อ้างอิงตาม สกมช.)'), ['ร้ายแรง'])
         self.assertEqual(ticked('1.5 ประเภท: event หรือ incident'), ['Incident'])
 
     # ── Section 4 User row ───────────────────────────────────────────── #

@@ -168,6 +168,16 @@
         </div>
 
         <div class="col-md-4">
+          <label class="form-label fw-semibold" for="{{ form.event_occurred_at.id_for_label }}">วันและเวลาที่เกิดเหตุการณ์</label>
+          <div class="input-group">
+            {{ form.event_occurred_at }}
+            <button type="button" class="btn btn-outline-secondary" id="occ-copy" title="ใช้เวลาเดียวกับเวลาที่ตรวจพบ">เท่ากับเวลาตรวจพบ</button>
+          </div>
+          <div class="field-hint">เวลาที่เหตุการณ์เกิดขึ้นจริง — หากไม่ทราบเวลาที่แน่นอน กดปุ่มเพื่อใช้เวลาเดียวกับที่ตรวจพบ</div>
+          {% if form.event_occurred_at.errors %}<div class="text-danger small">{{ form.event_occurred_at.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-4">
           <label class="form-label fw-semibold" for="{{ form.reference_id.id_for_label }}">Reference ID</label>
           {{ form.reference_id }}
           <div class="field-hint">รหัสอ้างอิงจากแหล่ง Log ต้นทาง เพื่อให้สามารถสืบค้นกลับไปยัง Log ได้</div>
@@ -582,10 +592,18 @@ updateDecisionPanels();
   // blank to force a deliberate answer; "ตอนนี้" is still one click away for
   // sources where filing really is the moment of detection (a phone report).
   const dt = document.getElementById('id_incident_datetime');
+  const occ = document.getElementById('id_event_occurred_at');
   const dtNowBtn = document.getElementById('dt-now');
   const dtUnlockBtn = document.getElementById('dt-unlock');
   const dtHint = document.getElementById('dt-hint');
   const DT_HINT_DEFAULT = dtHint ? dtHint.textContent : '';
+
+  // 'เวลาที่เกิดเหตุ' is the true moment the incident happened, distinct from
+  // detection. When it is unknown, this button copies the detection time rather
+  // than leaving it blank.
+  document.getElementById('occ-copy')?.addEventListener('click', () => {
+    if (occ && dt) { occ.value = dt.value; occ.dispatchEvent(new Event('change')); }
+  });
 
   function localNow() {
     const d = new Date();
@@ -602,6 +620,10 @@ updateDecisionPanels();
   function lockDetectionTime(stamp) {
     if (!dt || !stamp) return;
     dt.value = stamp;
+    // A Wazuh alert's OpenSearch timestamp is the actual event time, so seed the
+    // occurrence field from it too (only while blank — never clobber a manual
+    // entry). Left editable: the analyst may know the true event preceded the alert.
+    if (occ && !occ.value) { occ.value = stamp; occ.dispatchEvent(new Event('change')); }
     dt.readOnly = true;
     dt.classList.add('bg-light');
     dtNowBtn?.classList.add('d-none');

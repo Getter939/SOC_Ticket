@@ -246,6 +246,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'ticket_id': _report_ticket_id(ticket),
         # Section 1 prints this in the Thai style used on the paper form.
         'incident_datetime': _format_dt_thai(ticket.incident_datetime),
+        'event_occurred_at': _format_dt_thai(ticket.event_occurred_at),
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),
         'reporter': _user_label(ticket.created_by, include_phone=True),
@@ -286,6 +287,11 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_sev_low': _chk(ticket.severity == 'Low'),
         'chk_imp_high': _chk(ticket.is_emergency),
         'chk_imp_normal': _chk(not is_event_report and not ticket.is_emergency),
+        # 'ปกติทั่วไป' now prints on both the Event and Incident forms so the
+        # importance row reads the same on either. It only ever ticks for a
+        # non-emergency Event; on an Incident it is a blank option, present for
+        # form completeness (สำคัญ/สำคัญมาก carry the Incident's importance).
+        'chk_imp_general': _chk(is_event_report and not ticket.is_emergency),
         'chk_spread_yes': _chk(ticket.spread_to_others is True),
         'chk_spread_no': _chk(ticket.spread_to_others is False),
         'chk_ncsa_critical': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),
@@ -296,8 +302,23 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_asset_network': _chk(asset == 'Network Device'),
         'chk_asset_unknown': _chk(not asset_known),
     }
-    if is_event_report:
-        context['chk_imp_general'] = _chk(not ticket.is_emergency)
+    if ticket.status == Ticket.STATUS_CANCELLED:
+        cancellation = ticket.cancellation_requests.filter(status='APPROVED').select_related(
+            'decided_by', 'duplicate_of',
+        ).first()
+        details = ['ยกเลิกรายการแล้ว — ไม่ใช่การยืนยันว่าแก้ไขเหตุการณ์สำเร็จ']
+        if cancellation:
+            details.extend([
+                f'เหตุผล: {cancellation.get_reason_display()} — {cancellation.explanation}',
+                f'ผู้ดำเนินการ: {_user_label(cancellation.decided_by)}',
+                f'วันที่ยกเลิก: {_format_dt(cancellation.decided_at)}',
+                f'บันทึกการตัดสินใจ: {cancellation.decision_note}',
+            ])
+            if cancellation.duplicate_of_id:
+                details.append(f'รายการต้นฉบับ: {cancellation.duplicate_of.ticket_id}')
+        # Status is present in both the Event and Incident DOCX/PDF templates.
+        context['status'] = '\n'.join(details)
+        context['signoff_approver'] = '-'
     return context
 
 

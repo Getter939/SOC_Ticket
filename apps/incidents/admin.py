@@ -3,7 +3,24 @@ from .models import (
     NotificationTemplate, ProjectIncident, ProjectIncidentAttachment,
     ProjectIncidentLog, ThreatGuidance, Ticket,
     TicketAttachment, TicketLog, TicketSubtask, TriageRecord,
+    TicketCancellationRequest,
 )
+
+
+@admin.register(TicketCancellationRequest)
+class TicketCancellationRequestAdmin(admin.ModelAdmin):
+    list_display = ('ticket', 'status', 'reason', 'requested_by', 'decided_by', 'requested_at')
+    list_filter = ('status', 'reason', 'mode')
+    search_fields = ('ticket__ticket_id', 'explanation')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ProjectIncident)
@@ -38,6 +55,17 @@ class ProjectIncidentAttachmentAdmin(admin.ModelAdmin):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.status == Ticket.STATUS_CANCELLED:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == 'status':
+            kwargs['choices'] = [choice for choice in Ticket.STATUS_CHOICES
+                                 if choice[0] != Ticket.STATUS_CANCELLED]
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
+
     list_display = (
         'ticket_id', 'device_name', 'status', 'classification', 'is_emergency',
         'issue_type',

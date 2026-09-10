@@ -1,5 +1,15 @@
 # Workflow Change Log
 
+## 2026-09-10 — Ticket cancellation
+
+Added the separate cancellation request/decision process and terminal `CANCELLED`
+outcome. After handoff the SOC Manager approves; the Tier 1 creator may directly
+cancel only at NEW. Pending requests keep work and OLA clocks running. Outstanding
+subtasks require explicit manager cancellation. Thai forms, manager queue, audit
+history, notifications, reports and cancellation-specific reporting are included.
+See [ADR-0005](../adr/0005-ticket-cancellation.md) and the
+[lifecycle reference](ticket-lifecycle-states.md#cancellation-การยกเลิกรายการ).
+
 > **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-07-23
 > **Current-state reference:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md)
 

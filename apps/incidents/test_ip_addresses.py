@@ -119,9 +119,13 @@ class TicketIPMigrationTest(TransactionTestCase):
                     issue_description='Existing ticket', ip_address=value,
                 )
                 ids.append((ticket.pk, value))
-            MigrationExecutor(connection).migrate(latest)
+            executor = MigrationExecutor(connection)
+            executor.migrate(latest)
+            # Read with the model at 0069, not today's model: later migrations
+            # may add columns that deliberately do not exist at this point.
+            migrated_ticket = executor.loader.project_state(latest).apps.get_model('incidents', 'Ticket')
             for ticket_id, expected in ids:
-                self.assertEqual(Ticket.objects.get(pk=ticket_id).ip_address, expected)
+                self.assertEqual(migrated_ticket.objects.get(pk=ticket_id).ip_address, expected)
         finally:
             # Restore to the ACTUAL latest (leaf nodes), not the hardcoded target
             # above — otherwise migrations added after 0069 leave the schema behind

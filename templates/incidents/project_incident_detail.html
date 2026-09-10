@@ -9,8 +9,16 @@
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3-fill text-primary me-2"></i>{{ project.project_code }}</h4>
     <span class="badge bg-primary-subtle text-primary border border-primary">Project Incident (Case Bundle)</span>
+    {% if project.cancelled_member_count %}
+      <span class="badge bg-secondary">ยกเลิก {{ project.cancelled_member_count }} รายการ</span>
+      <span class="badge bg-light text-dark">แก้ไขสำเร็จ {{ project.resolved_member_count }} · ปิดแบบ Event {{ project.event_closed_member_count }}</span>
+    {% endif %}
     {% if project.all_closed %}
+      {% if project.cancelled_member_count %}
+      <span class="badge bg-secondary">สิ้นสุดการดำเนินงานทุกระบบแล้ว</span>
+      {% else %}
       <span class="badge bg-success">ปิดครบทุกระบบแล้ว</span>
+      {% endif %}
     {% else %}
       <span class="badge bg-warning text-dark">{{ project.open_member_count }} / {{ project.member_count }} ระบบยังดำเนินการอยู่</span>
     {% endif %}

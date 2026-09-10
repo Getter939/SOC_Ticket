@@ -1,11 +1,11 @@
 # Ticket Lifecycle States
 
-> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-02
-> **Source of truth:** `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS`
+> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-10
+> **Source of truth:** `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS` and `Ticket.cancellation_action`
 
 The complete ticket lifecycle as a diagram plus a transition reference, organised
-by which role may perform each move. **`STATUS_CHOICES` defines 13 statuses: 12
-are reachable in the active workflow, plus 1 legacy compatibility state
+by which role may perform each move. **`STATUS_CHOICES` defines 15 statuses: 14
+are reachable through the workflow or cancellation process, plus 1 legacy compatibility state
 (`OWNER_REMEDIATED`) that nothing transitions *into* any more** — it is retained
 only so tickets already sitting in it can finish. When the state machine changes
 in code, update the Mermaid block below — each line is one node or one arrow.
@@ -26,11 +26,13 @@ Key rules (redesigned 2026-07-14):
 - **Tier 2 verifies every containment/remediation** — both the System Admin lane and the System Owner lane — before a ticket can close. Tier 2 may also **reclassify an in-flight case as an Event** and close it directly (no manager), even when the emergency flag is set. ⚠️ These two mid-containment edges are deliberately **not** covered by the downgrade gate above — a known asymmetry, see the change log.
 - **Tier 2 must claim a ticket before acting on it** (added 2026-07-23). The Tier 2 Queue has claim/release like the Tier 1 triage queue; a claim held by another analyst blocks the transition in `transition_to`. The claim clears on every transition, since the queue spans three stages.
 - **SOC Manager reviews emergency tickets only** at the closing gate (the `is_emergency` flag; severity alone never routes to the manager). Emergency tickets pass Tier 2 first, then the manager.
+- **Monitoring is a watch-and-wait park, not a stage of handling** (added v1.2.3). Only Tier 2 may grant it, only from `ESCALATED_T2`, for a **fixed 30 days**, **once per case** (`has_been_monitored`). The case sits in the Tier 1 creator's court and resolves to Incident (→ SOC Manager triage) or Event (→ Tier 2 confirms the close). Expiry is computed on read — there is no scheduler. Tier 1 may *recommend* monitoring at creation; the recommendation is advisory only.
+- **The SOC Manager can step a ticket backward** along `STEP_BACK_EDGES` to correct a mis-route (e.g. the wrong admin was assigned). Step-back runs through `transition_to()`, so it inherits every invariant and the audit log instead of a parallel hand-rolled write; the `t1_route` gate allows exactly one of the two `PENDING_MANAGER` edges per ticket. No other role can move a ticket backward.
 - System Owner never uses the system — Tier 1 records the owner's fix on their behalf.
 
 ```mermaid
 flowchart TD
-    START([เริ่มต้น]) --> NEW[สร้าง Ticket — NEW<br/>ระบุความรุนแรง + จัดประเภท]
+    START([เริ่มต้น]) --> NEW[สร้าง Ticket — NEW<br/>ระบุความรุนแรง + จัดประเภท + IOC]
 
     %% ── Tier 1 triage decision ──────────────────────────────
     NEW --> D1{Event หรือ Incident?<br/>ตัดสินโดย Tier 1}
@@ -43,8 +45,16 @@ flowchart TD
     ESCALATED_T2[Tier 2 ทบทวน — ต้อง Claim ก่อน<br/>ESCALATED_T2] --> D2{Event หรือ Incident?<br/>ตัดสินโดย Tier 2}
     D2 -->|Event ที่ Tier 1 จัดไว้แล้ว — ยืนยันและปิด| CLOSED_EVENT
     D2 -->|Event ที่ Tier 2 ปรับจาก Incident| PENDING_MGR_EVENT_REVIEW
+    D2 -->|ยังไม่ใช่ทั้ง Event และ Incident| MONITORING
     D2 -->|Incident| T1_REVIEW[ส่งกลับ Tier 1 เลือกเส้นทาง<br/>T1_REVIEW]
     T1_REVIEW -->|เลือก Admin / Owner| PENDING_MGR_TRIAGE
+
+    %% ── Watch-and-wait: Tier 2 parks it, Tier 1 holds it ────
+    %% Fixed 30-day window, once per case (has_been_monitored),
+    %% expiry computed on read — there is no scheduler.
+    MONITORING[กำลังเฝ้าระวัง 30 วัน — อยู่ในมือ Tier 1<br/>MONITORING] --> D8{ครบกำหนด หรือ มีเหตุเกิดขึ้น?<br/>ตัดสินโดย Tier 1 ผู้เปิดตั๋ว}
+    D8 -->|มีเหตุเกิดขึ้น → ออกเป็น Incident| PENDING_MGR_TRIAGE
+    D8 -->|ครบกำหนดโดยเงียบ → สรุปเป็น Event| ESCALATED_T2
 
     %% ── Manager verifies a Tier 2 Event downgrade ───────────
     PENDING_MGR_EVENT_REVIEW[ผู้จัดการ SOC ตรวจการปิดแบบ Event<br/>PENDING_MGR_EVENT_REVIEW] --> D7{เป็น Event จริงหรือไม่?<br/>ตัดสินโดยผู้จัดการ SOC}
@@ -81,6 +91,20 @@ flowchart TD
     %% ── Manager gate (emergency only) ───────────────────────
     PENDING_MANAGER -->|อนุมัติ| APPROVED
 
+    %% ── Manager step-back (backward correction, STEP_BACK_EDGES) ──
+    %% Runs through transition_to(), so it inherits every invariant and
+    %% the audit log. The t1_route gate allows exactly one of the two
+    %% PENDING_MANAGER edges per ticket.
+    AWAITING_CONTAINMENT -.->|↩ step-back| PENDING_MGR_TRIAGE
+    AWAITING_OWNER -.->|↩ step-back| PENDING_MGR_TRIAGE
+    OWNER_REMEDIATED -.->|↩ step-back| AWAITING_OWNER
+    PENDING_MANAGER -.->|↩ step-back เลน Admin| CONTAINMENT_REPORTED
+    PENDING_MANAGER -.->|↩ step-back เลน Owner| PENDING_T2_REVIEW
+
+    %% ── Cancellation — a separate audited process, not a status move ──
+    %% Entered through Ticket.cancellation_action from ANY active stage.
+    ACTIVE_ANY[/ทุกสถานะที่ยังทำงานอยู่<br/>NEW … PENDING_MANAGER รวม MONITORING<br/>และ legacy OWNER_REMEDIATED/] -.->|ยกเลิกรายการ: ต้องมีเหตุผล<br/>ผู้เปิด/ผู้ถือขั้นตอนยื่นคำขอ · ผู้จัดการ SOC อนุมัติ<br/>(Tier 1 ยกเลิกเองได้เฉพาะตอน NEW)| CANCELLED[ยกเลิกแล้ว — terminal<br/>CANCELLED]
+
     %% ── Role coloring ───────────────────────────────────────
     classDef t1 fill:#e7f0ff,stroke:#3b82f6,color:#1e3a8a;
     classDef t2 fill:#f1ebfe,stroke:#8b5cf6,color:#5b21b6;
@@ -89,14 +113,18 @@ flowchart TD
     classDef closed fill:#e6f6ec,stroke:#34d399,color:#065f46;
     classDef decision fill:#eef0f2,stroke:#adb5bd,color:#343a40;
     classDef legacy fill:#f3f4f6,stroke:#9ca3af,color:#6b7280,stroke-dasharray:4 3;
+    classDef cancelled fill:#fdecec,stroke:#dc3545,color:#7f1d1d;
+    classDef meta fill:#f8f9fa,stroke:#6c757d,color:#343a40,stroke-dasharray:4 3;
 
-    class START,NEW,T1_REVIEW,AWAITING_OWNER t1;
+    class START,NEW,T1_REVIEW,AWAITING_OWNER,MONITORING t1;
     class ESCALATED_T2,CONTAINMENT_REPORTED,PENDING_T2_REVIEW t2;
     class AWAITING_CONTAINMENT admin;
     class PENDING_MGR_TRIAGE,PENDING_MANAGER,PENDING_MGR_EVENT_REVIEW mgr;
     class APPROVED,CLOSED_EVENT closed;
     class OWNER_REMEDIATED legacy;
-    class D1,D2,D3,D4,D6,D7,D_ROUTE decision;
+    class CANCELLED cancelled;
+    class ACTIVE_ANY meta;
+    class D1,D2,D3,D4,D6,D7,D8,D_ROUTE decision;
 ```
 
 ## Transition reference (who can do what)
@@ -115,8 +143,43 @@ flowchart TD
 | ~~OWNER_REMEDIATED~~ (legacy) | PENDING_T2_REVIEW | Tier 1 (creator) — **legacy only**: no live edge enters this state; used solely by tickets already sitting in it |
 | PENDING_T2_REVIEW | APPROVED (ไม่ฉุกเฉิน) / PENDING_MANAGER (ฉุกเฉิน) / CLOSED_EVENT (จัดเป็น Event) / AWAITING_OWNER (ปฏิเสธ) | **Tier 2** |
 | PENDING_MANAGER | APPROVED | SOC Manager |
+| AWAITING_CONTAINMENT | PENDING_MGR_TRIAGE | **SOC Manager** — ↩ step-back |
+| AWAITING_OWNER | PENDING_MGR_TRIAGE | **SOC Manager** — ↩ step-back |
+| ~~OWNER_REMEDIATED~~ (legacy) | AWAITING_OWNER | **SOC Manager** — ↩ step-back |
+| PENDING_MANAGER | CONTAINMENT_REPORTED (t1_route=ADMIN) / PENDING_T2_REVIEW (t1_route=OWNER) | **SOC Manager** — ↩ step-back |
 
-**Terminal states:** APPROVED, CLOSED_EVENT.
+**Terminal states:** APPROVED, CLOSED_EVENT, CANCELLED.
+
+### Cancellation (การยกเลิกรายการ)
+
+Cancellation is a separate audited process, entered through `Ticket.cancellation_action`,
+not a generic status-dropdown transition. It is available from every active stage,
+including MONITORING and legacy OWNER_REMEDIATED, irrespective of Classification
+or Emergency. It applies to an individual Member Ticket, retaining group membership,
+shared evidence and linked Alerts. It does not return Alerts to triage.
+
+- The Tier 1 creator may cancel directly only at NEW. The normal creation form
+  routes tickets immediately on save, so most saved tickets require manager approval.
+- The creator or current workflow actor may request cancellation. Tier 2 claims
+  still block another Tier 2 analyst. Response-team assignment alone does not allow it.
+- The SOC Manager approves/rejects pending requests or cancels an active ticket
+  directly. The existing superuser override applies with the same audit requirements.
+- Only the requester can withdraw a pending request. Rejection permits a new request.
+- Reasons are รายการซ้ำ, สร้างรายการผิด, or เหตุผลอื่น, with a mandatory explanation.
+  Duplicates must reference another accessible, non-cancelled ticket, rechecked at approval.
+- There is at most one pending request. It leaves status and OLA clocks unchanged;
+  work continues. Normal closure supersedes it. Rejection leaves the current stage intact.
+- Approval requires unfinished subtasks/Response Requests to be completed, or explicitly
+  selected for cancellation by the manager. Those tasks become CANCELLED, never DONE.
+- CANCELLED is terminal and frozen. Requester, decision maker, reasons, timestamps,
+  cancelled task IDs and TicketLog entries remain available. Cancellation stamps
+  `closed_at` without stamping resolution `approved_by` or `verified_by`.
+- Cancelled tickets leave active queues/OLA pressure, appear separately in history and
+  dashboards, and are excluded from successful-resolution and MTTR aggregates.
+  Historical clocks remain stored. Reports label cancellation and include its decision.
+
+The user-facing cancellation forms, outcomes and audit labels are Thai.
+See [ADR-0005](../adr/0005-ticket-cancellation.md).
 
 **Legacy state:** `OWNER_REMEDIATED` — Tier 1 used to stop here to record the
 owner's report before forwarding, which cost two clicks for one act. The live
@@ -161,3 +224,5 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 - [workflow-change-log.md](workflow-change-log.md) — *why* the state machine has this shape
 - [../handover/engineering-handover.md](../handover/engineering-handover.md) §3.1 — the same lifecycle in prose, with the gotchas
 - [../adr/0003-manager-verification-gate-in-model.md](../adr/0003-manager-verification-gate-in-model.md) — why the manager gate lives in the model
+- [../adr/0005-ticket-cancellation.md](../adr/0005-ticket-cancellation.md) — the cancellation process (separate from resolution)
+- [ticket-workflow-v1.4.0.drawio](ticket-workflow-v1.4.0.drawio) — editable draw.io version of this flow (3 pages: lifecycle, cancellation, gates & parallel work), for diagramming in diagrams.net

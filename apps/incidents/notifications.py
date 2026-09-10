@@ -20,6 +20,30 @@ from .models import NotificationTemplate
 
 logger = logging.getLogger(__name__)
 
+
+def notify_ticket_cancellation(record_id, action):
+    from apps.accounts.models import UserProfile
+    from .models import TicketCancellationRequest
+    record = TicketCancellationRequest.objects.select_related('ticket', 'requested_by').get(pk=record_id)
+    ticket = record.ticket
+    recipients = set(User.objects.filter(
+        is_active=True, profile__role=UserProfile.ROLE_SOC_MANAGER,
+    ).exclude(email='').values_list('email', flat=True))
+    if action != 'request':
+        users = User.objects.filter(pk__in=[
+            record.requested_by_id, ticket.created_by_id, ticket.assigned_admin_id, ticket.system_owner_id,
+            *ticket.subtasks.values_list('assigned_to_id', flat=True),
+        ], is_active=True).exclude(email='')
+        recipients.update(users.values_list('email', flat=True))
+    if not recipients:
+        return False
+    title = 'ขออนุมัติยกเลิกรายการ' if action == 'request' else record.get_status_display()
+    body = (f'รายการ {ticket.ticket_id}\n{title}\n'
+            f'เหตุผล: {record.get_reason_display()} — {record.explanation}\n'
+            f'บันทึกการตัดสินใจ: {record.decision_note or "รอผู้จัดการ SOC พิจารณา"}\n'
+            f'{_ticket_url(ticket)}')
+    return _send(f'{title} — {ticket.ticket_id}', body, sorted(recipients), ticket.ticket_id)
+
 SEVERITY_TH = {
     'Critical': 'วิกฤต',
     'High': 'สูง',

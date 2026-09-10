@@ -74,7 +74,12 @@ function callout(kind, lines) {
   });
 }
 
+// Figure counters, keyed by section number. Module-level, so a script that
+// builds MORE THAN ONE manual in a single process must call resetFigures()
+// before each body is assembled — otherwise the second manual's first figure
+// carries on from the first ("รูปที่ 3-2" on page one).
 const FIGSEC = {};
+function resetFigures() { Object.keys(FIGSEC).forEach((k) => delete FIGSEC[k]); }
 function shot(caption, shotId, section) {
   FIGSEC[section] = (FIGSEC[section] || 0) + 1;
   const figNo = section + "-" + FIGSEC[section];
@@ -167,9 +172,9 @@ function buildManual(cfg) {
     }),
     spacer(360),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("เวอร์ชันระบบ v1.1.0", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 3 กันยายน 2026", { color: INK, size: 28 })] }),
+      children: [r("เวอร์ชันระบบ v1.4.0", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 10 กันยายน 2026", { color: INK, size: 28 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("คู่มือฉบับที่ 1.0", { color: MUTED, size: 28 })] }),
+      children: [r("คู่มือฉบับที่ 1.1", { color: MUTED, size: 28 })] }),
     spacer(700),
     new Paragraph({ alignment: AlignmentType.CENTER,
       children: [r("เอกสารใช้ภายในองค์กร — บริษัท โทรคมนาคมแห่งชาติ จำกัด (มหาชน)", { italics: true, color: MUTED, size: 26 })] }),
@@ -232,5 +237,5 @@ function buildManual(cfg) {
   return Packer.toBuffer(doc).then((buf) => { fs.writeFileSync(cfg.outPath, buf); console.log("Wrote", cfg.outPath, buf.length); });
 }
 
-module.exports = { r, P, H1, H2, H3, bullet, step, spacer, stateName, menuTag, ui, callout, shot, dataTable, buildManual,
+module.exports = { r, P, H1, H2, H3, bullet, step, spacer, stateName, menuTag, ui, callout, shot, resetFigures, dataTable, buildManual,
   colors: { NAVY, BLUE, RED, INK, MUTED } };

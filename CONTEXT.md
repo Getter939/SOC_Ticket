@@ -50,6 +50,19 @@ _Avoid_: Remediation (remediation is the later fix-up summary), mitigation, reso
 
 ## Grouping
 
+**Ticket Cancellation**:
+Ending a mistakenly created or duplicate Ticket without asserting that an Incident
+was resolved or the case was an Event. Preserves the Ticket and its evidence/history.
+After handoff the SOC Manager authorizes cancellation; the Tier 1 creator may cancel
+directly only while the Ticket is still NEW.
+_Avoid_: Delete, Event-close, successful resolution
+
+**Cancellation Request**:
+A separately tracked request for the SOC Manager to cancel an active Ticket. The
+Ticket continues through its current workflow and OLA clock while the request awaits
+a decision. Approval ends the Ticket; rejection leaves its current stage unchanged.
+_Avoid_: Pending cancellation as a Ticket status, paused Ticket
+
 **Project Incident**:
 One multi-system security case worked as several linked Member Tickets — one per affected system. Each member is independently classified as Event or Incident; only Incident members pass through Project Review and Containment.
 _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Incident" in prose

@@ -56,6 +56,7 @@ param(
     [string] $AppRoot      = 'C:\SOCTicket\app',
     [string] $ServiceName  = 'SOCTicketWaitress',
     [string] $GpgRecipient = 'soc-backup@nt.local',
+    [string] $BackupRoot   = 'C:\SOCBackup\archive',
     [switch] $SkipBackup
 )
 
@@ -102,20 +103,42 @@ if ($SkipBackup) {
     Write-Warning 'No pre-deploy backup. Rollback from a data problem is not available.'
 } else {
     Write-Step 'Pre-deploy backup'
-    $before = Get-Date
+    if (-not (Test-Path $BackupRoot)) {
+        throw "Backup root not found: $BackupRoot. Pass -BackupRoot if it lives elsewhere."
+    }
+    # Small negative margin so a filesystem timestamp that rounds down cannot
+    # make a backup taken seconds ago look older than this deploy.
+    $before = (Get-Date).AddSeconds(-5)
+
     & .\scripts\backup\windows\New-SocBackup.ps1 -Tier manual -GpgRecipient $GpgRecipient
     Assert-LastExitCode 'Backup'
 
     # Trust the artifact, not the exit code: a backup that wrote nothing is the
     # failure mode that matters, and it is silent.
-    $archive = Get-ChildItem -Recurse -Filter '*.zip.gpg' |
+    #
+    # Look in $BackupRoot, NOT under the app tree. New-SocBackup writes to
+    # C:\SOCBackup\archive; the first version of this check searched the working
+    # directory instead, found nothing, and aborted a deploy whose backup had in
+    # fact succeeded.
+    $archive = Get-ChildItem -LiteralPath $BackupRoot -File -Filter '*.zip.gpg' |
         Where-Object { $_.LastWriteTime -ge $before -and $_.Length -gt 0 } |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
     if (-not $archive) {
-        throw 'Backup produced no new non-empty .zip.gpg. Deploy aborted.'
+        throw "Backup produced no new non-empty .zip.gpg in $BackupRoot. Deploy aborted."
     }
-    Write-Host ("Backup OK: {0} ({1:N0} bytes)" -f $archive.Name, $archive.Length) -ForegroundColor Green
+
+    # The runbook's own acceptance criteria: the encrypted archive, its checksum
+    # sidecar, and no leftover plaintext .zip, which would mean a torn package.
+    if (-not (Test-Path -LiteralPath "$($archive.FullName).sha256")) {
+        throw "Backup $($archive.Name) has no .sha256 sidecar. Deploy aborted."
+    }
+    $leftover = Join-Path $BackupRoot $archive.BaseName
+    if (Test-Path -LiteralPath $leftover) {
+        throw "Leftover plaintext archive $leftover - backup may be torn. Deploy aborted."
+    }
+
+    Write-Host ("Backup OK: {0} ({1:N0} bytes, .sha256 present)" -f $archive.Name, $archive.Length) -ForegroundColor Green
     Write-Host  'Record this filename in the deploy log.'
 }
 

@@ -47,6 +47,7 @@
         <div class="card-body py-3">
             <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
+                <a href="?status=CANCELLED{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CANCELLED' %}active{% endif %}">ยกเลิกแล้ว</a>
                 <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
                 <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
                 <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>

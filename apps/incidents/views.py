@@ -66,6 +66,8 @@ from .policies import (
     user_can_drive as _user_can_drive,
 )
 from .selectors import get_ticket_detail_read_model
+from .cancellation_views import cancellation_context
+from .models import TicketCancellationRequest
 from .ioc_values import INVENTORY_CATEGORY_CHOICES, normalize_for_category
 from .case_creation import (
     create_project_incident_from_forms,
@@ -444,6 +446,11 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'heading': heading,
         'description': description,
         'is_manager_queue': is_manager_queue,
+        'pending_cancellations': (
+            TicketCancellationRequest.objects.filter(status='PENDING', ticket__in=Ticket.objects.visible_to(request.user))
+            .select_related('ticket', 'requested_by').order_by('requested_at')
+            if is_manager_queue else []
+        ),
         'show_returned_to_admin_indicator': is_system_admin_viewer,
         'tickets': page_obj,
         'page_obj': page_obj,
@@ -1341,6 +1348,7 @@ def ticket_detail(request, pk):
 
     return render(request, 'incidents/ticket_detail.html', {
         'ticket': ticket,
+        **cancellation_context(ticket, request.user),
         **read_model,
         # One-shot: set by create_ticket on a successful save so this page can
         # clear the matching localStorage draft. Popped so a later plain visit
@@ -1527,7 +1535,7 @@ def ticket_history(request):
     if search_ticket:
         query_set = query_set.filter(ticket_id__icontains=search_ticket)
 
-    if status_filter in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT):
+    if status_filter in Ticket.TERMINAL_STATUSES:
         query_set = query_set.filter(status=status_filter)
 
     if severity_filter in dict(Ticket.SEVERITY_CHOICES):
@@ -2095,7 +2103,7 @@ def update_subtask(request, subtask_id):
         or subtask.assigned_to_id == request.user.pk
     )
     if ticket.status in Ticket.TERMINAL_STATUSES:
-        messages.error(request, 'This ticket is closed; no further files or subtask updates can be added.')
+        messages.error(request, 'รายการนี้ปิดหรือยกเลิกแล้ว ไม่สามารถเพิ่มไฟล์หรืออัปเดตงานย่อยได้')
         return redirect('ticket_detail', pk=ticket.pk)
     if not can_update:
         messages.error(request, 'คุณไม่มีสิทธิ์อัปเดตงานย่อยนี้')
@@ -2132,16 +2140,20 @@ def update_subtask(request, subtask_id):
                     except ValidationError as e:
                         messages.error(request, e.message)
 
-            subtask = save_subtask_update(
-                ticket=ticket,
-                actor=request.user,
-                update_form=form,
-                previous_status=previous_status,
-                previous_notes=previous_notes,
-                was_done=was_done,
-                result_upload=result_upload,
-                result_description=request.POST.get('result_file_desc', '').strip(),
-            ).subtask
+            try:
+                subtask = save_subtask_update(
+                    ticket=ticket,
+                    actor=request.user,
+                    update_form=form,
+                    previous_status=previous_status,
+                    previous_notes=previous_notes,
+                    was_done=was_done,
+                    result_upload=result_upload,
+                    result_description=request.POST.get('result_file_desc', '').strip(),
+                ).subtask
+            except ValidationError as exc:
+                messages.error(request, ' '.join(exc.messages))
+                return redirect('ticket_detail', pk=ticket.pk)
 
             messages.success(request, f'อัปเดตงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
         else:
@@ -2183,7 +2195,7 @@ def response_request_queue(request):
     else:
         status_filter = ''
 
-    open_count = sum(1 for s in requests_qs if not s.is_done)
+    open_count = sum(1 for s in requests_qs if s.status not in TicketSubtask.TERMINAL_STATUSES)
 
     return render(request, 'incidents/response_request_queue.html', {
         'requests': requests_qs,
@@ -2207,12 +2219,16 @@ def upload_attachment(request, pk):
         if form.is_valid():
             description = form.cleaned_data.get('description', '')
             uploads = form.cleaned_data['file']
-            result = add_ticket_attachments(
-                ticket=ticket,
-                actor=request.user,
-                uploads=uploads,
-                description=description,
-            )
+            try:
+                result = add_ticket_attachments(
+                    ticket=ticket,
+                    actor=request.user,
+                    uploads=uploads,
+                    description=description,
+                )
+            except ValidationError as exc:
+                messages.error(request, ' '.join(exc.messages))
+                return redirect('ticket_detail', pk=pk)
             if len(result.attachments) == 1:
                 messages.success(
                     request,
@@ -2283,7 +2299,11 @@ def delete_attachment(request, attachment_id):
         messages.error(request, 'กรุณาระบุเหตุผลในการลบไฟล์')
         return redirect('ticket_detail', pk=ticket.pk)
 
-    delete_ticket_attachment(attachment=att, actor=request.user, reason=reason)
+    try:
+        delete_ticket_attachment(attachment=att, actor=request.user, reason=reason)
+    except ValidationError as exc:
+        messages.error(request, ' '.join(exc.messages))
+        return redirect('ticket_detail', pk=ticket.pk)
     messages.success(request, 'ลบไฟล์เรียบร้อยแล้ว — ผู้จัดการ SOC สามารถกู้คืนได้')
     return redirect('ticket_detail', pk=ticket.pk)
 
@@ -2312,12 +2332,16 @@ def edit_ticket(request, pk):
             if not reason:
                 messages.error(request, 'กรุณาระบุเหตุผลในการแก้ไข')
             else:
-                result = save_ticket_edit(
-                    ticket=ticket,
-                    actor=request.user,
-                    edit_form=form,
-                    reason=reason,
-                )
+                try:
+                    result = save_ticket_edit(
+                        ticket=ticket,
+                        actor=request.user,
+                        edit_form=form,
+                        reason=reason,
+                    )
+                except ValidationError as exc:
+                    messages.error(request, ' '.join(exc.messages))
+                    return redirect('ticket_detail', pk=pk)
                 if result.changes:
                     messages.success(
                         request,
