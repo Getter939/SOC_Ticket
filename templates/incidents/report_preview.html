@@ -205,7 +205,7 @@
           {% for item in section.rows.0.items %}
             <div class="check-item"><span class="cb">{% if item.checked %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ item.label }}</div>
           {% endfor %}
-          <div class="check-item"><span class="cb">&#9744;</span>&#160;อื่นๆ ระบุ{% if section.rows.0.other %} — {{ section.rows.0.other }}{% endif %}</div>
+          <div class="check-item"><span class="cb">{% if section.rows.0.other %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;อื่นๆ ระบุ{% if section.rows.0.other %} — {{ section.rows.0.other }}{% endif %}</div>
         </div>
         {% with tail=section.rows|slice:"1:" %}
           {% if tail %}

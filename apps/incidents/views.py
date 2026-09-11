@@ -45,6 +45,7 @@ from .notifications import (
     notify_containment_alert,
 )
 from .reports import (
+    PREVIEW_IMAGE_ERRORS,
     build_attachment_preview_image,
     build_ticket_report_render_context,
     generate_ticket_report,
@@ -2508,7 +2509,9 @@ def preview_attachment(request, attachment_id):
     if kind == 'image':
         try:
             image = build_attachment_preview_image(att)
-        except Exception:
+        except PREVIEW_IMAGE_ERRORS:
+            # A corrupt / oversized / non-image file — 404 it. Anything else
+            # (storage, bug) propagates to a logged 500 rather than hiding here.
             logger.warning('Inline preview failed for attachment %s', att.pk, exc_info=True)
             raise Http404('ไม่สามารถแสดงตัวอย่างไฟล์รูปภาพนี้ได้')
         ctx['image_data_uri'] = image.data_uri

@@ -2968,6 +2968,11 @@ class AttachmentPreviewTest(TestCase):
             file=SimpleUploadedFile('evidence.zip', b'PK\x03\x04zip', content_type='application/zip'),
             original_name='evidence.zip', uploaded_by=cls.soc,
         )
+        cls.badimg = TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file=SimpleUploadedFile('broken.png', b'not a real image', content_type='image/png'),
+            original_name='broken.png', uploaded_by=cls.soc,
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -2989,6 +2994,11 @@ class AttachmentPreviewTest(TestCase):
     def test_non_previewable_type_404(self):
         self.client.force_login(self.soc)
         self.assertEqual(self.client.get(self._url(self.zipfile)).status_code, 404)
+
+    def test_corrupt_image_404(self):
+        # A decode failure is caught (→ 404); unexpected errors would 500 instead.
+        self.client.force_login(self.soc)
+        self.assertEqual(self.client.get(self._url(self.badimg)).status_code, 404)
 
     def test_soft_deleted_attachment_404(self):
         self.image.deleted_at = timezone.now()
@@ -5835,6 +5845,26 @@ class ReportSectionEightTest(TestCase):
         self.assertIn('☑ Isolate', text)
         self.assertIn('☑ Block IoC', text)
         self.assertIn('☐ Dump memory', text)
+        # The 'อื่นๆ ระบุ' line ticks because remediation_other is filled.
+        self.assertIn('☑ อื่นๆ ระบุ', text)
+
+    def test_other_line_ticks_only_when_filled(self):
+        # Filled (setUpTestData): ☑ in both preview and docx.
+        self.client.force_login(self.t1)
+        preview = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(preview, '&#9745;</span>&#160;อื่นๆ ระบุ')
+        self.assertIn('☑ อื่นๆ ระบุ', _docx_text(
+            generate_ticket_report(self.ticket.pk).content))
+
+        # Empty → ☐.
+        self.ticket.remediation_other = ''
+        self.ticket.save(update_fields=['remediation_other'])
+        preview = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(preview, '&#9744;</span>&#160;อื่นๆ ระบุ')
+        self.assertIn('☐ อื่นๆ ระบุ', _docx_text(
+            generate_ticket_report(self.ticket.pk).content))
 
     def test_compact_docx_removes_only_the_empty_section_eight_field(self):
         self.ticket.containment_report = ''
@@ -5969,14 +5999,17 @@ class RemediationChecklistWorkflowTest(TestCase):
             'action': 'workflow_action',
             'status': Ticket.STATUS_AWAITING_CONTAINMENT,
             'update_notes': 'still missing steps',
-            'remediation_done': ['isolate', 'block_ioc', 'bogus_key'],
+            # Posted out of checklist order (and with an unknown key) on purpose.
+            'remediation_done': ['block_ioc', 'bogus_key', 'isolate'],
             'remediation_other': 'ตรวจ log เพิ่ม',
         })
         self.assertEqual(response.status_code, 302)
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
-        # Unknown keys dropped; the rest saved even though this was a Return.
-        self.assertEqual(set(t.remediation_checklist), {'isolate', 'block_ioc'})
+        # Unknown keys dropped; the rest saved (even on a Return) in canonical
+        # REMEDIATION_CHECKLIST order — never the POST/set order — so a re-save is
+        # byte-identical and does not fabricate a history entry.
+        self.assertEqual(t.remediation_checklist, ['isolate', 'block_ioc'])
         self.assertEqual(t.remediation_other, 'ตรวจ log เพิ่ม')
         self.assertTrue(t.field_changes.filter(source='t2_remediation').exists())
 

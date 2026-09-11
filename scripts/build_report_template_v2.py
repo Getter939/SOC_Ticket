@@ -319,7 +319,7 @@ def add_remediation_section(doc):
         ])
     other = cell.add_paragraph()
     add_runs(other, [
-        ('☐ ', SYMBOL_FONT, BODY_PT, TEXT, False),
+        ('{{chk_rem_other}} ', SYMBOL_FONT, BODY_PT, TEXT, False),
         ('อื่นๆ ระบุ  {{remediation_other}}', BODY_FONT, BODY_PT, TEXT, False),
     ])
     p1 = cell.add_paragraph()

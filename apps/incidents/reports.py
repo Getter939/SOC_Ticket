@@ -102,6 +102,15 @@ REPORT_IMAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024
 # On-screen attachment preview re-encodes at a larger bound than the report
 # embed — it is viewed on a monitor, not printed into a form cell.
 PREVIEW_IMAGE_MAX_DIMENSION = 2400
+# The image-decode failures a corrupt/oversized/non-image file can raise. Shared
+# by the report embed and the inline preview so an unexpected error (storage,
+# bug) is never silently swallowed as one of these.
+PREVIEW_IMAGE_ERRORS = (
+    Image.DecompressionBombError,
+    OSError,
+    UnidentifiedImageError,
+    ValueError,
+)
 
 
 @dataclass(frozen=True)
@@ -328,6 +337,8 @@ def build_ticket_report_context(ticket, generated_at=None):
     ticked_remediation = set(ticket.remediation_checklist or [])
     for key, _label in REMEDIATION_CHECKLIST:
         context[f'chk_rem_{key}'] = _chk(key in ticked_remediation)
+    # The 'อื่นๆ ระบุ' line ticks whenever its free text is filled.
+    context['chk_rem_other'] = _chk(bool((ticket.remediation_other or '').strip()))
     if ticket.status == Ticket.STATUS_CANCELLED:
         cancellation = ticket.cancellation_requests.filter(status='APPROVED').select_related(
             'decided_by', 'duplicate_of',
@@ -968,12 +979,7 @@ def _report_evidence_images(ticket):
 
         try:
             image = _prepare_report_evidence_image(attachment)
-        except (
-            Image.DecompressionBombError,
-            OSError,
-            UnidentifiedImageError,
-            ValueError,
-        ) as exc:
+        except PREVIEW_IMAGE_ERRORS as exc:
             logger.warning(
                 'Skipping attachment %s in report image preview: %s',
                 attachment.pk, exc,

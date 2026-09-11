@@ -197,10 +197,13 @@ def record_remediation_check(
     Admin lane leaves them to the System Admin). Field history is recorded by the
     caller's surrounding snapshot; this only mutates and saves.
     """
-    from .report_content import REMEDIATION_CHECKLIST_KEYS
+    from .report_content import REMEDIATION_CHECKLIST
 
+    # Store in the checklist's canonical order (not the set's iteration order,
+    # which varies across process restarts) so re-saving the same selection is
+    # byte-identical and never produces a false field-history entry.
     ticket.remediation_checklist = [
-        key for key in checked_keys if key in REMEDIATION_CHECKLIST_KEYS
+        key for key, _ in REMEDIATION_CHECKLIST if key in checked_keys
     ]
     ticket.remediation_other = other or ''
     update_fields = ['remediation_checklist', 'remediation_other']
