@@ -1,16 +1,6 @@
 # Workflow Change Log
 
-## 2026-09-10 — Ticket cancellation
-
-Added the separate cancellation request/decision process and terminal `CANCELLED`
-outcome. After handoff the SOC Manager approves; the Tier 1 creator may directly
-cancel only at NEW. Pending requests keep work and OLA clocks running. Outstanding
-subtasks require explicit manager cancellation. Thai forms, manager queue, audit
-history, notifications, reports and cancellation-specific reporting are included.
-See [ADR-0005](../adr/0005-ticket-cancellation.md) and the
-[lifecycle reference](ticket-lifecycle-states.md#cancellation-การยกเลิกรายการ).
-
-> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-07-23
+> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-09-11
 > **Current-state reference:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md)
 
 A dated record of every workflow redesign and amendment, newest first, with the
@@ -22,6 +12,61 @@ Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 `apps/dashboard` (aggregates).
 
 ---
+
+## 2026-09-10 — Ticket cancellation (v1.5.0)
+
+Added a separate cancellation request/decision process and the terminal
+`CANCELLED` outcome. Cancellation is **not** a status-dropdown edge — it runs
+through `Ticket.cancellation_action` from **any active stage** (incl. MONITORING
+and legacy OWNER_REMEDIATED). The Tier 1 creator may cancel directly **only at
+NEW**; after handoff the current actor **requests** and the **SOC Manager**
+approves/rejects/cancels directly. A pending request keeps work and OLA clocks
+running and does not move the stage; at most one pending at a time; approval
+requires open subtasks/Response Requests to be completed or explicitly cancelled
+(they become `CANCELLED`, never `DONE`). Cancellation stamps `closed_at` without
+`approved_by`/`verified_by`, and cancelled tickets are excluded from
+successful-resolution and MTTR aggregates. Thai forms, the SOC-Manager decision
+UI (inline on ticket detail), manager queue, audit history, notifications,
+reports and cancellation-specific reporting are included.
+
+**FSM delta:** no new *edges* — `CANCELLED` is entered only via the cancellation
+process. New terminal state `CANCELLED` in `STATUS_CHOICES`
+(`incidents/0073`, `reporting/0005`). See
+[ADR-0005](../adr/0005-ticket-cancellation.md) and the
+[lifecycle reference](ticket-lifecycle-states.md#cancellation-การยกเลิกรายการ).
+
+## 2026-09-10 — SOC Manager step-back (backward correction)
+
+The SOC Manager can step a ticket **backward** along `STEP_BACK_EDGES`
+(`Ticket.step_back`) to correct a mis-route — e.g. the wrong admin was assigned.
+Step-back runs through `transition_to()`, so it inherits every invariant and the
+audit log rather than a parallel hand-rolled write; `can_step_back` refuses
+terminal states, so a closed or cancelled ticket is never reopened.
+
+**FSM delta (STEP_BACK_EDGES):** `AWAITING_CONTAINMENT → PENDING_MGR_TRIAGE`,
+`AWAITING_OWNER → PENDING_MGR_TRIAGE`, `OWNER_REMEDIATED → AWAITING_OWNER`,
+`PENDING_MANAGER → CONTAINMENT_REPORTED` (ADMIN lane) / `PENDING_T2_REVIEW`
+(OWNER lane) — the `t1_route` gate allows exactly one of the two `PENDING_MANAGER`
+edges per ticket. All `[MANAGER]`.
+
+## 2026-09-07 — Monitoring (กำลังเฝ้าระวัง) watch-and-wait state (v1.2.3)
+
+Added `MONITORING` for a case escalated to Tier 2 that **cannot yet be classified**
+Event or Incident. It is a **watch-and-wait park, not a stage of handling**: only
+Tier 2 may grant it, only from `ESCALATED_T2`, for a **fixed 30 days**
+(`MONITORING_DURATION_DAYS`), **once per case** (`has_been_monitored`). The case
+sits in the Tier 1 creator's court and resolves to Incident (→ `PENDING_MGR_TRIAGE`)
+or Event (→ `ESCALATED_T2`, where Tier 2 confirms the close). Expiry is computed on
+read (green→amber→red badge) — **no scheduler**. Tier 1 may *recommend* monitoring
+at creation (`monitoring_proposed`); the recommendation is advisory, Tier 2 decides.
+Bundle (Project Incident) members cannot be monitored, and the emergency flag cannot
+be reassessed while monitoring.
+
+**FSM delta:** `ESCALATED_T2 → MONITORING` [TIER2]; `MONITORING → PENDING_MGR_TRIAGE`
+and `MONITORING → ESCALATED_T2` [TIER1_CREATOR]. Fields `monitor_until`,
+`has_been_monitored`, `monitoring_proposed` (`incidents/0065`, additive). The My
+Queue nav badge counts only actionable work — a still-counting-down watch (passive)
+no longer inflates it, while an expired watch does.
 
 ## 0. 2026-07-14 update — SOC Manager pre-containment review
 

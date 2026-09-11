@@ -55,6 +55,10 @@ function responseTeamBody({ roleTh, intro, requestTable, who, readsAllTickets })
     push(bullet([menuTag("Tickets › Active Tickets / History"), r(" — อ่านตั๋วทุกใบ (อ่านอย่างเดียว: ไม่มีปุ่มแก้ไข เปลี่ยนสถานะ แนบไฟล์ หรือออกรายงาน)")]));
     push(bullet([menuTag("Tickets › IOC Database"), r(" — แหล่งรวมตัวบ่งชี้ทั้งหมด เป็นหน้าเฉพาะของบทบาทคุณ (ดูหัวข้อถัดไป)")]));
     push(bullet([menuTag("Tickets › IOC Search"), r(" — ค้นหาตัวบ่งชี้ข้ามตั๋วและข้ามคิวคัดกรอง Wazuh")]));
+    push(callout("note", [
+      [r("เพิ่ม v1.5.0: ", { bold: true }), r("เมื่อเปิดตั๋วเพื่ออ่านหลักฐาน ไฟล์แนบที่เป็นรูปภาพและข้อความ/log/CSV มีลิงก์ ", {}),
+       ui("ดูตัวอย่าง"), r(" เปิดดูในแท็บใหม่ได้โดยไม่ต้องดาวน์โหลด (ผ่านการตรวจสิทธิ์เสมอ)", {})],
+    ]));
   }
 
   push(SH("การทำงานกับคำขอ"));

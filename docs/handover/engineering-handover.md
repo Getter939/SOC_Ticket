@@ -1,8 +1,10 @@
 ﻿# Engineering Handover — SOC Ticketing System
 
 > **Audience:** the developer taking over this codebase · **Status:** Current
-> **Reviewed against:** `main` on 2026-08-27 · **§3.1 lifecycle** refreshed to
-> v1.4.0 on 2026-09-10 (adds MONITORING, step-back, cancellation)
+> **Reviewed against:** `main` on 2026-09-11 (**v1.5.0**) · covers the v1.2.0→v1.5.0
+> release train: MONITORING (v1.2.3), IOC Database + structured IOCs (v1.3.0),
+> Forensic read-all (v1.3.1), vulnerability-alert removal (v1.4.0), ticket
+> cancellation + attachment preview + Section 8 checklist + report rework (v1.5.0)
 > **Thai version:** [engineering-handover.th.md](engineering-handover.th.md)
 
 This document is the entry point for anyone taking over this project. It covers
@@ -82,8 +84,8 @@ deadline tracking — plus a KPI dashboard.
 | Alert source | Wazuh alerts via the OpenSearch REST API (`requests`) |
 | Login throttling | `django-axes` 7.1.0 (lockout on repeated failed logins) |
 
-Migration heads at time of writing: `incidents 0062`, `wazuh_ingest 0006`,
-`accounts 0009`, `reporting 0004`.
+Migration heads at time of writing (v1.5.0): `incidents 0075`, `wazuh_ingest 0007`,
+`accounts 0011`, `reporting 0005`.
 
 ## 3. Feature summary
 
@@ -138,7 +140,7 @@ NEW
    (ADMIN lane) or PENDING_T2_REVIEW (OWNER lane); OWNER_REMEDIATED → AWAITING_OWNER.
  • CANCELLED (terminal): reachable from every active state via
    Ticket.cancellation_action — a separate audited process, NOT a status edge.
-   (Cancellation is unreleased at time of writing; see ADR-0005.)
+   (Shipped in v1.5.0; see ADR-0005 and §3.11.)
 ```
 
 Rules that are easy to get wrong:
@@ -233,14 +235,15 @@ Rules that are easy to get wrong:
 | **SOC Manager** | Runs the pre-containment review (`PENDING_MGR_TRIAGE`): rules Emergency and forwards to the fixed lane. The **only** role that may set `is_emergency`. Spawns Response Requests. Approves `PENDING_MANAGER` → `APPROVED`. |
 | **System Admin** | Sees only tickets where they are `assigned_admin`. Writes `containment_report` (countermeasure) and `remediation_summary` (findings), returns the ticket for verification. Never sets classification. |
 | **System Owner** | Notified when tickets open/close on systems they own; has a read-oriented "My Tickets" dashboard at `/incidents/my-tickets/`. |
-| **Forensic Analyst** | Response-team role, **not** a SOC member. Sees only tickets carrying a Forensics/RCA Response Request assigned to them; works from the "Response Requests" queue. |
-| **Red Team Manager** | Response-team role, **not** a SOC member. Receives both VA/Pentest and Infrastructure Security Response Requests. |
+| **Forensic Analyst** | Response-team role, **not** a SOC member. **Reads *every* ticket (read-only, since v1.3.1)** so indicators can be correlated across incidents; every write gate (edit, attachment upload/restore, transitions, report export) independently excludes them. Their one write path is the deliverable on a Forensics/RCA Response Request assigned to them, worked from the "Response Requests" queue. Also the audience for the **IOC Database** (§3.10). |
+| **Red Team Manager** | Response-team role, **not** a SOC member. **Response-only visibility** — sees only tickets carrying a VA/Pentest or Infrastructure Security Response Request assigned to them. |
 
 Visibility is centralized in `TicketQuerySet.visible_to(user)`: SOC roles see
-all tickets, system admins see only their assigned tickets, the two response
-roles see only tickets with a Response Request assigned to them, and users
-without a profile see nothing. **Always check `getattr(user, 'profile', None)`
-before role checks** — superusers created via `createsuperuser` have no profile.
+all tickets, the **Forensic Analyst also reads all tickets** (read-only, v1.3.1),
+system admins see only their assigned tickets, the **Red Team Manager** sees only
+tickets with a Response Request assigned to them, and users without a profile see
+nothing. **Always check `getattr(user, 'profile', None)` before role checks** —
+superusers created via `createsuperuser` have no profile.
 
 ### 3.3 Emergency flag
 
@@ -350,6 +353,17 @@ tickets — one per affected system — grouped by a `ProjectIncident` with a
   README) — this is how you demo/test without reaching the cluster.
 - Triage (claim / create ticket / release) is **Tier-1-only**. Releasing an
   alert **requires a reason** (`release_reason`).
+- **Vulnerability-detector alerts are excluded (v1.4.0).** `WazuhAlert.kind`
+  (`DETECTION` / `VULNERABILITY`) is classified at ingest from the Wazuh rule
+  group (`wazuh_ingest` migration `0007` backfills existing rows). Vuln alerts
+  are filtered out **twice** — in the OpenSearch query and again in
+  `store_alert_hits` — the triage queue and its sidebar badge are scoped to
+  `kind=DETECTION`, and `claim_alert` rejects a vuln alert outright. Vulnerability
+  management lives in Wazuh's own dashboard. The `purge_vulnerability_alerts`
+  management command is a one-off cleanup for alerts stored before the filter
+  landed (`--dry-run` / `--batch-size`; never deletes a ticket-linked or bundled
+  alert). Triage-queue UX also gained an Agent IP column, click-to-sort headers,
+  and a 25/50/100 rows-per-page selector.
 - `escalation_queue` is the **ticket-level Tier 2 queue** and is fully live. Its
   `claim_escalation` / `release_escalation` views were dead stubs until
   2026-07-23 and are now the real claim/release implementation (URL names
@@ -397,6 +411,80 @@ Charts are fed via `json_script` (no `|safe` on user data — keep it that way).
   ticket logs/history with edit, Excel export, global search, IP lookup,
   manual triage records (`TriageRecord.source` shares choices with
   `Ticket.source`).
+- **In-browser attachment preview (v1.5.0).** A "ดูตัวอย่าง" link opens image and
+  text/log/CSV attachments in a new tab **with no download**. Images are
+  re-encoded through Pillow (the raw upload is never served — no stored-XSS from a
+  spoofed file), text is decoded (utf-8 / cp874) and shown escaped, CSV/TSV render
+  as a table. Office/archive/pcap types keep forced-download only. The view
+  narrows its exception handling so a real failure surfaces as a logged 500.
+
+### 3.11 Ticket cancellation (v1.5.0 — ADR-0005)
+
+A mistaken or duplicate ticket can end as **`CANCELLED`** (terminal) without
+being classified an Event or certified as remediated. It is a **separate audited
+process** through `Ticket.cancellation_action`, **not** a status-dropdown edge,
+available from every active stage (incl. MONITORING and legacy OWNER_REMEDIATED).
+
+- The **Tier 1 creator** may cancel directly **only at `NEW`**. After handoff the
+  current actor **requests** cancellation and the **SOC Manager** approves,
+  rejects, or cancels directly (superuser override applies with the same audit).
+- At most **one pending request**; it leaves status and **OLA clocks unchanged**
+  (work continues) and does not move the stage. Only the requester withdraws it;
+  rejection permits a new request; normal closure supersedes it.
+- Reasons: รายการซ้ำ / สร้างรายการผิด / เหตุผลอื่น, with a mandatory explanation;
+  duplicates must reference another accessible, non-cancelled ticket (re-checked
+  at approval). Approval requires open subtasks/Response Requests to be completed
+  or explicitly cancelled by the manager (they become `CANCELLED`, never `DONE`).
+- Cancellation stamps `closed_at` **without** stamping `approved_by`/`verified_by`;
+  cancelled tickets leave active queues/OLA pressure and are **excluded from
+  successful-resolution and MTTR aggregates**. The **SOC Manager's decision UI**
+  is surfaced inline on ticket detail alongside the other stage actions.
+
+### 3.12 IOC Database & structured IOCs (v1.3.0)
+
+- **IOC Database** (sidebar; **Forensic Analyst / superuser only**) unifies
+  indicators from **two sources** — those entered on tickets by T1/T2 and those
+  the FA researches externally and **types in by hand** — keyed by
+  *(category, value)* so the same indicator from both is one row showing Source
+  `Ticket` / `Manual` / both. Each carries an FA annotation: a two-state
+  **Checked / Not Checked** review flag ("reviewed against MISP") + free-text
+  **Note**, editable on any row. Manual entry adds several at once, generates a
+  `MAN-####` reference, dedupes anywhere, and **restores** a soft-removed record
+  if its value is typed again. Models: `TicketIOC` + `AnalystIOC` (renamed from
+  the import model), unified in the view; per-indicator `IOCReviewStatus`.
+- **Structured IOCs on tickets.** Ticket create / Project Incident create / Tier 2
+  review / edit gain an **Indicators of Compromise** section with six multi-valued
+  fields — File Name, Hash (SHA-256), Domain, IP Address, URL, File Path — each
+  validated/normalised per category (defang, case, IDNA, IPv6). They feed ticket
+  search, the change history (one IOC-set audit entry per edit), and the incident
+  report (Domain + URL rows in section 4). The old free-text *IoC อื่น ๆ* box was
+  removed (existing text preserved read-only).
+- **Multiple IP addresses per ticket.** `ip_address` accepts a comma/semicolon/
+  newline-separated list, normalised and de-duplicated on save.
+- **User / Command (v1.5.0)** indicators live in the ticket IOC section and are
+  searchable but are **deliberately kept out of the IOC Database**.
+
+### 3.13 Reports (`reports.py`)
+
+- **Incident report** (DOCX/PDF/preview) plus an **Event report form** (v1.2.0,
+  pale-blue NT one-pager). Report meta line removed in v1.2.0.
+- **v1.5.0 rework** (Incident report only): Section 1 occurrence/detection split,
+  row re-ordering, added `รายละเอียด` row, Reference ID folded into the source
+  row, **16pt** body; Section 4 gains File Name + คำสั่ง (Command) rows;
+  **Section 5 no longer lists attachment file names**; a **signature toggle**
+  (default hidden); **Section 8** is a fixed 15-item remediation checklist ticked
+  by Tier 2 while verifying (ADR-0006), stored per ticket in canonical order so
+  re-saves are byte-identical. New field `event_occurred_at` (เวลาที่เกิดเหตุ),
+  distinct from detection time.
+
+### 3.14 Two-factor authentication (v1.2.2)
+
+TOTP 2FA (`AuthenticatorDevice` / `MFAAudit` / recovery codes, `accounts`
+migrations `0010`–`0011`) is **switchable via `MFA_ENABLED`** (default `True`).
+**Production runs with `MFA_ENABLED=False`** — login is password-only; the tables
+sit unused and enrolled devices are retained, so re-enabling (`MFA_ENABLED=True`
++ a valid `MFA_ENCRYPTION_KEYS` key) restores 2FA unchanged. See
+[operations/two-factor-authentication.md](../operations/two-factor-authentication.md).
 
 ## 4. Codebase guide
 
@@ -461,8 +549,8 @@ python manage.py createsuperuser
 python manage.py runserver 0.0.0.0:8088
 ```
 
-Needs a reachable PostgreSQL 16 (`DB_*` in `.env`). App at
-`http://127.0.0.1:8088/`, admin at `/admin/`.
+Needs a reachable PostgreSQL (`DB_*` in `.env`; production and CI run **18**). App
+at `http://127.0.0.1:8088/`, admin at `/admin/`.
 
 **Test data:**
 
@@ -478,7 +566,7 @@ Needs a reachable PostgreSQL 16 (`DB_*` in `.env`). App at
 > regenerates every dataset and purges the legacy synthetic logins (`uat_*`,
 > `seed_*`, mockup names), removing their tickets first so nothing is orphaned.
 - `python manage.py seed_uat_states` — deterministic: one ticket parked in
-  **each of the 12** states, so every screen and button can be exercised
+  **each lifecycle state**, so every screen and button can be exercised
   without walking the whole workflow. Tagged with a `uat_` prefix (not `seed_`)
   so its `--flush` removes exactly its own rows and nothing a live tester made.
 - `python manage.py seed_response_demo` — tickets with open/closed Response

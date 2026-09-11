@@ -1,5 +1,8 @@
 # IOC Database
 
+> **Audience:** Forensic Analyst / developers · **Status:** Current · **Last updated:** 2026-09-11 (v1.5.0)
+> Feature shipped in **v1.3.0**; the Forensic Analyst reads every ticket (read-only) since **v1.3.1**.
+
 The **IOC Database** (sidebar, Forensic Analyst / superuser only) collects IOC data
 from **two sources**:
 
@@ -60,6 +63,13 @@ Ticket create / Project Incident / Tier 2 review / edit carry an **Indicators of
 Compromise** section with six multi-valued fields (File Name, Hash, Domain, IP, URL,
 File Path), each with a "＋ add" button. Stored as `TicketIOC`; they feed ticket
 search, the change history, the incident report, and this database.
+
+> **v1.5.0 — User and Command are kept out of the IOC Database.** The ticket IOC
+> section also captures a **User** and a **คำสั่ง (Command)** indicator, and both
+> are searchable on tickets, but they are **deliberately not** collected into the
+> IOC Database (they are context, not shareable network/file indicators). A ticket
+> can also record **multiple IP addresses** (v1.3.0) — a comma/semicolon/newline
+> list, normalised and de-duplicated on save.
 
 ## Deployment
 

@@ -41,14 +41,16 @@ the `shot()` placeholder (see `shot()` in `common.js`), then rebuild.
 
 - Cover version string and date are set in `common.js` (`buildManual`, cover block)
   and inline in `build-tier1.js` — **two places, keep them in step**. Currently
-  `v1.4.0` / 10 Sep 2026 (manual edition 1.1).
+  `v1.5.0` / 11 Sep 2026 (manual edition 1.2).
 - Content is written against
   [`docs/architecture/ticket-lifecycle-states.md`](../../../architecture/ticket-lifecycle-states.md),
   which is the authority for the state machine. When a release changes the workflow,
   diff that file first, then the manuals — the 2026-09-10 audit found the Tier 1
   manual still teaching "an Event closes the ticket immediately", two months after
   that stopped being true.
-- **Not yet covered:** ticket cancellation (unreleased at the time of writing). When
-  it ships it needs a pass across manager, tier1/tier2, response-teams and exec.
+- **Ticket cancellation (v1.5.0)** is now covered — the SOC Manager decision flow in
+  `build-manager.js`, and the request path in `build-tier1.js` / `build-tier2.js` /
+  `build-admin.js` / `build-owner.js`. Also covered in v1.5.0: in-browser attachment
+  preview and the Section 8 remediation checklist (tier2/admin/owner).
 - The table of contents is a live Word field: it populates when the `.docx` is
   opened/updated in Word, and shows blank in a raw headless PDF export.

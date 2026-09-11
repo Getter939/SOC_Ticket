@@ -1,7 +1,19 @@
 # SOC Ticket — Progression & Road to Go-Live
 
-> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-08-27
+> **Audience:** you (project owner) · **Status:** Current · **Last updated:** 2026-09-11
 > **Companion to:** [../PROJECT_STATUS.md](../PROJECT_STATUS.md) (this week's lanes) — this file is the *whole* arc
+
+> **Update (2026-09-11, v1.5.0).** Since the 2026-08-27 assessment below, the system
+> has been in **operate & evolve** mode and shipped a full release train to
+> production: **v1.2.0** (Event report form), **v1.2.2** (switchable 2FA, off in
+> prod), **v1.2.3** (Monitoring watch-and-wait state), **v1.3.0** (IOC Database +
+> structured IOCs + multiple IPs), **v1.3.1** (Forensic Analyst reads all,
+> read-only), **v1.4.0** (vulnerability alerts removed from ingest/triage), and
+> **v1.5.0** (ticket cancellation, in-browser attachment preview, Section 8
+> remediation checklist, Incident-report rework). Phase-A engineering items below
+> are effectively complete; the open finish-line work is still **UAT (Phase B)**,
+> the **real CA cert + DNS**, and the operational phases (E–F). See
+> [CHANGELOG.md](../CHANGELOG.md) for the per-release detail.
 
 The short answer to "how far am I?": **the software is essentially finished; the
 delivery is not.** You are roughly **two-thirds through the project**, and the
@@ -20,7 +32,7 @@ Verified against the repo on 2026-08-27:
 |---|---|
 | Test suite | **837 tests, all passing**; **86.3% branch coverage** |
 | Application code | ~14,000 production Python lines + ~6,700 template lines across 5 Django apps |
-| Lifecycle | 13-state FSM, 7 roles, transitions enforced in the model |
+| Lifecycle | 15-status FSM (14 reachable + 1 legacy, incl. terminal `CANCELLED` since v1.5.0), 7 roles, transitions enforced in the model |
 | Feature backlog | Core workflow **complete**; 4 deferred nice-to-haves remain |
 | Reporting layer | Phases 1–3 built; nightly refresh **scheduled** (`SOC-Refresh-Reporting`, 2026-08-26); Phases 4–5 (external `reporting_ro` role + retire `socdata`) pending |
 | Docs | 25+ documents incl. Thai user guides, ADRs, handover, runbooks |

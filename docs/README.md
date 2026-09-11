@@ -1,6 +1,6 @@
 # Documentation Index
 
-> **Audience:** everyone · **Status:** Current · **Last updated:** 2026-09-02
+> **Audience:** everyone · **Status:** Current · **Last updated:** 2026-09-11 (v1.5.0)
 > **Conventions:** lowercase kebab-case filenames; `.th.md` marks a Thai version
 
 Every document in this folder, by audience. Start with the row that matches who
@@ -51,11 +51,12 @@ reading the source.
 
 | File | Type | Contents |
 |---|---|---|
-| [ticket-lifecycle-states.md](architecture/ticket-lifecycle-states.md) | Current | **The authoritative current-workflow reference.** The lifecycle (12 active states + 1 legacy `OWNER_REMEDIATED`) as a mermaid diagram + transition table, organised by responsible role |
+| [ticket-lifecycle-states.md](architecture/ticket-lifecycle-states.md) | Current | **The authoritative current-workflow reference.** The lifecycle (`STATUS_CHOICES` = 15 statuses: 14 reachable through the workflow/cancellation — incl. terminal `CANCELLED` — plus 1 legacy `OWNER_REMEDIATED`) as a mermaid diagram + transition table, organised by responsible role |
 | [workflow-change-log.md](architecture/workflow-change-log.md) | Current | Dated rationale for the workflow redesign and each amendment (manager triage, response teams, Event-downgrade gate, Tier 2 claim, Tier 1 My Queue, owner two-step retirement §0.3) |
 | [data-infrastructure.md](architecture/data-infrastructure.md) | Current | The whole data picture — every store, the flows between them, the four-layer model, and how backup fits (with a mermaid diagram) |
 | reporting-layer-design.md 🚫 | Current | Reporting layer (Layer ③ `mart` schema) design spec — grains, metric definitions, severity normalization, phased rollout |
 | reporting-layer-build.md 🚫 | As-built | As-built record of the reporting layer (Phases 1–3 built, committed, scheduled): objects, migrations, privilege model, decisions |
+| [../ti-platform-inventory.md](ti-platform-inventory.md) | Current | The **IOC Database** feature (v1.3.0) — indicators unified from tickets and the Forensic Analyst's own research, reviewed against MISP; structured IOCs on tickets |
 
 ## adr/ — Architecture decision records 📌
 
@@ -68,6 +69,8 @@ area they cover — they record *why*, which the code cannot.
 | [0002](adr/0002-ola-clock-from-incident-time.md) | Current | OLA clocks start from when the incident occurred, not when the Ticket was filed |
 | [0003](adr/0003-manager-verification-gate-in-model.md) | Current | The manager-verification gate is enforced in the model, not only the view (**amended 2026-07-08**: gate condition is the Emergency flag only — severity floor removed) |
 | [0004](adr/0004-mixed-project-incident-classification.md) | Current | A Project Incident allows mixed member classifications — each member Ticket is classified independently by Tier 1 |
+| [0005](adr/0005-ticket-cancellation.md) | Current | Ticket cancellation is a separate audited decision (terminal `CANCELLED`), not a resolution — Tier 1 self-cancels only at `NEW`, otherwise the SOC Manager decides (**v1.5.0**) |
+| [0006](adr/0006-section8-remediation-checklist.md) | Current | Section 8 is a fixed 15-item remediation checklist ticked by Tier 2 while verifying, each tick attributable in change history (**v1.5.0**) |
 
 ## operations/ — Running it in production
 
@@ -83,6 +86,7 @@ area they cover — they record *why*, which the code cannot.
 | [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Procedure / Current | Running & deploying the reporting layer: `refresh_reporting`, scheduling (live 2026-08-26), readiness checklist, verification, rollback |
 | [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | Procedure | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4; takes `-v owner=<DB_USER>` — `ticket_prod` in prod) |
 | grafana-wazuh-wall.md 🚫 | Local-sensitive / Current | The "Wazuh SOC Wall" big-screen board. Reads **directly** from the Wazuh Indexer (OpenSearch), not this app's PostgreSQL |
+| [two-factor-authentication.md](operations/two-factor-authentication.md) | Current | TOTP two-factor enrolment/verification. Switchable via `MFA_ENABLED` (v1.2.2); **off in production** for now, tables and enrolled devices retained |
 
 ## security/ 🚫 — Security assessments & remediation
 

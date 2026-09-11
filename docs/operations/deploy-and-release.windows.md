@@ -1,6 +1,6 @@
 # Deploy & Release — Windows production
 
-> **Audience:** deployers, operators · **Status:** Current · **Last updated:** 2026-08-28
+> **Audience:** deployers, operators · **Status:** Current · **Last updated:** 2026-09-11
 
 How to cut a release, deploy it to the Windows production VM, verify it, and roll
 it back. This is the **repeatable** counterpart to
@@ -28,7 +28,9 @@ Releases are `vMAJOR.MINOR.PATCH` annotated git tags on `main`:
 
 Baseline: **`v1.0.0`** was the first production build. Phases 5–6 (HTTPS bridge,
 authenticated SMTP, Wazuh ingestion, reporting mart, retention) are the first
-feature release on top of it → **`v1.1.0`**.
+feature release on top of it → **`v1.1.0`**. The release train has since reached
+**`v1.5.0`** (2026-09-11) — see [CHANGELOG.md](../../CHANGELOG.md). The worked
+examples below use the most recent release, **`v1.5.0`**, deployed over **`v1.4.0`**.
 
 The deployed tag is written into the PROD `.env` as `APP_VERSION` (§3, step 8) so
 `/healthz` reports exactly which release is running.
@@ -43,8 +45,8 @@ Only tag a commit that CI has proven green.
 git checkout main
 git pull
 # Confirm CI is green for this exact commit on GitHub (the "CI" check).
-git tag -a v1.1.0 -m "Phase 5-6: HTTPS bridge, SMTP, Wazuh ingest, reporting mart, retention"
-git push origin v1.1.0
+git tag -a v1.5.0 -m "v1.5.0: ticket cancellation, attachment preview, Section 8 checklist, report rework"
+git push origin v1.5.0
 ```
 
 An **annotated** tag (`-a`) — not a lightweight one — so `git describe` on the VM
@@ -77,8 +79,8 @@ changes data; the pre-deploy backup is the only rollback path for that case (§4
 **Step 2 — Fetch the release tag.**
 ```powershell
 git fetch --tags
-git checkout v1.1.0        # detached HEAD at the tag — expected, not an error
-git describe --tags        # must print v1.1.0
+git checkout v1.5.0        # detached HEAD at the tag — expected, not an error
+git describe --tags        # must print v1.5.0
 ```
 
 **Step 3 — Sync dependencies.** Skipping this is how a new import 500s only in
@@ -109,7 +111,7 @@ Restart-Service SOCTicketWaitress
 ```powershell
 # App up + DB reachable + running version, direct to Waitress:
 curl.exe -s -H "X-Forwarded-Proto: https" http://127.0.0.1:8000/healthz
-#   want: {"status":"ok","database":"ok","version":"v1.1.0"}  (200)
+#   want: {"status":"ok","database":"ok","version":"v1.5.0"}  (200)
 & $py manage.py check --deploy   # W004/HSTS by design on the HTTP-proxy bridge; no NEW warnings
 ```
 - From a **third host**: `curl.exe -k https://10.1.220.118/healthz` → **200** with
@@ -125,7 +127,7 @@ turns the first key into `\ufeffSECRET_KEY` and Django won't start), then
 the deploy log (§6).
 
 **Step 9 — Keep the spare in step.** Update the pre-staged checkout on the spare
-VM to the **same tag** (handbook §2.8) — `git fetch --tags; git checkout v1.1.0;
+VM to the **same tag** (handbook §2.8) — `git fetch --tags; git checkout v1.5.0;
 pip install -r requirements.txt; collectstatic`, service left **stopped**. A stale
 pre-staged stack that won't start is discovered during the incident, which is the
 worst time. See
@@ -148,11 +150,11 @@ Set-Location C:\SOCTicket\app
 $py = 'C:\SOCTicket\app\venv\Scripts\python.exe'
 # If the bad release migrated forward, unapply those first, e.g.:
 & $py manage.py migrate <app> <last_good_migration>   # only for reversible ones
-git checkout v1.0.0                                    # the previous good tag
+git checkout v1.4.0                                    # the previous good tag
 & $py -m pip install -r requirements.txt
 & $py manage.py collectstatic --noinput
 Restart-Service SOCTicketWaitress
-# then Step 7 verify, and set APP_VERSION back to v1.0.0 (Step 8)
+# then Step 7 verify, and set APP_VERSION back to v1.4.0 (Step 8)
 ```
 
 ### 4b. A destructive/irreversible migration ran → restore the data from the pre-deploy backup
@@ -177,7 +179,7 @@ just the code:
    must recreate the `ticket`/`soc_backup` roles and re-run
    [reporting-ro-setup.sql](reporting-ro-setup.sql) — follow handbook §4.3 steps 3/3a
    verbatim; do not improvise the role/grant recovery.
-3. `git checkout v1.0.0`, `pip install -r requirements.txt`, `collectstatic --noinput`.
+3. `git checkout v1.4.0`, `pip install -r requirements.txt`, `collectstatic --noinput`.
 4. `Start-Service SOCTicketWaitress`, then Step 7 verify and reset `APP_VERSION`.
 
 This is exactly why Step 1's backup is non-negotiable and why a release carrying
@@ -192,7 +194,7 @@ deploy, that plain-tag rollback is off the table.
 ## 5. Rollback rehearsal (no PROD change)
 
 You can validate the mechanics without touching production:
-- `git checkout v1.0.0` in a scratch clone still resolves and builds — the
+- `git checkout v1.4.0` in a scratch clone still resolves and builds — the
   previous release is always recoverable.
 - Read each pending migration's `reverse_sql` / operations before deploying; if
   any is `RunSQL` without `reverse_sql`, a column removal, or a data rewrite, plan
@@ -206,7 +208,7 @@ Keep an append-only line per deploy (a text file on the VM, or the ops Notion),
 so `/healthz`'s `version` ties back to a known change:
 
 ```
-2026-08-28  v1.1.0  <operator>  OK   Phases 5-6 (HTTPS+SMTP+ingest+mart+retention). Backup: soc_ticket_manual_2026-08-28.zip.gpg
+2026-09-11  v1.5.0  <operator>  OK   Ticket cancellation + attachment preview + Section 8 checklist + report rework (additive migrations). Backup: soc_ticket_manual_2026-09-11.zip.gpg
 ```
 
 Record: date · tag · operator · result (OK / rolled back) · one-line what · the

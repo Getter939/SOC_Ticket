@@ -1,11 +1,11 @@
 <mxfile host="app.diagrams.net" agent="Claude Code" type="device" version="24.7.17">
-  <diagram id="lifecycle" name="1 · Ticket lifecycle (v1.4.0)">
+  <diagram id="lifecycle" name="1 · Ticket lifecycle (v1.5.0)">
     <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
-        <mxCell id="title" value="SOC Ticket — full workflow at v1.4.0 (+ ticket cancellation, in flight)" style="text;html=1;fontSize=20;fontStyle=1;fontColor=#212529;" vertex="1" parent="1">
+        <mxCell id="title" value="SOC Ticket — full workflow at v1.5.0 (incl. ticket cancellation)" style="text;html=1;fontSize=20;fontStyle=1;fontColor=#212529;" vertex="1" parent="1">
           <mxGeometry x="60" y="20" width="900" height="30" as="geometry" />
         </mxCell>
         <mxCell id="subtitle" value="Source of truth: apps/incidents/models.py → Ticket.ALLOWED_TRANSITIONS · 15 statuses (13 live + legacy OWNER_REMEDIATED + CANCELLED). Page 2 = cancellation, page 3 = gates &amp; parallel work." style="text;html=1;fontSize=11;fontColor=#6C757D;" vertex="1" parent="1">
@@ -295,7 +295,7 @@
     </mxGraphModel>
   </diagram>
 
-  <diagram id="cancellation" name="2 · Cancellation (v1.4.0+)">
+  <diagram id="cancellation" name="2 · Cancellation (v1.5.0)">
     <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="c0" />
