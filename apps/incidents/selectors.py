@@ -53,7 +53,7 @@ def get_ticket_detail_read_model(
     for attachment in attachments:
         attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
 
-    subtasks = ticket.subtasks.select_related('assigned_to', 'created_by').prefetch_related(
+    subtasks = list(ticket.subtasks.select_related('assigned_to', 'created_by').prefetch_related(
         Prefetch(
             'attachments',
             queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
@@ -63,7 +63,7 @@ def get_ticket_detail_read_model(
             queryset=TicketFieldChange.objects.filter(field_name='status')
             .select_related('changed_by').order_by('changed_at'),
         ),
-    )
+    ))
     for subtask in subtasks:
         for attachment in subtask.attachments.all():
             attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
@@ -91,8 +91,10 @@ def get_ticket_detail_read_model(
         if can_restore_attachment else []
     )
 
+    alert_links = list(ticket.alert_links.select_related('alert', 'linked_by'))
+
     return {
-        'alert_links': list(ticket.alert_links.select_related('alert', 'linked_by')),
+        'alert_links': alert_links,
         'logs': logs,
         'containment_return_log': containment_return_log,
         'attachments': attachments,
@@ -105,4 +107,6 @@ def get_ticket_detail_read_model(
         'response_routing': response_routing,
         'response_member_roles': response_member_roles,
         'subtasks': subtasks,
+        'open_subtask_count': sum(not subtask.is_done for subtask in subtasks),
+        'evidence_count': len(attachments) + len(alert_links),
     }

@@ -3,50 +3,23 @@
 {% block title %}เปิด Project Incident — SOC Support System{% endblock %}
 
 {% block content %}
+{% include 'incidents/_incident_form_styles.html' %}
 <style>
-  .section-header { background:#1a1a2e; color:#fff; padding:.6rem 1rem; border-radius:6px; font-size:.82rem; font-weight:700; letter-spacing:.04em; margin-bottom:1rem; }
-  .section-header small { color:rgba(255,255,255,.55); font-weight:400; margin-left:.5rem; }
-  .form-section { background:#fff; border:1px solid #e3e6ea; border-radius:10px; padding:1.25rem 1.5rem; margin-bottom:1.25rem; }
-  .severity-radio { display:none; }
-  .severity-group { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .severity-group label { cursor:pointer; padding:.35rem .9rem; border-radius:20px; font-size:.8rem; font-weight:600; border:2px solid transparent; transition:all .15s; }
-  input[value="Critical"] + label { border-color:#dc3545; color:#dc3545; }
-  input[value="Critical"]:checked + label, label.selected[for*="Critical"] { background:#dc3545; color:#fff; }
-  input[value="High"] + label { border-color:#fd7e14; color:#fd7e14; }
-  input[value="High"]:checked + label, label.selected[for*="High"] { background:#fd7e14; color:#fff; }
-  input[value="Medium"] + label { border-color:#ffc107; color:#856404; }
-  input[value="Medium"]:checked + label, label.selected[for*="Medium"] { background:#ffc107; color:#856404; }
-  input[value="Low"] + label { border-color:#198754; color:#198754; }
-  input[value="Low"]:checked + label, label.selected[for*="Low"] { background:#198754; color:#fff; }
-  input[value="Unknown"] + label { border-color:#6f42c1; color:#6f42c1; }
-  input[value="Unknown"]:checked + label, label.selected[for*="Unknown"] { background:#6f42c1; color:#fff; }
-  .ncsa-severity-radio { display:none; }
-  input[value="CRITICAL"] + label { border-color:#dc3545; color:#dc3545; }
-  input[value="CRITICAL"]:checked + label { background:#dc3545; color:#fff; }
-  input[value="SEVERE"] + label { border-color:#fd7e14; color:#fd7e14; }
-  input[value="SEVERE"]:checked + label { background:#fd7e14; color:#fff; }
-  input[value="NON_SEVERE"] + label { border-color:#198754; color:#198754; }
-  input[value="NON_SEVERE"]:checked + label { background:#198754; color:#fff; }
-  .mitre-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:.3rem .75rem; }
-  .mitre-option { display:flex; align-items:center; gap:.4rem; }
-  .mitre-option label { font-size:.82rem; margin:0; cursor:pointer; }
-  .field-hint { font-size:.75rem; color:#6c757d; margin-top:.25rem; }
-  .required-star { color:#dc3545; }
-  .field-has-error > .form-label, .field-has-error > label { color:#dc3545; }
-  #error-summary a.error-jump { font-weight:600; }
-  .target-card { border:1px solid #dee2e6; border-radius:10px; padding:1rem 1rem .75rem; margin-bottom:.85rem; background:#fbfcfe; position:relative; }
+  /* Project-Incident-only: per-system target cards. Shared chrome is in the partial. */
+  .target-card { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); padding:1rem 1rem .75rem; margin-bottom:.85rem; background:var(--ui-surface-subtle); position:relative; }
   .target-badge { position:absolute; top:-.7rem; left:1rem; background:#0d6efd; color:#fff; font-size:.72rem; font-weight:700; padding:.15rem .55rem; border-radius:12px; }
   .target-remove { position:absolute; top:.5rem; right:.6rem; }
 </style>
 
-<div class="row justify-content-center">
-<div class="col-xl-10 col-lg-11">
-
-  <div class="d-flex align-items-center gap-3 mb-3">
-    <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3-fill text-primary me-2"></i>PROJECT INCIDENT</h4>
-    <span class="text-muted" style="font-size:.8rem;">เหตุการณ์เดียวที่กระทบหลายระบบ — สร้าง Ticket แยกตามระบบ (Case Bundling)</span>
-    <span id="draft-status" class="text-muted ms-auto" style="font-size:.75rem;"></span>
+<div class="page-header">
+  <div>
+    <h1 class="page-header__title"><i class="bi bi-diagram-3-fill me-2"></i>เปิด Project Incident</h1>
+    <p class="page-header__subtitle">เหตุการณ์เดียวที่กระทบหลายระบบ — สร้าง Ticket แยกตามระบบ (Case Bundling)</p>
   </div>
+  <div class="page-header__meta" id="draft-status" aria-live="polite"></div>
+</div>
+
+<div class="incident-form-workspace">
 
   {% include 'incidents/_case_mode_switch.html' %}
 
@@ -99,7 +72,7 @@
           {% if form.title.errors %}<div class="text-danger small">{{ form.title.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold">วันและเวลาที่ตรวจพบเหตุการณ์ <span class="required-star">*</span></label>
           {{ form.incident_datetime }}
           {% if form.incident_datetime.errors %}<div class="text-danger small">{{ form.incident_datetime.errors }}</div>{% endif %}
         </div>
@@ -112,7 +85,18 @@
           <div class="field-hint">เวลาที่เหตุการณ์เกิดขึ้นจริง — หากไม่ทราบ กดปุ่มเพื่อใช้เวลาที่ตรวจพบ</div>
           {% if form.event_occurred_at.errors %}<div class="text-danger small">{{ form.event_occurred_at.errors }}</div>{% endif %}
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">แหล่งที่มา (Source)</label>
+          {{ form.issue_type }}
+          {% if form.issue_type.errors %}<div class="text-danger small">{{ form.issue_type.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
+          {{ form.log_source }}
+          <div class="field-hint" id="log-source-hint">ชื่อระบบที่เป็นแหล่งข้อมูล เช่น Wazuh, Palo Alto Firewall, Windows Security Event Log · ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
           <label class="form-label fw-semibold">Reference ID</label>
           {{ form.reference_id }}
           {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
@@ -138,23 +122,12 @@
           <div class="field-hint">วิกฤต / ร้ายแรง / ไม่ร้ายแรง — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
           {% if form.ncsa_severity.errors %}<div class="text-danger small mt-1">{{ form.ncsa_severity.errors }}</div>{% endif %}
         </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
-          {{ form.log_source }}
-          <div class="field-hint">ชื่อแหล่ง Log เช่น Palo Alto Firewall, Windows Security Event Log — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
-          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
-        </div>
       </div>
     </div>
 
     <div class="form-section">
       <div class="section-header">2. ประเภทภัยคุกคาม <small>Category</small></div>
       <div class="row g-3">
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">แหล่งที่มา (Source)</label>
-          {{ form.issue_type }}
-          {% if form.issue_type.errors %}<div class="text-danger small">{{ form.issue_type.errors }}</div>{% endif %}
-        </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold">ประเภทภัยคุกคาม</label>
           {{ form.detailed_issue }}
@@ -198,13 +171,13 @@
         <div class="col-md-6">
           <label class="form-label fw-semibold">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</label>
           {{ form.ioc_user }}
-          <div class="field-hint">บัญชีผู้ใช้ที่ผู้โจมตีใช้ — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          <div class="field-hint">บัญชีผู้ใช้ที่ผู้โจมตีใช้ในการโจมตี — แสดงเป็นแถว "User" ในหมวด 4 ของรายงาน (ไม่เข้าฐานข้อมูล IOC) · ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
           {% if form.ioc_user.errors %}<div class="text-danger small">{{ form.ioc_user.errors }}</div>{% endif %}
         </div>
         <div class="col-md-6">
           <label class="form-label fw-semibold">คำสั่ง (Command)</label>
           {{ form.ioc_command }}
-          <div class="field-hint">คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง</div>
+          <div class="field-hint">คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง แสดงเป็นแถว "คำสั่ง" ในหมวด 4 ของรายงาน · ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
           {% if form.ioc_command.errors %}<div class="text-danger small">{{ form.ioc_command.errors }}</div>{% endif %}
         </div>
         <div class="col-12 d-flex align-items-center gap-2">
@@ -321,7 +294,6 @@
     </div>
   </form>
 </div>
-</div>
 
 {% include 'incidents/_evidence_picker_js.html' %}
 
@@ -381,6 +353,24 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
   });
   if (radio.checked) radio.nextElementSibling.classList.add('selected');
 });
+
+// ── Log Source hint follows the Source (same wording as the ticket form) ──
+// SIEM/TI = the detecting system; every other source = the person/contractor
+// who supplied the case. Both keep the bundle "shared across tickets" note.
+(function () {
+  const issueTypeSel = document.getElementById('id_issue_type');
+  const logSourceHint = document.getElementById('log-source-hint');
+  const SHARED = ' · ใช้ร่วมกันทุก Ticket ในกลุ่ม';
+  const SYSTEM = 'ชื่อระบบที่เป็นแหล่งข้อมูล เช่น Wazuh, Palo Alto Firewall, Windows Security Event Log' + SHARED;
+  const PROVIDER = 'ชื่อผู้ให้ข้อมูล/ผู้รับเหมาที่ส่งข้อมูลเคส เช่น TrendMicro, Trellix' + SHARED;
+  function updateLogSourceHint() {
+    if (!issueTypeSel || !logSourceHint) return;
+    const v = issueTypeSel.value;
+    logSourceHint.textContent = (v === 'SIEM' || v === 'TI') ? SYSTEM : PROVIDER;
+  }
+  issueTypeSel?.addEventListener('change', updateLogSourceHint);
+  updateLogSourceHint();
+})();
 
 // ── Insert standard containment guidance ─────────────────────────────────
 // Appends the selected category's shared guidance without replacing the

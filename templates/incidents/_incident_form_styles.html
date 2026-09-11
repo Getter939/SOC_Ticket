@@ -1,0 +1,60 @@
+{% comment %}
+Shared styling for the incident-creation forms — ticket_form.html and
+project_incident_form.html — so the two cannot drift apart again. Theme-aware
+(var(--ui-*)) so both work in light and dark mode. Form-specific rules stay
+inline in each form: the create form's disposition/asset/spread pills, and the
+Project Incident form's per-system target cards.
+{% endcomment %}
+<style>
+  .section-header {
+    color: #23395d;
+    padding: 0 0 .75rem;
+    border-bottom: 1px solid var(--ui-border);
+    font-size: .9rem; font-weight: 800;
+    letter-spacing: .025em; margin-bottom: 1rem;
+  }
+  .section-header small { color: var(--ui-muted); font-weight: 400; margin-left: .5rem; }
+  .form-section {
+    background: var(--ui-surface); border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm); box-shadow: none;
+    padding: 1.25rem 1.5rem; margin-bottom: 1.25rem;
+  }
+  /* Full content width. Set a max-width here (e.g. 1400px) + margin:0 auto to
+     re-cap it on ultra-wide screens. */
+  .incident-form-workspace { max-width: none; }
+
+  /* Severity radio pills */
+  .severity-radio { display: none; }
+  .severity-group { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .severity-group label { cursor: pointer; padding: .35rem .9rem; border-radius: 20px; font-size: .8rem; font-weight: 600; border: 2px solid transparent; transition: all .15s; }
+  input[value="Critical"] + label, label[for*="Critical"] { border-color: #dc3545; color: #dc3545; }
+  input[value="Critical"]:checked + label, label[for*="Critical"].selected { background: #dc3545; color: #fff; }
+  input[value="High"] + label, label[for*="High"] { border-color: #fd7e14; color: #fd7e14; }
+  input[value="High"]:checked + label, label[for*="High"].selected { background: #fd7e14; color: #fff; }
+  input[value="Medium"] + label, label[for*="Medium"] { border-color: #ffc107; color: #856404; }
+  input[value="Medium"]:checked + label, label[for*="Medium"].selected { background: #ffc107; color: #856404; }
+  input[value="Low"] + label, label[for*="Low"] { border-color: #198754; color: #198754; }
+  input[value="Low"]:checked + label, label[for*="Low"].selected { background: #198754; color: #fff; }
+  input[value="Unknown"] + label, label[for*="Unknown"] { border-color: #6f42c1; color: #6f42c1; }
+  input[value="Unknown"]:checked + label, label[for*="Unknown"].selected { background: #6f42c1; color: #fff; }
+
+  /* NCSA severity pills (วิกฤต / ร้ายแรง / ไม่ร้ายแรง) */
+  .ncsa-severity-radio { display: none; }
+  input[value="CRITICAL"] + label   { border-color: #dc3545; color: #dc3545; }
+  input[value="CRITICAL"]:checked + label   { background: #dc3545; color: #fff; }
+  input[value="SEVERE"] + label     { border-color: #fd7e14; color: #fd7e14; }
+  input[value="SEVERE"]:checked + label     { background: #fd7e14; color: #fff; }
+  input[value="NON_SEVERE"] + label { border-color: #198754; color: #198754; }
+  input[value="NON_SEVERE"]:checked + label { background: #198754; color: #fff; }
+
+  /* MITRE ATT&CK tactic multi-select checkboxes */
+  .mitre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .3rem .75rem; }
+  .mitre-option { display: flex; align-items: center; gap: .4rem; }
+  .mitre-option label { font-size: .82rem; margin: 0; cursor: pointer; }
+  .mitre-option input { cursor: pointer; }
+
+  .field-hint { font-size: .75rem; color: #6c757d; margin-top: .25rem; }
+  .required-star { color: #dc3545; }
+  .field-has-error > .form-label, .field-has-error > label { color: #dc3545; }
+  #error-summary a.error-jump { font-weight: 600; }
+</style>

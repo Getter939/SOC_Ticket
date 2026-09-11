@@ -321,6 +321,8 @@ class TicketDetailSelectorTest(TestCase):
 
         subtasks = list(read_model['subtasks'])
         self.assertEqual([subtask.pk for subtask in subtasks], [self.subtask.pk])
+        self.assertEqual(read_model['open_subtask_count'], 1)
+        self.assertEqual(read_model['evidence_count'], 1)
         deliverables = list(subtasks[0].attachments.all())
         self.assertEqual([attachment.pk for attachment in deliverables], [self.deliverable.pk])
         self.assertTrue(deliverables[0].can_delete)

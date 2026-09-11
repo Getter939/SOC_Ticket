@@ -13,6 +13,12 @@
   .ticket-title .title-lead { font-size:.42em; font-weight:600; opacity:.62; letter-spacing:.06em; text-transform:uppercase; margin-right:.35em; vertical-align:.28em; }
   .ticket-hero .hero-subject { color:#354356; font-size:.95rem; font-weight:650; }
   .ticket-hero .hero-summary { max-width:900px; color:var(--ui-muted); font-size:.84rem; line-height:1.55; }
+  .hero-operational { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:1rem; margin-top:1rem; padding:.85rem 1rem; border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); background:var(--ui-surface-subtle); }
+  .hero-operational-label { color:var(--ui-muted); font-size:.68rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+  .hero-operational-value { color:var(--ui-text); font-size:.9rem; font-weight:750; line-height:1.45; }
+  .copy-button { display:inline-flex; align-items:center; justify-content:center; color:var(--ui-muted); border:0; background:transparent; padding:.2rem .35rem; border-radius:.25rem; }
+  .copy-button:hover, .copy-button:focus-visible { color:var(--ui-primary); background:var(--ui-surface-hover); }
+  .copy-feedback { position:fixed; right:1rem; bottom:1rem; z-index:1090; max-width:min(360px,calc(100vw - 2rem)); }
   /* Actions own a full-width row of their own: nothing can wrap beside them,
      so the block cannot relocate as the button count or warnings change. */
   .hero-actions { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1rem; padding-top:.85rem; border-top:1px solid var(--ui-border); }
@@ -21,10 +27,14 @@
   .snapshot-card:last-child { border-right:0; }
   .snapshot-label { color:#6c757d; font-size:.7rem; letter-spacing:.04em; text-transform:uppercase; margin-bottom:.3rem; }
   .snapshot-value { color:#1f2d3d; font-size:.88rem; font-weight:700; line-height:1.3; }
-  .quick-nav { display:flex; flex-wrap:wrap; gap:1rem; padding:0 .15rem .55rem; border-bottom:1px solid var(--ui-border); }
-  .quick-nav a { color:#526071; padding:.25rem 0; font-size:.76rem; font-weight:650; text-decoration:none; }
-  .quick-nav a:hover { color:var(--ui-primary); }
+  .quick-nav { position:sticky; top:calc(var(--header-height) + .5rem); z-index:1010; display:flex; gap:.35rem; padding:.45rem; overflow-x:auto; scrollbar-width:none; border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); background:color-mix(in srgb,var(--ui-surface) 94%,transparent); box-shadow:var(--ui-shadow-sm); }
+  .quick-nav::-webkit-scrollbar { display:none; }
+  .quick-nav a { flex:0 0 auto; color:var(--ui-muted); padding:.45rem .7rem; border-radius:.35rem; font-size:.76rem; font-weight:650; text-decoration:none; white-space:nowrap; }
+  .quick-nav a:hover, .quick-nav a:focus-visible { color:var(--ui-primary); background:var(--ui-surface-hover); }
+  .quick-nav a.active { color:#fff; background:var(--ui-primary); }
+  .quick-nav .nav-count { opacity:.8; font-variant-numeric:tabular-nums; }
   .section-card { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); box-shadow:none; overflow:hidden; }
+  .section-card[id] { scroll-margin-top:calc(var(--header-height) + 4.75rem); }
   .section-card .card-header { background:#fff; border-bottom:1px solid #edf0f4; padding:.9rem 1.1rem; }
   .section-card .card-body { padding:1.1rem; }
   .section-title { font-size:.92rem; font-weight:800; margin:0; color:#2e3a49; }
@@ -48,6 +58,7 @@
   .subtask-status-history summary { cursor:pointer; color:#64748b; font-size:.75rem; }
   .subtask-status-event { display:flex; align-items:center; gap:.35rem; flex-wrap:wrap; padding:.3rem 0; border-top:1px solid #edf0f4; font-size:.72rem; }
   .subtask-new { background:#f6f8fb; border:1px dashed #c3d0e0; border-radius:.75rem; padding:.9rem 1rem 1rem; margin:0; }
+  .subtask-update { background:var(--ui-surface-subtle); border:1px solid var(--ui-border); border-radius:.5rem; }
   .subtask-empty { text-align:center; color:#8a93a2; font-size:.84rem; padding:1.4rem .5rem; }
   .timeline { position:relative; margin-left:.45rem; padding-left:1.25rem; border-left:2px solid #dce3ec; }
   .timeline-entry { position:relative; margin-bottom:.8rem; border:1px solid #e4e8ee; border-radius:var(--ui-radius-sm); background:#fff; }
@@ -56,7 +67,7 @@
   .timeline-entry summary::-webkit-details-marker { display:none; }
   .timeline-entry[open] summary { border-bottom:1px solid #edf0f4; }
   .timeline-note { padding:.85rem; font-size:.82rem; line-height:1.65; color:#404b59; background:#fafbfd; border-radius:0 0 .75rem .75rem; }
-  .action-stack { display:flex; flex-direction:column; gap:1rem; min-width:0; }
+  .action-stack { display:flex; flex-direction:column; gap:1rem; min-width:0; scroll-margin-top:calc(var(--header-height) + 4rem); }
   .action-stack .card { border:1px solid var(--ui-border) !important; border-radius:var(--ui-radius-sm); box-shadow:none !important; }
   .action-stack .card-header { background:#f7f8fa !important; color:#2e3a49 !important; border-bottom:1px solid var(--ui-border); }
   .action-stack .workflow-primary { border-left:3px solid #446b9e !important; }
@@ -82,6 +93,12 @@
   .action-disclosure[open] > summary .action-chevron { transform:rotate(180deg); }
   .action-disclosure[open] > summary { border-bottom:1px solid var(--ui-border); }
   .action-disclosure-body { padding:1rem; overflow-wrap:anywhere; }
+  .action-checklist { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); background:var(--ui-surface-subtle); overflow:hidden; }
+  .action-checklist > summary { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.8rem .9rem; cursor:pointer; list-style:none; }
+  .action-checklist > summary::-webkit-details-marker { display:none; }
+  .action-checklist[open] > summary { border-bottom:1px solid var(--ui-border); }
+  .action-checklist[open] > summary .action-chevron { transform:rotate(180deg); }
+  .action-checklist-body { padding:.9rem; }
   .cancellation-disclosure .action-icon { color:var(--bs-danger); }
   .action-stack .cancellation-attention { border-left:3px solid #d99a16 !important; }
   .emergency-summary { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); padding:.85rem 1rem; background:var(--ui-surface); font-size:.8rem; }
@@ -92,8 +109,9 @@
   .closure-grid dt { color:#6b7a72; margin:0; }
   .closure-grid dd { margin:0; font-weight:600; }
   .review-fields > div { margin-bottom:1rem; }
+  .workflow-feedback:focus { outline:2px solid var(--ui-primary); outline-offset:2px; }
   @media (max-width:991px) { .snapshot-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .snapshot-card:nth-child(2) { border-right:0; } .snapshot-card:nth-child(-n+2) { border-bottom:1px solid var(--ui-border); } .action-stack { position:static; } }
-  @media (max-width:576px) { .snapshot-grid { grid-template-columns:1fr; } .snapshot-card { border-right:0; border-bottom:1px solid var(--ui-border); } .snapshot-card:last-child { border-bottom:0; } .detail-grid { grid-template-columns:1fr; gap:.2rem; } .detail-grid dd { margin-bottom:.55rem; } .hero-actions .btn, .hero-actions form { flex:1 1 auto; } .hero-actions form .btn { width:100%; } }
+  @media (max-width:576px) { .snapshot-grid { grid-template-columns:1fr; } .snapshot-card { border-right:0; border-bottom:1px solid var(--ui-border); } .snapshot-card:last-child { border-bottom:0; } .detail-grid { grid-template-columns:1fr; gap:.2rem; } .detail-grid dd { margin-bottom:.55rem; } .hero-operational { grid-template-columns:1fr; } .hero-operational .btn { width:100%; } .hero-actions .btn, .hero-actions form, .hero-actions .dropdown { flex:1 1 auto; } .hero-actions form .btn, .hero-actions .dropdown .btn { width:100%; } .subtask-row { grid-template-columns:1fr; } .subtask-row > .text-end { text-align:left !important; } .subtask-row > .text-end .badge { display:inline-block !important; margin-right:.25rem; } }
 </style>
 
 <section class="ticket-hero {% if ticket.is_emergency %}emergency{% endif %} mb-3">
@@ -111,11 +129,49 @@
   </div>
   {# Incident vs Event is context, not a state signal — plain eyebrow text, no badge. #}
   {% if ticket.classification %}<div class="hero-eyebrow mb-1">{{ ticket.get_classification_display }}</div>{% endif %}
-  <h1 class="ticket-title mb-2"><span class="title-lead">Ticket</span>#{{ ticket.ticket_id }}</h1>
+  <div class="d-flex align-items-center gap-1 mb-2">
+    <h1 class="ticket-title mb-0"><span class="title-lead">Ticket</span><span id="ticket-reference">#{{ ticket.ticket_id }}</span></h1>
+    <button class="copy-button" type="button" data-copy-target="ticket-reference" aria-label="คัดลอก Ticket Reference" title="คัดลอก Ticket Reference"><i class="bi bi-copy" aria-hidden="true"></i></button>
+  </div>
   <div class="hero-subject mb-2">{{ ticket.device_name }}{% if ticket.incident_name %} <span class="text-muted">·</span> {{ ticket.incident_name }}{% endif %}</div>
   <div class="hero-summary">{{ ticket.issue_description|truncatechars:180 }}</div>
+  <div class="hero-operational">
+    <div>
+      {% if is_terminal %}
+      <div class="hero-operational-label">ผลการดำเนินการ</div>
+      <div class="hero-operational-value">กระบวนการของ Ticket นี้สิ้นสุดแล้ว</div>
+      {% elif t2_claim_visible and t2_claim_state == 'unclaimed' %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">รับ Ticket ก่อนเริ่มตรวจสอบ</div>
+      {% elif can_t2_review %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">ตรวจสอบข้อมูลและยืนยันการจัดประเภท</div>
+      {% elif can_assign_admin %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">เลือกเส้นทางการจัดการและส่งให้ผู้จัดการ SOC</div>
+      {% elif can_mgr_forward %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">ประเมินสถานะฉุกเฉินและส่งต่อ</div>
+      {% elif can_submit_containment %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">บันทึกผลการตรวจสอบและส่งรายงานการควบคุม</div>
+      {% elif can_conclude_monitoring %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">สรุปผลการเฝ้าระวัง</div>
+      {% elif transition_actions %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">ตรวจสอบผลและเลือกการดำเนินการ</div>
+      {% else %}
+      <div class="hero-operational-label">กำลังรอการดำเนินการจาก</div><div class="hero-operational-value">{{ ticket.court_holder_label|default:"ยังไม่มีผู้รับผิดชอบในขั้นตอนนี้" }}</div>
+      {% endif %}
+      {% if ticket.ola_contain_deadline and not is_terminal %}<div class="small text-muted mt-1">Contain OLA: {{ ticket.ola_contain_deadline|date:"d/m/Y H:i" }}</div>{% endif %}
+    </div>
+    {% if can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or can_conclude_monitoring or transition_actions or t2_claim_state == 'unclaimed' or t2_claim_state == 'mine' %}
+    <a class="btn btn-primary btn-sm px-3" href="#workflow-actions">
+      {% if t2_claim_visible and t2_claim_state == 'unclaimed' %}รับเรื่องและตรวจสอบ
+      {% elif can_t2_review %}ตรวจสอบข้อมูล Tier 2
+      {% elif can_assign_admin %}เลือกเส้นทางการจัดการ
+      {% elif can_mgr_forward %}ตรวจสอบและส่งต่อ
+      {% elif can_submit_containment %}ส่งผลการควบคุม
+      {% elif can_conclude_monitoring %}สรุปผลการเฝ้าระวัง
+      {% else %}ตรวจสอบและเลือกผล{% endif %}
+    </a>
+    {% endif %}
+  </div>
   <div class="hero-actions">
-    {% if can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or transition_actions or t2_claim_visible %}<a class="btn btn-dark btn-sm px-3" href="#workflow-actions">ไปยังขั้นตอนถัดไป</a>{% endif %}
     {% if can_edit_ticket %}<a class="btn btn-outline-secondary btn-sm px-3" href="{% url 'edit_ticket' ticket.pk %}">แก้ไขข้อมูล</a>{% endif %}
     {# Reports are useful secondary tools, not competing workflow actions. #}
     {% if can_access_report %}
@@ -175,38 +231,21 @@ onto its own wrapped row, which space-between then left-aligned.
   <div class="snapshot-card"><div class="snapshot-label">หน่วยงานเจ้าของ</div><div class="snapshot-value">{% if ticket.asset_owner %}{{ ticket.asset_owner }}{% elif ticket.system_owner %}{{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% else %}ไม่ระบุ{% endif %}</div></div>
 </div>
 
-{% if alert_links|length > 1 %}
-<details class="card section-card mb-3">
-  <summary class="card-header d-flex align-items-center gap-2">
-    <i class="bi bi-collection text-primary"></i>
-    <span class="section-title">Wazuh Alert ที่เกี่ยวข้อง ({{ alert_links|length }})</span>
-    <span class="section-hint">Alert หลักใช้กำหนดเวลาตรวจพบและ OLA; รายการอื่นเป็นหลักฐานประกอบ</span>
-  </summary>
-  <div class="card-body py-2">
-    <div class="table-responsive"><table class="table table-sm align-middle mb-0">
-      <thead><tr><th>ประเภท</th><th>เวลาตรวจพบ</th><th>Agent</th><th>Level</th><th>Rule</th></tr></thead>
-      <tbody>{% for link in alert_links %}<tr>
-        <td>{% if link.role == 'PRIMARY' %}<span class="signal-badge signal-neutral">หลัก</span>{% else %}<span class="text-muted small">ประกอบ</span>{% endif %}</td>
-        <td class="small font-monospace">{{ link.alert.timestamp|date:"Y-m-d H:i" }}</td>
-        <td>{{ link.alert.agent_name|default:"-" }}</td>
-        <td>{{ link.alert.rule_level }}</td>
-        <td>{{ link.alert.rule_description|truncatechars:120 }}</td>
-      </tr>{% endfor %}</tbody>
-    </table></div>
-  </div>
-</details>
-{% endif %}
-
-<nav class="quick-nav mb-3" aria-label="Ticket sections">
+<nav class="quick-nav mb-3" aria-label="ส่วนต่าง ๆ ของ Ticket" data-section-nav>
   <a href="#overview">ภาพรวม</a>
   <a href="#technical">ข้อมูลทางเทคนิค</a>
-  <a href="#response">การตอบสนอง</a>
-  <a href="#tasks">งานย่อย</a>
-  <a href="#timeline">ประวัติ</a>
+  {% if ticket.action_required or ticket.action_precautions or ticket.actions_taken_summary or ticket.next_steps_summary %}<a href="#response">การตอบสนอง</a>{% endif %}
+  <a href="#tasks">งานย่อย{% if open_subtask_count %} <span class="nav-count">· {{ open_subtask_count }} ค้าง</span>{% endif %}</a>
+  <a href="#evidence">หลักฐาน{% if evidence_count %} <span class="nav-count">· {{ evidence_count }}</span>{% endif %}</a>
+  <a href="#timeline">กิจกรรม</a>
 </nav>
 
 <div class="row g-4">
-  <div class="col-xl-8">
+  <div class="workflow-column col-12 {% if can_t2_review or can_submit_containment or can_t2_record_remediation %}col-xl-12 order-xl-1 workflow-wide{% else %}col-xl-4 order-xl-2{% endif %}">
+    {% include 'incidents/_ticket_workflow_actions.html' %}
+  </div>
+
+  <div class="ticket-content col-12 {% if can_t2_review or can_submit_containment or can_t2_record_remediation %}col-xl-12 order-xl-2{% else %}col-xl-8 order-xl-1{% endif %}">
     <section id="overview" class="card section-card mb-4">
       <div class="card-header"><h2 class="section-title">สรุปเหตุการณ์</h2><div class="section-hint">สิ่งที่เกิดขึ้นและผลกระทบที่ประเมินได้</div></div>
       <div class="card-body summary-copy">{{ ticket.issue_description|linebreaks }}</div>
@@ -224,9 +263,11 @@ onto its own wrapped row, which space-between then left-aligned.
         <div class="row g-4">
           <div class="col-md-6">
             <dl class="detail-grid mb-0">
-              <dt>Reference ID</dt><dd>{{ ticket.reference_id|default:"-" }}</dd>
+              <dt>เวลาที่ตรวจพบ</dt><dd>{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</dd>
+              <dt>เวลาที่เกิดเหตุ</dt><dd>{{ ticket.event_occurred_at|date:"d M Y H:i"|default:"-" }}</dd>
+              <dt>Reference ID</dt><dd>{% if ticket.reference_id %}<span id="external-reference">{{ ticket.reference_id }}</span><button class="copy-button ms-1" type="button" data-copy-target="external-reference" aria-label="คัดลอก Reference ID" title="คัดลอก Reference ID"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
               <dt>ความรุนแรง (สกมช.)</dt><dd>{{ ticket.get_ncsa_severity_display|default:"-" }}</dd>
-              <dt>Source</dt><dd>{{ ticket.get_issue_type_display }}</dd>
+              <dt>แหล่งที่มา (Source)</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>แหล่งข้อมูล (Log Source)</dt><dd>{{ ticket.log_source|default:"-" }}</dd>
               <dt>ประเภทภัยคุกคาม</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
               <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
@@ -240,9 +281,8 @@ onto its own wrapped row, which space-between then left-aligned.
           </div>
           <div class="col-md-6">
             <dl class="detail-grid mb-3">
-              <dt>IP Addresses</dt><dd class="font-monospace">{{ ticket.ip_address|default:"-" }}</dd>
-              <dt>Destination</dt><dd class="font-monospace">{{ ticket.destination_ip|default:"-" }}</dd>
-              <dt>MAC Address</dt><dd class="font-monospace">{{ ticket.mac_address|default:"-" }}</dd>
+              <dt>IP Addresses</dt><dd class="font-monospace">{% if ticket.ip_address %}<span id="source-addresses">{{ ticket.ip_address }}</span><button class="copy-button ms-1" type="button" data-copy-target="source-addresses" aria-label="คัดลอก IP Addresses" title="คัดลอก IP Addresses"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
+              <dt>Destination</dt><dd class="font-monospace">{% if ticket.destination_ip %}<span id="destination-addresses">{{ ticket.destination_ip }}</span><button class="copy-button ms-1" type="button" data-copy-target="destination-addresses" aria-label="คัดลอก Destination" title="คัดลอก Destination"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
             </dl>
             {% regroup ticket.iocs.all by get_category_display as ioc_groups %}
             {% if ioc_groups %}
@@ -250,7 +290,7 @@ onto its own wrapped row, which space-between then left-aligned.
             <dl class="small text-break ioc-detail-list mb-2">
               {% for group in ioc_groups %}
               <dt>{{ group.grouper }}</dt>
-              <dd>{% for row in group.list %}<div class="font-monospace">{{ row.value }}</div>{% endfor %}</dd>
+              <dd>{% for row in group.list %}<div class="font-monospace d-flex align-items-start gap-1"><span>{{ row.value }}</span><button class="copy-button flex-shrink-0" type="button" data-copy-value="{{ row.value }}" aria-label="คัดลอก IOC" title="คัดลอก IOC"><i class="bi bi-copy" aria-hidden="true"></i></button></div>{% endfor %}</dd>
               {% endfor %}
             </dl>
             {% endif %}
@@ -396,17 +436,27 @@ onto its own wrapped row, which space-between then left-aligned.
             {% endif %}
             {% endfor %}
           </div>
-          <div class="text-end"><span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{{ subtask.get_subtask_type_display }}</span><span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span><div class="text-muted mb-2" style="font-size:.68rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>{% if subtask.assigned_to %}<div class="text-muted" style="font-size:.68rem;">{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}</div>
+          <div class="text-end">
+            <span class="badge {% if is_resp %}bg-primary{% else %}bg-secondary{% endif %} d-block mb-1">{% if is_resp %}คำขอทีมตอบสนอง · {% else %}งานภายใน · {% endif %}{{ subtask.get_subtask_type_display }}</span>
+            <span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span>
+            <div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>
+            {% if subtask.assigned_to %}<div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-person me-1"></i>{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}
+            {% if not is_terminal %}{% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#update-subtask-{{ subtask.pk }}" aria-expanded="false" aria-controls="update-subtask-{{ subtask.pk }}"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>อัปเดตงาน</button>
+            {% endif %}{% endif %}
+          </div>
         </div>
         {% if not is_terminal %}
         {% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
-        <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="row g-2 mb-3 px-1 py-2" style="background:#f6f8fb;border-radius:.5rem;">{% csrf_token %}
-          <div class="col-md-3">{{ subtask_update_form.status.label_tag }}
-            <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-          <div class="col-md-5"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="1">{{ subtask.result_notes }}</textarea></div>
-          <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
-          <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-outline-primary w-100" type="submit"><i class="bi bi-save"></i></button></div>
-        </form>
+        <div class="collapse" id="update-subtask-{{ subtask.pk }}">
+          <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
+            <div class="col-md-3">{{ subtask_update_form.status.label_tag }}
+              <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+            <div class="col-md-5"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
+            <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
+            <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-primary w-100" type="submit"><i class="bi bi-save me-1" aria-hidden="true"></i><span class="d-md-none">บันทึก</span><span class="visually-hidden d-none d-md-inline">บันทึกการอัปเดตงาน</span></button></div>
+          </form>
+        </div>
         {% endif %}
         {% endif %}
         {% endwith %}
@@ -476,16 +526,39 @@ onto its own wrapped row, which space-between then left-aligned.
       </div>
     </section>
 
-    <section class="card section-card">
-      <div class="card-header"><h2 class="section-title">ไฟล์แนบ</h2></div>
+    <section id="evidence" class="card section-card">
+      <div class="card-header"><h2 class="section-title">หลักฐานและไฟล์แนบ{% if evidence_count %} <span class="signal-badge signal-neutral align-middle">{{ evidence_count }}</span>{% endif %}</h2><div class="section-hint">ไฟล์หลักฐานที่แนบกับ Ticket และ Alert ที่เชื่อมโยง</div></div>
+      {% if alert_links %}
+      <details class="border-bottom" {% if alert_links|length == 1 %}open{% endif %}>
+        <summary class="d-flex align-items-center gap-2 px-3 py-3">
+          <i class="bi bi-collection text-primary" aria-hidden="true"></i>
+          <span class="fw-semibold small">Wazuh Alert ที่เกี่ยวข้อง ({{ alert_links|length }})</span>
+          <span class="section-hint ms-auto">Alert หลักกำหนดเวลาตรวจพบและ OLA</span>
+        </summary>
+        <div class="table-responsive px-3 pb-3"><table class="table table-sm align-middle mb-0">
+          <thead><tr><th>ประเภท</th><th>เวลาตรวจพบ</th><th>Agent</th><th>Level</th><th>Rule</th></tr></thead>
+          <tbody>{% for link in alert_links %}<tr>
+            <td>{% if link.role == 'PRIMARY' %}<span class="signal-badge signal-neutral">หลัก</span>{% else %}<span class="text-muted small">ประกอบ</span>{% endif %}</td>
+            <td class="small font-monospace">{{ link.alert.timestamp|date:"Y-m-d H:i" }}</td>
+            <td>{{ link.alert.agent_name|default:"-" }}</td>
+            <td>{{ link.alert.rule_level }}</td>
+            <td>{{ link.alert.rule_description|truncatechars:120 }}</td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+      </details>
+      {% endif %}
       <div class="card-body">
-        {% for att in attachments %}<div class="d-flex justify-content-between gap-3 border-bottom py-2"><div><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>{% if att.preview_kind %} <a href="{% url 'preview_attachment' att.pk %}" target="_blank" rel="noopener" class="small ms-1" title="ดูตัวอย่างในแท็บใหม่ (ไม่ต้องดาวน์โหลด)"><i class="bi bi-eye"></i> ดูตัวอย่าง</a>{% endif %}{% if att.description %}<div class="small">{{ att.description }}</div>{% endif %}<div class="small text-muted">Uploaded by {% if att.uploaded_by %}{{ att.uploaded_by.get_full_name|default:att.uploaded_by.username }}{% else %}Unknown user{% endif %} · {{ att.uploaded_at|date:"d M Y H:i" }}</div></div>
+        {% for att in attachments %}<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 border-bottom py-3"><div class="min-w-0"><div class="fw-semibold text-break"><i class="bi bi-paperclip me-1" aria-hidden="true"></i>{{ att.original_name }}</div>{% if att.description %}<div class="small mt-1">{{ att.description }}</div>{% endif %}<div class="small text-muted mt-1">อัปโหลดโดย {% if att.uploaded_by %}{{ att.uploaded_by.get_full_name|default:att.uploaded_by.username }}{% else %}ไม่ทราบผู้ใช้{% endif %} · {{ att.uploaded_at|date:"d/m/Y H:i" }}</div></div>
+          <div class="d-flex align-items-center gap-1">
+            {% if att.preview_kind %}<a href="{% url 'preview_attachment' att.pk %}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary" title="ดูตัวอย่างในแท็บใหม่"><i class="bi bi-eye me-1" aria-hidden="true"></i>ดูตัวอย่าง</a>{% endif %}
+            <a href="{% url 'download_attachment' att.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-download me-1" aria-hidden="true"></i>ดาวน์โหลด</a>
           {# Decided by _can_delete_ticket_attachment in the view. Deleting needs #}
           {# a written reason, so the modal doubles as the confirmation step. #}
           {% if att.can_delete %}
-          <div>
             <button type="button" class="btn btn-sm btn-link text-danger" data-bs-toggle="modal" data-bs-target="#delete-att-{{ att.pk }}">ลบ</button>
+          {% endif %}
           </div>
+          {% if att.can_delete %}
           <div class="modal fade" id="delete-att-{{ att.pk }}" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
               <form method="post" action="{% url 'delete_attachment' att.pk %}" class="modal-content">
@@ -532,12 +605,110 @@ onto its own wrapped row, which space-between then left-aligned.
       </div>
     </section>
   </div>
-
-  <div class="col-xl-4">
-    {% include 'incidents/_ticket_workflow_actions.html' %}
-  </div>
 </div>
+<div class="copy-feedback alert alert-dark py-2 mb-0 d-none" role="status" aria-live="polite">คัดลอกแล้ว</div>
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
 {% if can_t2_review %}{% include 'incidents/_occurred_copy_script.html' %}{% endif %}
 {% if clear_draft_key %}<script nonce="{{ request.csp_nonce }}">try{localStorage.removeItem("{{ clear_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
+<script nonce="{{ request.csp_nonce }}">
+(function(){
+  var nav=document.querySelector('[data-section-nav]');
+  if(nav&&'IntersectionObserver' in window){
+    var links=Array.prototype.slice.call(nav.querySelectorAll('a[href^="#"]'));
+    var sections=links.map(function(link){return document.querySelector(link.getAttribute('href'));}).filter(Boolean);
+    var activate=function(id){links.forEach(function(link){var active=link.getAttribute('href')==='#'+id;link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');});};
+    var observer=new IntersectionObserver(function(entries){
+      var visible=entries.filter(function(entry){return entry.isIntersecting;}).sort(function(a,b){return a.boundingClientRect.top-b.boundingClientRect.top;});
+      if(visible.length)activate(visible[0].target.id);
+    },{rootMargin:'-22% 0px -68% 0px',threshold:0});
+    sections.forEach(function(section){observer.observe(section);});
+    links.forEach(function(link){link.addEventListener('click',function(){activate(link.getAttribute('href').slice(1));});});
+    if(sections.length)activate((location.hash&&document.getElementById(location.hash.slice(1))?location.hash.slice(1):sections[0].id));
+  }
+
+  var feedback=document.querySelector('.copy-feedback');
+  var feedbackTimer;
+  function showCopyFeedback(){
+    if(!feedback)return;
+    feedback.classList.remove('d-none');
+    clearTimeout(feedbackTimer);
+    feedbackTimer=setTimeout(function(){feedback.classList.add('d-none');},1800);
+  }
+  function fallbackCopy(value){
+    var input=document.createElement('textarea');
+    input.value=value;input.setAttribute('readonly','');input.style.position='fixed';input.style.opacity='0';
+    document.body.appendChild(input);input.select();document.execCommand('copy');input.remove();showCopyFeedback();
+  }
+  document.querySelectorAll('[data-copy-target],[data-copy-value]').forEach(function(button){
+    button.addEventListener('click',function(){
+      var target=button.getAttribute('data-copy-target');
+      var value=button.getAttribute('data-copy-value')||(target&&document.getElementById(target)?document.getElementById(target).textContent:'');
+      value=value.trim();if(!value)return;
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(value).then(showCopyFeedback,function(){fallbackCopy(value);});}
+      else fallbackCopy(value);
+    });
+  });
+
+  var actionStack=document.getElementById('workflow-actions');
+  if(!actionStack)return;
+  var forms=Array.prototype.slice.call(actionStack.querySelectorAll('form'));
+  var prefix='ticket-workflow-draft:{{ ticket.pk }}:';
+  var lastKeyName=prefix+'last-submitted';
+  function formKey(form,index){
+    var actionField=form.querySelector('input[name="action"]');
+    var identity=actionField?actionField.value:(new URL(form.action,location.href)).pathname;
+    return prefix+identity+':'+index;
+  }
+  function capture(form){
+    var data={};
+    form.querySelectorAll('input,textarea,select').forEach(function(field){
+      if(!field.name||field.type==='file'||field.type==='hidden'||field.type==='submit'||field.type==='button')return;
+      if(field.type==='checkbox'||field.type==='radio'){
+        if(!data[field.name])data[field.name]=[];
+        data[field.name].push({value:field.value,checked:field.checked});
+      }else if(field.multiple){
+        data[field.name]=Array.prototype.slice.call(field.options).filter(function(option){return option.selected;}).map(function(option){return option.value;});
+      }else data[field.name]=field.value;
+    });
+    return data;
+  }
+  function restore(form,data){
+    if(!data)return;
+    form.querySelectorAll('input,textarea,select').forEach(function(field){
+      if(!field.name||!(field.name in data))return;
+      var value=data[field.name];
+      if(field.type==='checkbox'||field.type==='radio'){
+        var match=value.find(function(item){return item.value===field.value;});
+        if(match)field.checked=match.checked;
+      }else if(field.multiple){
+        Array.prototype.forEach.call(field.options,function(option){option.selected=value.indexOf(option.value)!==-1;});
+      }else field.value=value;
+    });
+    form.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  try{
+    var lastKey=sessionStorage.getItem(lastKeyName);
+    var errorAlert=document.querySelector('#main-content > .alert-danger');
+    forms.forEach(function(form,index){
+      var key=formKey(form,index);form.dataset.draftKey=key;
+      var saved=sessionStorage.getItem(key);
+      if(saved&&(!lastKey||key!==lastKey||errorAlert))restore(form,JSON.parse(saved));
+      if(lastKey&&key===lastKey&&!errorAlert)sessionStorage.removeItem(key);
+      var save=function(){sessionStorage.setItem(key,JSON.stringify(capture(form)));};
+      form.addEventListener('input',save);form.addEventListener('change',save);
+      form.addEventListener('submit',function(){save();sessionStorage.setItem(lastKeyName,key);});
+    });
+    if(lastKey&&!errorAlert)sessionStorage.removeItem(lastKey);
+    if(lastKey){sessionStorage.removeItem(lastKeyName);}
+    if(lastKey&&errorAlert){
+      var localAlert=errorAlert.cloneNode(true);
+      var closeButton=localAlert.querySelector('.btn-close');if(closeButton)closeButton.remove();
+      localAlert.classList.remove('fade','show','alert-dismissible');localAlert.classList.add('workflow-feedback');localAlert.tabIndex=-1;
+      actionStack.prepend(localAlert);
+      var failedForm=forms.find(function(form){return form.dataset.draftKey===lastKey;});
+      (failedForm||localAlert).scrollIntoView({behavior:'smooth',block:'center'});localAlert.focus({preventScroll:true});
+    }
+  }catch(e){}
+})();
+</script>
 {% endblock %}

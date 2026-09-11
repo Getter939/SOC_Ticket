@@ -225,4 +225,4 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 - [../handover/engineering-handover.md](../handover/engineering-handover.md) §3.1 — the same lifecycle in prose, with the gotchas
 - [../adr/0003-manager-verification-gate-in-model.md](../adr/0003-manager-verification-gate-in-model.md) — why the manager gate lives in the model
 - [../adr/0005-ticket-cancellation.md](../adr/0005-ticket-cancellation.md) — the cancellation process (separate from resolution)
-- [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — editable draw.io version of this flow (3 pages: lifecycle, cancellation, gates & parallel work), for diagramming in diagrams.net
+- [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — redesigned editable draw.io version (4 focused pages: overview, triage decisions, resolution lanes, and exceptions/controls), for diagramming in diagrams.net

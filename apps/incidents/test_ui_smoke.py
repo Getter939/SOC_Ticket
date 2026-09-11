@@ -126,6 +126,10 @@ class UiSmokeTest(TestCase):
         self.assertContains(resp, 'สรุปเหตุการณ์')
         self.assertContains(resp, 'ขอบเขตและข้อมูลทางเทคนิค')
         self.assertContains(resp, 'ประวัติการดำเนินการ')
+        self.assertContains(resp, 'data-section-nav')
+        self.assertContains(resp, 'href="#evidence"')
+        self.assertContains(resp, 'hero-operational')
+        self.assertContains(resp, 'workflow-column')
 
     def test_ticket_detail_renders_for_assigned_admin(self):
         self.ticket.t1_route = Ticket.T1_ROUTE_ADMIN
