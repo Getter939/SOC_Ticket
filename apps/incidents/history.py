@@ -41,6 +41,7 @@ TRACKED_FIELDS = {
     'destination_ip':        'IP Address ปลายทาง',
     'ioc_details':           'Indicators of Compromise',
     'ioc_user':              'บัญชีผู้ใช้ที่เกี่ยวข้อง',
+    'ioc_command':           'คำสั่ง (Command)',
     'log_source':            'แหล่งข้อมูล/Log',
     'mitre_tactics':         'MITRE ATT&CK Tactics',
     'action_required':       'สิ่งที่ต้องดำเนินการ',
@@ -49,13 +50,20 @@ TRACKED_FIELDS = {
     'next_steps_summary':    'การดำเนินการลำดับถัดไป',
     'containment_report':    'รายงานการควบคุม',
     'remediation_summary':   'ผลการตรวจสอบ',
+    'remediation_checklist': 'เช็กลิสต์สรุปผลการดำเนินการแก้ไข',
+    'remediation_other':     'สรุปผลการดำเนินการแก้ไข — อื่นๆ',
 }
 
 
 def _display(ticket, field, value):
     """Human-readable form of a stored value, matching what the UI shows."""
-    if value is None or value == '':
+    if value is None or value == '' or value == []:
         return ''
+    if field == 'remediation_checklist':
+        # Stored as a list of REMEDIATION_CHECKLIST keys; show the labels.
+        from .report_content import REMEDIATION_CHECKLIST
+        labels = dict(REMEDIATION_CHECKLIST)
+        return ', '.join(labels.get(key, key) for key in value)
     if isinstance(value, bool):
         return 'ใช่' if value else 'ไม่ใช่'
     getter = getattr(ticket, f'get_{field}_display', None)

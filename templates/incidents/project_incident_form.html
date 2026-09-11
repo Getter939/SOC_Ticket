@@ -195,6 +195,18 @@
           <h3 class="h6 fw-semibold mb-2">Indicators of Compromise (IOC)</h3>
           {% include 'incidents/_structured_ioc_fields.html' %}
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</label>
+          {{ form.ioc_user }}
+          <div class="field-hint">บัญชีผู้ใช้ที่ผู้โจมตีใช้ — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          {% if form.ioc_user.errors %}<div class="text-danger small">{{ form.ioc_user.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">คำสั่ง (Command)</label>
+          {{ form.ioc_command }}
+          <div class="field-hint">คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง</div>
+          {% if form.ioc_command.errors %}<div class="text-danger small">{{ form.ioc_command.errors }}</div>{% endif %}
+        </div>
         <div class="col-12 d-flex align-items-center gap-2">
           <button type="button" class="btn btn-outline-primary btn-sm" id="insert-guidance-btn" disabled>
             <i class="bi bi-lightbulb me-1"></i>แทรกแนวทางมาตรฐาน
@@ -268,10 +280,6 @@
               {% if tform.ip_address.errors %}<div class="text-danger small">{{ tform.ip_address.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
-              <label class="form-label small fw-semibold mb-1">MAC Address</label>
-              {{ tform.mac_address }}
-            </div>
-            <div class="col-md-3">
               <label class="form-label small fw-semibold mb-1">ประเภททรัพย์สิน</label>
               {{ tform.asset_type }}
             </div>
@@ -343,10 +351,6 @@
         <label class="form-label small fw-semibold mb-1">IP Addresses</label>
         {{ target_formset.empty_form.ip_address }}
         <div class="field-hint">{{ target_formset.empty_form.ip_address.help_text }}</div>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label small fw-semibold mb-1">MAC Address</label>
-        {{ target_formset.empty_form.mac_address }}
       </div>
       <div class="col-md-3">
         <label class="form-label small fw-semibold mb-1">ประเภททรัพย์สิน</label>

@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% comment %}
+Inline preview of one ticket attachment, opened in its own tab from the ticket
+detail page. The server has already decided this file is previewable and, for
+images, re-encoded it into a data: URI (image_data_uri) so no raw upload bytes
+reach the browser. Text is rendered autoescaped — never as markup.
+{% endcomment %}
+{% block title %}ตัวอย่างไฟล์ — {{ attachment.original_name }}{% endblock %}
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h1 class="h5 mb-1 text-break">{{ attachment.original_name }}</h1>
+      <div class="text-muted small">
+        เคส <a href="{% url 'ticket_detail' ticket.pk %}" class="font-monospace">#{{ ticket.ticket_id }}</a>
+        {% if attachment.description %} · {{ attachment.description }}{% endif %}
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{% url 'download_attachment' attachment.pk %}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-download me-1"></i>ดาวน์โหลด
+      </a>
+      <a href="{% url 'ticket_detail' ticket.pk %}" class="btn btn-sm btn-light border">
+        <i class="bi bi-arrow-left me-1"></i>กลับไปหน้าเคส
+      </a>
+    </div>
+  </div>
+
+  {% if truncated %}
+  <div class="alert alert-warning small d-flex gap-2">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <div>ไฟล์มีขนาดใหญ่ — แสดงเฉพาะส่วนต้นของไฟล์ กรุณาดาวน์โหลดเพื่อดูทั้งหมด</div>
+  </div>
+  {% endif %}
+
+  {% if kind == 'image' %}
+    <div class="text-center bg-body-tertiary border rounded p-2">
+      <img src="{{ image_data_uri }}" alt="{{ attachment.description|default:'ภาพหลักฐาน' }}"
+           style="max-width:100%; height:auto;">
+    </div>
+  {% elif csv_rows %}
+    <div class="table-responsive border rounded">
+      <table class="table table-sm table-bordered table-striped small mb-0 font-monospace">
+        <tbody>
+          {% for row in csv_rows %}
+          <tr>{% for cell in row %}<td class="text-nowrap">{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if csv_truncated %}<div class="small text-muted mt-1">แสดงบางแถวเท่านั้น</div>{% endif %}
+  {% else %}
+    <pre class="border rounded p-3 bg-body-tertiary small" style="white-space:pre-wrap; word-break:break-word; max-height:80vh; overflow:auto;">{{ text }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

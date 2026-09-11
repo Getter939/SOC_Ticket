@@ -105,6 +105,7 @@ class MFAFlowTests(TestCase):
             '/admin/',
             reverse('ticket_detail', args=[123]),
             reverse('download_attachment', args=[123]),
+            reverse('preview_attachment', args=[123]),
             reverse('ticket_report_pdf', args=[123]),
             reverse('ticket_report_docx', args=[123]),
             reverse('download_project_attachment', args=[123]),

@@ -14,7 +14,10 @@ from .ticket_workflow import cancellation_action
 
 
 class CancellationForm(forms.Form):
-    reason = forms.ChoiceField(label='ประเภทเหตุผล', choices=TicketCancellationRequest.REASON_CHOICES)
+    reason = forms.ChoiceField(
+        label='ประเภทเหตุผล',
+        choices=[('', 'เลือกประเภทเหตุผล')] + list(TicketCancellationRequest.REASON_CHOICES),
+    )
     explanation = forms.CharField(label='รายละเอียดเหตุผล', max_length=4000, widget=forms.Textarea(attrs={'rows': 3}))
     duplicate_reference = forms.CharField(label='เลขรายการต้นฉบับ (กรณีรายการซ้ำ)', required=False)
 

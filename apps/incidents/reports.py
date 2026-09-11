@@ -27,6 +27,7 @@ from .report_content import (
     EVENT_SECTION1_ROWS,
     FOOTER_LEFT,
     FOOTER_RIGHT,
+    REMEDIATION_CHECKLIST,
     SECTION1_ROWS,
     SECTION3_ROWS,
     SECTION4_ROWS,
@@ -98,6 +99,9 @@ REPORT_IMAGE_MAX_COUNT = 20
 REPORT_IMAGE_MAX_PIXELS = 20_000_000
 REPORT_IMAGE_MAX_DIMENSION = 1600
 REPORT_IMAGE_MAX_TOTAL_BYTES = 20 * 1024 * 1024
+# On-screen attachment preview re-encodes at a larger bound than the report
+# embed — it is viewed on a monitor, not printed into a form cell.
+PREVIEW_IMAGE_MAX_DIMENSION = 2400
 
 
 @dataclass(frozen=True)
@@ -124,7 +128,9 @@ class ReportEvidenceImage:
         return f'data:{self.content_type};base64,{encoded}'
 
 
-def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
+def generate_ticket_report(
+    ticket_id, generated_by=None, hide_empty=True, show_signoff=False,
+):
     ticket = _load_ticket(ticket_id)
     generated_at = timezone.now()
     context = build_ticket_report_context(ticket, generated_at=generated_at)
@@ -138,6 +144,8 @@ def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
     if hide_empty:
         _remove_empty_docx_fields(doc, context)
         _renumber_docx_section_one(doc)
+    if not show_signoff:
+        _remove_docx_signoff(doc)
     evidence_paragraph = _find_docx_placeholder_paragraph(doc, '{{evidence_log}}')
     _replace_placeholders(doc, context)
     _append_docx_evidence_images(evidence_paragraph, evidence_images)
@@ -158,7 +166,7 @@ def generate_ticket_report(ticket_id, generated_by=None, hide_empty=True):
 
 
 def generate_ticket_report_pdf(
-    ticket_id, generated_by=None, base_url=None, hide_empty=True,
+    ticket_id, generated_by=None, base_url=None, hide_empty=True, show_signoff=False,
 ):
     ticket = _load_ticket(ticket_id)
     generated_at = timezone.now()
@@ -167,6 +175,7 @@ def generate_ticket_report_pdf(
         generated_at=generated_at,
         show_report_actions=False,
         hide_empty=hide_empty,
+        show_signoff=show_signoff,
     )
     html = render_to_string(REPORT_PREVIEW_TEMPLATE, context)
     content = _render_pdf_from_html(html, base_url=base_url)
@@ -188,6 +197,7 @@ def generate_ticket_report_pdf(
 
 def build_ticket_report_render_context(
     ticket, generated_at=None, show_report_actions=True, hide_empty=True,
+    show_signoff=False,
 ):
     is_event_report = _is_event_report(ticket)
     report = build_ticket_report_context(ticket, generated_at=generated_at)
@@ -215,6 +225,7 @@ def build_ticket_report_render_context(
         'nt_logo': _logo_data_uri(),
         'show_report_actions': show_report_actions,
         'hide_empty': hide_empty,
+        'show_signoff': show_signoff,
     }
 
 
@@ -224,9 +235,9 @@ def build_ticket_report_context(ticket, generated_at=None):
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
     is_event_report = _is_event_report(ticket)
 
-    # Structured indicators, grouped by category. Hash / IP / Domain / URL each
-    # get their own Section 4 row; File Name + File Path (plus any legacy
-    # ioc_details text) fill the "Process/File Path" row.
+    # Structured indicators, grouped by category. File Name / Hash / IP / Domain
+    # / URL each get their own Section 4 row; File Path (plus any legacy
+    # ioc_details text) fills the "Process/File Path" row.
     ioc_map = {}
     for row in ticket.iocs.all():
         ioc_map.setdefault(row.category, []).append(row.value)
@@ -234,11 +245,16 @@ def build_ticket_report_context(ticket, generated_at=None):
     def _ioc(category):
         return '\n'.join(ioc_map.get(category, []))
 
-    process_parts = []
-    for label, category in (('File Name', CAT_FILE_NAME), ('File Path', CAT_FILE_PATH)):
-        process_parts += [f'{label}: {value}' for value in ioc_map.get(category, [])]
+    process_parts = [f'File Path: {value}' for value in ioc_map.get(CAT_FILE_PATH, [])]
     if ticket.ioc_details:
         process_parts.append(ticket.ioc_details)
+
+    # Section 5 carries no file-name text any more, so it can be empty text while
+    # still having embedded screenshots. Emit '' (kept), not '-' (dropped by the
+    # empty-field filter), when there is image evidence but no MITRE line.
+    evidence_log = _evidence_log(ticket)
+    if evidence_log == '-' and not is_event_report and _has_image_evidence(ticket):
+        evidence_log = ''
 
     context = {
         # The official report number carries a presentation-only classification
@@ -250,8 +266,8 @@ def build_ticket_report_context(ticket, generated_at=None):
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),
         'reporter': _user_label(ticket.created_by, include_phone=True),
-        'log_source': _value(ticket.log_source),
-        'status': _value(ticket.get_status_display()),
+        'log_source': _log_source_with_reference(ticket),
+        'status': _containment_status(ticket),
         'actions_taken_summary': _value(ticket.actions_taken_summary),
         'next_steps_summary': _value(ticket.next_steps_summary),
         'incident_description': _value(ticket.issue_description),
@@ -262,18 +278,23 @@ def build_ticket_report_context(ticket, generated_at=None):
         'host_name': _value(ticket.device_name),
         'ip_address': _value(ticket.ip_address),
         'operating_system': _value(ticket.operating_system),
+        'ioc_file_name': _value(_ioc(CAT_FILE_NAME)),
         'ioc_process': _value('\n'.join(process_parts)),
-        'ioc_command': '-',
+        'ioc_command': _value(ticket.ioc_command),
         'ioc_hash': _value(_ioc(CAT_HASH)),
         'ioc_ip': _value(_ioc(CAT_IP) or ticket.destination_ip),
         'ioc_domain': _value(_ioc(CAT_DOMAIN)),
         'ioc_url': _value(_ioc(CAT_URL)),
         'ioc_user': _value(ticket.ioc_user),
-        'evidence_log': _evidence_log(ticket),
+        'evidence_log': evidence_log,
         'action_required': _containment_checklist_flat(ticket),
         'action_precautions': _value(ticket.action_precautions),
         'remediation_summary': _value(ticket.remediation_summary),
         'containment_report': _value(ticket.containment_report),
+        # Not _value(): the 'อื่นๆ ระบุ' line is part of the fixed checklist and
+        # must always print, so it must never become the '-' that compact mode
+        # would strip. Empty renders as a blank after the label.
+        'remediation_other': ticket.remediation_other or '',
         'signoff_admin': _signoff_name(ticket.assigned_admin),
         'signoff_approver': _signoff_name(ticket.approved_by),
         'template_version': _report_template_version(ticket),
@@ -302,6 +323,11 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_asset_network': _chk(asset == 'Network Device'),
         'chk_asset_unknown': _chk(not asset_known),
     }
+    # Section 8's fixed checklist — one chk_rem_<key> per REMEDIATION_CHECKLIST
+    # item, ticked from the keys Tier 2 saved in ticket.remediation_checklist.
+    ticked_remediation = set(ticket.remediation_checklist or [])
+    for key, _label in REMEDIATION_CHECKLIST:
+        context[f'chk_rem_{key}'] = _chk(key in ticked_remediation)
     if ticket.status == Ticket.STATUS_CANCELLED:
         cancellation = ticket.cancellation_requests.filter(status='APPROVED').select_related(
             'decided_by', 'duplicate_of',
@@ -409,6 +435,7 @@ def build_ticket_report_sections(
             {'number': '7', 'title': SECTION_TITLES['7'], 'rows': [
                 text(report['action_precautions'])]},
             {'number': '8', 'title': SECTION_TITLES['8'], 'rows': [
+                _remediation_checklist_row(report),
                 kv('ผลการตรวจสอบ / Investigation Findings', report['remediation_summary']),
                 kv('มาตรการควบคุม / Countermeasure', report['containment_report']),
             ]},
@@ -576,18 +603,19 @@ def _load_ticket(ticket_id):
     )
 
 
+# Sections whose whole heading is dropped in compact mode when every field in
+# them is empty. Section 8 is deliberately absent: its fixed checklist always
+# prints, so the heading must stay even when the two free-text fields are empty
+# (those two still drop individually via _remove_empty_docx_paragraph_pairs).
 _DOCX_OPTIONAL_SECTION_FIELDS = {
     f'2. {SECTION_TITLES["2"]}': ('incident_description',),
     f'4. {SECTION_TITLES["4"]}': (
-        'ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip',
+        'ioc_file_name', 'ioc_process', 'ioc_command', 'ioc_hash', 'ioc_ip',
         'ioc_domain', 'ioc_url', 'ioc_user',
     ),
     f'5. {SECTION_TITLES["5"]}': ('evidence_log',),
     f'6. {SECTION_TITLES["6"]}': ('action_required',),
     f'7. {SECTION_TITLES["7"]}': ('action_precautions',),
-    f'8. {SECTION_TITLES["8"]}': (
-        'remediation_summary', 'containment_report',
-    ),
 }
 
 
@@ -733,6 +761,17 @@ def _find_docx_placeholder_paragraph(doc, placeholder):
     return None
 
 
+def _remove_docx_signoff(doc):
+    """Drop the two-column sign-off table (the signature blocks) from a filled
+    DOCX. Called when signatures are toggled off. Must run before placeholder
+    replacement, while the ``{{signoff_admin}}`` marker is still present."""
+    for table in list(doc.tables):
+        text = '\n'.join(cell.text for row in table.rows for cell in row.cells)
+        if '{{signoff_admin}}' in text or '{{signoff_approver}}' in text:
+            table._tbl.getparent().remove(table._tbl)
+            return
+
+
 def _append_docx_evidence_images(paragraph, images):
     """Insert image evidence after the section-5 filename paragraph."""
     if not paragraph or not images or paragraph._p.getparent() is None:
@@ -756,9 +795,10 @@ def _append_docx_evidence_images(paragraph, images):
             width=Inches(display_width),
             height=Inches(display_height),
         )
-        picture.add_break()
-        caption = image_paragraph.add_run(image.caption)
-        caption.bold = True
+        if image.caption:
+            picture.add_break()
+            caption = image_paragraph.add_run(image.caption)
+            caption.bold = True
         previous = image_paragraph
 
 
@@ -900,18 +940,13 @@ def _user_label(user, include_phone=False):
     return label
 
 
-def _attachment_summary(ticket):
-    parts = []
-    for attachment in ticket.attachments.all():
-        parts.append(_attachment_label(attachment))
-    return '\n'.join(parts) if parts else '-'
-
-
-def _attachment_label(attachment):
-    label = attachment.original_name
-    if attachment.description:
-        label = f'{label} - {attachment.description}'
-    return label
+def _has_image_evidence(ticket):
+    """True if any attachment is an image, by extension — a cheap pre-check used
+    to decide whether Section 5 stays even when it carries no evidence text."""
+    return any(
+        Path(attachment.original_name).suffix.lower() in REPORT_IMAGE_EXTENSIONS
+        for attachment in ticket.attachments.all()
+    )
 
 
 def _report_evidence_images(ticket):
@@ -957,7 +992,19 @@ def _report_evidence_images(ticket):
     return tuple(images)
 
 
-def _prepare_report_evidence_image(attachment):
+def build_attachment_preview_image(attachment):
+    """A safe, re-encoded ``data:`` URI for showing one image attachment inline.
+
+    Re-encoding through Pillow strips any embedded metadata or polyglot payload,
+    so the raw uploaded bytes are never served to the browser. Returns the
+    ReportEvidenceImage (use ``.data_uri``); raises on a non-image / corrupt /
+    oversized file, which the caller turns into a 404."""
+    return _prepare_report_evidence_image(
+        attachment, max_dimension=PREVIEW_IMAGE_MAX_DIMENSION,
+    )
+
+
+def _prepare_report_evidence_image(attachment, max_dimension=REPORT_IMAGE_MAX_DIMENSION):
     with attachment.file.open('rb') as source_file:
         with Image.open(source_file) as source:
             width, height = source.size
@@ -969,7 +1016,7 @@ def _prepare_report_evidence_image(attachment):
             source.seek(0)  # animated formats use only their first frame
             prepared = ImageOps.exif_transpose(source)
             prepared.thumbnail(
-                (REPORT_IMAGE_MAX_DIMENSION, REPORT_IMAGE_MAX_DIMENSION),
+                (max_dimension, max_dimension),
                 Image.Resampling.LANCZOS,
             )
 
@@ -993,7 +1040,9 @@ def _prepare_report_evidence_image(attachment):
                 content_type = 'image/jpeg'
 
             return ReportEvidenceImage(
-                caption=_attachment_label(attachment),
+                # File names are intentionally omitted from the report — the
+                # caption is the analyst's description, or blank.
+                caption=attachment.description or '',
                 content=output.getvalue(),
                 content_type=content_type,
                 width_px=prepared.width,
@@ -1006,15 +1055,52 @@ def _host_ip(ticket):
     return ' / '.join(parts) if parts else '-'
 
 
+def _log_source_with_reference(ticket):
+    """Section 1's 'แหล่งข้อมูล' row: the log source with the Reference ID
+    appended after it, e.g. ``TrendMicro IC-xx-xxxx``. Reference ID has no row of
+    its own on the report — it rides along here so the source can be traced back
+    to the originating log."""
+    parts = [p for p in (ticket.log_source, ticket.reference_id) if p and p.strip()]
+    return ' '.join(part.strip() for part in parts) if parts else '-'
+
+
+# Section 1's 'สถานะปัจจุบัน' is written from the containment executor's point of
+# view, collapsing the workflow onto the executive dashboard's SANS-IR phases
+# (apps.dashboard.views._IR_PHASES). The wording lives here because it is a
+# report-only lens; the ticket keeps its real status. Kept in step with the
+# dashboard phases by ContainmentStatusPhaseParityTest.
+_CONTAINMENT_STATUS_BY_STATUS = {
+    Ticket.STATUS_NEW:                     'รอรับเรื่อง (ยังไม่เริ่มดำเนินการ)',
+    Ticket.STATUS_T1_REVIEW:               'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
+    Ticket.STATUS_ESCALATED_T2:            'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
+    Ticket.STATUS_PENDING_MGR_TRIAGE:      'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
+    Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
+    Ticket.STATUS_MONITORING:              'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
+    Ticket.STATUS_AWAITING_CONTAINMENT:    'มีความจำเป็นต้อง Containment (อยู่ระหว่างการควบคุม)',
+    Ticket.STATUS_CONTAINMENT_REPORTED:    'มีความจำเป็นต้อง Containment (อยู่ระหว่างการควบคุม)',
+    Ticket.STATUS_AWAITING_OWNER:          'มีความจำเป็นต้อง Containment (อยู่ระหว่างการควบคุม)',
+    Ticket.STATUS_OWNER_REMEDIATED:        'มีความจำเป็นต้อง Containment (อยู่ระหว่างการควบคุม)',
+    Ticket.STATUS_PENDING_MANAGER:         'ดำเนินการควบคุมแล้ว รอการตรวจสอบ/อนุมัติ',
+    Ticket.STATUS_PENDING_T2_REVIEW:       'ดำเนินการควบคุมแล้ว รอการตรวจสอบ/อนุมัติ',
+    Ticket.STATUS_APPROVED:                'ดำเนินการเสร็จสิ้น (ปิดเคสแล้ว)',
+    Ticket.STATUS_CLOSED_EVENT:            'ดำเนินการเสร็จสิ้น (ปิดเคสแล้ว)',
+    Ticket.STATUS_CANCELLED:               'ยกเลิกรายการแล้ว',
+}
+
+
+def _containment_status(ticket):
+    return _CONTAINMENT_STATUS_BY_STATUS.get(
+        ticket.status, _value(ticket.get_status_display()),
+    )
+
+
 def _evidence_log(ticket):
-    parts = []
-    attachments = _attachment_summary(ticket)
-    if attachments != '-':
-        parts.append(attachments)
+    """Section 5's text. Attachment file names are deliberately NOT listed —
+    screenshots are embedded as images (captioned by their description) and other
+    files are downloaded from the ticket, so a bare filename list only added
+    noise. Only the MITRE line remains as text."""
     mitre = ', '.join(ticket.mitre_tactic_labels)
-    if mitre:
-        parts.append(f'MITRE ATT&CK: {mitre}')
-    return '\n'.join(parts) if parts else '-'
+    return f'MITRE ATT&CK: {mitre}' if mitre else '-'
 
 
 def _signoff_name(user):
@@ -1041,6 +1127,21 @@ def _containment_checklist_flat(ticket):
     if trailing:
         text = f'{text}\n{trailing}'
     return text
+
+
+def _remediation_checklist_row(report):
+    """Section-8 fixed checklist row for the HTML/PDF preview: every
+    REMEDIATION_CHECKLIST item with its ticked state, plus the 'อื่นๆ ระบุ' text.
+    Always present, so Section 8 prints even when the two text fields are empty."""
+    other = report.get('remediation_other', '-')
+    return {
+        'type': 'remediation_checklist',
+        'items': [
+            {'label': label, 'checked': report[f'chk_rem_{key}'] == CHECKED}
+            for key, label in REMEDIATION_CHECKLIST
+        ],
+        'other': '' if other == '-' else other,
+    }
 
 
 def _containment_checklist_row(ticket):

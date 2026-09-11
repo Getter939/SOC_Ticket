@@ -1,7 +1,14 @@
 {% if can_request_cancellation or pending_cancellation or cancellation_records %}
-<section class="card shadow-sm mb-3" aria-labelledby="cancellation-heading" style="overflow-wrap:anywhere;">
-  <div class="card-header"><h2 id="cancellation-heading" class="h5 mb-0">การยกเลิกรายการ</h2></div>
-  <div class="card-body">
+<details id="cancellation-heading" class="action-disclosure cancellation-disclosure" {% if pending_cancellation or ticket.status == 'CANCELLED' %}open{% endif %}>
+  <summary>
+    <i class="bi bi-x-circle action-icon" aria-hidden="true"></i>
+    <span class="action-summary-copy">
+      <span class="action-title">{% if can_decide_cancellation %}พิจารณาคำขอยกเลิกรายการ{% else %}การยกเลิกรายการ{% endif %}</span>
+      <span class="action-hint">{% if pending_cancellation %}มีคำขอรอผู้จัดการ SOC พิจารณา{% elif ticket.status == 'CANCELLED' %}ยกเลิกแล้ว · ดูเหตุผลและประวัติ{% elif can_request_cancellation %}สำหรับรายการซ้ำหรือสร้างผิด · เก็บประวัติไว้{% else %}ดูประวัติคำขอและผลการพิจารณา{% endif %}</span>
+    </span>
+    <i class="bi bi-chevron-down action-chevron" aria-hidden="true"></i>
+  </summary>
+  <div class="action-disclosure-body">
     {% if ticket.status == 'CANCELLED' %}
     <div class="alert alert-secondary">รายการนี้ยกเลิกแล้ว หลักฐานและประวัติยังคงเก็บไว้ การยกเลิกไม่ใช่การยืนยันว่าแก้ไขเหตุการณ์สำเร็จ</div>
     {% endif %}
@@ -11,10 +18,17 @@
     {% if pending_cancellation.duplicate_visible %}<p>รายการต้นฉบับ: <a href="{% url 'ticket_detail' pending_cancellation.duplicate_of_id %}">{{ pending_cancellation.duplicate_of.ticket_id }}</a></p>{% endif %}
     {% endif %}
     {% if can_request_cancellation or can_decide_cancellation %}
-    <form method="post" action="{% url 'ticket_cancellation' ticket.pk %}">
+    <form id="cancellation-form" method="post" action="{% url 'ticket_cancellation' ticket.pk %}">
       {% csrf_token %}
       {% if can_request_cancellation %}
-        {% for field in cancellation_form %}<div class="mb-3">{{ field.label_tag }}{{ field }}</div>{% endfor %}
+        <p class="small text-muted">การยกเลิกไม่ใช่การปิดเคสที่แก้ไขสำเร็จ หลักฐานและประวัติยังคงเก็บไว้</p>
+        {% for field in cancellation_form %}
+        <div class="mb-3" {% if field.name == 'duplicate_reference' %}id="cancellation-duplicate-field"{% endif %}>
+          <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</label>
+          {{ field }}
+          {% if field.name == 'duplicate_reference' %}<div class="form-text">กรอกเลขรายการต้นฉบับให้ครบตามที่แสดงในระบบ</div>{% endif %}
+        </div>
+        {% endfor %}
       {% else %}
         <input type="hidden" name="request_id" value="{{ pending_cancellation.pk }}">
         <label for="cancellation-decision" class="form-label">บันทึกการตัดสินใจ <span class="text-danger">*</span></label>
@@ -32,15 +46,15 @@
         {% endfor %}
       </fieldset>
       {% endif %}
-      <div class="d-flex flex-wrap gap-2">
+      <div class="d-grid gap-2">
       {% if can_decide_cancellation %}
-      <button type="submit" name="action" value="approve" class="btn btn-dark">อนุมัติยกเลิกรายการ</button>
+      <button type="submit" name="action" value="approve" class="btn btn-outline-danger">อนุมัติยกเลิกรายการ</button>
       <button type="submit" name="action" value="reject" class="btn btn-outline-secondary">ไม่อนุมัติ</button>
       {% elif can_cancel_directly %}
-      <button type="submit" name="action" value="direct" class="btn btn-dark">ยืนยันยกเลิกรายการ</button>
+      <button type="submit" name="action" value="direct" class="btn btn-outline-danger">ยืนยันยกเลิกรายการ</button>
       {% if not cancellation_manager %}<button type="submit" name="action" value="request" class="btn btn-outline-secondary">ส่งคำขอให้ผู้จัดการ SOC พิจารณา</button>{% endif %}
       {% else %}
-      <button type="submit" name="action" value="request" class="btn btn-outline-dark">ส่งคำขอยกเลิกให้ผู้จัดการ SOC</button>
+      <button type="submit" name="action" value="request" class="btn btn-outline-danger">ส่งคำขอยกเลิกให้ผู้จัดการ SOC</button>
       {% endif %}
       </div>
     </form>
@@ -66,5 +80,25 @@
     </details>
     {% endif %}
   </div>
-</section>
+</details>
+<script nonce="{{ request.csp_nonce }}">(function(){
+  var panel=document.getElementById('cancellation-heading');
+  function revealLinkedPanel(){if(window.location.hash==='#cancellation-heading')panel.open=true;}
+  window.addEventListener('hashchange',revealLinkedPanel);
+  revealLinkedPanel();
+  var form=document.getElementById('cancellation-form');
+  if(!form)return;
+  var reason=form.elements.namedItem('reason');
+  var reference=form.elements.namedItem('duplicate_reference');
+  var field=document.getElementById('cancellation-duplicate-field');
+  if(!reason||!reference||!field)return;
+  function syncDuplicate(){
+    var duplicate=reason.value==='DUPLICATE';
+    field.hidden=!duplicate;
+    reference.required=duplicate;
+    reference.disabled=!duplicate;
+  }
+  reason.addEventListener('change',syncDuplicate);
+  syncDuplicate();
+})();</script>
 {% endif %}

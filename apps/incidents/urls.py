@@ -36,6 +36,7 @@ urlpatterns = [
     path('evidence/staged/<int:pk>/discard/', views.discard_staged_attachment, name='discard_staged_attachment'),
     path('evidence/staged/<int:pk>/restore/', views.restore_staged_attachment, name='restore_staged_attachment'),
     path('attachment/<int:attachment_id>/download/', views.download_attachment, name='download_attachment'),
+    path('attachment/<int:attachment_id>/preview/', views.preview_attachment, name='preview_attachment'),
     path('log/edit/<int:log_id>/', views.edit_log, name='edit_log'),
     path('ticket/<int:pk>/subtask/new/', views.create_subtask, name='create_subtask'),
     path('ticket/<int:pk>/response-request/new/', views.create_response_request, name='create_response_request'),

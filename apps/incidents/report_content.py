@@ -22,11 +22,30 @@ GUIDANCE_COORDINATION_NOTE = (
     'เรื่องขอคำแนะนำ Network Security และ Infrastructure Security: 02-574-8186 (วปกก.)'
 )
 
-# Section 8 used to carry a fixed 15-item remediation checklist, ticked by hand
-# on the printed form. It was removed: it was static boilerplate that no ticket
-# field ever drove, always rendered unticked, and section 6 already carries a
-# real containment checklist whose done-state comes from `action_required`
-# (Ticket.containment_checklist). Section 8 now shows only its two data rows.
+# Section 8's fixed remediation checklist. It was briefly removed (nothing ever
+# ticked it), then reinstated once Tier 2 gained a way to tick it while verifying
+# that the System Admin / System Owner has contained the incident. Each item has
+# a stable KEY and a printed LABEL; ``Ticket.remediation_checklist`` stores the
+# ticked keys, so rewording a label never loses a tick. Distinct from section 6's
+# checklist, which is the analyst's own free-text ``action_required`` list.
+REMEDIATION_CHECKLIST = [
+    ('isolate',          'Isolate เครื่อง – แยกเครื่องที่ได้รับผลกระทบออกจากเครือข่าย'),
+    ('close_service',    'Close Service ที่ไม่จำเป็น – ปิดบริการหรือพอร์ตที่เปิดเผยและมีความเสี่ยง'),
+    ('block_ioc',        'Block IoC – บล็อกตัวบ่งชี้การโจมตี (IP, Domain, URL, Hash)'),
+    ('dump_memory',      'Dump memory ของเครื่อง Server'),
+    ('collect_logs',     'รวบรวม Event Logs เพื่อส่งต่อ ปปกก.'),
+    ('disable_account',  'Disable/Reset Account – ปิดการใช้งานหรือรีเซ็ตรหัสผ่านบัญชีที่ได้รับผลกระทบ'),
+    ('change_password',  'เปลี่ยนรหัสผ่าน'),
+    ('remove_malware',   'Remove Malware – กำจัดมัลแวร์ออกจากระบบ'),
+    ('delete_files',     'ลบไฟล์ และ Path ที่ต้องสงสัย'),
+    ('patch',            'Patch Vulnerability – ติดตั้งแพตช์แก้ไขช่องโหว่ที่เกี่ยวข้อง'),
+    ('update_os',        'Update Software/OS – อัปเดตซอฟต์แวร์หรือระบบปฏิบัติการให้เป็นเวอร์ชันล่าสุด'),
+    ('harden',           'Harden Configuration – ปรับแต่งการตั้งค่าความปลอดภัยของระบบให้รัดกุมมากขึ้น'),
+    ('verify_threat',    'ตรวจสอบการทำงานของภัยคุกคามยังทำงานอยู่หรือไม่'),
+    ('sysmon',           'ติดตั้ง Sysmon'),
+    ('wazuh_agent',      'ติดตั้ง Agent Wazuh'),
+]
+REMEDIATION_CHECKLIST_KEYS = frozenset(key for key, _ in REMEDIATION_CHECKLIST)
 
 
 # ── Table-row layout, shared by the DOCX builder and the HTML/PDF view ───── #
@@ -76,11 +95,14 @@ SECTION1_ROWS = [
         ('chk_asset_server', 'Server'),
         ('chk_asset_network', 'Network Device')]),
     ('kv', '1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
-    ('kv', '1.13 สถานะปัจจุบัน', 'status'),
-    ('kv', '1.14 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
-    ('kv', '1.15 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
-    ('kv', '1.16 ผู้รายงาน', 'reporter'),
-    ('kv', '1.17 แหล่งข้อมูล', 'log_source'),
+    # 1.13 mirrors section 2 for now — it is meant to be a shorter summary of the
+    # incident description, but there is no separate summary field yet.
+    ('kv', '1.13 รายละเอียด', 'incident_description'),
+    ('kv', '1.14 สถานะปัจจุบัน', 'status'),
+    ('kv', '1.15 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
+    ('kv', '1.16 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
+    ('kv', '1.17 ผู้รายงาน', 'reporter'),
+    ('kv', '1.18 แหล่งข้อมูล', 'log_source'),
 ]
 
 # The Event-only form follows the shorter one-page ODT supplied by the SOC.
@@ -114,7 +136,7 @@ EVENT_SECTION1_ROWS = [
         ('chk_asset_server', 'Server'),
         ('chk_asset_network', 'Network Device')]),
     ('kv', '1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
-    ('kv', '1.13 รายละเอียดของเหตุ', 'incident_description'),
+    ('kv', '1.13 รายละเอียด', 'incident_description'),
     ('kv', '1.14 สถานะปัจจุบัน', 'status'),
     ('kv', '1.15 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
     ('kv', '1.16 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),
@@ -140,6 +162,7 @@ SECTION3_ROWS = [
 ]
 
 SECTION4_ROWS = [
+    ('kv', 'File Name', 'ioc_file_name'),
     ('kv', 'Process/File Path', 'ioc_process'),
     ('kv', 'คำสั่ง', 'ioc_command'),
     ('kv', 'Hash', 'ioc_hash'),

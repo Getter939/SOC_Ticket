@@ -81,6 +81,15 @@
     .event-report .banner { background: #D9EAF7; }
     .event-report .section-band { background: #EAF3FA; }
 
+    /* The Incident report reads at 16pt with tighter cells (the Event report
+       keeps its 12pt one-page layout). Plain class selectors so xhtml2pdf's
+       limited CSS engine applies them to the PDF too. */
+    .incident-report { font-size: 16pt; line-height: 1.2; }
+    .incident-report th, .incident-report td { padding: 2px 8px; }
+    .incident-report .textbox { padding: 4px 8px; min-height: 0; }
+    .incident-report .section-band { font-size: 16pt; }
+    .incident-report .check-item { margin-bottom: 1px; }
+
     .meta { text-align: right; color: #5B6775; font-size: 9pt; margin: 4px 0 12px; }
 
     .section-band {
@@ -146,13 +155,15 @@
     <div class="report-actions">
       <div>
         <a href="{% url 'ticket_detail' ticket.pk %}">กลับไปแก้ไข Ticket</a>
-        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด DOCX</button></form>
-        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด PDF</button></form>
+        <form method="post" action="{% url 'ticket_report_docx' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><input type="hidden" name="show_signoff" value="{% if show_signoff %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด DOCX</button></form>
+        <form method="post" action="{% url 'ticket_report_pdf' ticket.pk %}">{% csrf_token %}<input type="hidden" name="hide_empty" value="{% if hide_empty %}1{% else %}0{% endif %}"><input type="hidden" name="show_signoff" value="{% if show_signoff %}1{% else %}0{% endif %}"><button type="submit">ดาวน์โหลด PDF</button></form>
       </div>
       <div class="report-options">
         <form method="get" class="empty-toggle-form" id="emptyFieldsForm">
           <input type="hidden" name="hide_empty" value="0">
+          <input type="hidden" name="show_signoff" value="0">
           <label><input type="checkbox" name="hide_empty" value="1" id="hideEmptyFields" {% if hide_empty %}checked{% endif %}> ซ่อนช่องที่ไม่มีข้อมูล</label>
+          <label><input type="checkbox" name="show_signoff" value="1" id="showSignoff" {% if show_signoff %}checked{% endif %}> แสดงช่องลงนาม</label>
           <button type="submit">ใช้</button>
         </form>
         <div class="muted">ตัวอย่างแบบอ่านอย่างเดียว — แก้ไขข้อมูลได้ที่หน้า Ticket</div>
@@ -160,7 +171,7 @@
     </div>
   {% endif %}
 
-  <main class="report-page{% if is_event_report %} event-report{% endif %}">
+  <main class="report-page{% if is_event_report %} event-report{% else %} incident-report{% endif %}">
     <div id="reportHeader">{% if nt_logo %}<img src="{{ nt_logo }}" alt="NT">{% endif %}</div>
 
     <div class="banner">
@@ -174,11 +185,11 @@
         <div class="textbox">{{ section.rows.0.value }}</div>
       {% elif section.rows.0.type == 'evidence' %}
         <div class="textbox">
-          <div class="evidence-text">{{ section.rows.0.value }}</div>
+          {% if section.rows.0.value %}<div class="evidence-text">{{ section.rows.0.value }}</div>{% endif %}
           {% for image in section.rows.0.images %}
             <figure class="evidence-figure">
-              <figcaption>{{ image.caption }}</figcaption>
-              <img src="{{ image.data_uri }}" alt="{{ image.caption }}">
+              {% if image.caption %}<figcaption>{{ image.caption }}</figcaption>{% endif %}
+              <img src="{{ image.data_uri }}" alt="{{ image.caption|default:'ภาพหลักฐาน' }}">
             </figure>
           {% endfor %}
         </div>
@@ -189,6 +200,24 @@
           {% endfor %}
           {% if section.rows.0.trailing %}<div style="margin-top:6px; white-space:pre-wrap;">{{ section.rows.0.trailing }}</div>{% endif %}
         </div>
+      {% elif section.rows.0.type == 'remediation_checklist' %}
+        <div class="textbox">
+          {% for item in section.rows.0.items %}
+            <div class="check-item"><span class="cb">{% if item.checked %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ item.label }}</div>
+          {% endfor %}
+          <div class="check-item"><span class="cb">&#9744;</span>&#160;อื่นๆ ระบุ{% if section.rows.0.other %} — {{ section.rows.0.other }}{% endif %}</div>
+        </div>
+        {% with tail=section.rows|slice:"1:" %}
+          {% if tail %}
+          <table>
+            <tbody>
+              {% for row in tail %}
+                <tr><th>{{ row.label }}</th><td>{{ row.value|linebreaksbr }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+        {% endwith %}
       {% else %}
         <table>
           <tbody>
@@ -208,6 +237,7 @@
     {% endfor %}
 
     {% if not is_event_report %}
+    {% if show_signoff %}
     <table class="signoff">
       <tbody>
         <tr>
@@ -226,6 +256,7 @@
         </tr>
       </tbody>
     </table>
+    {% endif %}
     <div class="section-band appendix">&#8206;*หมวดหมู่ของภัยคุกคามทางไซเบอร์</div>
     <p class="appendix-intro">{{ appendix_intro }}</p>
     {# Present in the DOCX builder but previously missing here, so DOCX and PDF disagreed. #}
@@ -253,6 +284,9 @@
   {% if show_report_actions %}
     <script>
       document.getElementById('hideEmptyFields').addEventListener('change', function () {
+        document.getElementById('emptyFieldsForm').requestSubmit();
+      });
+      document.getElementById('showSignoff').addEventListener('change', function () {
         document.getElementById('emptyFieldsForm').requestSubmit();
       });
     </script>

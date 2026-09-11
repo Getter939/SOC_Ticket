@@ -40,11 +40,12 @@ from .staging import (
     MAX_ATTACHMENT_COUNT, discard_staged, restore_staged,
     staged_for, stage_uploads,
 )
-from .report_content import GUIDANCE_COORDINATION_NOTE
+from .report_content import GUIDANCE_COORDINATION_NOTE, REMEDIATION_CHECKLIST
 from .notifications import (
     notify_containment_alert,
 )
 from .reports import (
+    build_attachment_preview_image,
     build_ticket_report_render_context,
     generate_ticket_report,
     generate_ticket_report_pdf,
@@ -99,6 +100,7 @@ from .ticket_workflow import (
     manager_forward,
     reassess_emergency,
     reclassify_as_event,
+    record_remediation_check,
     start_monitoring,
     step_back,
     submit_containment,
@@ -1046,6 +1048,20 @@ def ticket_detail(request, pk):
         )
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
+    # Tier 2 records the section-8 remediation checklist while verifying that the
+    # System Admin (CONTAINMENT_REPORTED) or System Owner (PENDING_T2_REVIEW) has
+    # contained the incident. The Owner lane also exposes the two free-text
+    # result fields, which the Admin lane leaves to the System Admin's own form.
+    can_t2_record_remediation = (
+        not is_terminal
+        and ticket.status in (
+            Ticket.STATUS_CONTAINMENT_REPORTED, Ticket.STATUS_PENDING_T2_REVIEW,
+        )
+        and bool(transition_actions)
+        and (request.user.is_superuser or (profile is not None and profile.is_tier2))
+    )
+    remediation_owner_lane = ticket.status == Ticket.STATUS_PENDING_T2_REVIEW
+    remediation_checklist_state = _remediation_checklist_state(ticket)
     # Tier 2 may park an escalated case under Tier 1 for the fixed watch window
     # — once only (has_been_monitored), and never a bundle member. Rendered
     # inside the Tier 2 review card, alongside the Incident/Event decision.
@@ -1303,12 +1319,33 @@ def ticket_detail(request, pk):
                 messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
             else:
                 try:
-                    result = transition_ticket(
-                        ticket=ticket,
-                        actor=request.user,
-                        next_status=new_status,
-                        note=new_note,
-                    )
+                    with transaction.atomic():
+                        # Tier 2's section-8 remediation checklist is saved
+                        # alongside every forward move (incl. Return/Reject), so
+                        # what was ticked carries into the next round.
+                        if can_t2_record_remediation:
+                            before = history.snapshot(ticket)
+                            findings = countermeasure = None
+                            if remediation_owner_lane:
+                                findings = request.POST.get('remediation_summary', '').strip()
+                                countermeasure = request.POST.get('containment_report', '').strip()
+                            record_remediation_check(
+                                ticket=ticket,
+                                actor=request.user,
+                                checked_keys=set(request.POST.getlist('remediation_done')),
+                                other=request.POST.get('remediation_other', '').strip(),
+                                findings=findings,
+                                countermeasure=countermeasure,
+                            )
+                            history.record_changes(
+                                ticket, before, request.user, source='t2_remediation',
+                            )
+                        result = transition_ticket(
+                            ticket=ticket,
+                            actor=request.user,
+                            next_status=new_status,
+                            note=new_note,
+                        )
                     for warning in result.warnings:
                         messages.warning(request, warning)
                 except ValidationError as e:
@@ -1380,6 +1417,9 @@ def ticket_detail(request, pk):
         'can_mgr_forward': can_mgr_forward,
         'mgr_forward_target': mgr_forward_target,
         'can_t2_reclassify': can_t2_reclassify,
+        'can_t2_record_remediation': can_t2_record_remediation,
+        'remediation_owner_lane': remediation_owner_lane,
+        'remediation_checklist_state': remediation_checklist_state,
         'can_monitor': can_monitor,
         'can_conclude_monitoring': can_conclude_monitoring,
         'monitoring_duration_days': Ticket.MONITORING_DURATION_DAYS,
@@ -1400,6 +1440,22 @@ def _hide_empty_report_fields(params):
     return params.get('hide_empty', '1') != '0'
 
 
+def _show_report_signoff(params):
+    """Whether the report should print the signature block. Off by default —
+    most exports circulate before sign-off, so the blank lines are noise."""
+    return params.get('show_signoff', '0') == '1'
+
+
+def _remediation_checklist_state(ticket):
+    """The section-8 fixed checklist as [{key, label, done}], done reflecting the
+    keys Tier 2 has already ticked — so the form comes back pre-checked."""
+    ticked = set(ticket.remediation_checklist or [])
+    return [
+        {'key': key, 'label': label, 'done': key in ticked}
+        for key, label in REMEDIATION_CHECKLIST
+    ]
+
+
 @login_required
 @require_POST
 def ticket_report_docx(request, pk):
@@ -1411,6 +1467,7 @@ def ticket_report_docx(request, pk):
             pk,
             generated_by=request.user,
             hide_empty=_hide_empty_report_fields(request.POST),
+            show_signoff=_show_report_signoff(request.POST),
         )
     except Exception:
         logger.exception('DOCX report generation failed for ticket %s', pk)
@@ -1436,6 +1493,7 @@ def ticket_report_pdf(request, pk):
             generated_by=request.user,
             base_url=request.build_absolute_uri('/'),
             hide_empty=_hide_empty_report_fields(request.POST),
+            show_signoff=_show_report_signoff(request.POST),
         )
     except Exception:
         logger.exception('PDF report generation failed for ticket %s', pk)
@@ -1460,6 +1518,7 @@ def ticket_report_preview(request, pk):
         build_ticket_report_render_context(
             ticket,
             hide_empty=_hide_empty_report_fields(request.GET),
+            show_signoff=_show_report_signoff(request.GET),
         ),
     )
 
@@ -1843,6 +1902,9 @@ def dismiss_manual_triage(request, triage_id):
 TICKET_SEARCH_FIELDS = (
     'ticket_id', 'device_name', 'ip_address', 'destination_ip',
     'issue_description', 'ioc_details', 'mitre_tactics', 'reference_id',
+    # User + Command are their own fields (kept out of the TicketIOC table / IOC
+    # Database), but should still be findable here.
+    'ioc_user', 'ioc_command',
 )
 TRIAGE_SEARCH_FIELDS = (
     'source_reference', 'alert_description', 'source_ip', 'notes', 't2_notes',
@@ -2412,6 +2474,87 @@ def download_attachment(request, attachment_id):
     )
     response['X-Content-Type-Options'] = 'nosniff'
     return response
+
+
+# Cap on how much of a text/log/CSV file the inline preview reads. Enough to read
+# the file, small enough not to freeze the browser on a multi-hundred-MB log.
+_PREVIEW_TEXT_MAX_BYTES = 1024 * 1024        # 1 MB
+_PREVIEW_CSV_MAX_ROWS = 500
+# Thai Windows logs are commonly cp874; try the Unicode forms first.
+_PREVIEW_TEXT_ENCODINGS = ('utf-8-sig', 'cp874')
+
+
+@login_required
+def preview_attachment(request, attachment_id):
+    """Render one attachment inline (own tab) so users can read it without
+    downloading. Same authorization as download_attachment; only image and
+    text/log/CSV files preview — anything else 404s (its button is not shown).
+
+    Images are re-encoded through Pillow into a ``data:`` URI, so the raw upload
+    is never served to the browser (no stored-XSS via a spoofed SVG/HTML). Text
+    is decoded defensively and rendered autoescaped, so it displays as text, not
+    markup. This is why it is safe to render inline where download_attachment
+    deliberately forces a download.
+    """
+    att = get_object_or_404(TicketAttachment, pk=attachment_id)
+    get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
+
+    kind = att.preview_kind
+    if not kind:
+        raise Http404('ไฟล์ชนิดนี้ไม่รองรับการแสดงตัวอย่าง')
+
+    ctx = {'attachment': att, 'ticket': att.ticket, 'kind': kind}
+
+    if kind == 'image':
+        try:
+            image = build_attachment_preview_image(att)
+        except Exception:
+            logger.warning('Inline preview failed for attachment %s', att.pk, exc_info=True)
+            raise Http404('ไม่สามารถแสดงตัวอย่างไฟล์รูปภาพนี้ได้')
+        ctx['image_data_uri'] = image.data_uri
+        return render(request, 'incidents/attachment_preview.html', ctx)
+
+    # text / log / csv
+    with att.file.open('rb') as fh:
+        raw = fh.read(_PREVIEW_TEXT_MAX_BYTES + 1)
+    ctx['truncated'] = len(raw) > _PREVIEW_TEXT_MAX_BYTES
+    raw = raw[:_PREVIEW_TEXT_MAX_BYTES]
+    text = None
+    for encoding in _PREVIEW_TEXT_ENCODINGS:
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        text = raw.decode('latin-1', errors='replace')
+
+    ext = att.original_name.rpartition('.')[2].lower()
+    if ext in ('csv', 'tsv'):
+        rows = _preview_csv_rows(text, delimiter='\t' if ext == 'tsv' else ',')
+        if rows is not None:
+            ctx['csv_rows'] = rows
+            ctx['csv_truncated'] = len(rows) >= _PREVIEW_CSV_MAX_ROWS
+            return render(request, 'incidents/attachment_preview.html', ctx)
+    ctx['text'] = text
+    return render(request, 'incidents/attachment_preview.html', ctx)
+
+
+def _preview_csv_rows(text, delimiter):
+    """Parse text into at most _PREVIEW_CSV_MAX_ROWS rows for a table preview, or
+    None if it does not parse as delimited data (fall back to plain text)."""
+    import csv
+    import io
+    try:
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+        rows = []
+        for row in reader:
+            rows.append(row)
+            if len(rows) >= _PREVIEW_CSV_MAX_ROWS:
+                break
+        return rows or None
+    except csv.Error:
+        return None
 
 
 # ── System Owner dashboard ────────────────────────────────────────────── #

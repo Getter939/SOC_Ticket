@@ -186,6 +186,33 @@ def submit_containment(*, ticket, actor, report, remediation, note, checked_inde
     )
 
 
+def record_remediation_check(
+    *, ticket, actor, checked_keys, other, findings=None, countermeasure=None,
+):
+    """Save Tier 2's section-8 remediation checklist as it verifies containment.
+
+    Stores the ticked item KEYS (unknown keys ignored) plus the free-text
+    'อื่นๆ ระบุ'. ``findings`` / ``countermeasure`` are the Owner-lane's optional
+    Investigation Findings / Countermeasure — accepted only when provided (the
+    Admin lane leaves them to the System Admin). Field history is recorded by the
+    caller's surrounding snapshot; this only mutates and saves.
+    """
+    from .report_content import REMEDIATION_CHECKLIST_KEYS
+
+    ticket.remediation_checklist = [
+        key for key in checked_keys if key in REMEDIATION_CHECKLIST_KEYS
+    ]
+    ticket.remediation_other = other or ''
+    update_fields = ['remediation_checklist', 'remediation_other']
+    if findings is not None:
+        ticket.remediation_summary = findings
+        update_fields.append('remediation_summary')
+    if countermeasure is not None:
+        ticket.containment_report = countermeasure
+        update_fields.append('containment_report')
+    ticket.save(update_fields=update_fields)
+
+
 def transition_ticket(*, ticket, actor, next_status, note):
     """Apply a standard status transition and its resulting notifications."""
     previous_status = ticket.status

@@ -363,15 +363,16 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             'issue_description',
             # Section 4
             'ip_address',
-            'mac_address',
             'asset_type',
             'operating_system',
             'asset_owner',
             'asset_owner_name',
             'spread_to_others',
             # Section 5 — the six structured indicators live in TicketIOC and are
-            # handled by _TicketIOCForm; ioc_user is the report's separate "User".
+            # handled by _TicketIOCForm; ioc_user + ioc_command are the report's
+            # separate "User"/"Command" rows (kept out of the IOC Database).
             'ioc_user',
+            'ioc_command',
             # Section 6
             'mitre_tactics',
             # Section 7
@@ -404,13 +405,16 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
                 'class': 'form-control', 'rows': 5,
                 'placeholder': 'สรุปรายละเอียดเหตุการณ์ที่ตรวจพบ เช่น ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบเหตุการณ์ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น',
             }),
-            'mac_address':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':         forms.RadioSelect(attrs={'class': 'asset-type-radio'}),
             'asset_owner':        forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น ฝ่ายเทคโนโลยีสารสนเทศ / กองระบบงาน HR'}),
             'asset_owner_name':   forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
             'ioc_user':           forms.TextInput(attrs={
                 'class': 'form-control',
                 'placeholder': 'เช่น administrator หรือ DOMAIN\\svc_backup',
+            }),
+            'ioc_command':        forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 2,
+                'placeholder': 'คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง',
             }),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
@@ -524,7 +528,7 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
             'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'issue_description',
-            'ioc_user', 'mitre_tactics',
+            'ioc_user', 'ioc_command', 'mitre_tactics',
             'spread_to_others',
             'action_required', 'action_precautions',
             'actions_taken_summary', 'next_steps_summary',
@@ -549,6 +553,10 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
                 'placeholder': 'สรุปเหตุการณ์โดยรวมที่กระทบหลายระบบ — เนื้อหานี้จะถูกใช้ร่วมกันในทุก Ticket ของกลุ่ม',
             }),
             'ioc_user':           forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'บัญชีผู้ใช้ที่เกี่ยวข้อง'}),
+            'ioc_command':        forms.Textarea(attrs={
+                'class': 'form-control', 'rows': 2,
+                'placeholder': 'คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง',
+            }),
             'action_required':    forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'ขั้นตอน/มาตรการที่ผู้ดูแลระบบต้องดำเนินการ — ใช้ร่วมกันในทุก Ticket ของกลุ่ม',
@@ -619,7 +627,7 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     class Meta:
         model = Ticket
         fields = [
-            'device_name', 'system_detail', 'ip_address', 'mac_address',
+            'device_name', 'system_detail', 'ip_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'assigned_admin',
         ]
@@ -629,7 +637,6 @@ class ProjectIncidentTargetForm(forms.ModelForm):
                 'class': 'form-control form-control-sm', 'rows': 3,
                 'placeholder': 'รายละเอียดเฉพาะของระบบนี้',
             }),
-            'mac_address': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'AA:BB:CC:DD:EE:FF'}),
             'asset_type':  forms.Select(attrs={'class': 'form-select form-select-sm'}),
             'asset_owner': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น ฝ่ายไอที'}),
             'asset_owner_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
@@ -676,11 +683,14 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
             'classification', 'incident_name', 'severity', 'ncsa_severity',
             'incident_datetime', 'event_occurred_at', 'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
-            'device_name', 'issue_description', 'ip_address', 'mac_address',
+            'device_name', 'issue_description', 'ip_address',
             'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
             'spread_to_others',
-            'ioc_user', 'mitre_tactics', 'action_required',
+            'mitre_tactics', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
+            # Last, so the generic field loop renders User + Command right above
+            # the structured IOC block on the edit / Tier 2 review surfaces.
+            'ioc_user', 'ioc_command',
         ]
         widgets = {
             'classification': forms.RadioSelect(),
@@ -690,6 +700,7 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
             'event_occurred_at': forms.DateTimeInput(
                 attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
             ),
+            'ioc_command': forms.Textarea(attrs={'rows': 2}),
             'issue_description': forms.Textarea(attrs={'rows': 4}),
             'action_required': forms.Textarea(attrs={'rows': 3}),
             'action_precautions': forms.Textarea(attrs={'rows': 3}),
@@ -887,10 +898,12 @@ class ResponseRequestForm(forms.ModelForm):
         widgets = {
             'title': forms.TextInput(attrs={
                 'class': 'form-control form-control-sm',
+                'id': 'resp-title',
                 'placeholder': 'เช่น เก็บ memory image / สแกนช่องโหว่ระบบที่ถูกโจมตี',
             }),
             'description': forms.Textarea(attrs={
                 'class': 'form-control form-control-sm', 'rows': 2,
+                'id': 'resp-description',
                 'placeholder': 'ขอบเขตงานที่ต้องการให้ทีมตอบสนองดำเนินการ...',
             }),
         }

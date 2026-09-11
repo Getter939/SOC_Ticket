@@ -177,20 +177,6 @@
           {% if form.event_occurred_at.errors %}<div class="text-danger small">{{ form.event_occurred_at.errors }}</div>{% endif %}
         </div>
 
-        <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.reference_id.id_for_label }}">Reference ID</label>
-          {{ form.reference_id }}
-          <div class="field-hint">รหัสอ้างอิงจากแหล่ง Log ต้นทาง เพื่อให้สามารถสืบค้นกลับไปยัง Log ได้</div>
-          {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.log_source.id_for_label }}">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
-          {{ form.log_source }}
-          <div class="field-hint">ชื่อแหล่ง Log ที่ตรวจพบเหตุการณ์ เช่น Palo Alto Firewall, Windows Security Event Log</div>
-          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
-        </div>
-
         <div class="col-md-6">
           {% comment %}
           Radio-set heading: a <label for> can only point at one control, so
@@ -227,6 +213,18 @@
           <label class="form-label fw-semibold" for="{{ form.issue_type.id_for_label }}">แหล่งที่มา (Source)</label>
           {{ form.issue_type }}
           {% if form.issue_type.errors %}<div class="text-danger small">{{ form.issue_type.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold" for="{{ form.log_source.id_for_label }}">แหล่งข้อมูล (Log Source) <span class="required-star">*</span></label>
+          {{ form.log_source }}
+          <div class="field-hint" id="log-source-hint">ชื่อระบบที่เป็นแหล่งข้อมูล เช่น Wazuh, Palo Alto Firewall, Windows Security Event Log</div>
+          {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold" for="{{ form.reference_id.id_for_label }}">Reference ID</label>
+          {{ form.reference_id }}
+          <div class="field-hint">รหัสอ้างอิงจากแหล่ง Log ต้นทาง เพื่อให้สามารถสืบค้นกลับไปยัง Log ได้</div>
+          {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold" for="{{ form.detailed_issue.id_for_label }}">ประเภทภัยคุกคาม (Detailed)</label>
@@ -271,12 +269,6 @@
           <label class="form-label fw-semibold" for="{{ form.operating_system.id_for_label }}">ระบบปฏิบัติการ <small class="text-muted">(OS)</small></label>
           {{ form.operating_system }}
           {% if form.operating_system.errors %}<div class="text-danger small">{{ form.operating_system.errors }}</div>{% endif %}
-        </div>
-
-        <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.mac_address.id_for_label }}">MAC Address</label>
-          {{ form.mac_address }}
-          {% if form.mac_address.errors %}<div class="text-danger small">{{ form.mac_address.errors }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
@@ -329,13 +321,6 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold" for="{{ form.ioc_user.id_for_label }}">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</label>
-          {{ form.ioc_user }}
-          <div class="field-hint">บัญชีที่ถูกใช้โจมตีหรือถูกเจาะ — แสดงเป็นแถว "User" ในหมวด 4 ของรายงาน</div>
-          {% if form.ioc_user.errors %}<div class="text-danger small">{{ form.ioc_user.errors }}</div>{% endif %}
-        </div>
-
-        <div class="col-12">
           {% include 'incidents/_evidence_picker.html' with picker_label='แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)' %}
         </div>
 
@@ -346,6 +331,20 @@
     <div class="form-section">
       <div class="section-header">3. Indicators of Compromise (IOC) <small>ตัวบ่งชี้การโจมตีที่พบ</small></div>
       {% include 'incidents/_structured_ioc_fields.html' %}
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="{{ form.ioc_user.id_for_label }}">บัญชีผู้ใช้ที่เกี่ยวข้อง (User)</label>
+          {{ form.ioc_user }}
+          <div class="field-hint">บัญชีผู้ใช้ที่ผู้โจมตีใช้ในการโจมตี — แสดงเป็นแถว "User" ในหมวด 4 ของรายงาน (ไม่เข้าฐานข้อมูล IOC)</div>
+          {% if form.ioc_user.errors %}<div class="text-danger small">{{ form.ioc_user.errors }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="{{ form.ioc_command.id_for_label }}">คำสั่ง (Command)</label>
+          {{ form.ioc_command }}
+          <div class="field-hint">คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง แสดงเป็นแถว "คำสั่ง" ในหมวด 4 ของรายงาน</div>
+          {% if form.ioc_command.errors %}<div class="text-danger small">{{ form.ioc_command.errors }}</div>{% endif %}
+        </div>
+      </div>
     </div>
 
     <!-- ── Block 4: Response Guidance ── -->
@@ -604,6 +603,22 @@ updateDecisionPanels();
   document.getElementById('occ-copy')?.addEventListener('click', () => {
     if (occ && dt) { occ.value = dt.value; occ.dispatchEvent(new Event('change')); }
   });
+
+  // 'แหล่งข้อมูล (Log Source)' means different things per source: for SIEM/TI it
+  // is the name of the detecting system; for every other channel it is the
+  // person or contractor who supplied the case data. Reflect that in the hint.
+  const issueTypeSel = document.getElementById('id_issue_type');
+  const logSourceHint = document.getElementById('log-source-hint');
+  const LOG_SOURCE_HINT_SYSTEM = 'ชื่อระบบที่เป็นแหล่งข้อมูล เช่น Wazuh, Palo Alto Firewall, Windows Security Event Log';
+  const LOG_SOURCE_HINT_PROVIDER = 'ชื่อผู้ให้ข้อมูล/ผู้รับเหมาที่ส่งข้อมูลเคส เช่น TrendMicro, Trellix';
+  function updateLogSourceHint() {
+    if (!issueTypeSel || !logSourceHint) return;
+    const v = issueTypeSel.value;
+    logSourceHint.textContent = (v === 'SIEM' || v === 'TI')
+      ? LOG_SOURCE_HINT_SYSTEM : LOG_SOURCE_HINT_PROVIDER;
+  }
+  issueTypeSel?.addEventListener('change', updateLogSourceHint);
+  updateLogSourceHint();
 
   function localNow() {
     const d = new Date();

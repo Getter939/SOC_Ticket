@@ -32,6 +32,7 @@ from apps.incidents.report_content import (  # noqa: E402
     APPENDIX_INTRO,
     FOOTER_LEFT,
     FOOTER_RIGHT,
+    REMEDIATION_CHECKLIST,
     SECTION1_ROWS,
     SECTION3_ROWS,
     SECTION4_ROWS,
@@ -51,10 +52,11 @@ MUTED = '5B6775'
 
 BODY_FONT = 'TH Sarabun New'
 SYMBOL_FONT = 'DejaVu Sans'   # supplies ☐/☑ glyphs
+BODY_PT = 16   # body text size; bumped from 14 at the SOC's request
 
 # ── low-level helpers ──────────────────────────────────────────────────── #
 
-def set_run_font(run, name=BODY_FONT, size=14, color=TEXT, bold=False):
+def set_run_font(run, name=BODY_FONT, size=BODY_PT, color=TEXT, bold=False):
     run.font.name = name
     rpr = run._element.get_or_add_rPr()
     rfonts = rpr.find(qn('w:rFonts'))
@@ -78,7 +80,7 @@ def set_cell_shading(cell, fill):
     shd.set(qn('w:fill'), fill)
 
 
-def set_cell_margins(cell, top=60, start=120, bottom=60, end=120):
+def set_cell_margins(cell, top=20, start=120, bottom=20, end=120):
     tc_pr = cell._tc.get_or_add_tcPr()
     tc_mar = tc_pr.find(qn('w:tcMar'))
     if tc_mar is None:
@@ -154,9 +156,9 @@ def checkbox_segments(options):
     segments = []
     for i, (key, label) in enumerate(options):
         if i:
-            segments.append(('   ', BODY_FONT, 14, TEXT, False))
-        segments.append((f'{{{{{key}}}}}', SYMBOL_FONT, 14, TEXT, False))
-        segments.append((f' {label}', BODY_FONT, 14, TEXT, False))
+            segments.append(('   ', BODY_FONT, BODY_PT, TEXT, False))
+        segments.append((f'{{{{{key}}}}}', SYMBOL_FONT, BODY_PT, TEXT, False))
+        segments.append((f' {label}', BODY_FONT, BODY_PT, TEXT, False))
     return segments
 
 
@@ -195,10 +197,11 @@ def style_doc(doc):
     normal._element.rPr.rFonts.set(qn('w:ascii'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:hAnsi'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:cs'), BODY_FONT)
-    normal.font.size = Pt(14)
+    normal.font.size = Pt(BODY_PT)
     normal.font.color.rgb = RGBColor.from_string(TEXT)
-    normal.paragraph_format.space_after = Pt(4)
-    normal.paragraph_format.line_spacing = 1.1
+    # Tighter than before: cells were carrying a lot of empty vertical space.
+    normal.paragraph_format.space_after = Pt(0)
+    normal.paragraph_format.line_spacing = 1.0
 
 
 def build_header(doc):
@@ -262,7 +265,7 @@ def add_section_band(doc, text):
     set_cell_margins(cell, top=70, bottom=70)
     p = _first_paragraph(cell)
     p.paragraph_format.keep_with_next = True
-    add_runs(p, [(text, BODY_FONT, 15, '1F2933', True)])
+    add_runs(p, [(text, BODY_FONT, 17, '1F2933', True)])
 
 
 def add_kv_table(doc, rows):
@@ -275,10 +278,10 @@ def add_kv_table(doc, rows):
         left, right = table.rows[idx].cells
         set_cell_shading(left, LABEL_GRAY)
         lp = _first_paragraph(left)
-        add_runs(lp, [(label, BODY_FONT, 14, TEXT, True)])
+        add_runs(lp, [(label, BODY_FONT, BODY_PT, TEXT, True)])
         rp = _first_paragraph(right)
         if isinstance(value, str):
-            add_runs(rp, [(value, BODY_FONT, 14, TEXT, False)])
+            add_runs(rp, [(value, BODY_FONT, BODY_PT, TEXT, False)])
         else:
             add_runs(rp, value)
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
@@ -290,9 +293,9 @@ def add_freetext_box(doc, placeholder, min_height_pt=None):
     set_table_widths(table, [6.6])
     set_table_borders(table)
     cell = table.rows[0].cells[0]
-    set_cell_margins(cell, top=100, bottom=100)
+    set_cell_margins(cell, top=40, bottom=40)
     p = _first_paragraph(cell)
-    add_runs(p, [(placeholder, BODY_FONT, 14, TEXT, False)])
+    add_runs(p, [(placeholder, BODY_FONT, BODY_PT, TEXT, False)])
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
     return table
 
@@ -302,19 +305,31 @@ def add_remediation_section(doc):
     set_table_widths(table, [6.6])
     set_table_borders(table)
     cell = table.rows[0].cells[0]
-    set_cell_margins(cell, top=90, bottom=90)
-    # A fixed 15-item remediation checklist used to be printed here. It was
-    # removed — it was never ticked by the system and section 6 already carries
-    # the real, data-driven containment checklist. Section 8 is now just the
-    # two free-text results below.
-    gap = _first_paragraph(cell)
-    add_runs(gap, [('ผลการตรวจสอบ / Investigation Findings:', BODY_FONT, 14, TEXT, True)])
-    p = cell.add_paragraph()
-    add_runs(p, [('{{remediation_summary}}', BODY_FONT, 14, TEXT, False)])
+    set_cell_margins(cell, top=40, bottom=40)
+    # Fixed checklist, ticked by Tier 2 while verifying containment. Each item is
+    # a ballot glyph (DejaVu Sans, so {{chk_rem_x}} substitutes ☐/☑) plus its
+    # label. Followed by the 'อื่นๆ ระบุ' line and the two free-text results.
+    first = True
+    for key, label in REMEDIATION_CHECKLIST:
+        p = _first_paragraph(cell) if first else cell.add_paragraph()
+        first = False
+        add_runs(p, [
+            (f'{{{{chk_rem_{key}}}}}', SYMBOL_FONT, BODY_PT, TEXT, False),
+            (f' {label}', BODY_FONT, BODY_PT, TEXT, False),
+        ])
+    other = cell.add_paragraph()
+    add_runs(other, [
+        ('☐ ', SYMBOL_FONT, BODY_PT, TEXT, False),
+        ('อื่นๆ ระบุ  {{remediation_other}}', BODY_FONT, BODY_PT, TEXT, False),
+    ])
+    p1 = cell.add_paragraph()
+    add_runs(p1, [('ผลการตรวจสอบ / Investigation Findings:', BODY_FONT, BODY_PT, TEXT, True)])
     p2 = cell.add_paragraph()
-    add_runs(p2, [('มาตรการควบคุม / Countermeasure:', BODY_FONT, 14, TEXT, True)])
+    add_runs(p2, [('{{remediation_summary}}', BODY_FONT, BODY_PT, TEXT, False)])
     p3 = cell.add_paragraph()
-    add_runs(p3, [('{{containment_report}}', BODY_FONT, 14, TEXT, False)])
+    add_runs(p3, [('มาตรการควบคุม / Countermeasure:', BODY_FONT, BODY_PT, TEXT, True)])
+    p4 = cell.add_paragraph()
+    add_runs(p4, [('{{containment_report}}', BODY_FONT, BODY_PT, TEXT, False)])
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
@@ -338,7 +353,7 @@ def add_signoff(doc):
             p = _first_paragraph(cell) if i == 0 else cell.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_after = Pt(0)
-            add_runs(p, [(text, BODY_FONT, 14, TEXT, False)])
+            add_runs(p, [(text, BODY_FONT, BODY_PT, TEXT, False)])
     # Keep the whole sign-off block together on one page.
     trPr = table.rows[0]._tr.get_or_add_trPr()
     trPr.append(OxmlElement('w:cantSplit'))
@@ -347,11 +362,11 @@ def add_signoff(doc):
 def add_appendix(doc):
     doc.add_section(WD_SECTION_START.NEW_PAGE)
     heading = doc.add_paragraph()
-    add_runs(heading, [('*หมวดหมู่ของภัยคุกคามทางไซเบอร์', BODY_FONT, 15, '1F2933', True)])
+    add_runs(heading, [('*หมวดหมู่ของภัยคุกคามทางไซเบอร์', BODY_FONT, 17, '1F2933', True)])
     intro = doc.add_paragraph()
-    add_runs(intro, [(APPENDIX_INTRO, BODY_FONT, 13, TEXT, False)])
+    add_runs(intro, [(APPENDIX_INTRO, BODY_FONT, 15, TEXT, False)])
     sub = doc.add_paragraph()
-    add_runs(sub, [('ข้อ ๑ การจำแนกหมวดหมู่ของภัยคุกคามทางไซเบอร์', BODY_FONT, 14, TEXT, True)])
+    add_runs(sub, [('ข้อ ๑ การจำแนกหมวดหมู่ของภัยคุกคามทางไซเบอร์', BODY_FONT, BODY_PT, TEXT, True)])
 
     table = doc.add_table(rows=len(APPENDIX_CATEGORIES) + 1, cols=2)
     set_table_widths(table, [1.0, 5.6])
@@ -359,14 +374,14 @@ def add_appendix(doc):
     head_no, head_desc = table.rows[0].cells
     set_cell_shading(head_no, LABEL_GRAY)
     set_cell_shading(head_desc, LABEL_GRAY)
-    add_runs(_first_paragraph(head_no), [('หมวดหมู่', BODY_FONT, 14, TEXT, True)])
-    add_runs(_first_paragraph(head_desc), [('คำอธิบาย', BODY_FONT, 14, TEXT, True)])
+    add_runs(_first_paragraph(head_no), [('หมวดหมู่', BODY_FONT, BODY_PT, TEXT, True)])
+    add_runs(_first_paragraph(head_desc), [('คำอธิบาย', BODY_FONT, BODY_PT, TEXT, True)])
     for i, (num, desc) in enumerate(APPENDIX_CATEGORIES, start=1):
         no_cell, desc_cell = table.rows[i].cells
         pno = _first_paragraph(no_cell)
         pno.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        add_runs(pno, [(num, BODY_FONT, 14, TEXT, False)])
-        add_runs(_first_paragraph(desc_cell), [(desc, BODY_FONT, 14, TEXT, False)])
+        add_runs(pno, [(num, BODY_FONT, BODY_PT, TEXT, False)])
+        add_runs(_first_paragraph(desc_cell), [(desc, BODY_FONT, BODY_PT, TEXT, False)])
 
 
 # ── document ───────────────────────────────────────────────────────────── #

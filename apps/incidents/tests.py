@@ -485,12 +485,15 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
         self.assertIn(f'{self.ticket.ticket_id}-I', text)
         self.assertNotIn('คำสั่ง', text)
-        self.assertNotIn('Hash', text)
+        # 'File Name' is an empty Section-4 row dropped in compact mode; unlike
+        # 'Hash', it is not a substring of the Section-8 checklist labels.
+        self.assertNotIn('File Name', text)
         self.assertIn('Suspicious SoftEther Signed File', text)
         self.assertIn('SOC contacted the owner and blocked the IP.', text)
         self.assertIn('Host isolated and C2 destination blocked.', text)
         self.assertIn('Initial Access, Execution', text)
-        self.assertIn('evidence.log', text)
+        # Attachment file names are no longer printed in Section 5.
+        self.assertNotIn('evidence.log', text)
         self.assertNotIn('{{ticket_id}}', text)
         # Checkbox states reflect the ticket: INCIDENT / High / SEVERE / Server.
         self.assertIn('☑ Incident', text)
@@ -526,7 +529,9 @@ class TicketReportExportTest(TestCase):
                 self.client.force_login(self.t1)
                 preview = self.client.get(
                     reverse('ticket_report_preview', args=[self.ticket.pk]))
-                self.assertContains(preview, 'incident-screen.png - EDR detection screenshot')
+                # Caption is the analyst's description only — no file name.
+                self.assertContains(preview, 'EDR detection screenshot')
+                self.assertNotContains(preview, 'incident-screen.png')
                 # One PNG data URI is the header logo; the second is evidence.
                 self.assertGreaterEqual(
                     preview.content.count(b'data:image/png;base64,'), 2)
@@ -534,10 +539,9 @@ class TicketReportExportTest(TestCase):
                 docx_report = generate_ticket_report(self.ticket.pk)
                 doc = Document(BytesIO(docx_report.content))
                 self.assertGreaterEqual(len(doc.inline_shapes), 1)
-                self.assertIn(
-                    'incident-screen.png - EDR detection screenshot',
-                    _docx_text(docx_report.content),
-                )
+                docx_text = _docx_text(docx_report.content)
+                self.assertIn('EDR detection screenshot', docx_text)
+                self.assertNotIn('incident-screen.png', docx_text)
 
                 pdf_report = generate_ticket_report_pdf(self.ticket.pk)
                 # The PDF contains separate image XObjects for the NT logo and
@@ -559,8 +563,9 @@ class TicketReportExportTest(TestCase):
                 )
 
                 report = generate_ticket_report(self.ticket.pk)
-                self.assertIn(
-                    'broken.png - Unreadable screenshot', _docx_text(report.content))
+                # The unreadable image is skipped for embedding; its description
+                # still appears if it embedded, but the file name never does.
+                self.assertNotIn('broken.png', _docx_text(report.content))
 
     def test_ticket_report_docx_endpoint_streams_authorized_download(self):
         self.client.force_login(self.t1)
@@ -647,7 +652,7 @@ class TicketReportExportTest(TestCase):
         self.assertContains(response, 'Alert Event REPORT')
         self.assertContains(response, 'แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ')
         self.assertContains(response, f'{self.event_ticket.ticket_id}-E')
-        self.assertContains(response, '1.13 รายละเอียดของเหตุ')
+        self.assertContains(response, '1.13 รายละเอียด')
         self.assertContains(response, 'Multiple failed sign-ins were observed.')
         self.assertContains(response, '&#9745;</span>&#160;Event')
         self.assertContains(response, '&#9745;</span>&#160;ปกติทั่วไป')
@@ -670,7 +675,7 @@ class TicketReportExportTest(TestCase):
         )
         self.assertIn('Alert Event REPORT', text)
         self.assertIn(f'{self.event_ticket.ticket_id}-E', text)
-        self.assertIn('1.13 รายละเอียดของเหตุ', text)
+        self.assertIn('1.13 รายละเอียด', text)
         self.assertIn('Multiple failed sign-ins were observed.', text)
         self.assertIn('☑ Event', text)
         self.assertIn('☑ ปกติทั่วไป', text)
@@ -765,7 +770,9 @@ class TicketReportExportTest(TestCase):
         normalized_text = ' '.join(text.split())
         self.assertIn(f'{self.ticket.ticket_id}-I', normalized_text)
         self.assertIn('Suspicious SoftEther Signed File', normalized_text)
-        self.assertNotIn('Hash', normalized_text)
+        # 'File Name' is an empty Section-4 row dropped in compact mode; 'Hash'
+        # can no longer be used as the marker (it is in a Section-8 checklist label).
+        self.assertNotIn('File Name', normalized_text)
 
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.report_template_version, REPORT_TEMPLATE_VERSION)
@@ -855,7 +862,7 @@ class TicketReportExportTest(TestCase):
 
         self.assertNotIn('1.12 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', labels)
         # เกิดเหตุ (1.3) is empty and asset_owner was blanked, so รายละเอียด climbs to 1.11.
-        self.assertIn('1.11 รายละเอียดของเหตุ', labels)
+        self.assertIn('1.11 รายละเอียด', labels)
         self.assertEqual(
             [int(re.match(r'1\.(\d+)', label).group(1)) for label in labels],
             list(range(1, len(labels) + 1)),
@@ -2924,6 +2931,94 @@ class AttachmentDownloadSecurityTest(TestCase):
     def test_admin_cannot_download_attachment_on_unrelated_ticket(self):
         self.client.force_login(self.admin_b)
         self.assertEqual(self.client.get(self._url()).status_code, 404)
+
+
+class AttachmentPreviewTest(TestCase):
+    """Inline preview: same authorization as download, image re-encoded, text
+    autoescaped, and only image / text-like files preview."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_t1('prev_soc')
+        cls.admin_b = _make_user('prev_admin_b', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.ticket = _make_ticket(created_by=cls.soc)
+        img = BytesIO()
+        Image.new('RGB', (120, 80), '#334455').save(img, 'PNG')
+        cls.image = TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file=SimpleUploadedFile('shot.png', img.getvalue(), content_type='image/png'),
+            original_name='shot.png', uploaded_by=cls.soc,
+        )
+        cls.logfile = TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file=SimpleUploadedFile(
+                'trace.log',
+                'บรรทัดที่หนึ่ง\n<script>x</script>\n'.encode('cp874', 'replace'),
+                content_type='text/plain',
+            ),
+            original_name='trace.log', uploaded_by=cls.soc,
+        )
+        cls.csvfile = TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file=SimpleUploadedFile('data.csv', b'a,b,c\n1,2,3\n', content_type='text/csv'),
+            original_name='data.csv', uploaded_by=cls.soc,
+        )
+        cls.zipfile = TicketAttachment.objects.create(
+            ticket=cls.ticket,
+            file=SimpleUploadedFile('evidence.zip', b'PK\x03\x04zip', content_type='application/zip'),
+            original_name='evidence.zip', uploaded_by=cls.soc,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def _url(self, att):
+        return reverse('preview_attachment', args=[att.pk])
+
+    def test_unauthenticated_redirected_to_login(self):
+        response = self.client.get(self._url(self.image))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
+
+    def test_unrelated_user_gets_404(self):
+        self.client.force_login(self.admin_b)
+        self.assertEqual(self.client.get(self._url(self.image)).status_code, 404)
+
+    def test_non_previewable_type_404(self):
+        self.client.force_login(self.soc)
+        self.assertEqual(self.client.get(self._url(self.zipfile)).status_code, 404)
+
+    def test_soft_deleted_attachment_404(self):
+        self.image.deleted_at = timezone.now()
+        self.image.save(update_fields=['deleted_at'])
+        try:
+            self.client.force_login(self.soc)
+            self.assertEqual(self.client.get(self._url(self.image)).status_code, 404)
+        finally:
+            self.image.deleted_at = None
+            self.image.save(update_fields=['deleted_at'])
+
+    def test_image_re_encoded_to_data_uri(self):
+        self.client.force_login(self.soc)
+        response = self.client.get(self._url(self.image))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data:image/png;base64,')
+
+    def test_text_is_escaped_and_thai_decoded(self):
+        self.client.force_login(self.soc)
+        response = self.client.get(self._url(self.logfile))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'บรรทัดที่หนึ่ง')
+        self.assertContains(response, '&lt;script&gt;')
+        self.assertNotContains(response, '<script>x</script>')
+
+    def test_csv_renders_as_table(self):
+        self.client.force_login(self.soc)
+        response = self.client.get(self._url(self.csvfile))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<table')
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -5661,11 +5756,13 @@ class ReportAccessRoleTest(TestCase):
 # ──────────────────────────────────────────────────────────────────────────── #
 
 class ReportSectionEightTest(TestCase):
-    """The 15 boilerplate items were never ticked by anything; section 6 holds
-    the real, data-driven containment checklist."""
+    """Section 8 carries a fixed remediation checklist (ticked by Tier 2) plus the
+    two free-text result fields. The checklist and heading always print; the two
+    text fields still drop individually in compact mode. Section 6's own
+    (data-driven) checklist is unaffected."""
 
-    # A sample of the removed items, in both scripts used by the form.
-    REMOVED = [
+    # A sample of the fixed checklist labels that must now be printed.
+    SAMPLE_ITEMS = [
         'ติดตั้ง Sysmon',
         'ติดตั้ง Agent Wazuh',
         'Dump memory ของเครื่อง Server',
@@ -5682,6 +5779,8 @@ class ReportSectionEightTest(TestCase):
             action_required='1) Block IoC\n2) Isolate the host',
             remediation_summary='Unauthorized service removed.',
             containment_report='Host isolated and C2 destination blocked.',
+            remediation_checklist=['isolate', 'block_ioc'],
+            remediation_other='ตรวจสอบ log เพิ่มเติม',
         )
 
     def test_section_eight_keeps_its_title_and_data_rows(self):
@@ -5694,31 +5793,48 @@ class ReportSectionEightTest(TestCase):
         self.assertContains(response, 'Unauthorized service removed.')
         self.assertContains(response, 'Host isolated and C2 destination blocked.')
 
-    def test_preview_no_longer_prints_the_boilerplate(self):
+    def test_preview_prints_the_fixed_checklist(self):
         self.client.force_login(self.t1)
         response = self.client.get(
             reverse('ticket_report_preview', args=[self.ticket.pk]))
-        for item in self.REMOVED:
-            self.assertNotContains(response, item)
+        for item in self.SAMPLE_ITEMS:
+            self.assertContains(response, item)
+        self.assertContains(response, 'อื่นๆ ระบุ')
+        self.assertContains(response, 'ตรวจสอบ log เพิ่มเติม')
 
-    def test_committed_docx_template_no_longer_carries_the_boilerplate(self):
-        """Guards a forgotten template rebuild. The checklist lived in the .docx
-        as literal text, not as a {{placeholder}}, so
-        test_build_script_matches_committed_template — which compares only
-        placeholder sets — would never notice a stale file."""
+    def test_preview_ticks_follow_remediation_checklist(self):
+        sections = build_ticket_report_sections(
+            build_ticket_report_context(self.ticket), self.ticket)
+        section_eight = next(s for s in sections if s['number'] == '8')
+        checklist = section_eight['rows'][0]
+        self.assertEqual(checklist['type'], 'remediation_checklist')
+        ticked = {item['label'] for item in checklist['items'] if item['checked']}
+        self.assertIn(
+            'Isolate เครื่อง – แยกเครื่องที่ได้รับผลกระทบออกจากเครือข่าย', ticked)
+        self.assertIn(
+            'Block IoC – บล็อกตัวบ่งชี้การโจมตี (IP, Domain, URL, Hash)', ticked)
+        self.assertTrue(any(not item['checked'] for item in checklist['items']))
+
+    def test_committed_docx_template_carries_the_checklist(self):
+        """Guards a forgotten template rebuild. The checklist lives in the .docx
+        as literal text, so test_build_script_matches_committed_template — which
+        compares only placeholder sets — would never notice a stale file."""
         doc = Document(str(REPORT_TEMPLATE_PATH))
         text = '\n'.join(p.text for p in _iter_paragraphs(doc))
-        for item in self.REMOVED:
-            self.assertNotIn(item, text)
+        for item in self.SAMPLE_ITEMS:
+            self.assertIn(item, text)
 
-    def test_generated_docx_no_longer_carries_the_boilerplate(self):
+    def test_generated_docx_carries_the_checklist_and_ticks(self):
         report = generate_ticket_report(self.ticket.pk, generated_by=self.t1)
         text = _docx_text(report.content)
-        for item in self.REMOVED:
-            self.assertNotIn(item, text)
-        # Section 8's real content is still rendered.
+        for item in self.SAMPLE_ITEMS:
+            self.assertIn(item, text)
         self.assertIn('Unauthorized service removed.', text)
         self.assertIn('Host isolated and C2 destination blocked.', text)
+        # Ticked items show ☑; an unticked one shows ☐.
+        self.assertIn('☑ Isolate', text)
+        self.assertIn('☑ Block IoC', text)
+        self.assertIn('☐ Dump memory', text)
 
     def test_compact_docx_removes_only_the_empty_section_eight_field(self):
         self.ticket.containment_report = ''
@@ -5731,14 +5847,17 @@ class ReportSectionEightTest(TestCase):
         self.assertIn('Unauthorized service removed.', text)
         self.assertNotIn('มาตรการควบคุม / Countermeasure', text)
 
-    def test_compact_docx_removes_section_heading_when_both_fields_are_empty(self):
+    def test_compact_docx_keeps_heading_and_checklist_when_text_fields_empty(self):
         self.ticket.remediation_summary = ''
         self.ticket.containment_report = ''
         self.ticket.save(update_fields=['remediation_summary', 'containment_report'])
 
         text = _docx_text(generate_ticket_report(self.ticket.pk).content)
 
-        self.assertNotIn('สรุปผลการดำเนินการแก้ไข', text)
+        # The fixed checklist (and therefore the heading) always prints; only the
+        # two free-text fields drop when empty.
+        self.assertIn('สรุปผลการดำเนินการแก้ไข', text)
+        self.assertIn('ติดตั้ง Sysmon', text)
         self.assertNotIn('ผลการตรวจสอบ / Investigation Findings', text)
         self.assertNotIn('มาตรการควบคุม / Countermeasure', text)
 
@@ -5759,6 +5878,122 @@ class ReportSectionEightTest(TestCase):
             build_ticket_report_context(self.ticket), self.ticket)
         types = {row.get('type') for s in sections for row in s['rows']}
         self.assertNotIn('checklist', types)
+
+
+class ReportSignatureToggleTest(TestCase):
+    """Signatures are off by default; the preview toggle and the exports follow
+    the same show_signoff flag."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('sig_t1')
+        cls.ticket = _make_ticket(
+            created_by=cls.t1, classification=Ticket.CLASSIFICATION_INCIDENT)
+
+    def test_preview_hides_signoff_by_default(self):
+        self.client.force_login(self.t1)
+        r = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertNotContains(r, 'ผู้ดำเนินการแก้ไข')
+        # The appendix (also inside the incident-only block) still prints.
+        self.assertContains(r, 'การจำแนกหมวดหมู่')
+
+    def test_preview_shows_signoff_when_toggled(self):
+        self.client.force_login(self.t1)
+        r = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]),
+            {'show_signoff': '1'})
+        self.assertContains(r, 'ผู้ดำเนินการแก้ไข')
+        self.assertContains(r, 'ผู้อนุมัติ')
+
+    def test_docx_omits_signoff_by_default_and_includes_when_toggled(self):
+        off = _docx_text(generate_ticket_report(self.ticket.pk).content)
+        self.assertNotIn('ผู้ดำเนินการแก้ไข', off)
+        on = _docx_text(
+            generate_ticket_report(self.ticket.pk, show_signoff=True).content)
+        self.assertIn('ผู้ดำเนินการแก้ไข', on)
+
+
+class IocUserCommandFieldsTest(TestCase):
+    """User + Command are their own fields — printed in the report and reachable
+    by global search, but never entered into the IOC Database."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_t1('ioccmd_soc')
+        cls.ticket = _make_ticket(
+            created_by=cls.soc,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            device_name='attacked-host',
+            ioc_user='DOMAIN\\evil_admin',
+            ioc_command='whoami /all\nnet user',
+        )
+
+    def test_report_prints_user_and_command_rows(self):
+        report = build_ticket_report_context(self.ticket)
+        self.assertEqual(report['ioc_user'], 'DOMAIN\\evil_admin')
+        self.assertIn('whoami /all', report['ioc_command'])
+
+    def test_global_search_finds_by_user_and_command(self):
+        self.client.force_login(self.soc)
+        for term in ('evil_admin', 'whoami'):
+            r = self.client.get(reverse('global_search'), {'q': term})
+            self.assertContains(r, self.ticket.ticket_id)
+
+    def test_command_does_not_enter_the_ioc_database(self):
+        # No TicketIOC rows were created for the command/user text.
+        self.assertFalse(self.ticket.iocs.exists())
+
+
+class RemediationChecklistWorkflowTest(TestCase):
+    """Tier 2 records the section-8 remediation checklist while verifying
+    containment — saved on any forward move, with the two text fields owned by
+    the System Admin in the admin lane."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('remwf_t1')
+        cls.t2 = _make_t2('remwf_t2')
+        cls.admin = _make_user('remwf_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def _reported_incident(self):
+        t = _make_ticket(
+            created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT, severity='High')
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
+        return t
+
+    def test_tier2_saves_checklist_on_return_to_admin(self):
+        t = self._reported_incident()
+        self.client.force_login(self.t2)
+        response = self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'workflow_action',
+            'status': Ticket.STATUS_AWAITING_CONTAINMENT,
+            'update_notes': 'still missing steps',
+            'remediation_done': ['isolate', 'block_ioc', 'bogus_key'],
+            'remediation_other': 'ตรวจ log เพิ่ม',
+        })
+        self.assertEqual(response.status_code, 302)
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+        # Unknown keys dropped; the rest saved even though this was a Return.
+        self.assertEqual(set(t.remediation_checklist), {'isolate', 'block_ioc'})
+        self.assertEqual(t.remediation_other, 'ตรวจ log เพิ่ม')
+        self.assertTrue(t.field_changes.filter(source='t2_remediation').exists())
+
+    def test_admin_lane_ignores_posted_findings(self):
+        t = self._reported_incident()
+        original = t.remediation_summary
+        self.client.force_login(self.t2)
+        self.client.post(reverse('ticket_detail', args=[t.pk]), {
+            'action': 'workflow_action',
+            'status': Ticket.STATUS_AWAITING_CONTAINMENT,
+            'update_notes': 'note',
+            'remediation_done': ['isolate'],
+            'remediation_summary': 'INJECTED FINDINGS',
+        })
+        t.refresh_from_db()
+        self.assertEqual(t.remediation_summary, original)
+        self.assertNotEqual(t.remediation_summary, 'INJECTED FINDINGS')
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -5828,7 +6063,7 @@ class ReportNTFormLayoutTest(TestCase):
 
     def test_section_one_rows_are_numbered_sequentially(self):
         labels = [r['label'] for r in self._section('1')['rows']]
-        self.assertEqual(len(labels), 17)
+        self.assertEqual(len(labels), 18)
         for index, label in enumerate(labels, start=1):
             self.assertTrue(
                 label.startswith(f'1.{index} '),
@@ -5903,6 +6138,10 @@ class ReportNTFormLayoutTest(TestCase):
         # Placed after IP, as on the paper form.
         labels = [r['label'] for r in self._section('4')['rows']]
         self.assertEqual(labels[-2:], ['IP', 'User'])
+
+    def test_section_four_leads_with_a_file_name_row(self):
+        labels = [r['label'] for r in self._section('4')['rows']]
+        self.assertEqual(labels[0], 'File Name')
 
     def test_blank_user_renders_as_a_dash_not_an_empty_cell(self):
         self.ticket.ioc_user = ''

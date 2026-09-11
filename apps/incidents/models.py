@@ -1040,10 +1040,22 @@ class Ticket(models.Model):
         verbose_name='Indicators of Compromise (IoC)',
     )
     # Its own field rather than a line inside ioc_details, because the NT
-    # incident-report form gives the account its own row in section 4.
+    # incident-report form gives the account its own row in section 4. Kept out
+    # of the structured TicketIOC table (and therefore the IOC Database) on
+    # purpose — it identifies the compromised account for the report, not a
+    # shareable indicator — but it is still reachable from global search.
     ioc_user = models.CharField(
         max_length=150, blank=True, default='',
         verbose_name='บัญชีผู้ใช้ที่เกี่ยวข้อง (User)',
+        help_text='บัญชีผู้ใช้ที่ผู้โจมตีใช้ในการโจมตี เช่น administrator หรือ DOMAIN\\svc_backup',
+    )
+    # The command(s) the attacker ran — one per line. Like ioc_user, its own
+    # field (report section 4's 'คำสั่ง' row) rather than a TicketIOC category, so
+    # it never enters the IOC Database; still covered by global search.
+    ioc_command = models.TextField(
+        blank=True, default='',
+        verbose_name='คำสั่ง (Command)',
+        help_text='คำสั่งที่ผู้โจมตีสั่งรัน — หนึ่งบรรทัดต่อหนึ่งคำสั่ง',
     )
 
     # ── Section 6: MITRE ATT&CK ─────────────────────────────────────── #
@@ -1103,6 +1115,16 @@ class Ticket(models.Model):
     remediation_summary = models.TextField(
         blank=True, default='',
         verbose_name='สรุปผลการดำเนินการแก้ไข',
+    )
+    # Report section 8's fixed remediation checklist (REMEDIATION_CHECKLIST in
+    # report_content). Stores the ticked item KEYS, not their labels, so
+    # rewording an item never loses its tick. Ticked by Tier 2 while verifying
+    # that the System Admin / System Owner has contained the incident.
+    remediation_checklist = models.JSONField(default=list, blank=True)
+    # The section-8 checklist's free-text "อื่นๆ ระบุ" line.
+    remediation_other = models.TextField(
+        blank=True, default='',
+        verbose_name='สรุปผลการดำเนินการแก้ไข — อื่นๆ',
     )
 
     status = models.CharField(
@@ -2995,6 +3017,16 @@ DEFAULT_ALLOWED_ATTACHMENT_EXTENSIONS = frozenset({
     'eml', 'msg',
 })
 
+# Extensions we can safely show inline on the ticket page (opened in a new tab
+# by preview_attachment). Images are re-encoded through Pillow before display so
+# the raw upload is never served; text/log/CSV is shown as autoescaped text.
+# Everything else (Office, archives, pcaps, mail) has no preview and only offers
+# the forced download.
+PREVIEW_IMAGE_EXTENSIONS = frozenset({'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'})
+PREVIEW_TEXT_EXTENSIONS = frozenset({
+    'txt', 'log', 'csv', 'tsv', 'json', 'yaml', 'yml', 'md',
+})
+
 # Leading magic bytes for the renderable types we accept, so a spoofed
 # `evil.svg` renamed to `.png` (still active content) is rejected on content,
 # not just on its extension.
@@ -3152,6 +3184,17 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return f'{self.original_name} → {self.ticket.ticket_id}'
+
+    @property
+    def preview_kind(self):
+        """'image', 'text', or '' — how (if at all) this file can be shown inline
+        without a download. Drives the 'ดูตัวอย่าง' link and preview_attachment."""
+        ext = _attachment_extension(self.original_name)
+        if ext in PREVIEW_IMAGE_EXTENSIONS:
+            return 'image'
+        if ext in PREVIEW_TEXT_EXTENSIONS:
+            return 'text'
+        return ''
 
 
 def staged_attachment_upload_path(instance, filename):

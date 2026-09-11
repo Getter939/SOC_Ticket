@@ -309,8 +309,12 @@ class IOCDatabaseTests(MFATestCase):
         self.assertEqual(report['ioc_ip'], '203.0.113.1')
         self.assertEqual(report['ioc_domain'], 'example.org')
         self.assertEqual(report['ioc_url'], 'https://bad.example.com/x')
-        for value in ('invoice.exe', r'C:\tmp\a.exe', 'legacy note'):
+        # File Name now has its own Section-4 row; File Path + legacy notes
+        # remain folded into 'Process/File Path'.
+        self.assertEqual(report['ioc_file_name'], 'invoice.exe')
+        for value in (r'C:\tmp\a.exe', 'legacy note'):
             self.assertIn(value, report['ioc_process'])
+        self.assertNotIn('invoice.exe', report['ioc_process'])
 
     def test_global_search_finds_ticket_by_ioc(self):
         ticket = Ticket.objects.create(created_by=self.soc, device_name='private-host')
