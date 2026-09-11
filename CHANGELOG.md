@@ -8,6 +8,70 @@ release (tag) dates.
 
 ## [Unreleased]
 
+## [v1.5.0] — 2026-09-11
+
+Reworks the Incident/Event report toward the NT paper form, adds **in-browser
+attachment preview** and a **Tier 2 remediation checklist**, and ships **ticket
+cancellation** with an SOC-Manager decision flow.
+
+### Added
+- **Ticket cancellation.** A mistaken or duplicate ticket can end as `CANCELLED`
+  without classifying it as an Event or certifying remediation. The Tier 1 creator
+  may cancel only while the ticket is still `NEW`; after handoff the current actor
+  **requests** cancellation and the **SOC Manager** approves, rejects, or cancels
+  directly. Requests and decisions are separately audited, and a pending request
+  does not pause the OLA clock or move the workflow stage (ADR 0005).
+- **In-browser attachment preview.** A "ดูตัวอย่าง" link opens image and
+  text/log/CSV attachments in a new tab with no download. Images are re-encoded
+  through Pillow (the raw upload is never served — no stored-XSS from a spoofed
+  file), text is decoded (utf-8 / cp874) and shown escaped, and CSV/TSV render as a
+  table. Other types (Office, archives, pcaps) keep the forced download only.
+- **Section 8 remediation checklist.** A fixed 15-item checklist plus an "อื่นๆ
+  ระบุ" line, ticked by Tier 2 while verifying containment (System Admin lane at
+  `CONTAINMENT_REPORTED`, System Owner lane at `PENDING_T2_REVIEW`). Stored per
+  ticket and written to change history, so unlike the old static list every tick is
+  attributable (ADR 0006). Findings / Countermeasure are retained.
+- **Event occurrence time.** A new `เวลาที่เกิดเหตุ` field on the report and ticket
+  forms, distinct from the detection time; a Wazuh alert pre-fills it, and a button
+  copies the detection time when the true moment is unknown.
+- **User + Command indicators.** Report section 4 gains a **File Name** row and a
+  **คำสั่ง (Command)** field; "User" and "Command" live in the ticket form's IOC
+  section, are searchable, and are deliberately kept out of the IOC Database.
+- **Report signature toggle.** The preview and the DOCX/PDF exports can show or hide
+  the sign-off block; the default is **hidden**.
+
+### Changed
+- **Incident report Section 1 rework** — occurrence/detection split, checkbox and
+  row re-ordering, an added `รายละเอียด` row, the Reference ID folded into the
+  แหล่งข้อมูล row, and a containment-executor view of the current status. Body text
+  is now **16pt** with tighter cells (Incident report only; the Event one-pager is
+  unchanged).
+- **Ticket-detail workflow UI refactor + Manager Decision UI.** The action controls
+  are extracted into focused partials, and the SOC Manager's cancellation decision
+  is surfaced inline alongside the other stage actions.
+- **Report Section 5 no longer lists attachment file names** — screenshots embed
+  with the analyst's description as caption; the MITRE line stays.
+- Ticket form: **Source → Log Source → Reference ID** order, a Log-Source hint that
+  changes with the source, and the **MAC Address input removed** (the stored field
+  and its read-only display are kept).
+
+### Fixed
+- Section 8 checklist keys are stored in a **canonical order**, so re-saving the
+  same selection is byte-identical and never fabricates a field-history entry.
+- The report's "อื่นๆ ระบุ" box now **ticks (☑) when it has text**.
+- The attachment-preview view narrows its exception handling, so a real
+  storage/programming failure surfaces as a logged 500 rather than a misleading 404.
+
+### Database
+- `incidents.0073`–`0075`, `reporting.0005` — all additive (new tables / nullable or
+  defaulted columns). To roll back to v1.4.0, run `migrate incidents 0072` and
+  `migrate reporting 0004` first.
+
+### Docs
+- ADR **0005** (ticket cancellation) and **0006** (Section 8 checklist supersedes
+  the 2026-08-06 UAT removal). Lifecycle, workflow-change-log and engineering
+  handover, the end-user guide, and the role manuals (`.docx`) updated.
+
 ## [v1.4.0] — 2026-09-09
 
 Takes Wazuh **vulnerability-detector alerts out of the triage queue entirely**
@@ -276,6 +340,10 @@ production VM (VM foundation + application readiness).
   (NSSM service) + IIS/ARR reverse proxy; Waitress pinned, `/healthz` endpoint,
   Wazuh retention command, STORAGES fix.
 
+[v1.5.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.5.0
+[v1.4.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.4.0
+[v1.3.1]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.3.1
+[v1.3.0]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.3.0
 [v1.2.3]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.3
 [v1.2.2]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.2
 [v1.2.1]: https://github.com/Getter939/SOC_Ticket/releases/tag/v1.2.1
