@@ -68,11 +68,11 @@ One multi-system security case worked as several linked Member Tickets — one p
 _Avoid_: Case Bundle is an accepted synonym in code, but prefer "Project Incident" in prose
 
 **Alert Bundle**:
-Several related Alerts judged to be evidence of one real-world Incident, worked as one Ticket. One Primary Alert supplies the Incident's authoritative detection time; the remaining alerts are Supporting Alerts.
+Several related Alerts judged to be one case, worked as one Ticket and classified as a whole as Event or Incident. One Primary Alert supplies the case's authoritative detection time; the remaining alerts are Supporting Alerts. An Event bundle records every one of its alerts as a false positive.
 _Avoid_: Project Incident (that is one incident across multiple Tickets), alert batch, merged ticket
 
 **Primary Alert**:
-The Alert in an Alert Bundle that represents the Incident's detection time and is the anchor for its OLA. It is chosen deliberately by the Tier 1 analyst.
+The Alert in an Alert Bundle that represents the case's detection time and is the anchor for its OLA. It is chosen deliberately by the Tier 1 analyst.
 _Avoid_: First alert (chronology alone does not establish relevance), main ticket
 
 **Supporting Alert**:

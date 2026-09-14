@@ -483,7 +483,7 @@ class TicketReportExportTest(TestCase):
         text = _docx_text(content)
 
         self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
-        self.assertIn(f'{self.ticket.ticket_id}-I', text)
+        self.assertIn(self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1), text)
         self.assertNotIn('คำสั่ง', text)
         # 'File Name' is an empty Section-4 row dropped in compact mode; unlike
         # 'Hash', it is not a substring of the Section-8 checklist labels.
@@ -613,7 +613,7 @@ class TicketReportExportTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f'<title>Incident Report {self.ticket.ticket_id}</title>', html=True)
-        self.assertContains(response, f'{self.ticket.ticket_id}-I')
+        self.assertContains(response, self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1))
         self.assertContains(response, 'ซ่อนช่องที่ไม่มีข้อมูล')
         self.assertNotContains(response, '<th>คำสั่ง</th>')
         self.assertNotContains(response, '<th>Hash</th>')
@@ -651,7 +651,7 @@ class TicketReportExportTest(TestCase):
         )
         self.assertContains(response, 'Alert Event REPORT')
         self.assertContains(response, 'แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ')
-        self.assertContains(response, f'{self.event_ticket.ticket_id}-E')
+        self.assertContains(response, self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1))
         self.assertContains(response, '1.13 รายละเอียด')
         self.assertContains(response, 'Multiple failed sign-ins were observed.')
         self.assertContains(response, '&#9745;</span>&#160;Event')
@@ -674,7 +674,7 @@ class TicketReportExportTest(TestCase):
             f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.docx',
         )
         self.assertIn('Alert Event REPORT', text)
-        self.assertIn(f'{self.event_ticket.ticket_id}-E', text)
+        self.assertIn(self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1), text)
         self.assertIn('1.13 รายละเอียด', text)
         self.assertIn('Multiple failed sign-ins were observed.', text)
         self.assertIn('☑ Event', text)
@@ -704,7 +704,7 @@ class TicketReportExportTest(TestCase):
             f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.pdf',
         )
         self.assertIn('Alert Event REPORT', text)
-        self.assertIn(f'{self.event_ticket.ticket_id}-E', text)
+        self.assertIn(self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1), text)
         self.assertIn('Multiple failed sign-ins were observed.', text)
         self.assertNotIn('Indicators of Compromise', text)
         self.assertNotIn('Containment', text)
@@ -740,17 +740,23 @@ class TicketReportExportTest(TestCase):
         self.assertIn('คำสั่ง', text)
         self.assertIn('Hash', text)
 
-    def test_report_number_suffix_tracks_classification_without_changing_ticket_id(self):
+    def test_report_number_prefix_tracks_classification_without_changing_ticket_id(self):
         stored_ticket_id = self.ticket.ticket_id
 
         incident_report = build_ticket_report_context(self.ticket)
-        self.assertEqual(incident_report['ticket_id'], f'{stored_ticket_id}-I')
+        self.assertEqual(
+            incident_report['ticket_id'],
+            stored_ticket_id.replace('SOC-', 'SOC-INC-', 1),
+        )
 
         self.ticket.classification = Ticket.CLASSIFICATION_EVENT
         self.ticket.save(update_fields=['classification'])
         event_report = build_ticket_report_context(self.ticket)
 
-        self.assertEqual(event_report['ticket_id'], f'{stored_ticket_id}-E')
+        self.assertEqual(
+            event_report['ticket_id'],
+            stored_ticket_id.replace('SOC-', 'SOC-EVE-', 1),
+        )
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.ticket_id, stored_ticket_id)
 
@@ -768,7 +774,7 @@ class TicketReportExportTest(TestCase):
         self.assertGreaterEqual(len(pdf.pages), 1)
         text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
         normalized_text = ' '.join(text.split())
-        self.assertIn(f'{self.ticket.ticket_id}-I', normalized_text)
+        self.assertIn(self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1), normalized_text)
         self.assertIn('Suspicious SoftEther Signed File', normalized_text)
         # 'File Name' is an empty Section-4 row dropped in compact mode; 'Hash'
         # can no longer be used as the marker (it is in a Section-8 checklist label).
@@ -2355,6 +2361,47 @@ class TriageWorkflowIntegrityTest(TestCase):
         supporting.refresh_from_db()
         self.assertEqual(primary.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
         self.assertEqual(supporting.triage_status, WazuhAlert.TRIAGE_TRUE_POSITIVE)
+        self.assertTrue(ticket.logs.filter(note__contains='Alert Bundle').exists())
+
+    def test_alert_bundle_can_be_classified_as_event(self):
+        primary = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-event-primary',
+            timestamp=timezone.now() - timedelta(minutes=8), rule_level=10,
+            rule_description='Repeated failed sign-in from scanner',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        supporting = WazuhAlert.objects.create(
+            opensearch_id='ticket-bundle-event-supporting',
+            timestamp=timezone.now() - timedelta(minutes=4), rule_level=10,
+            rule_description='Repeated failed sign-in from scanner',
+            triage_status=WazuhAlert.TRIAGE_TRIAGING,
+            claimed_by=self.t1, claimed_at=timezone.now(),
+        )
+        self.client.force_login(self.t1)
+
+        data = _ticket_post_data(
+            wazuh_alert=primary.pk,
+            alert_bundle=[str(primary.pk), str(supporting.pk)],
+            classification=Ticket.CLASSIFICATION_EVENT,
+            t1_route='',
+        )
+        response = self.client.post(reverse('create_ticket'), data)
+        self.assertEqual(response.status_code, 302)
+
+        ticket = Ticket.objects.get(wazuh_alert=primary)
+        self.assertEqual(ticket.classification, Ticket.CLASSIFICATION_EVENT)
+        self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
+        links = {link.alert_id: link.role for link in ticket.alert_links.all()}
+        self.assertEqual(links, {
+            primary.pk: TicketAlertLink.ROLE_PRIMARY,
+            supporting.pk: TicketAlertLink.ROLE_SUPPORTING,
+        })
+        primary.refresh_from_db()
+        supporting.refresh_from_db()
+        self.assertEqual(primary.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertEqual(supporting.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertIsNone(supporting.claimed_by)
         self.assertTrue(ticket.logs.filter(note__contains='Alert Bundle').exists())
 
     def test_alert_bundle_rejects_alert_claimed_by_another_analyst(self):

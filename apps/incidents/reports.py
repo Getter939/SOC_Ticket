@@ -368,12 +368,19 @@ def _report_template_version(ticket):
 
 
 def _report_ticket_id(ticket):
-    suffix = {
-        Ticket.CLASSIFICATION_EVENT: 'E',
-        Ticket.CLASSIFICATION_INCIDENT: 'I',
+    # The classification is carried as a presentation-only token inserted after
+    # the SOC- prefix (SOC-EVE-YYYYMM-NNNN / SOC-INC-YYYYMM-NNNN), not as a
+    # trailing suffix. The Ticket Reference itself stays immutable in the DB.
+    token = {
+        Ticket.CLASSIFICATION_EVENT: 'EVE',
+        Ticket.CLASSIFICATION_INCIDENT: 'INC',
     }.get(ticket.classification)
     ticket_id = _value(ticket.ticket_id)
-    return f'{ticket_id}-{suffix}' if suffix else ticket_id
+    if not token:
+        return ticket_id
+    if ticket_id.startswith('SOC-'):
+        return f'SOC-{token}-{ticket_id[len("SOC-"):]}'
+    return f'{token}-{ticket_id}'
 
 
 def build_ticket_report_sections(

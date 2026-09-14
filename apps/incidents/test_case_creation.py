@@ -154,6 +154,48 @@ class CaseCreationServiceTest(TestCase):
 
     @patch('apps.incidents.case_creation.notify_manager_triage_pending')
     @patch('apps.incidents.case_creation.adopt_staged')
+    def test_event_alert_bundle_marks_every_alert_false_positive(self, adopt_staged, notify_manager):
+        primary = self._alert('event-primary')
+        supporting = self._alert('event-supporting')
+        triage = TriageRecord.objects.create(
+            source=TriageRecord.SOURCE_EMAIL,
+            alert_description='Reported benign activity',
+            claimed_by=self.t1,
+            claimed_at=timezone.now(),
+        )
+        form = _TicketForm(
+            self._ticket(
+                wazuh_alert=primary,
+                classification=Ticket.CLASSIFICATION_EVENT,
+            ),
+            '',
+        )
+
+        result = create_ticket_from_form(
+            form=form,
+            actor=self.t1,
+            triage=triage,
+            alert_bundle_ids=(primary.pk, supporting.pk),
+        )
+
+        ticket = result.ticket
+        self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertEqual(
+            {link.alert_id: link.role for link in ticket.alert_links.all()},
+            {primary.pk: 'PRIMARY', supporting.pk: 'SUPPORTING'},
+        )
+        triage.refresh_from_db()
+        primary.refresh_from_db()
+        supporting.refresh_from_db()
+        self.assertEqual(triage.decision, TriageRecord.DECISION_FP)
+        self.assertEqual(primary.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertEqual(supporting.triage_status, WazuhAlert.TRIAGE_FALSE_POSITIVE)
+        self.assertIsNone(supporting.claimed_by)
+        self.assertTrue(ticket.logs.filter(note__contains='Alert Bundle').exists())
+        notify_manager.assert_not_called()
+
+    @patch('apps.incidents.case_creation.notify_manager_triage_pending')
+    @patch('apps.incidents.case_creation.adopt_staged')
     def test_single_incident_admin_route_notifies_manager(self, adopt_staged, notify_manager):
         form = _TicketForm(
             self._ticket(assigned_admin=self.admin_a),

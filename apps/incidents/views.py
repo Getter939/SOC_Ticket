@@ -523,12 +523,6 @@ def create_ticket(request):
         evidence_token, staged_errors = stage_uploads(request)
         for staged_error in staged_errors:
             form.add_error(None, staged_error)
-        if form.is_valid() and alert_bundle_ids:
-            if form.cleaned_data['classification'] != Ticket.CLASSIFICATION_INCIDENT:
-                form.add_error(
-                    'classification',
-                    'Alert Bundle ต้องเปิดเป็น Incident เดียว ไม่สามารถจัดเป็น Event ได้',
-                )
         if form.is_valid():
             try:
                 result = create_ticket_from_form(

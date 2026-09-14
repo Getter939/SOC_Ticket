@@ -8,6 +8,13 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Changed
+- **Alert Bundles may be classified as Event.** A bundle of related Wazuh alerts
+  was previously forced to open as an Incident. It can now be saved as an Event:
+  every bundled alert is recorded as a false positive and the ticket goes to
+  Tier 2 to confirm before closing — one ticket for a burst of related false
+  positives instead of one per alert.
+
 ## [v1.5.0] — 2026-09-11
 
 Reworks the Incident/Event report toward the NT paper form, adds **in-browser
