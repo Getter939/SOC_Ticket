@@ -7787,3 +7787,50 @@ class ActingTierManagerCreateTest(TestCase):
         self.client.login(username='act_mgr', password='testpass123')
         resp = self.client.get(reverse('ticket_list'))
         self.assertNotContains(resp, 'โหมดทำงานระดับ Tier ชั่วคราว')
+
+    # ── whole-flow: the acting manager is not blocked at any tier/manager step ─ #
+
+    def test_acting_manager_drives_full_incident_to_approved(self):
+        """One acting manager plays T1, T2 AND manager end-to-end; only the
+        System Admin containment step needs another actor. Reaching APPROVED
+        proves no TIER1_CREATOR / TIER2 / MANAGER edge blocks them."""
+        self._grant()
+        admin = _make_user('act_flow_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        ticket = _make_ticket(
+            created_by=self.manager, assigned_admin=admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            severity='Critical', is_emergency=True,
+        )
+        # t1/t2/mgr are all the same acting manager; admin does only containment.
+        _advance_to(
+            ticket, Ticket.STATUS_APPROVED,
+            t1=self.manager, admin=admin, mgr=self.manager, t2=self.manager,
+        )
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_APPROVED)
+
+    def test_acting_manager_drives_escalate_then_return_to_t1(self):
+        """The T1→T2→back-to-T1 hats on a single actor: escalate (TIER1_CREATOR),
+        confirm/return (TIER2), then re-route as the creating T1 (TIER1_CREATOR)."""
+        self._grant()
+        ticket = _make_ticket(
+            created_by=self.manager, classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+        ticket.transition_to(Ticket.STATUS_ESCALATED_T2, self.manager, 'escalate')
+        ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, 'confirm incident')
+        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.manager, 'route')
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_revoking_grant_mid_flow_blocks_the_next_tier_step(self):
+        """Sanity check the other direction: once revoked, the manager is a plain
+        manager again and cannot drive a TIER2 edge."""
+        self._grant()
+        ticket = _make_ticket(
+            created_by=self.manager, classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+        ticket.transition_to(Ticket.STATUS_ESCALATED_T2, self.manager, 'escalate')
+        # Revoke, then the T2 verification edge must be refused.
+        self._grant(on=False)
+        with self.assertRaises(ValidationError):
+            ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, 'confirm')

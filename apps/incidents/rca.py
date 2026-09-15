@@ -17,13 +17,17 @@ notice, the audit trail and the OPEN→IN_PROGRESS nudge from drifting apart.
 """
 
 import csv
+import hashlib
 import io
 from datetime import datetime
+from io import BytesIO
+from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
+from docx import Document
 
 from . import history
 from .ioc_values import (
@@ -32,10 +36,18 @@ from .ioc_values import (
 )
 from .models import (
     AnalystIOC, IOCReviewStatus, RCAAsset, RCAIndicator, RCAReport,
-    RCATimelineEntry, Ticket, TicketSubtask,
+    RCARootCause, RCATimelineEntry, Ticket, TicketSubtask,
 )
-from .reports import _THAI_MONTHS_ABBR, _report_ticket_id
+from .rca_content import RCA_TEMPLATE_VERSION
+from .reports import (
+    _THAI_MONTHS_ABBR, _chk, _expand_docx_repeat_rows, _replace_placeholders,
+    _report_ticket_id,
+)
 from .ti_platform import _is_duplicate, create_manual_iocs
+
+RCA_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent / 'report_templates' / 'rca_report_template_v1.docx'
+)
 
 # Audit labels — one per section the analyst can change.
 SECTION_GENERAL = 'ส่วนที่ 1 ข้อมูลทั่วไป'
@@ -465,3 +477,159 @@ def import_timeline_csv(rca, uploaded_file, user):
         name = getattr(uploaded_file, 'name', '') or 'CSV'
         record_edit(rca, user, SECTION_TIMELINE, f'+{len(entries)} แถว (นำเข้าไฟล์ {name})')
     return len(entries)
+
+
+# ── DOCX draft ────────────────────────────────────────────────────────────── #
+
+def _timeline_when(entry):
+    """The timeline's date column: ``21 เม.ย. 2566 16:27–16:38`` (a same-day span
+    collapses to a time range; a cross-day one shows both dates)."""
+    start = timezone.localtime(entry.occurred_at)
+    text = f'{thai_date(entry.occurred_at)} {start:%H:%M}'
+    if entry.occurred_until:
+        end = timezone.localtime(entry.occurred_until)
+        if end.date() == start.date():
+            text += f'–{end:%H:%M}'
+        else:
+            text += f' – {thai_date(entry.occurred_until)} {end:%H:%M}'
+    return text
+
+
+def _evidence_cell(entry):
+    parts = [entry.evidence_file.strip()] if entry.evidence_file.strip() else []
+    if entry.evidence_line.strip():
+        parts.append(f'line {entry.evidence_line.strip()}')
+    return '\n'.join(parts)
+
+
+def _section1_context(rca):
+    """The flat ``{{rca_*}}`` values for Section 1 and the page header."""
+    threat = dict(Ticket.DETAILED_ISSUE_CHOICES).get(rca.threat_category, rca.threat_category)
+    forensic = set(rca.forensic_types or [])
+    context = {
+        'rca_case_no': case_number(rca),
+        'rca_incident_name': rca.incident_name or '-',
+        'rca_first_occurrence': rca.first_occurrence or '-',
+        'rca_detected': rca.detected_text or '-',
+        'rca_scope': rca.scope_period or '-',
+        'rca_threat_category': threat or '-',
+        'rca_assets_examined': rca.assets_examined or '-',
+        'rca_affected_systems': rca.affected_systems or '-',
+        'rca_asset_owner': rca.asset_owner or '-',
+        'rca_examiner': rca.examiner or '-',
+        'rca_related_refs': rca.related_refs or '-',
+    }
+    for key, _label in RCAReport.FORENSIC_TYPE_CHOICES:
+        context[f'rca_chk_ft_{key}'] = _chk(key in forensic)
+    context['rca_chk_imp_general'] = _chk(rca.importance == RCAReport.IMPORTANCE_GENERAL)
+    context['rca_chk_imp_important'] = _chk(rca.importance == RCAReport.IMPORTANCE_IMPORTANT)
+    context['rca_chk_imp_critical'] = _chk(rca.importance == RCAReport.IMPORTANCE_CRITICAL)
+    for level in ('low', 'moderate', 'high', 'critical'):
+        context[f'rca_chk_siem_{level}'] = _chk(rca.siem_severity == level.capitalize())
+    context['rca_chk_ncsa_non_severe'] = _chk(rca.ncsa_severity == Ticket.NCSA_SEVERITY_NON_SEVERE)
+    context['rca_chk_ncsa_severe'] = _chk(rca.ncsa_severity == Ticket.NCSA_SEVERITY_SEVERE)
+    context['rca_chk_ncsa_critical'] = _chk(rca.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL)
+    context['rca_chk_asset_computer'] = _chk(rca.asset_type == 'Computer')
+    context['rca_chk_asset_server'] = _chk(rca.asset_type == 'Server')
+    context['rca_chk_asset_network'] = _chk(rca.asset_type == 'Network Device')
+    context['rca_chk_asset_unknown'] = _chk(
+        rca.asset_type not in ('Computer', 'Server', 'Network Device')
+    )
+    return context
+
+
+def _repeat_rows(rca):
+    """The item dicts for every repeatable table, keyed by placeholder prefix.
+
+    Indicators fan out into their per-category tables; recommendations carry the
+    derived ``(RC-n)`` codes of the root causes they address.
+    """
+    assets = [
+        {'as_host': a.host, 'as_ip': a.ip, 'as_detail': a.detail}
+        for a in rca.assets.all()
+    ]
+    timeline = [
+        {
+            'tl_when': _timeline_when(e), 'tl_host': e.host, 'tl_event': e.event,
+            'tl_evidence': _evidence_cell(e), 'tl_excerpt': e.excerpt,
+        }
+        for e in rca.timeline.all()
+    ]
+    root_causes = list(rca.root_causes.all())
+    code_by_pk = {rc.pk: f'RC-{index}' for index, rc in enumerate(root_causes, start=1)}
+    rc_rows = [
+        {
+            'rc_code': code_by_pk[rc.pk], 'rc_category': rc.category, 'rc_cause': rc.cause,
+            'rc_evidence': rc.evidence_ref, 'rc_excerpt': rc.excerpt,
+        }
+        for rc in root_causes
+    ]
+    indicators = list(rca.indicators.all())
+
+    def by_cat(*categories):
+        return [ind for ind in indicators if ind.category in categories]
+
+    file_paths = [
+        {'fp_value': i.value, 'fp_host': i.host, 'fp_note': i.note or i.label}
+        for i in by_cat(RCAIndicator.CAT_FILE_PATH)
+    ]
+    ips = [
+        {'ip_value': i.value, 'ip_label': i.label, 'ip_note': i.note}
+        for i in by_cat(RCAIndicator.CAT_IP)
+    ]
+    web = [
+        {
+            'web_value': i.value,
+            'web_label': i.label or i.get_category_display(),
+            'web_note': i.note,
+        }
+        for i in by_cat(RCAIndicator.CAT_URL, RCAIndicator.CAT_DOMAIN, RCAIndicator.CAT_EMAIL)
+    ]
+    hashes = [
+        {'hash_label': i.label or i.host, 'hash_value': i.value}
+        for i in by_cat(RCAIndicator.CAT_HASH)
+    ]
+    accounts = [
+        {'acct_value': i.value, 'acct_host': i.host, 'acct_note': i.note}
+        for i in by_cat(RCAIndicator.CAT_ACCOUNT)
+    ]
+    recommendations = []
+    for index, rec in enumerate(rca.recommendations.all(), start=1):
+        codes = [code_by_pk[rc.pk] for rc in rec.root_causes.all() if rc.pk in code_by_pk]
+        action = rec.action
+        if codes:
+            action = f'{action} ({", ".join(codes)})'
+        recommendations.append({'rec_no': str(index), 'rec_action': action})
+    return {
+        'as': assets, 'tl': timeline, 'rc': rc_rows, 'fp': file_paths, 'ip': ips,
+        'web': web, 'hash': hashes, 'acct': accounts, 'rec': recommendations,
+    }
+
+
+def generate_rca_draft(rca, user):
+    """Render the prefilled RCA draft DOCX and record its provenance.
+
+    Fills Section 1 and clones each evidence table's prototype row per stored
+    item, leaving the narrative sections' guidance for Word. Returns
+    ``(filename, content_bytes)``. Records draft_* on the RCAReport only — never
+    the ticket's report_* provenance (that belongs to the Incident/Event report).
+    """
+    doc = Document(str(RCA_TEMPLATE_PATH))
+    for prefix, rows in _repeat_rows(rca).items():
+        _expand_docx_repeat_rows(doc, prefix, rows)
+    _replace_placeholders(doc, _section1_context(rca))
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    content = buffer.getvalue()
+    digest = hashlib.sha256(content).hexdigest()
+    now = timezone.now()
+    RCAReport.objects.filter(pk=rca.pk).update(
+        draft_generated_at=now, draft_generated_by=user,
+        draft_sha256=digest, draft_template_version=RCA_TEMPLATE_VERSION,
+    )
+    rca.draft_generated_at, rca.draft_generated_by = now, user
+    rca.draft_sha256, rca.draft_template_version = digest, RCA_TEMPLATE_VERSION
+
+    filename = f'report_{case_number(rca)}_{RCA_TEMPLATE_VERSION}.docx'
+    return filename, content

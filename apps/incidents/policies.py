@@ -166,6 +166,15 @@ def can_upload_project_attachment(project, user):
     )
 
 
+def can_add_project_member(project, user):
+    """Whether ``user`` may report another affected system in this bundle."""
+    if project.all_closed:
+        return False
+    if user.is_superuser or is_soc_manager(user):
+        return True
+    return project.created_by_id is not None and project.created_by_id == user.pk
+
+
 def can_delete_project_attachment(project, attachment, user):
     """Whether user may remove shared bundle evidence.
 

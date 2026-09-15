@@ -802,6 +802,63 @@ def _replace_placeholders(doc, context):
         raise ValueError(f'Unresolved report template placeholders: {", ".join(remaining)}')
 
 
+def _fill_docx_row(row, values):
+    """Fill one table row's ``{{key}}`` placeholders from ``values`` (key→text),
+    blanking any placeholder the mapping does not cover. Goes through _fill_run so
+    ballot glyphs and per-run fonts are preserved."""
+    replacements = {f'{{{{{key}}}}}': str(value) for key, value in values.items()}
+    for cell in row.cells:
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                text = run.text
+                if '{{' not in text:
+                    continue
+                for placeholder, value in replacements.items():
+                    if placeholder in text:
+                        text = text.replace(placeholder, value)
+                text = re.sub(r'\{\{[^}]+\}\}', '', text)
+                _fill_run(run, text)
+
+
+def _expand_docx_repeat_rows(doc, prefix, rows):
+    """Clone a table's prototype row once per item, filling ``{{prefix_*}}``.
+
+    A repeatable table is authored with a header row and ONE prototype data row
+    of ``{{prefix_field}}`` placeholders. This finds that row (the first row
+    carrying a ``{{prefix_`` marker), clones it for each dict in ``rows``, fills
+    each clone through :func:`_fill_docx_row`, and drops the prototype. With no
+    rows it leaves a single blank row (placeholders cleared) so the table still
+    reads as an empty form. Must run before :func:`_replace_placeholders`.
+    """
+    marker = f'{{{{{prefix}_'
+    for table in _iter_docx_tables(doc):
+        prototype = None
+        for row in table.rows:
+            if any(marker in cell.text for cell in row.cells):
+                prototype = row
+                break
+        if prototype is None:
+            continue
+        if not rows:
+            _fill_docx_row(prototype, {})
+            return
+        proto_tr = prototype._tr
+        parent = proto_tr.getparent()
+        anchor = parent.index(proto_tr)
+        clones = []
+        for offset, _values in enumerate(rows):
+            clone = deepcopy(proto_tr)
+            parent.insert(anchor + offset, clone)
+            clones.append(clone)
+        parent.remove(proto_tr)
+        by_tr = {id(tr): values for tr, values in zip(clones, rows)}
+        for row in table.rows:
+            values = by_tr.get(id(row._tr))
+            if values is not None:
+                _fill_docx_row(row, values)
+        return
+
+
 def _find_docx_placeholder_paragraph(doc, placeholder):
     for paragraph in _iter_paragraphs(doc):
         if placeholder in paragraph.text:

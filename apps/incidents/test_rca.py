@@ -2,6 +2,7 @@ import importlib.util
 import re
 import tempfile
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 from django.conf import settings
@@ -18,8 +19,11 @@ from . import rca as rca_service
 from .models import (
     AnalystIOC,
     IOCReviewStatus,
+    RCAAsset,
     RCAIndicator,
+    RCARecommendation,
     RCAReport,
+    RCARootCause,
     RCATimelineEntry,
     Ticket,
     TicketFieldChange,
@@ -538,3 +542,124 @@ class RCATemplateTest(TestCase):
             [key for key, _label in RCA_FORENSIC_TYPES],
             [key for key, _label in RCAReport.FORENSIC_TYPE_CHOICES],
         )
+
+
+def _docx_text(content):
+    return '\n'.join(p.text for p in _iter_paragraphs(Document(BytesIO(content))))
+
+
+class RCADraftTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.forensic = _user(
+            'rca-draft-forensic', UserProfile.ROLE_FORENSIC,
+            department='ปปกก.', phone='02-574-8209', first_name='วศิน', last_name='เชาว์บวร',
+        )
+
+    def _populated_rca(self):
+        ticket = _ticket(
+            incident_name='เว็บไซต์ถูกเปลี่ยนหน้า', severity='High',
+            ncsa_severity=Ticket.NCSA_SEVERITY_NON_SEVERE, detailed_issue='Root Intrusion',
+            asset_type='Server', is_emergency=True,
+        )
+        subtask = _rca_request(ticket, self.forensic)
+        rca, _ = rca_service.get_or_create_rca(subtask, self.forensic)
+        rca.forensic_types = ['host_disk', 'log_timeline', 'malware']
+        rca.scope_period = '11 พ.ย. 2563 – 10 ก.ย. 2569'
+        rca.save()
+        RCAAsset.objects.create(
+            rca=rca, order=1, host='ginfo', ip='111.111.11.111', detail='Joomla 1.5',
+        )
+        RCATimelineEntry.objects.create(
+            rca=rca, occurred_at=_bkk(2023, 4, 21, 16, 27),
+            occurred_until=_bkk(2023, 4, 21, 16, 38), host='NTDA',
+            event='Brute Force MariaDB', evidence_file='authfail.log', evidence_line='14',
+            excerpt='Access denied',
+        )
+        rc1 = RCARootCause.objects.create(
+            rca=rca, order=1, category='Application', cause='Joomla 1.5 หมดการสนับสนุน',
+        )
+        rc2 = RCARootCause.objects.create(
+            rca=rca, order=2, category='การตั้งค่าระบบ', cause='ไม่แยกบัญชีผู้ใช้',
+        )
+        rec = RCARecommendation.objects.create(rca=rca, order=1, action='ย้ายไปแพลตฟอร์มที่รองรับ')
+        rec.root_causes.set([rc1, rc2])
+        RCAIndicator.objects.create(
+            rca=rca, category=RCAIndicator.CAT_HASH, value=HASH_A,
+            label='wp-indos.php', source=RCAIndicator.SOURCE_ANALYST,
+        )
+        RCAIndicator.objects.create(
+            rca=rca, category=RCAIndicator.CAT_IP, value='185.242.3.85',
+            label='เครือข่ายภายนอก', note='ส่งคำขอ CVE', source=RCAIndicator.SOURCE_ANALYST,
+        )
+        RCAIndicator.objects.create(
+            rca=rca, category=RCAIndicator.CAT_EMAIL, value='attacker@example.com',
+            source=RCAIndicator.SOURCE_ANALYST,
+        )
+        return ticket, subtask, rca
+
+    def test_draft_fills_data_and_leaves_no_placeholders(self):
+        ticket, _subtask, rca = self._populated_rca()
+        period = ticket.ticket_id[len('SOC-'):]
+
+        filename, content = rca_service.generate_rca_draft(rca, self.forensic)
+
+        self.assertEqual(filename, f'report_SOC-RCA-{period}_rca-v1.docx')
+        text = _docx_text(content)
+        self.assertNotIn('{{', text)
+        self.assertIn(f'SOC-RCA-{period}', text)
+        self.assertIn('เว็บไซต์ถูกเปลี่ยนหน้า', text)
+        self.assertIn('☑ Host / Disk Triage', text)
+        self.assertIn('☐ Memory Forensic', text)
+        self.assertIn('☑ High', text)          # SIEM severity
+        self.assertIn('☑ สำคัญมาก', text)       # emergency → critical importance
+        self.assertIn('☑ Server', text)
+        # Evidence tables cloned per item.
+        self.assertIn('ginfo', text)
+        self.assertIn('Brute Force MariaDB', text)
+        self.assertIn('16:27–16:38', text)
+        self.assertIn(HASH_A, text)
+        self.assertIn('185.242.3.85', text)
+        self.assertIn('attacker@example.com', text)
+        # Root-cause codes derived from order; recommendation cites them.
+        self.assertIn('RC-1', text)
+        self.assertIn('RC-2', text)
+        self.assertIn('ย้ายไปแพลตฟอร์มที่รองรับ (RC-1, RC-2)', text)
+
+    def test_draft_records_provenance_without_touching_ticket(self):
+        ticket, _subtask, rca = self._populated_rca()
+
+        _filename, content = rca_service.generate_rca_draft(rca, self.forensic)
+
+        rca.refresh_from_db()
+        self.assertEqual(rca.draft_template_version, 'rca-v1')
+        self.assertEqual(rca.draft_generated_by, self.forensic)
+        self.assertIsNotNone(rca.draft_generated_at)
+        self.assertEqual(
+            rca.draft_sha256, __import__('hashlib').sha256(content).hexdigest(),
+        )
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.report_template_version, '')
+        self.assertEqual(ticket.report_sha256, '')
+        self.assertIsNone(ticket.report_generated_by)
+
+    def test_stale_flag_after_a_draft_then_edit(self):
+        _ticket_obj, _subtask, rca = self._populated_rca()
+        rca_service.generate_rca_draft(rca, self.forensic)
+        rca.refresh_from_db()
+        self.assertFalse(rca.has_stale_draft)
+
+        rca_service.record_edit(rca, self.forensic, rca_service.SECTION_ASSETS, 'edited')
+
+        rca.refresh_from_db()
+        self.assertTrue(rca.has_stale_draft)
+
+    def test_draft_of_an_empty_report_still_renders(self):
+        subtask = _rca_request(_ticket(), self.forensic)
+        rca, _ = rca_service.get_or_create_rca(subtask, self.forensic)
+        rca.indicators.all().delete()
+        rca.assets.all().delete()
+
+        _filename, content = rca_service.generate_rca_draft(rca, self.forensic)
+
+        self.assertNotIn('{{', _docx_text(content))

@@ -25,7 +25,8 @@ from apps.incidents import ola as ola_buckets
 from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentForm,
-    ProjectIncidentTargetFormSet, ResponseRequestForm, SubtaskForm,
+    ProjectIncidentTargetForm, ProjectIncidentTargetFormSet,
+    ResponseRequestForm, SubtaskForm,
     SubtaskUpdateForm, TicketEditForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
@@ -53,6 +54,7 @@ from .reports import (
 )
 from .policies import (
     can_access_ticket_report as _can_access_ticket_report,
+    can_add_project_member as _can_add_project_member,
     can_create_ticket_from_triage as _can_create_ticket_from_triage,
     can_create_ticket_from_wazuh as _can_create_ticket_from_wazuh,
     can_delete_project_attachment as _can_delete_project_attachment,
@@ -77,7 +79,7 @@ from .case_creation import (
     load_alert_bundle,
 )
 from .project_workflow import (
-    add_shared_attachments,
+    MAX_PROJECT_MEMBERS, add_project_member, add_shared_attachments,
     delete_shared_attachment,
     forward_project_review,
     reassess_project_emergency,
@@ -745,6 +747,9 @@ def project_incident_detail(request, pk):
     can_manage_project = request.user.is_superuser or (
         profile is not None and profile.is_soc_manager
     )
+    can_add_project_member = _can_add_project_member(project, request.user)
+    add_member_form = ProjectIncidentTargetForm(prefix='member')
+    show_add_member_modal = False
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -792,7 +797,40 @@ def project_incident_detail(request, pk):
                     reason=reason,
                 )
                 messages.success(request, 'อัปเดต Emergency สำหรับ Member Ticket ที่ยังดำเนินการอยู่แล้ว')
-        return redirect('project_incident_detail', pk=project.pk)
+        elif action == 'add_project_member':
+            add_member_form = ProjectIncidentTargetForm(request.POST, prefix='member')
+            if project.all_closed:
+                messages.error(request, 'ไม่สามารถเพิ่มระบบได้ เนื่องจาก Project Incident นี้ปิดครบทุก Ticket แล้ว')
+            elif project.member_count >= MAX_PROJECT_MEMBERS:
+                messages.error(
+                    request,
+                    f'Project Incident หนึ่งรายการมี Member Ticket ได้ไม่เกิน {MAX_PROJECT_MEMBERS} ระบบ',
+                )
+            elif not can_add_project_member:
+                messages.error(request, 'เฉพาะผู้เปิด Project Incident หรือผู้จัดการ SOC เท่านั้นที่เพิ่มระบบได้')
+            elif add_member_form.is_valid():
+                try:
+                    result = add_project_member(
+                        project=project,
+                        target_form=add_member_form,
+                        actor=request.user,
+                    )
+                except ValidationError as exc:
+                    add_member_form.add_error(None, exc.message)
+                    show_add_member_modal = True
+                else:
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
+                    ticket = result.tickets[0]
+                    messages.success(
+                        request,
+                        f'เพิ่มระบบ {ticket.device_name} เป็น {ticket.bundle_ref} เรียบร้อย',
+                    )
+                    return redirect('project_incident_detail', pk=project.pk)
+            else:
+                show_add_member_modal = True
+        if action != 'add_project_member' or not show_add_member_modal:
+            return redirect('project_incident_detail', pk=project.pk)
 
     members = (
         project.member_tickets.visible_to(request.user)
@@ -828,6 +866,10 @@ def project_incident_detail(request, pk):
         'source_triage': project.source_triages.first(),
         'project_logs': project.logs.select_related('author'),
         'can_manage_project': can_manage_project,
+        'can_add_project_member': can_add_project_member,
+        'add_member_form': add_member_form,
+        'show_add_member_modal': show_add_member_modal,
+        'project_member_limit': MAX_PROJECT_MEMBERS,
         'can_upload_project_attachment': _can_upload_project_attachment(
             project, request.user),
         'can_restore_project_attachment': _can_restore_ticket_attachment(

@@ -181,8 +181,13 @@
     </div>
   </div>
 
-  <div class="d-flex align-items-center mb-2">
+  <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
     <h6 class="fw-bold mb-0"><i class="bi bi-list-check me-1"></i>Ticket ตามระบบที่ได้รับผลกระทบ</h6>
+    {% if can_add_project_member and project.member_count < project_member_limit %}
+    <button class="btn btn-sm btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addProjectMemberModal">
+      <i class="bi bi-plus-lg me-1"></i>เพิ่มระบบที่ได้รับผลกระทบ
+    </button>
+    {% endif %}
   </div>
   <div class="table-responsive">
     <table class="table table-hover align-middle bg-white border">
@@ -216,6 +221,107 @@
       </tbody>
     </table>
   </div>
+
+  {% if can_add_project_member or show_add_member_modal %}
+  <div class="modal fade" id="addProjectMemberModal" tabindex="-1" aria-labelledby="addProjectMemberTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add_project_member">
+          <div class="modal-header">
+            <div>
+              <h5 class="modal-title" id="addProjectMemberTitle">เพิ่มระบบที่ได้รับผลกระทบ</h5>
+              <div class="small text-muted mt-1">ข้อมูลเหตุการณ์ ระดับความรุนแรง เวลา และหลักฐานส่วนกลางจะใช้ร่วมกับ Project Incident นี้</div>
+            </div>
+            <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="ปิด"></button>
+          </div>
+          <div class="modal-body">
+            {% if add_member_form.non_field_errors %}
+            <div class="alert alert-danger py-2">{{ add_member_form.non_field_errors }}</div>
+            {% endif %}
+            <div class="row g-3">
+              <div class="col-md-5">
+                <label class="form-label fw-semibold">ระบบ / บริการ <span class="text-danger">*</span></label>
+                {{ add_member_form.device_name }}
+                {% if add_member_form.device_name.errors %}<div class="text-danger small">{{ add_member_form.device_name.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-7">
+                <div class="form-label fw-semibold">การตัดสินใจและเส้นทาง <span class="text-danger">*</span></div>
+                {% for radio in add_member_form.t1_route %}
+                <div class="form-check">{{ radio.tag }}<label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label></div>
+                {% endfor %}
+                {% if add_member_form.t1_route.errors %}<div class="text-danger small">{{ add_member_form.t1_route.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-6" id="add-member-admin-field">
+                <label class="form-label fw-semibold">ผู้ดูแลระบบ (Admin)</label>
+                {{ add_member_form.assigned_admin }}
+                {% if add_member_form.assigned_admin.errors %}<div class="text-danger small">{{ add_member_form.assigned_admin.errors }}</div>{% endif %}
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold">รายละเอียดเฉพาะระบบ</label>
+                {{ add_member_form.system_detail }}
+                {% if add_member_form.system_detail.errors %}<div class="text-danger small">{{ add_member_form.system_detail.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">IP Addresses</label>
+                {{ add_member_form.ip_address }}
+                {% if add_member_form.ip_address.help_text %}<div class="form-text">{{ add_member_form.ip_address.help_text }}</div>{% endif %}
+                {% if add_member_form.ip_address.errors %}<div class="text-danger small">{{ add_member_form.ip_address.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">ประเภททรัพย์สิน</label>
+                {{ add_member_form.asset_type }}
+                {% if add_member_form.asset_type.errors %}<div class="text-danger small">{{ add_member_form.asset_type.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">ระบบปฏิบัติการ (OS)</label>
+                {{ add_member_form.operating_system }}
+                {% if add_member_form.operating_system.errors %}<div class="text-danger small">{{ add_member_form.operating_system.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">หน่วยงานเจ้าของทรัพย์สิน</label>
+                {{ add_member_form.asset_owner }}
+                {% if add_member_form.asset_owner.errors %}<div class="text-danger small">{{ add_member_form.asset_owner.errors }}</div>{% endif %}
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold">ชื่อเจ้าของทรัพย์สิน</label>
+                {{ add_member_form.asset_owner_name }}
+                {% if add_member_form.asset_owner_name.errors %}<div class="text-danger small">{{ add_member_form.asset_owner_name.errors }}</div>{% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-light border" type="button" data-bs-dismiss="modal">ยกเลิก</button>
+            <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i>สร้าง Member Ticket</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script nonce="{{ request.csp_nonce }}">
+  (function () {
+    const modalElement = document.getElementById('addProjectMemberModal');
+    const adminField = document.getElementById('add-member-admin-field');
+    if (!modalElement || !adminField) return;
+    const routeInputs = modalElement.querySelectorAll('input[name="member-t1_route"]');
+    const adminSelect = adminField.querySelector('select');
+    function syncAdminField() {
+      const selected = modalElement.querySelector('input[name="member-t1_route"]:checked');
+      const show = !selected || selected.value === 'ADMIN';
+      adminField.classList.toggle('d-none', !show);
+      if (adminSelect) adminSelect.disabled = !show;
+    }
+    routeInputs.forEach(input => input.addEventListener('change', syncAdminField));
+    syncAdminField();
+    {% if show_add_member_modal %}
+    document.addEventListener('DOMContentLoaded', function () {
+      window.bootstrap.Modal.getOrCreateInstance(modalElement).show();
+    });
+    {% endif %}
+  })();
+  </script>
+  {% endif %}
 
   {% if project_logs %}
   <div class="card shadow-sm mt-4"><div class="card-header fw-bold">ประวัติระดับ Project</div><div class="list-group list-group-flush">{% for log in project_logs %}<div class="list-group-item"><div class="small text-muted">{{ log.created_at|date:"d M Y H:i" }} · {{ log.author.get_full_name|default:log.author.username|default:"Unknown user" }}</div>{{ log.note }}</div>{% endfor %}</div></div>

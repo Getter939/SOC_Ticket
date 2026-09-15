@@ -8,6 +8,25 @@ release (tag) dates.
 
 ## [Unreleased]
 
+## [v1.5.3] — 2026-09-15
+
+### Added
+- **Temporary Tier 1/2 access for a SOC Manager.** A superadmin can grant a SOC
+  Manager temporary Tier 1 **and** Tier 2 privileges — opening cases, triage
+  intake, driving their own cases, and Tier 2 verification — from the Django
+  admin user list, and revoke it just as easily. While granted, the manager sees
+  the Tier 1/2 navigation and a banner marking the elevated mode; every other
+  role boundary (System Admin containment, System Owner remediation) stays in
+  place. Only a superuser can grant or revoke it — a manager cannot elevate
+  themselves.
+
+### Changed
+- **Forensic RCA report groundwork (internal).** Adds the Root Cause Analysis
+  data model, generator and Word-draft template that back a Forensic Analyst's
+  `FORENSIC_RCA` response request. The report is captured as structured data and
+  rendered into a DOCX draft the analyst finishes in Word. Backend only in this
+  release — not yet surfaced in the app.
+
 ## [v1.5.2] — 2026-09-14
 
 ### Changed

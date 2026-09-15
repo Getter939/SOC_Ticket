@@ -652,11 +652,12 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         route = cleaned.get('t1_route')
-        if route == self.ROUTE_EVENT:
-            # Event members do not enter an Incident handling lane. Tier 2
-            # verifies them independently after creation.
+        if route != Ticket.T1_ROUTE_ADMIN:
+            # Event and Direct-to-Owner members do not use an admin assignment.
+            # Clear a stale/maliciously submitted value as well as hiding the
+            # picker in the browser.
             cleaned['assigned_admin'] = None
-        elif route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
+        elif not cleaned.get('assigned_admin'):
             self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบ')
         # The Direct-to-Owner route names no user here: the SOC contacts the
         # system owner directly (off-system), so no per-row owner is selected.
