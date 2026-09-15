@@ -2957,12 +2957,12 @@ class NotificationTemplate(models.Model):
             'issue_type', 'device_name', 'outcome',
         ],
         KEY_RESPONSE_REQUEST_CREATED: [
-            'ticket_id', 'ticket_url', 'request_type', 'title', 'description',
-            'summary', 'requested_by',
+            'ticket_id', 'ticket_url', 'request_url', 'request_type', 'title',
+            'description', 'summary', 'requested_by',
         ],
         KEY_RESPONSE_REQUEST_COMPLETED: [
-            'ticket_id', 'ticket_url', 'request_type', 'title', 'result_notes',
-            'completed_by',
+            'ticket_id', 'ticket_url', 'request_url', 'request_type', 'title',
+            'result_notes', 'completed_by',
         ],
     }
 
@@ -3600,19 +3600,34 @@ class RCAIndicator(models.Model):
     def __str__(self):
         return f'{self.get_category_display()}: {self.value}'
 
-    def clean(self):
-        super().clean()
+    @classmethod
+    def normalize_value(cls, category, value):
+        """Canonical form of ``value`` for ``category`` (raises ValidationError
+        on a malformed hash / IP / domain / URL / email). Empty in → empty out.
+
+        Shared by ``clean()`` and ``RCAIndicatorForm.clean_value`` so the form's
+        ``cleaned_data['value']`` is already canonical — that is what lets the
+        inline formset's unique check catch a within-category duplicate that only
+        collides after normalisation (e.g. an upper/lower-case hash pair) instead
+        of the save hitting the DB constraint and 500-ing.
+        """
         from django.core.validators import validate_email
         from .ioc_values import normalize_for_category
 
+        value = (value or '').strip()
+        if not value:
+            return ''
+        if category in cls.NORMALIZED_CATEGORIES:
+            return normalize_for_category(category, value)
+        if category == cls.CAT_EMAIL:
+            value = value.lower()
+            validate_email(value)
+        return value
+
+    def clean(self):
+        super().clean()
         try:
-            if self.category in self.NORMALIZED_CATEGORIES:
-                self.value = normalize_for_category(self.category, self.value)
-            elif self.category == self.CAT_EMAIL:
-                self.value = (self.value or '').strip().lower()
-                validate_email(self.value)
-            else:
-                self.value = (self.value or '').strip()
+            self.value = self.normalize_value(self.category, self.value)
         except ValidationError as exc:
             raise ValidationError({'value': exc.messages})
         if not self.value:

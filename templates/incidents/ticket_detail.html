@@ -385,6 +385,27 @@ onto its own wrapped row, which space-between then left-aligned.
           <div>
             <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}</div>
             <div class="small text-muted mb-1">{{ subtask.description }}</div>
+            {% if subtask.is_rca_request %}
+            <div class="small border-start border-warning border-3 ps-2 py-1 my-2">
+              {% if subtask.rca_report %}
+              <strong>{{ subtask.rca_case_number }}</strong>
+              · Asset {{ subtask.rca_asset_count }}
+              · Timeline {{ subtask.rca_timeline_count }}
+              · Root Cause {{ subtask.rca_root_cause_count }}
+              · IOC {{ subtask.rca_indicator_count }}
+              · คำแนะนำ {{ subtask.rca_recommendation_count }}
+              {% if subtask.rca_report.draft_generated_at %}
+              <div class="text-muted mt-1">
+                Draft ล่าสุด {{ subtask.rca_report.draft_generated_at|date:"d/m/Y H:i" }}
+                {% if subtask.rca_report.draft_generated_by %}
+                โดย {{ subtask.rca_report.draft_generated_by.get_full_name|default:subtask.rca_report.draft_generated_by.username }}
+                {% endif %}
+                {% if subtask.rca_report.has_stale_draft %}<span class="badge bg-warning text-dark ms-1">ข้อมูลใหม่กว่า Draft</span>{% endif %}
+              </div>
+              {% else %}<span class="text-muted">ยังไม่ได้สร้าง Draft</span>{% endif %}
+              {% else %}<span class="text-muted">ยังไม่ได้เริ่มจัดทำข้อมูล RCA</span>{% endif %}
+            </div>
+            {% endif %}
             <div class="small text-muted mb-1"><i class="bi bi-calendar-plus me-1"></i>สร้างเมื่อ {{ subtask.created_at|date:"d/m/Y H:i" }}</div>
             {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
             <details class="subtask-status-history">
@@ -441,23 +462,25 @@ onto its own wrapped row, which space-between then left-aligned.
             <span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span>
             <div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>
             {% if subtask.assigned_to %}<div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-person me-1"></i>{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}
-            {% if not is_terminal %}{% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
+            {% if subtask.is_rca_request %}
+            {# RCA requests are worked entirely in the workspace — no inline status/upload form here. #}
+            <a class="btn btn-sm btn-warning mb-1 d-block" href="{% url 'rca_workspace' subtask.pk %}"><i class="bi bi-file-earmark-medical me-1"></i>{% if subtask.rca_can_start %}เริ่มจัดทำ RCA{% else %}เปิด RCA Workspace{% endif %}</a>
+            {% elif subtask.can_update %}
             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#update-subtask-{{ subtask.pk }}" aria-expanded="false" aria-controls="update-subtask-{{ subtask.pk }}"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>อัปเดตงาน</button>
-            {% endif %}{% endif %}
+            {% endif %}
           </div>
         </div>
-        {% if not is_terminal %}
-        {% if request.user.is_superuser or profile.is_soc or subtask.assigned_to == request.user %}
+        {% if subtask.can_update and not subtask.is_rca_request %}
         <div class="collapse" id="update-subtask-{{ subtask.pk }}">
           <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
-            <div class="col-md-3">{{ subtask_update_form.status.label_tag }}
+            <div class="col-md-2">{{ subtask_update_form.status.label_tag }}
               <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-            <div class="col-md-5"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
+            <div class="col-md-4"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
             <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
+            <div class="col-md-2"><label class="form-label small mb-1">คำอธิบายไฟล์</label><input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="เช่น รายงาน RCA ฉบับสมบูรณ์"></div>
             <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-primary w-100" type="submit"><i class="bi bi-save me-1" aria-hidden="true"></i><span class="d-md-none">บันทึก</span><span class="visually-hidden d-none d-md-inline">บันทึกการอัปเดตงาน</span></button></div>
           </form>
         </div>
-        {% endif %}
         {% endif %}
         {% endwith %}
         {% empty %}

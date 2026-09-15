@@ -1,0 +1,127 @@
+{% comment %}
+Session keep-alive + idle-expiry warning for long form pages.
+
+Requires `idle_seconds` in the context (the server's SESSION_COOKIE_AGE). While
+the user is actively typing/clicking, this pings an authenticated endpoint so
+SESSION_SAVE_EVERY_REQUEST slides the idle clock; a genuinely idle session still
+expires on schedule. Two minutes before expiry it shows a countdown modal.
+{% endcomment %}
+<div id="session-keepalive" hidden
+     data-url="{% url 'session_keepalive' %}" data-idle="{{ idle_seconds }}"></div>
+
+<div class="modal fade" id="session-warning-modal" tabindex="-1" aria-hidden="true"
+     aria-labelledby="session-warning-title">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="session-warning-title">
+          <i class="bi bi-clock-history text-warning me-2"></i>เซสชันกำลังจะหมดอายุ
+        </h5>
+      </div>
+      <div class="modal-body">
+        <div id="session-warn-body">
+          <p class="mb-2">คุณจะถูกออกจากระบบโดยอัตโนมัติในอีก
+            <strong id="session-countdown">120</strong> วินาที เนื่องจากไม่มีการใช้งาน</p>
+          <p class="small text-muted mb-0">กด "อยู่ในระบบต่อ" เพื่อทำงานต่อ
+            ข้อมูลที่ยังไม่ได้บันทึกจะหายหากเซสชันหมดอายุ</p>
+        </div>
+        <div id="session-expired-body" hidden>
+          <p class="mb-2 text-danger fw-semibold">เซสชันหมดอายุแล้ว</p>
+          <p class="small text-muted mb-0">กรุณาคัดลอกข้อความที่ยังไม่ได้บันทึกไว้ก่อน
+            แล้วเข้าสู่ระบบใหม่ในอีกแท็บเพื่อไม่ให้ข้อมูลหาย</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="session-stay-btn">
+          <i class="bi bi-shield-check me-1"></i>อยู่ในระบบต่อ
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script nonce="{{ request.csp_nonce }}">
+(() => {
+function initSessionKeepalive() {
+  const root = document.getElementById('session-keepalive');
+  if (!root || typeof bootstrap === 'undefined') return;
+  const url = root.dataset.url;
+  const idleMs = parseInt(root.dataset.idle, 10) * 1000;
+  if (!idleMs) return;
+  const WARN_MS = 120000;        // show the countdown 2 minutes before expiry
+  // Keep the normal five-minute cadence, but stay inside deliberately short
+  // idle windows used by local/test deployments.
+  const PING_MIN_MS = Math.min(300000, Math.max(30000, idleMs - WARN_MS));
+
+  const modalEl = document.getElementById('session-warning-modal');
+  const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+  const countdownEl = document.getElementById('session-countdown');
+  const warnBody = document.getElementById('session-warn-body');
+  const expiredBody = document.getElementById('session-expired-body');
+  const stayBtn = document.getElementById('session-stay-btn');
+
+  let lastContact = Date.now();  // page load itself slid the clock
+  let lastPing = Date.now();
+  let activity = false;
+  let expired = false;
+  let warningOpen = false;
+
+  ['input', 'keydown', 'click', 'scroll'].forEach((evt) =>
+    document.addEventListener(evt, () => { activity = true; }, { passive: true }));
+
+  async function ping() {
+    try {
+      const resp = await fetch(url, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+      });
+      if (resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        if (data && data.ok) {
+          lastContact = Date.now();
+          lastPing = Date.now();
+          activity = false;
+          return true;
+        }
+      }
+    } catch (e) { /* network blip — treated as no contact */ }
+    return false;
+  }
+
+  function showExpired() {
+    expired = true;
+    warnBody.hidden = true;
+    expiredBody.hidden = false;
+    stayBtn.hidden = true;
+    modal.show();
+  }
+
+  stayBtn.addEventListener('click', async () => {
+    if (await ping()) { warningOpen = false; modal.hide(); } else { showExpired(); }
+  });
+
+  setInterval(async () => {
+    if (expired) return;
+    const now = Date.now();
+    if (activity && now - lastPing >= PING_MIN_MS) { await ping(); }
+    const remaining = idleMs - (Date.now() - lastContact);
+    if (remaining <= 0) { showExpired(); return; }
+    if (remaining <= WARN_MS) {
+      countdownEl.textContent = Math.ceil(remaining / 1000);
+      if (!warningOpen) { warningOpen = true; modal.show(); }
+    } else if (warningOpen) {
+      warningOpen = false;
+      modal.hide();
+    }
+  }, 1000);
+}
+
+// This include is rendered in the page content, before base.html loads the
+// Bootstrap bundle. Defer setup until Bootstrap and the rest of the DOM exist.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSessionKeepalive, { once: true });
+} else {
+  initSessionKeepalive();
+}
+})();
+</script>

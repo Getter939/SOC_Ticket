@@ -549,12 +549,14 @@ class ResponseTeamUiTest(TestCase):
     # ── Responder controls ────────────────────────────────────────────── #
 
     def test_assignee_sees_update_form_and_can_complete(self):
+        # A non-RCA response request (VA/PT) keeps the inline update form on the
+        # ticket page; RCA requests are worked in the dedicated workspace instead.
         t = self._ticket()
         st = TicketSubtask.objects.create(
-            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
-            title='RCA', assigned_to=self.forensic, created_by=self.manager,
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=self.redteam, created_by=self.manager,
         )
-        self.client.force_login(self.forensic)
+        self.client.force_login(self.redteam)
         detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, reverse('update_subtask', args=[st.pk]))
@@ -571,6 +573,17 @@ class ResponseTeamUiTest(TestCase):
         self.assertTrue(st.is_done)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ['m@example.com'])
+
+    def test_rca_row_shows_workspace_button_not_the_inline_form(self):
+        t = self._ticket()
+        st = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=self.forensic, created_by=self.manager,
+        )
+        self.client.force_login(self.forensic)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(detail, reverse('rca_workspace', args=[st.pk]))
+        self.assertNotContains(detail, reverse('update_subtask', args=[st.pk]))
 
     # ── My Requests queue ─────────────────────────────────────────────── #
 

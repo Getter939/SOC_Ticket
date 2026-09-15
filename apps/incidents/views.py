@@ -64,6 +64,7 @@ from .policies import (
     can_upload_project_attachment as _can_upload_project_attachment,
     can_upload_subtask_result as _can_upload_subtask_result,
     can_upload_ticket_attachment as _can_upload_ticket_attachment,
+    can_update_subtask as _can_update_subtask,
     holds_ticket_court as _holds_ticket_court,
     is_soc as _is_soc,
     is_soc_manager as _is_soc_manager,
@@ -2192,14 +2193,9 @@ def create_response_request(request, pk):
 def update_subtask(request, subtask_id):
     subtask = get_object_or_404(TicketSubtask, pk=subtask_id)
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=subtask.ticket_id)
-    profile = getattr(request.user, 'profile', None)
 
-    can_update = (
-        request.user.is_superuser
-        or (profile and profile.is_soc)
-        or subtask.assigned_to_id == request.user.pk
-    )
-    if ticket.status in Ticket.TERMINAL_STATUSES:
+    can_update = _can_update_subtask(subtask, request.user)
+    if not can_update and ticket.status in Ticket.TERMINAL_STATUSES:
         messages.error(request, 'รายการนี้ปิดหรือยกเลิกแล้ว ไม่สามารถเพิ่มไฟล์หรืออัปเดตงานย่อยได้')
         return redirect('ticket_detail', pk=ticket.pk)
     if not can_update:

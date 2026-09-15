@@ -8,4 +8,5 @@ urlpatterns = [
     path('2fa/recovery-codes/', mfa_views.RecoveryCodesView.as_view(), name='mfa_recovery_codes'),
     path('password/change/', views.AccountPasswordChangeView.as_view(), name='password_change'),
     path('password/change/done/', views.PasswordChangeDoneView.as_view(), name='password_change_done'),
+    path('session/keepalive/', views.session_keepalive, name='session_keepalive'),
 ]

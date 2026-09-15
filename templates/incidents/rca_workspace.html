@@ -1,0 +1,293 @@
+{% extends 'base.html' %}
+
+{% block title %}RCA {{ case_number }} — SOC Support System{% endblock %}
+
+{% block content %}
+<style>
+  .rca-shell { display:grid; grid-template-columns:250px minmax(0,1fr); gap:1rem; align-items:start; }
+  .rca-nav { position:sticky; top:72px; }
+  .rca-nav .list-group-item { display:flex; gap:.65rem; align-items:center; border-color:var(--ui-border); }
+  .rca-nav .marker { width:2rem; height:2rem; border-radius:50%; display:grid; place-items:center; background:var(--ui-surface-subtle); font-size:.75rem; font-weight:700; flex:0 0 auto; }
+  .rca-nav .active .marker { background:rgba(255,255,255,.2); }
+  .rca-entry { padding:1rem; margin-bottom:.85rem; border:1px solid var(--ui-border); border-radius:var(--ui-radius-md); background:var(--ui-surface-subtle); }
+  .rca-entry[hidden] { display:none !important; }
+  .rca-section-card .card-header { display:flex; justify-content:space-between; gap:1rem; align-items:center; }
+  .rca-checks ul { list-style:none; margin:0; padding:0; display:flex; gap:1rem; flex-wrap:wrap; }
+  .rca-checks label { display:flex; gap:.4rem; align-items:center; }
+  .rca-preview-list { max-height:15rem; overflow:auto; }
+  .rca-stepper { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; margin:.5rem 0 1rem; }
+  .rca-stepper .step { display:flex; align-items:center; gap:.4rem; font-size:.78rem; font-weight:600;
+    color:var(--ui-muted); padding:.25rem .7rem; border-radius:20px; border:1px solid var(--ui-border); }
+  .rca-stepper .step .num { width:1.3rem; height:1.3rem; border-radius:50%; display:grid; place-items:center;
+    background:var(--ui-surface-subtle); font-size:.7rem; }
+  .rca-stepper .step.done { color:#198754; border-color:#19875455; }
+  .rca-stepper .step.current { color:#fff; background:#2f6fb2; border-color:#2f6fb2; }
+  .rca-stepper .step.current .num { background:rgba(255,255,255,.25); }
+  .rca-stepper .sep { color:var(--ui-muted); }
+  .rca-start-card { border:1px dashed var(--ui-border); border-radius:var(--ui-radius-md);
+    padding:2rem 1.5rem; text-align:center; background:var(--ui-surface-subtle); }
+  @media (max-width: 991.98px) {
+    .rca-shell { grid-template-columns:1fr; }
+    .rca-nav { position:static; }
+    .rca-nav .list-group { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+</style>
+
+<div class="page-header">
+  <div>
+    <div class="small text-muted mb-1"><a href="{% url 'ticket_detail' ticket.pk %}#tasks">Ticket #{{ ticket.ticket_id }}</a> / Forensics &amp; RCA</div>
+    <h1 class="page-header__title"><i class="bi bi-file-earmark-medical me-2"></i>{{ case_number|default:'RCA Workspace' }}</h1>
+    <p class="page-header__subtitle mb-0">{{ subtask.title }} · {{ subtask.get_status_display }}</p>
+  </div>
+  <div class="page-header__actions d-flex gap-2 flex-wrap">
+    {% if can_edit %}<span class="badge bg-success">แก้ไขได้</span>{% else %}<span class="badge bg-secondary">อ่านอย่างเดียว</span>{% endif %}
+    {% if rca.has_stale_draft %}<span class="badge bg-warning text-dark">ข้อมูลใหม่กว่า Draft</span>{% endif %}
+  </div>
+</div>
+
+{% comment %} Header stepper: start → build → draft → deliver {% endcomment %}
+<div class="rca-stepper" aria-label="ขั้นตอนการจัดทำ RCA">
+  {% with step=workflow_step %}
+  <span class="step {% if step != 'start' %}done{% else %}current{% endif %}"><span class="num">1</span>เริ่มงาน</span>
+  <i class="bi bi-chevron-right sep"></i>
+  <span class="step {% if step == 'build' %}current{% elif step == 'draft' or step == 'done' %}done{% endif %}"><span class="num">2</span>จัดทำข้อมูล</span>
+  <i class="bi bi-chevron-right sep"></i>
+  <span class="step {% if step == 'draft' %}current{% elif step == 'done' %}done{% endif %}"><span class="num">3</span>Draft</span>
+  <i class="bi bi-chevron-right sep"></i>
+  <span class="step {% if step == 'done' %}current{% endif %}"><span class="num">4</span>ส่งมอบ</span>
+  {% endwith %}
+</div>
+
+{% include 'incidents/_rca_case_panel.html' %}
+
+{% if not rca %}
+<div class="rca-start-card">
+  {% if can_edit and is_open %}
+  <i class="bi bi-file-earmark-medical d-block mb-2" style="font-size:2rem;opacity:.5;"></i>
+  <h2 class="h5">เริ่มจัดทำรายงาน RCA</h2>
+  <p class="text-muted mb-3">ระบบจะสร้างรายงานและดึงข้อมูลเบื้องต้นจาก Ticket ให้อัตโนมัติ
+    จากนั้นคำขอจะเปลี่ยนเป็น "กำลังดำเนินการ"</p>
+  <form method="post" action="{% url 'rca_start' subtask.pk %}">{% csrf_token %}
+    <button class="btn btn-primary btn-lg" type="submit"><i class="bi bi-play-circle me-1"></i>เริ่มจัดทำ RCA</button>
+  </form>
+  {% else %}
+  <i class="bi bi-hourglass-split d-block mb-2" style="font-size:2rem;opacity:.5;"></i>
+  <p class="text-muted mb-0">ยังไม่เริ่มจัดทำรายงาน — รอผู้รับผิดชอบ (Forensic Analyst) หรือผู้จัดการ SOC เริ่มงาน</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="rca-shell">
+  <nav class="rca-nav" aria-label="ส่วนของรายงาน RCA">
+    <div class="list-group shadow-sm">
+      {% for section in sections %}
+      <a href="?section={{ section.key }}" class="list-group-item list-group-item-action {% if active_section == section.key %}active{% endif %}" data-section-link>
+        <span class="marker">{{ section.marker }}</span>
+        <span class="flex-grow-1">{{ section.label }}</span>
+        {% if section.count != None %}<span class="badge rounded-pill {% if active_section == section.key %}bg-light text-dark{% else %}bg-secondary{% endif %}">{{ section.count }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <main>
+    <section class="card rca-section-card shadow-sm">
+      <div class="card-header">
+        <div>
+          <h2 class="h5 mb-1">
+            {% for section in sections %}{% if active_section == section.key %}{{ section.label }}{% endif %}{% endfor %}
+          </h2>
+          <div class="small text-muted">บันทึกเฉพาะส่วนนี้ ข้อมูลในส่วนอื่นจะไม่ถูกเปลี่ยน</div>
+        </div>
+        {% if active_section == 'general' and can_edit %}
+        <form method="post" action="{% url 'rca_section1_refresh' subtask.pk %}" data-confirm="ข้อมูลทั่วไปที่แก้ไว้จะถูกแทนที่ด้วยข้อมูลล่าสุดจาก Ticket ยืนยันหรือไม่?">
+          {% csrf_token %}<button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-arrow-repeat me-1"></i>ดึงจาก Ticket อีกครั้ง</button>
+        </form>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if active_section == 'general' %}
+        <form method="post" data-rca-edit-form>
+          {% csrf_token %}<input type="hidden" name="section" value="general">
+          {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+          <div class="row g-3">
+            {% for field in form %}
+            <div class="{% if field.name == 'forensic_types' %}col-12 rca-checks{% else %}col-lg-6{% endif %}">
+              <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+          {% if can_edit %}<button class="btn btn-primary mt-4" type="submit"><i class="bi bi-save me-1"></i>บันทึกข้อมูลทั่วไป</button>{% endif %}
+        </form>
+
+        {% elif active_section == 'timeline' %}
+        {% if can_edit %}
+        <div class="border rounded p-3 mb-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
+            <div><strong>นำเข้า Timeline</strong><div class="small text-muted">CSV หรือ TSV ครั้งละไม่เกิน {{ timeline_max_rows }} แถว หากมีแถวผิด ระบบจะไม่เพิ่มข้อมูลทั้งไฟล์</div></div>
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'rca_timeline_template' subtask.pk %}"><i class="bi bi-download me-1"></i>ดาวน์โหลด Template</a>
+          </div>
+          <form method="post" action="{% url 'rca_timeline_import' subtask.pk %}" enctype="multipart/form-data" class="row g-2 align-items-end">
+            {% csrf_token %}<div class="col-md-9">{{ import_form.timeline_file.label_tag }}{{ import_form.timeline_file }}</div>
+            <div class="col-md-3"><button class="btn btn-outline-primary w-100" type="submit">นำเข้าไฟล์</button></div>
+          </form>
+        </div>
+        {% endif %}
+        <form method="post" data-rca-edit-form>
+          {% csrf_token %}<input type="hidden" name="section" value="timeline">
+          {% include 'incidents/_rca_formset.html' with formset=formset %}
+          {% if can_edit %}<button class="btn btn-primary mt-3" type="submit"><i class="bi bi-save me-1"></i>บันทึก Timeline</button>{% endif %}
+        </form>
+
+        {% elif active_section == 'iocs' %}
+        {% if ioc_preview %}
+        <div class="alert alert-warning">
+          <h3 class="h6">ตรวจสอบก่อนส่งเข้า IOC Database</h3>
+          <div class="row g-2 small">
+            <div class="col-md-4">สร้างใหม่: <strong>{{ ioc_preview.create|length }}</strong></div>
+            <div class="col-md-4">กู้คืน: <strong>{{ ioc_preview.restore|length }}</strong></div>
+            <div class="col-md-4">ซ้ำ: <strong>{{ ioc_preview.duplicate|length }}</strong></div>
+            <div class="col-md-4">มาจาก Ticket: <strong>{{ ioc_preview.from_ticket|length }}</strong></div>
+            <div class="col-md-4">ส่งแล้ว: <strong>{{ ioc_preview.already_pushed|length }}</strong></div>
+            <div class="col-md-4">Exclude: <strong>{{ ioc_preview.excluded|length }}</strong> · ไม่รองรับ: <strong>{{ ioc_preview.unsupported|length }}</strong></div>
+          </div>
+          {% if ioc_preview.create or ioc_preview.restore %}
+          <div class="rca-preview-list bg-body rounded border p-2 my-3">
+            {% for item in ioc_preview.create %}<div><span class="badge bg-success me-1">ใหม่</span>{{ item.get_category_display }} · {{ item.value }}</div>{% endfor %}
+            {% for item in ioc_preview.restore %}<div><span class="badge bg-info text-dark me-1">กู้คืน</span>{{ item.get_category_display }} · {{ item.value }}</div>{% endfor %}
+          </div>
+          <form method="post" action="{% url 'rca_iocs_push' subtask.pk %}">{% csrf_token %}<button class="btn btn-warning" type="submit">ยืนยันส่ง IOC</button></form>
+          {% else %}<div class="mt-3">ไม่มี IOC ใหม่ที่พร้อมส่ง</div>{% endif %}
+        </div>
+        {% endif %}
+        {% if can_edit %}
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+          <form method="post" action="{% url 'rca_iocs_pull' subtask.pk %}">{% csrf_token %}<button class="btn btn-outline-secondary" type="submit"><i class="bi bi-arrow-down-circle me-1"></i>ดึง IOC จาก Ticket</button></form>
+          {% if can_push_iocs %}<a class="btn btn-outline-warning" href="{% url 'rca_iocs_push' subtask.pk %}"><i class="bi bi-database-up me-1"></i>ดูตัวอย่างก่อนส่ง</a>{% endif %}
+        </div>
+        {% endif %}
+        <form method="post" data-rca-edit-form>
+          {% csrf_token %}<input type="hidden" name="section" value="iocs">
+          {% for group in indicator_groups %}
+          <div class="border rounded p-3 mb-3">
+            <h3 class="h6 mb-3">{{ group.label }}</h3>
+            {% include 'incidents/_rca_formset.html' with formset=group.formset %}
+          </div>
+          {% endfor %}
+          {% if can_edit %}<button class="btn btn-primary" type="submit"><i class="bi bi-save me-1"></i>บันทึก IOC</button>{% endif %}
+        </form>
+
+        {% elif active_section == 'final' %}
+        <div class="row g-3 mb-4">
+          <div class="col-lg-7">
+            <div class="border rounded p-3 h-100">
+              <h3 class="h6">Word Draft</h3>
+              {% if rca.draft_generated_at %}
+              <p class="small mb-2">สร้างล่าสุด {{ rca.draft_generated_at|date:"d/m/Y H:i" }}{% if rca.draft_generated_by %} โดย {{ rca.draft_generated_by.get_full_name|default:rca.draft_generated_by.username }}{% endif %}</p>
+              {% if rca.has_stale_draft %}<div class="alert alert-warning py-2 small">ข้อมูลใน Workspace เปลี่ยนหลังจากสร้าง Draft ครั้งล่าสุด</div>{% endif %}
+              {% else %}<p class="small text-muted">ยังไม่เคยสร้าง Draft</p>{% endif %}
+              {% if can_generate_draft %}<form method="post" action="{% url 'rca_draft' subtask.pk %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit"><i class="bi bi-file-earmark-word me-1"></i>สร้างและดาวน์โหลด Draft</button></form>{% endif %}
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="border rounded p-3 h-100"><h3 class="h6">ไฟล์ที่ส่งมอบ</h3>
+              {% for attachment in attachments %}<div class="small mb-1"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' attachment.pk %}">{{ attachment.original_name }}</a>{% if attachment.description %}<div class="text-muted ms-4">{{ attachment.description }}</div>{% endif %}</div>{% empty %}<div class="small text-muted">ยังไม่มีไฟล์ส่งมอบ</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+        {% if can_edit %}
+        <form method="post" action="{% url 'rca_final_submission' subtask.pk %}" enctype="multipart/form-data" data-rca-edit-form>
+          {% csrf_token %}
+          <div class="mb-3">{{ final_form.result_notes.label_tag }}{{ final_form.result_notes }}{% for error in final_form.result_notes.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          <div class="row g-3">
+            <div class="col-md-6">{{ final_form.result_file.label_tag }}{{ final_form.result_file }}{% for error in final_form.result_file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+            <div class="col-md-6">{{ final_form.result_file_desc.label_tag }}{{ final_form.result_file_desc }}{% for error in final_form.result_file_desc.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+          </div>
+          <div class="d-flex justify-content-between gap-2 flex-wrap mt-4">
+            <button class="btn btn-outline-primary" type="submit" name="complete" value="0"><i class="bi bi-save me-1"></i>บันทึกผลและไฟล์</button>
+            <button class="btn btn-success" type="submit" name="complete" value="1" data-confirm-click="เมื่อปิดงานแล้ว ข้อมูล RCA จะเป็นแบบอ่านอย่างเดียว ยืนยันหรือไม่?"><i class="bi bi-check-circle me-1"></i>ส่งมอบและ Mark Done</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="border rounded p-3"><strong>ผลการดำเนินการ</strong><div class="mt-2">{{ subtask.result_notes|default:'-'|linebreaksbr }}</div></div>
+        {% endif %}
+
+        {% else %}
+        <form method="post" data-rca-edit-form>
+          {% csrf_token %}<input type="hidden" name="section" value="{{ active_section }}">
+          {% include 'incidents/_rca_formset.html' with formset=formset %}
+          {% if can_edit %}<button class="btn btn-primary mt-3" type="submit"><i class="bi bi-save me-1"></i>บันทึกส่วนนี้</button>{% endif %}
+        </form>
+        {% endif %}
+      </div>
+    </section>
+  </main>
+</div>
+{% endif %}
+
+<script nonce="{{ request.csp_nonce }}">
+(() => {
+  let dirty = false;
+  let submitting = false;
+  const editForms = document.querySelectorAll('[data-rca-edit-form]');
+  editForms.forEach((form) => {
+    form.addEventListener('input', () => { dirty = true; });
+    form.addEventListener('change', () => { dirty = true; });
+    form.addEventListener('submit', () => { submitting = true; });
+  });
+
+  document.querySelectorAll('[data-section-link]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      if (dirty && !window.confirm('ส่วนนี้มีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกจากส่วนนี้หรือไม่?')) {
+        event.preventDefault();
+      }
+    });
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (dirty && !submitting) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+
+  document.querySelectorAll('[data-confirm]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+    });
+  });
+  document.querySelectorAll('[data-confirm-click]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      if (!window.confirm(button.dataset.confirmClick)) event.preventDefault();
+    });
+  });
+
+  document.querySelectorAll('[data-formset]').forEach((formset) => {
+    const prefix = formset.dataset.prefix;
+    const total = document.getElementById(`id_${prefix}-TOTAL_FORMS`);
+    const rows = formset.querySelector('[data-formset-rows]');
+    const template = formset.querySelector('[data-empty-form]');
+    const add = formset.querySelector('[data-add-row]');
+    if (add && template && total) {
+      add.addEventListener('click', () => {
+        rows.querySelector('[data-empty-message]')?.remove();
+        const index = Number(total.value);
+        rows.insertAdjacentHTML('beforeend', template.innerHTML.replaceAll('__prefix__', index));
+        total.value = index + 1;
+        dirty = true;
+      });
+    }
+    formset.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-remove-row]');
+      if (!button) return;
+      const row = button.closest('[data-form-row]');
+      const deletion = row.querySelector('input[name$="-DELETE"]');
+      if (deletion) deletion.checked = true;
+      row.hidden = true;
+      dirty = true;
+    });
+  });
+})();
+</script>
+{% if can_edit %}{% include 'includes/_session_keepalive.html' %}{% endif %}
+{% endblock %}

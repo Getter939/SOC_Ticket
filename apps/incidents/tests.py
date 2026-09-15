@@ -3506,7 +3506,7 @@ class AttachmentWorkflowPermissionTest(TestCase):
         response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
         self.assertContains(response, attachment.original_name)
         self.assertContains(response, 'Firewall export')
-        self.assertContains(response, 'Uploaded by')
+        self.assertContains(response, 'อัปโหลดโดย')
         self.assertContains(response, self.creator.username)
 
 
@@ -5194,6 +5194,35 @@ class ResponseRequestNotificationTest(TestCase):
         self.assertTrue(notify_response_request_completed(st))
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ['mgr@example.com'])
+
+    def test_rca_created_email_links_to_the_workspace(self):
+        st = self._request(self.forensic)
+        notify_response_request_created(st)
+        body = mail.outbox[0].body
+        self.assertIn(reverse('rca_workspace', args=[st.pk]), body)
+        self.assertNotIn(reverse('ticket_detail', args=[self.ticket.pk]), body)
+
+    def test_non_rca_created_email_links_to_the_ticket(self):
+        st = TicketSubtask.objects.create(
+            ticket=self.ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=self.forensic, created_by=self.mgr,
+        )
+        notify_response_request_created(st)
+        body = mail.outbox[0].body
+        self.assertIn(reverse('ticket_detail', args=[self.ticket.pk]), body)
+        self.assertNotIn(reverse('rca_workspace', args=[st.pk]), body)
+
+    def test_custom_template_using_only_ticket_url_still_sends(self):
+        from apps.incidents.models import NotificationTemplate
+
+        NotificationTemplate.objects.create(
+            key=NotificationTemplate.KEY_RESPONSE_REQUEST_CREATED,
+            subject='คำขอ {ticket_id}',
+            body='ดูที่ {ticket_url}',
+        )
+        st = self._request(self.forensic)
+        self.assertTrue(notify_response_request_created(st))
+        self.assertIn(reverse('ticket_detail', args=[self.ticket.pk]), mail.outbox[0].body)
 
 
 # ── Template/markup regression tests (2026-07 UX audit) ──────────────────── #

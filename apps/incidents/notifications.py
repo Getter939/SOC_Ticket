@@ -65,6 +65,24 @@ def _ticket_url(ticket):
     return f'{site_url}{path}'
 
 
+def _request_url(subtask):
+    """Where a response-request email should send the responder.
+
+    A Forensics / RCA request opens its dedicated workspace; every other request
+    type still lands on the ticket. Falls back to the ticket URL if the RCA route
+    is unavailable for any reason, so an email never carries a broken link.
+    """
+    from .models import TicketSubtask
+
+    if subtask.subtask_type == TicketSubtask.TYPE_FORENSIC_RCA:
+        site_url = getattr(settings, 'SITE_URL', 'http://localhost:8088').rstrip('/')
+        try:
+            return f'{site_url}{reverse("rca_workspace", kwargs={"subtask_id": subtask.pk})}'
+        except Exception:
+            pass
+    return _ticket_url(subtask.ticket)
+
+
 def _render(key, context, default_subject, default_body):
     """
     Render subject/body for notification ``key`` from the admin-editable
@@ -343,6 +361,7 @@ def notify_response_request_created(subtask):
 
     ticket = subtask.ticket
     ticket_url = _ticket_url(ticket)
+    request_url = _request_url(subtask)
     summary = ticket.issue_description[:100]
     if len(ticket.issue_description) > 100:
         summary += '…'
@@ -363,8 +382,8 @@ def notify_response_request_created(subtask):
         'รายละเอียด:\n'
         '{description}\n'
         '\n'
-        'เปิดดู Ticket ได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
-        '  {ticket_url}\n'
+        'เปิดงานได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
+        '  {request_url}\n'
         '\n'
         'กรุณาอย่าตอบกลับอีเมลนี้'
     )
@@ -372,6 +391,7 @@ def notify_response_request_created(subtask):
     context = {
         'ticket_id': ticket.ticket_id,
         'ticket_url': ticket_url,
+        'request_url': request_url,
         'request_type': subtask.get_subtask_type_display(),
         'title': subtask.title,
         'description': subtask.description or '-',
@@ -411,6 +431,7 @@ def notify_response_request_completed(subtask):
 
     ticket = subtask.ticket
     ticket_url = _ticket_url(ticket)
+    request_url = _request_url(subtask)
 
     responder = subtask.assigned_to
     completed_by = (responder.get_full_name() or responder.username) if responder else '-'
@@ -427,8 +448,8 @@ def notify_response_request_completed(subtask):
         'ผลการดำเนินการ:\n'
         '{result_notes}\n'
         '\n'
-        'เปิดดู Ticket ได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
-        '  {ticket_url}\n'
+        'เปิดดูงานได้ที่นี่ (ต้องเข้าสู่ระบบ):\n'
+        '  {request_url}\n'
         '\n'
         'กรุณาอย่าตอบกลับอีเมลนี้'
     )
@@ -436,6 +457,7 @@ def notify_response_request_completed(subtask):
     context = {
         'ticket_id': ticket.ticket_id,
         'ticket_url': ticket_url,
+        'request_url': request_url,
         'request_type': subtask.get_subtask_type_display(),
         'title': subtask.title,
         'result_notes': subtask.result_notes or '-',

@@ -4,7 +4,8 @@ from django.contrib.auth.models import User
 from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
 from .models import (
-    Ticket, TicketAttachment, TicketSubtask, TriageRecord,
+    RCAAsset, RCAIndicator, RCARecommendation, RCAReport, RCARootCause,
+    RCATimelineEntry, Ticket, TicketAttachment, TicketSubtask, TriageRecord,
     validate_attachment, validate_attachment_batch,
 )
 from django.core.exceptions import ValidationError
@@ -928,6 +929,180 @@ class SubtaskUpdateForm(forms.ModelForm):
                 'placeholder': 'บันทึกผลการดำเนินการ...',
             }),
         }
+
+
+class _RCAFormMixin:
+    """Apply the project form styling consistently across the RCA workspace."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            widget = field.widget
+            if isinstance(widget, (forms.CheckboxInput, forms.CheckboxSelectMultiple)):
+                continue
+            css_class = 'form-select' if isinstance(widget, forms.Select) else 'form-control'
+            widget.attrs['class'] = f'{widget.attrs.get("class", "")} {css_class}'.strip()
+
+
+class RCASection1Form(_RCAFormMixin, forms.ModelForm):
+    forensic_types = forms.MultipleChoiceField(
+        choices=RCAReport.FORENSIC_TYPE_CHOICES,
+        required=False,
+        label='ประเภทการตรวจพิสูจน์',
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = RCAReport
+        fields = [
+            'incident_name', 'first_occurrence', 'detected_text', 'scope_period',
+            'forensic_types', 'importance', 'siem_severity', 'ncsa_severity',
+            'threat_category', 'assets_examined', 'asset_type', 'affected_systems',
+            'asset_owner', 'examiner', 'related_refs',
+        ]
+        widgets = {
+            'first_occurrence': forms.TextInput(),
+            'detected_text': forms.TextInput(),
+            'scope_period': forms.TextInput(),
+            'assets_examined': forms.Textarea(attrs={'rows': 2}),
+            'affected_systems': forms.Textarea(attrs={'rows': 2}),
+            'asset_owner': forms.Textarea(attrs={'rows': 2}),
+            'related_refs': forms.Textarea(attrs={'rows': 2}),
+        }
+
+
+class RCAAssetForm(_RCAFormMixin, forms.ModelForm):
+    class Meta:
+        model = RCAAsset
+        fields = ['host', 'ip', 'detail']
+        widgets = {'detail': forms.Textarea(attrs={'rows': 2})}
+
+
+class RCATimelineEntryForm(_RCAFormMixin, forms.ModelForm):
+    class Meta:
+        model = RCATimelineEntry
+        fields = [
+            'occurred_at', 'occurred_until', 'host', 'event',
+            'evidence_file', 'evidence_line', 'excerpt',
+        ]
+        widgets = {
+            'occurred_at': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'occurred_until': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'event': forms.Textarea(attrs={'rows': 2}),
+            'excerpt': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['occurred_at'].input_formats = ['%Y-%m-%dT%H:%M']
+        self.fields['occurred_until'].input_formats = ['%Y-%m-%dT%H:%M']
+
+
+class RCARootCauseForm(_RCAFormMixin, forms.ModelForm):
+    class Meta:
+        model = RCARootCause
+        fields = ['category', 'cause', 'evidence_ref', 'excerpt']
+        widgets = {
+            'cause': forms.Textarea(attrs={'rows': 2}),
+            'evidence_ref': forms.Textarea(attrs={'rows': 2}),
+            'excerpt': forms.Textarea(attrs={'rows': 2}),
+        }
+
+
+class RCARecommendationForm(_RCAFormMixin, forms.ModelForm):
+    class Meta:
+        model = RCARecommendation
+        fields = ['action', 'root_causes']
+        widgets = {
+            'action': forms.Textarea(attrs={'rows': 3}),
+            'root_causes': forms.CheckboxSelectMultiple,
+        }
+
+    def __init__(self, *args, rca=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if rca is not None:
+            self.fields['root_causes'].queryset = rca.root_causes.all()
+
+
+class RCAIndicatorForm(_RCAFormMixin, forms.ModelForm):
+    class Meta:
+        model = RCAIndicator
+        fields = ['category', 'value', 'host', 'label', 'note', 'excluded']
+        widgets = {
+            'category': forms.HiddenInput(),
+            'label': forms.Textarea(attrs={'rows': 2}),
+            'note': forms.Textarea(attrs={'rows': 2}),
+        }
+
+    def __init__(self, *args, category=None, **kwargs):
+        self.rca_category = category
+        super().__init__(*args, **kwargs)
+        if category:
+            self.fields['category'].initial = category
+
+    def clean_category(self):
+        return self.rca_category or self.cleaned_data['category']
+
+    def clean_value(self):
+        # Normalise to the canonical form (raising on a malformed value) so the
+        # inline formset's unique check compares canonical values and rejects a
+        # within-category duplicate before the DB constraint 500s on save.
+        category = self.rca_category or self.data.get(self.add_prefix('category'))
+        return RCAIndicator.normalize_value(category, self.cleaned_data.get('value', ''))
+
+
+RCAAssetFormSet = forms.inlineformset_factory(
+    RCAReport, RCAAsset, form=RCAAssetForm, extra=0, can_delete=True,
+)
+RCATimelineFormSet = forms.inlineformset_factory(
+    RCAReport, RCATimelineEntry, form=RCATimelineEntryForm, extra=0, can_delete=True,
+)
+RCARootCauseFormSet = forms.inlineformset_factory(
+    RCAReport, RCARootCause, form=RCARootCauseForm, extra=0, can_delete=True,
+)
+RCARecommendationFormSet = forms.inlineformset_factory(
+    RCAReport, RCARecommendation, form=RCARecommendationForm, extra=0, can_delete=True,
+)
+RCAIndicatorFormSet = forms.inlineformset_factory(
+    RCAReport, RCAIndicator, form=RCAIndicatorForm, extra=0, can_delete=True,
+)
+
+
+class RCATimelineImportForm(forms.Form):
+    timeline_file = forms.FileField(
+        label='ไฟล์ Timeline (CSV/TSV)',
+        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.csv,.tsv,text/csv'}),
+    )
+
+
+class RCAFinalSubmissionForm(forms.Form):
+    result_notes = forms.CharField(
+        required=False,
+        label='สรุปผลการดำเนินการ',
+        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
+    )
+    result_file = forms.FileField(
+        required=False,
+        label='รายงาน RCA ฉบับสมบูรณ์',
+        widget=forms.FileInput(attrs={'class': 'form-control'}),
+    )
+    result_file_desc = forms.CharField(
+        required=False,
+        max_length=255,
+        label='คำอธิบายไฟล์',
+        initial='รายงาน RCA ฉบับสมบูรณ์',
+        widget=forms.TextInput(attrs={'class': 'form-control'}),
+    )
+
+    def clean_result_file(self):
+        upload = self.cleaned_data.get('result_file')
+        if upload is not None:
+            validate_attachment(upload)
+        return upload
 
 
 class MultipleFileInput(forms.ClearableFileInput):

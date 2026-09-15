@@ -101,6 +101,12 @@ def case_number(rca):
     return _report_ticket_id(rca.subtask.ticket, kind='RCA')
 
 
+def case_number_for(subtask):
+    """The RCA case number from the request alone, before any report exists —
+    for the workspace's Start screen."""
+    return _report_ticket_id(subtask.ticket, kind='RCA')
+
+
 def _examiner_label(user):
     """1.15 — ``name (department · phone)``, dropping whatever is missing."""
     if not user:
@@ -220,6 +226,19 @@ def start_request(subtask, user):
     subtask.status = fresh.status
     subtask.status_changed_at = fresh.status_changed_at
     return True
+
+
+def start_rca(subtask, user):
+    """Begin the RCA: create + prefill the report and move OPEN → IN_PROGRESS.
+
+    The one action behind the workspace's "Start RCA" button. Idempotent — a
+    request already In Progress just returns its report, so a double click or a
+    manager pressing Start after the analyst does nothing twice.
+    """
+    with transaction.atomic():
+        report, _created = get_or_create_rca(subtask, user)
+        start_request(subtask, user)
+    return report
 
 
 def record_edit(rca, user, section_label, summary):
@@ -365,7 +384,7 @@ TIMELINE_CSV_COLUMNS = (
     'datetime', 'datetime_end', 'host', 'event', 'evidence_file', 'evidence_line', 'excerpt',
 )
 TIMELINE_IMPORT_MAX_BYTES = 2 * 1024 * 1024
-TIMELINE_IMPORT_MAX_ROWS = 2000
+TIMELINE_IMPORT_MAX_ROWS = 30
 _TIMELINE_LIMITS = {'host': 255, 'evidence_file': 255, 'evidence_line': 64}
 
 

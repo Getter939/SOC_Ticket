@@ -277,6 +277,30 @@ def can_upload_subtask_result(subtask, user):
     return profile is not None and profile.is_soc_manager
 
 
+def response_request_updates_frozen(subtask):
+    """Whether the parent Ticket freezes updates to this response request.
+
+    Response Requests deliberately outlive a Ticket closed as an Event.  An
+    approved Incident or a cancelled Ticket is final and freezes the request.
+    Ordinary SOC subtasks keep the historical rule that every terminal parent
+    freezes them.
+    """
+    ticket_status = subtask.ticket.status
+    if subtask.is_response_request and ticket_status == Ticket.STATUS_CLOSED_EVENT:
+        return False
+    return ticket_status in Ticket.TERMINAL_STATUSES
+
+
+def can_update_subtask(subtask, user):
+    """Whether ``user`` may update notes/status on an existing Subtask."""
+    if response_request_updates_frozen(subtask):
+        return False
+    if user.is_superuser or subtask.assigned_to_id == user.pk:
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_soc)
+
+
 def can_view_rca(subtask, user):
     """Whether user may open a Forensics / RCA request's report and download its
     draft.
@@ -318,6 +342,21 @@ def can_push_rca_iocs(subtask, user):
     from .ti_platform import can_manage_inventory
 
     return can_edit_rca(subtask, user) and can_manage_inventory(user)
+
+
+def can_generate_rca_draft(subtask, user):
+    """Whether ``user`` may generate and download the RCA DOCX draft.
+
+    Generation writes provenance on the RCA report, so it is intentionally
+    narrower than read access: the assignee, SOC Manager, or superuser only.
+    It remains available after completion so the stable final data can be
+    downloaded again.
+    """
+    if not can_view_rca(subtask, user):
+        return False
+    if user.is_superuser or subtask.assigned_to_id == user.pk:
+        return True
+    return is_soc_manager(user)
 
 
 def can_access_ticket_report(user):

@@ -5,7 +5,7 @@ workflow state and do not construct forms or HTTP responses.
 """
 
 from django.contrib.auth.models import User
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch
 
 from apps.accounts.models import UserProfile
 
@@ -16,7 +16,15 @@ from .models import (
     TicketLogRevision,
     TicketSubtask,
 )
-from .policies import can_delete_ticket_attachment, can_restore_ticket_attachment
+from .policies import (
+    can_delete_ticket_attachment,
+    can_edit_rca,
+    can_generate_rca_draft,
+    can_restore_ticket_attachment,
+    can_update_subtask,
+)
+from .rca import case_number as rca_case_number
+from .reports import _report_ticket_id
 
 
 def get_ticket_detail_read_model(
@@ -53,7 +61,15 @@ def get_ticket_detail_read_model(
     for attachment in attachments:
         attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
 
-    subtasks = list(ticket.subtasks.select_related('assigned_to', 'created_by').prefetch_related(
+    subtasks = list(ticket.subtasks.select_related(
+        'assigned_to', 'created_by', 'rca__draft_generated_by',
+    ).annotate(
+        rca_asset_count=Count('rca__assets', distinct=True),
+        rca_timeline_count=Count('rca__timeline', distinct=True),
+        rca_root_cause_count=Count('rca__root_causes', distinct=True),
+        rca_indicator_count=Count('rca__indicators', distinct=True),
+        rca_recommendation_count=Count('rca__recommendations', distinct=True),
+    ).prefetch_related(
         Prefetch(
             'attachments',
             queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
@@ -65,6 +81,18 @@ def get_ticket_detail_read_model(
         ),
     ))
     for subtask in subtasks:
+        subtask.can_update = can_update_subtask(subtask, user)
+        subtask.is_rca_request = subtask.subtask_type == TicketSubtask.TYPE_FORENSIC_RCA
+        subtask.rca_can_start = (
+            subtask.is_rca_request
+            and subtask.status == TicketSubtask.STATUS_OPEN
+            and can_edit_rca(subtask, user)
+        )
+        subtask.rca_report = getattr(subtask, 'rca', None)
+        subtask.rca_case_number = (
+            rca_case_number(subtask.rca_report) if subtask.rca_report else ''
+        )
+        subtask.can_generate_rca_draft = can_generate_rca_draft(subtask, user)
         for attachment in subtask.attachments.all():
             attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
 
@@ -109,4 +137,52 @@ def get_ticket_detail_read_model(
         'subtasks': subtasks,
         'open_subtask_count': sum(not subtask.is_done for subtask in subtasks),
         'evidence_count': len(attachments) + len(alert_links),
+    }
+
+
+def get_rca_case_context(ticket):
+    """Read-only case snapshot for the RCA workspace's case panel.
+
+    Gives the analyst the ticket's own record — description, classification,
+    indicators, linked alerts and evidence — without leaving the workspace. All
+    read-only; the analyst is already authorised to view it (``visible_to``).
+    """
+    iocs = list(ticket.iocs.all())
+    ioc_groups = []
+    for ioc in iocs:
+        if ioc_groups and ioc_groups[-1]['category'] == ioc.category:
+            ioc_groups[-1]['values'].append(ioc.value)
+        else:
+            ioc_groups.append({
+                'category': ioc.category,
+                'label': ioc.get_category_display(),
+                'values': [ioc.value],
+            })
+
+    return {
+        'report_number': _report_ticket_id(ticket),
+        'incident_name': ticket.incident_name,
+        'classification': ticket.get_classification_display() if ticket.classification else '',
+        'severity': ticket.severity,
+        'ncsa_severity': ticket.get_ncsa_severity_display() if ticket.ncsa_severity else '',
+        'threat_category': ticket.get_detailed_issue_display() if ticket.detailed_issue else '',
+        'device_name': ticket.device_name,
+        'ip_address': ticket.ip_address,
+        'operating_system': ticket.operating_system,
+        'asset_owner': ticket.asset_owner,
+        'asset_owner_name': ticket.asset_owner_name,
+        'log_source': ticket.log_source,
+        'reference_id': ticket.reference_id,
+        'incident_datetime': ticket.incident_datetime,
+        'event_occurred_at': ticket.event_occurred_at,
+        'issue_description': ticket.issue_description,
+        'ioc_groups': ioc_groups,
+        'ioc_user': ticket.ioc_user,
+        'ioc_command': ticket.ioc_command,
+        'alert_links': list(
+            ticket.alert_links.select_related('alert', 'linked_by')
+        ),
+        'attachments': list(
+            ticket.attachments.filter(subtask__isnull=True).select_related('uploaded_by')
+        ),
     }

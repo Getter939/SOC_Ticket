@@ -8,6 +8,57 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Added
+- **Forensic RCA workspace.** Forensics/RCA response requests now open a
+  dedicated, section-based workspace for general incident data, affected
+  assets, timeline evidence, root causes, indicators, linked recommendations,
+  Word-draft generation, final notes, report upload, and Mark Done. Each section
+  saves independently, records RCA audit history, and becomes read-only after
+  completion. Timeline imports accept UTF-8/Thai Windows CSV or TSV files with
+  an all-or-nothing limit of 30 data rows per file, while IOC promotion keeps
+  its existing preview-and-confirm workflow.
+- **Guided RCA analyst handoff.** Opening an RCA request now shows a read-only
+  Ticket context panel before the analyst explicitly starts the report; starting
+  pre-fills the workspace and moves the request to In Progress. Ticket rows and
+  both response-request notification emails link directly to the workspace, and
+  active editors receive an idle-expiry countdown with authenticated keep-alive
+  protection for long-running analysis.
+
+### Changed
+- **Response-request completion after Event closure.** Assigned response-team
+  members and SOC Managers can finish VA/PT, Infrastructure Security, and
+  Forensics/RCA requests after the parent Ticket is closed as an Event. Approved
+  Incidents and cancelled Tickets remain frozen. RCA draft generation is limited
+  to the assigned analyst, SOC Manager, and superuser.
+
+## [v1.5.4] — 2026-09-15
+
+Adds late-discovered systems to active Project Incidents and advances the
+Forensic RCA report groundwork from a data model to a generated Word draft.
+
+### Added
+- **Add affected systems to an active Project Incident.** The Project Incident
+  creator or an SOC Manager can use the new plus-button form on the project page
+  to create another Member Ticket with the existing system-detail and decision
+  fields. Event members go to Tier 2; Incident members added after Project Review
+  inherit its current Normal/Emergency assessment and enter their selected Admin
+  or Direct-to-Owner lane immediately. The operation preserves the project
+  creator as the Ticket owner, assigns the next member suffix, copies shared
+  incident facts and structured IOCs, retains the original incident time for OLA,
+  and records both project- and ticket-level audit history. Finished projects are
+  frozen and cannot receive another member.
+- **Forensic RCA DOCX draft generation (backend).** RCA data can now populate a
+  versioned Word draft with the case number, general facts, severity and forensic
+  checkboxes, affected assets, timeline, root causes, indicators and linked
+  recommendations. Generation records the author, time, template version and
+  SHA-256 digest on the RCA report. The in-app RCA workspace/editor is not part
+  of this release.
+
+### Changed
+- **RCA Word template.** Rebuilt the draft template around repeatable table rows
+  so each stored asset, timeline entry, root cause, IOC and recommendation gets
+  its own formatted row while empty sections remain usable as a Word form.
+
 ## [v1.5.3] — 2026-09-15
 
 ### Added

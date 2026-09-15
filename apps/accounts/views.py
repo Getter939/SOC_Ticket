@@ -1,10 +1,13 @@
 import logging
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordResetForm
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, JsonResponse
 from django.urls import reverse_lazy
+from django.views.decorators.http import require_GET
 
 from .models import PasswordChangeAudit
 from .password_audit import password_audit_context
@@ -77,3 +80,23 @@ class AccountPasswordChangeView(auth_views.PasswordChangeView):
 
 class PasswordChangeDoneView(auth_views.PasswordChangeDoneView):
     template_name = 'registration/password_change_done.html'
+
+
+@require_GET
+@login_required
+def session_keepalive(request):
+    """Slide the idle-session clock for a user who is actively working.
+
+    Reaching an authenticated view is itself the keep-alive: SESSION_SAVE_EVERY_
+    REQUEST resets SESSION_COOKIE_AGE on every request. This endpoint exists so a
+    long form page (e.g. the RCA workspace) can send that request from the client
+    while the analyst types, without navigating. It never extends an idle
+    session on its own — the page only calls it after real activity — so the
+    30-minute policy still expires an abandoned console. An expired session never
+    reaches here (the auth middleware 302s to login), which the caller reads as
+    "expired". Returns the idle window so the client can time its own warning.
+    """
+    return JsonResponse({
+        'ok': True,
+        'idle_seconds': settings.SESSION_COOKIE_AGE,
+    })

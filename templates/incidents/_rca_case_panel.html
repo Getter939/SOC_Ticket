@@ -1,0 +1,97 @@
+{% comment %}
+Read-only case snapshot for the RCA workspace. Expects `case` (from
+selectors.get_rca_case_context) and `ticket`. Everything here is view-only; the
+analyst already has visibility of this ticket.
+{% endcomment %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-body d-flex justify-content-between align-items-center gap-2">
+    <button class="btn btn-sm btn-link text-decoration-none p-0 fw-semibold" type="button"
+            data-bs-toggle="collapse" data-bs-target="#rca-case-panel"
+            aria-expanded="false" aria-controls="rca-case-panel">
+      <i class="bi bi-info-circle me-1"></i>ข้อมูลเคส (Ticket #{{ ticket.ticket_id }})
+    </button>
+    <a class="small" href="{% url 'ticket_detail' ticket.pk %}#tasks">
+      เปิด Ticket แบบเต็ม <i class="bi bi-box-arrow-up-right"></i>
+    </a>
+  </div>
+  <div class="collapse" id="rca-case-panel">
+    <div class="card-body">
+      <div class="row g-3 small">
+        <div class="col-lg-6">
+          <dl class="row mb-0">
+            <dt class="col-5 text-muted">ชื่อเหตุการณ์</dt><dd class="col-7">{{ case.incident_name|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ประเภท</dt><dd class="col-7">{{ case.classification|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ความรุนแรง (SIEM)</dt><dd class="col-7">{{ case.severity|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ความรุนแรง (สกมช.)</dt><dd class="col-7">{{ case.ncsa_severity|default:'-' }}</dd>
+            <dt class="col-5 text-muted">หมวดหมู่ภัยคุกคาม</dt><dd class="col-7">{{ case.threat_category|default:'-' }}</dd>
+            <dt class="col-5 text-muted">แหล่งข้อมูล/Log</dt><dd class="col-7">{{ case.log_source|default:'-' }}{% if case.reference_id %} · {{ case.reference_id }}{% endif %}</dd>
+          </dl>
+        </div>
+        <div class="col-lg-6">
+          <dl class="row mb-0">
+            <dt class="col-5 text-muted">ระบบ/อุปกรณ์</dt><dd class="col-7">{{ case.device_name|default:'-' }}</dd>
+            <dt class="col-5 text-muted">IP Address</dt><dd class="col-7" style="white-space:pre-line;">{{ case.ip_address|default:'-' }}</dd>
+            <dt class="col-5 text-muted">OS</dt><dd class="col-7">{{ case.operating_system|default:'-' }}</dd>
+            <dt class="col-5 text-muted">เจ้าของทรัพย์สิน</dt><dd class="col-7">{{ case.asset_owner|default:'-' }}{% if case.asset_owner_name %} ({{ case.asset_owner_name }}){% endif %}</dd>
+            <dt class="col-5 text-muted">เกิดเหตุ</dt><dd class="col-7">{{ case.event_occurred_at|date:"d/m/Y H:i"|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ตรวจพบ</dt><dd class="col-7">{{ case.incident_datetime|date:"d/m/Y H:i"|default:'-' }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      {% if case.issue_description %}
+      <div class="mt-3">
+        <div class="text-muted small mb-1">รายละเอียดเหตุการณ์</div>
+        <div class="border rounded p-2 bg-body small" style="white-space:pre-line;">{{ case.issue_description }}</div>
+      </div>
+      {% endif %}
+
+      {% if case.ioc_groups or case.ioc_user or case.ioc_command %}
+      <div class="mt-3">
+        <div class="text-muted small mb-1">IOC ใน Ticket</div>
+        <div class="small">
+          {% for group in case.ioc_groups %}
+          <div><span class="badge bg-light text-dark border me-1">{{ group.label }}</span>{{ group.values|join:", " }}</div>
+          {% endfor %}
+          {% if case.ioc_user %}<div><span class="badge bg-light text-dark border me-1">บัญชีผู้ใช้</span><span style="white-space:pre-line;">{{ case.ioc_user }}</span></div>{% endif %}
+          {% if case.ioc_command %}<div><span class="badge bg-light text-dark border me-1">คำสั่ง</span>{{ case.ioc_command }}</div>{% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if case.alert_links %}
+      <div class="mt-3">
+        <div class="text-muted small mb-1">Alert ที่เชื่อมโยง</div>
+        <div class="table-responsive">
+          <table class="table table-sm small mb-0">
+            <thead><tr><th>เวลา</th><th>Rule</th><th>Level</th><th>Agent</th></tr></thead>
+            <tbody>
+              {% for link in case.alert_links %}
+              <tr>
+                <td>{{ link.alert.timestamp|date:"d/m/Y H:i"|default:'-' }}</td>
+                <td>{{ link.alert.rule_id }} · {{ link.alert.rule_description|default:'-'|truncatechars:80 }}</td>
+                <td>{{ link.alert.rule_level }}</td>
+                <td>{{ link.alert.agent_name|default:'-' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if case.attachments %}
+      <div class="mt-3">
+        <div class="text-muted small mb-1">หลักฐานใน Ticket</div>
+        {% for att in case.attachments %}
+        <div class="small d-flex align-items-center gap-1">
+          <i class="bi bi-paperclip"></i>
+          <a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>
+          {% if att.preview_kind %}<a href="{% url 'preview_attachment' att.pk %}" target="_blank" rel="noopener" title="ดูตัวอย่าง"><i class="bi bi-eye"></i></a>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
