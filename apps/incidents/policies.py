@@ -268,6 +268,49 @@ def can_upload_subtask_result(subtask, user):
     return profile is not None and profile.is_soc_manager
 
 
+def can_view_rca(subtask, user):
+    """Whether user may open a Forensics / RCA request's report and download its
+    draft.
+
+    As broad as seeing the ticket. The RCA carries sensitive indicators, but the
+    decision (2026-09) was to keep it with the case like every other request
+    deliverable — anyone ``visible_to`` the parent ticket already downloads the
+    final report attached to the request. Read-only outside can_edit_rca's set.
+    """
+    if subtask.subtask_type != subtask.TYPE_FORENSIC_RCA:
+        return False
+    return Ticket.objects.visible_to(user).filter(pk=subtask.ticket_id).exists()
+
+
+def can_edit_rca(subtask, user):
+    """Whether user may change the RCA report's data.
+
+    The same people as can_upload_subtask_result — the assignee does the work,
+    the SOC Manager owns the request, and a superuser can correct anything —
+    while the request itself is still open.
+
+    A closed Event does NOT freeze it: response requests are designed to outlive
+    CLOSED_EVENT so the analyst can finish (see Ticket.has_open_response_requests).
+    An approved or cancelled parent does.
+    """
+    if subtask.subtask_type != subtask.TYPE_FORENSIC_RCA:
+        return False
+    if subtask.status in subtask.TERMINAL_STATUSES:
+        return False
+    ticket_status = subtask.ticket.status
+    if ticket_status in Ticket.TERMINAL_STATUSES and ticket_status != Ticket.STATUS_CLOSED_EVENT:
+        return False
+    return can_upload_subtask_result(subtask, user)
+
+
+def can_push_rca_iocs(subtask, user):
+    """Whether user may send the report's indicators to the IOC Database — an
+    RCA editor who also owns that database (Forensic Analyst or superuser)."""
+    from .ti_platform import can_manage_inventory
+
+    return can_edit_rca(subtask, user) and can_manage_inventory(user)
+
+
 def can_access_ticket_report(user):
     """Whether user may preview or export the incident report.
 

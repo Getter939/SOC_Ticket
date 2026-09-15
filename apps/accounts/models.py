@@ -50,6 +50,24 @@ class UserProfile(models.Model):
     tier         = models.CharField(
         max_length=5, choices=TIER_CHOICES, blank=True, default='', verbose_name="ระดับ (Tier)",
     )
+    # A superadmin may temporarily grant a SOC Manager the full Tier 1 + Tier 2
+    # function set (ticket creation, triage intake, driving their own cases,
+    # tier-2 actions) and revoke it again. The grant is set BY the superadmin —
+    # a manager can never toggle their own — so it lives here as persisted state
+    # rather than a session flag. Because every tier gate funnels through the
+    # is_tier1/is_tier2 properties below, honouring this flag there lights up all
+    # the scattered gates at once. Defaults off, so managers behave exactly as
+    # before until a superadmin acts.
+    acting_tier_access     = models.BooleanField(
+        default=False, verbose_name="สิทธิ์ทำงานระดับ Tier ชั่วคราว",
+    )
+    acting_tier_granted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='acting_tier_grants', verbose_name="ผู้ให้สิทธิ์",
+    )
+    acting_tier_granted_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="ให้สิทธิ์เมื่อ",
+    )
 
     @property
     def is_soc_staff(self):
@@ -92,17 +110,30 @@ class UserProfile(models.Model):
         return self.role in (self.ROLE_SOC_STAFF, self.ROLE_SOC_MANAGER)
 
     @property
+    def is_acting_tier_manager(self):
+        """A SOC Manager the superadmin has temporarily elevated to tier work."""
+        return self.is_soc_manager and self.acting_tier_access
+
+    @property
     def is_tier1(self):
         """SOC staff at Tier 1 — opens tickets, classifies, reviews, verifies.
 
         Under the redesigned workflow ``tier`` carries permission weight: only a
         Tier 1 analyst may create tickets and drive the T1 side of the lifecycle.
+        A SOC Manager granted temporary tier access counts here too.
         """
+        if self.is_acting_tier_manager:
+            return True
         return self.is_soc_staff and self.tier == self.TIER_T1
 
     @property
     def is_tier2(self):
-        """SOC staff at Tier 2 — handles escalated tickets (return-to-T1 / close only)."""
+        """SOC staff at Tier 2 — handles escalated tickets (return-to-T1 / close only).
+
+        A SOC Manager granted temporary tier access counts here too.
+        """
+        if self.is_acting_tier_manager:
+            return True
         return self.is_soc_staff and self.tier == self.TIER_T2
 
     def __str__(self):

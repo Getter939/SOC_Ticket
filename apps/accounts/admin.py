@@ -6,6 +6,7 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.template.response import TemplateResponse
+from django.utils import timezone
 
 from axes.models import AccessAttempt
 from axes.utils import reset as reset_axes_attempts
@@ -17,7 +18,26 @@ from .passwords import send_password_reset_email
 
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
+    # UserProfile now has a second FK to User (acting_tier_granted_by), so the
+    # inline must say which one binds it to the parent user.
+    fk_name = 'user'
     can_delete = False
+    # The acting-tier grant is a privilege escalation. SOC Managers are is_staff
+    # and can reach this admin, so the grant fields must be read-only for anyone
+    # but a superuser — otherwise a manager could grant it to themselves. The
+    # superuser-gated changelist actions below are the intended write path.
+    _ACTING_TIER_FIELDS = (
+        'acting_tier_access', 'acting_tier_granted_by', 'acting_tier_granted_at',
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = tuple(super().get_readonly_fields(request, obj))
+        if not request.user.is_superuser:
+            readonly += self._ACTING_TIER_FIELDS
+        else:
+            # Who/when are set by the actions, never typed by hand.
+            readonly += ('acting_tier_granted_by', 'acting_tier_granted_at')
+        return readonly
 
 
 @admin.register(MFAAudit)
@@ -82,11 +102,67 @@ def send_password_reset_link(modeladmin, request, queryset):
     messages.success(request, f'Sent {success_count} secure password-reset link(s).')
 
 
+@admin.action(description='Grant temporary Tier 1/2 access (SOC Managers)')
+def grant_acting_tier(modeladmin, request, queryset):
+    """Temporarily elevate selected SOC Managers to Tier 1 + Tier 2 work."""
+    if not request.user.is_superuser:
+        messages.error(request, 'Only superusers may grant acting-tier access.')
+        return
+    granted = skipped = 0
+    now = timezone.now()
+    for user in queryset.select_related('profile'):
+        profile = getattr(user, 'profile', None)
+        if profile is None or profile.role != UserProfile.ROLE_SOC_MANAGER:
+            skipped += 1
+            continue
+        profile.acting_tier_access = True
+        profile.acting_tier_granted_by = request.user
+        profile.acting_tier_granted_at = now
+        profile.save(update_fields=[
+            'acting_tier_access', 'acting_tier_granted_by', 'acting_tier_granted_at',
+        ])
+        granted += 1
+    if granted:
+        messages.success(request, f'Granted acting-tier access to {granted} SOC Manager(s).')
+    if skipped:
+        messages.warning(
+            request,
+            f'Skipped {skipped} selected user(s) that are not SOC Managers.',
+        )
+
+
+@admin.action(description='Revoke temporary Tier 1/2 access')
+def revoke_acting_tier(modeladmin, request, queryset):
+    """Withdraw a previously granted acting-tier elevation."""
+    if not request.user.is_superuser:
+        messages.error(request, 'Only superusers may revoke acting-tier access.')
+        return
+    revoked = 0
+    for user in queryset.select_related('profile'):
+        profile = getattr(user, 'profile', None)
+        if profile is None or not profile.acting_tier_access:
+            continue
+        profile.acting_tier_access = False
+        profile.acting_tier_granted_by = None
+        profile.acting_tier_granted_at = None
+        profile.save(update_fields=[
+            'acting_tier_access', 'acting_tier_granted_by', 'acting_tier_granted_at',
+        ])
+        revoked += 1
+    messages.success(request, f'Revoked acting-tier access from {revoked} user(s).')
+
+
 class UserAdmin(BaseUserAdmin):
     add_form = MyUserCreationForm
     inlines = (UserProfileInline,)
-    actions = [send_welcome_email_action, send_password_reset_link]
-    list_display = ('username', 'email', 'first_name', 'last_name', 'role', 'tier', 'is_staff')
+    actions = [
+        send_welcome_email_action, send_password_reset_link,
+        grant_acting_tier, revoke_acting_tier,
+    ]
+    list_display = (
+        'username', 'email', 'first_name', 'last_name', 'role', 'tier',
+        'acting_tier', 'is_staff',
+    )
     list_select_related = ('profile',)
     add_fieldsets = (
         (None, {
@@ -110,6 +186,21 @@ class UserAdmin(BaseUserAdmin):
             return obj.profile.get_tier_display() or '—'
         except UserProfile.DoesNotExist:
             return '—'
+
+    @admin.display(description='Acting tier', boolean=True, ordering='profile__acting_tier_access')
+    def acting_tier(self, obj):
+        """Whether this SOC Manager currently holds a temporary tier grant."""
+        try:
+            return obj.profile.acting_tier_access
+        except UserProfile.DoesNotExist:
+            return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not request.user.is_superuser:
+            actions.pop('grant_acting_tier', None)
+            actions.pop('revoke_acting_tier', None)
+        return actions
 
     def save_model(self, request, obj, form, change):
         is_new_user = not change and obj.pk is None

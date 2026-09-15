@@ -737,6 +737,17 @@
 
 <!-- ── Main ── -->
 <div id="main-content">
+    {% if request.user.profile.is_acting_tier_manager %}
+        <div class="alert alert-warning d-flex align-items-center py-2 mb-3" role="alert">
+            <i class="bi bi-shield-lock-fill me-2"></i>
+            <div>
+                <strong>โหมดทำงานระดับ Tier ชั่วคราว</strong> —
+                คุณได้รับสิทธิ์ Tier 1 และ Tier 2 ชั่วคราวจากผู้ดูแลระบบ
+                (Acting as Tier 1 / Tier 2). แจ้งผู้ดูแลระบบเพื่อยกเลิกเมื่อเสร็จสิ้น
+            </div>
+        </div>
+    {% endif %}
+
     {% if messages %}
         {% for message in messages %}
             {# Django's "error" tag is not a Bootstrap class — map it to "danger" #}

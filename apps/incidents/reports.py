@@ -170,7 +170,7 @@ def generate_ticket_report(
         report_format='docx', template_version=template_version,
     )
 
-    filename = f'report_{ticket.ticket_id}_{template_version}.docx'
+    filename = f'report_{_report_ticket_id(ticket)}_{template_version}.docx'
     return GeneratedTicketReport(filename=filename, content=content)
 
 
@@ -196,7 +196,7 @@ def generate_ticket_report_pdf(
         report_format='pdf', template_version=template_version,
     )
 
-    filename = f'report_{ticket.ticket_id}_{template_version}.pdf'
+    filename = f'report_{_report_ticket_id(ticket)}_{template_version}.pdf'
     return GeneratedTicketReport(
         filename=filename,
         content=content,
@@ -223,6 +223,9 @@ def build_ticket_report_render_context(
         'footer_left': FOOTER_LEFT,
         'footer_right': EVENT_FOOTER_RIGHT if is_event_report else FOOTER_RIGHT,
         'is_event_report': is_event_report,
+        # Decorated report number (SOC-<TYPE>-YYYYMM-<SRC>-NNNN) for the browser
+        # <title>, kept consistent with the number shown in Section 1.1.
+        'report_number': report['ticket_id'],
         'browser_title': 'Event Report' if is_event_report else 'Incident Report',
         'report_heading': (
             'Alert Event REPORT' if is_event_report else 'INCIDENT REPORT: Containment'
@@ -367,17 +370,44 @@ def _report_template_version(ticket):
     return EVENT_REPORT_TEMPLATE_VERSION if _is_event_report(ticket) else REPORT_TEMPLATE_VERSION
 
 
-def _report_ticket_id(ticket):
-    # The classification is carried as a presentation-only token inserted after
-    # the SOC- prefix (SOC-EVE-YYYYMM-NNNN / SOC-INC-YYYYMM-NNNN), not as a
-    # trailing suffix. The Ticket Reference itself stays immutable in the DB.
-    token = {
-        Ticket.CLASSIFICATION_EVENT: 'EVE',
-        Ticket.CLASSIFICATION_INCIDENT: 'INC',
-    }.get(ticket.classification)
+# Report-kind tokens for the ticket-based reports that are NOT the Event/Incident
+# report itself but still belong to an Incident/Event case (RCA, VA/PT,
+# Hardening). Each reuses its parent ticket's number, differentiated only by the
+# token — so `SOC-RCA-202609-0142` is the RCA report of case 0142. Inert until
+# those report generators exist: the forward seam so the number never has to
+# change format again when they are built. INC/EVE are not listed here — they
+# come from the (re-classifiable) ticket.classification, so an Event<->Incident
+# flip only swaps the token, not the number. Threat Hunt is deliberately absent:
+# it is standalone (own yearly counter `SOC-THR-YYYY-NNNN`), not ticket-based,
+# and is numbered elsewhere when that feature is built.
+REPORT_KIND_TOKENS = {
+    'RCA': 'RCA',    # Forensics / Root-Cause Analysis
+    'VAPT': 'VAPT',  # Vulnerability Assessment / Penetration Test
+    'HARD': 'HARD',  # Hardening / Infrastructure Security
+}
+
+
+def _report_ticket_id(ticket, kind=None):
+    # The report number is a presentation-only type facet on the immutable case
+    # reference (ticket.ticket_id = SOC-YYYYMM-NNNN), producing SOC-<TYPE>-YYYYMM-NNNN.
+    # Every report about a case reuses the case's number, so reviewers can see
+    # which reports belong to the same case.
+    #   INC/EVE — from the (re-classifiable) classification, so a flip keeps the
+    #             number.
+    #   RCA/VAPT/HARD — pass an explicit `kind`; the caller passes the PARENT
+    #             Incident/Event ticket, so these reuse the parent's number.
+    # The ticket_id stored in the database is never altered.
+    if kind is not None:
+        token = REPORT_KIND_TOKENS.get(kind)
+    else:
+        token = {
+            Ticket.CLASSIFICATION_EVENT: 'EVE',
+            Ticket.CLASSIFICATION_INCIDENT: 'INC',
+        }.get(ticket.classification)
     ticket_id = _value(ticket.ticket_id)
     if not token:
         return ticket_id
+    # SOC-YYYYMM-NNNN -> SOC-<token>-YYYYMM-NNNN
     if ticket_id.startswith('SOC-'):
         return f'SOC-{token}-{ticket_id[len("SOC-"):]}'
     return f'{token}-{ticket_id}'

@@ -1754,11 +1754,9 @@ def triage_list(request):
 @login_required
 def create_triage(request):
     profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (
-        profile is None
-        or not profile.is_soc_staff
-        or profile.tier != profile.TIER_T1
-    ):
+    # Route through is_tier1 (not raw role/tier) so it tracks a manager's
+    # temporary acting-tier grant like every other Tier-1 gate.
+    if not request.user.is_superuser and (profile is None or not profile.is_tier1):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถ Triage ได้')
         return redirect('home')
 

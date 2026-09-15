@@ -501,3 +501,105 @@ class AuditStaffFlagsCommandTest(TestCase):
         self._run()
         stray.refresh_from_db()
         self.assertTrue(stray.is_staff)
+
+
+class ActingTierGrantTest(TestCase):
+    """A superadmin may temporarily elevate a SOC Manager to Tier 1 + Tier 2."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.accounts.models import UserProfile
+
+        def _make(username, role, tier='', **flags):
+            user = User.objects.create_user(
+                username, f'{username}@example.test', 'AdminAccess!123', **flags,
+            )
+            UserProfile.objects.create(
+                user=user, department='T', phone='0', role=role, tier=tier,
+            )
+            return user
+
+        cls.superadmin = User.objects.create_superuser(
+            'at_root', 'root@example.test', 'AdminAccess!123',
+        )
+        cls.manager = _make('at_mgr', UserProfile.ROLE_SOC_MANAGER, is_staff=True)
+        cls.tier1 = _make('at_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        cls.tier2 = _make('at_t2', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2)
+
+    # ── properties ─────────────────────────────────────────────────────── #
+
+    def test_manager_is_not_tier_without_a_grant(self):
+        prof = self.manager.profile
+        self.assertFalse(prof.acting_tier_access)
+        self.assertFalse(prof.is_acting_tier_manager)
+        self.assertFalse(prof.is_tier1)
+        self.assertFalse(prof.is_tier2)
+
+    def test_grant_makes_manager_count_as_both_tiers(self):
+        prof = self.manager.profile
+        prof.acting_tier_access = True
+        prof.save(update_fields=['acting_tier_access'])
+        self.assertTrue(prof.is_acting_tier_manager)
+        self.assertTrue(prof.is_tier1)
+        self.assertTrue(prof.is_tier2)
+        self.assertTrue(prof.is_soc_manager)
+
+    def test_grant_flag_is_inert_for_non_managers(self):
+        from apps.accounts.models import UserProfile
+
+        staff = User.objects.create_user('at_stray', 's@example.test', 'AdminAccess!123')
+        prof = UserProfile.objects.create(
+            user=staff, department='T', phone='0',
+            role=UserProfile.ROLE_SOC_STAFF, acting_tier_access=True,
+        )
+        self.assertFalse(prof.is_acting_tier_manager)
+        self.assertFalse(prof.is_tier1)
+        self.assertFalse(prof.is_tier2)
+
+    def test_real_tier_analysts_are_unaffected(self):
+        self.assertTrue(self.tier1.profile.is_tier1)
+        self.assertFalse(self.tier1.profile.is_tier2)
+        self.assertTrue(self.tier2.profile.is_tier2)
+        self.assertFalse(self.tier2.profile.is_tier1)
+
+    # ── admin actions ──────────────────────────────────────────────────── #
+
+    def _request(self, user):
+        from django.test import RequestFactory
+
+        request = RequestFactory().post('/admin/auth/user/')
+        request.user = user
+        request.session = self.client.session
+        request._messages = FallbackStorage(request)
+        return request
+
+    def test_superuser_grant_and_revoke_actions(self):
+        from apps.accounts.admin import grant_acting_tier, revoke_acting_tier
+
+        qs = User.objects.filter(pk=self.manager.pk)
+        grant_acting_tier(None, self._request(self.superadmin), qs)
+        prof = User.objects.get(pk=self.manager.pk).profile
+        self.assertTrue(prof.acting_tier_access)
+        self.assertEqual(prof.acting_tier_granted_by_id, self.superadmin.pk)
+        self.assertIsNotNone(prof.acting_tier_granted_at)
+
+        revoke_acting_tier(None, self._request(self.superadmin), qs)
+        prof.refresh_from_db()
+        self.assertFalse(prof.acting_tier_access)
+        self.assertIsNone(prof.acting_tier_granted_by_id)
+        self.assertIsNone(prof.acting_tier_granted_at)
+
+    def test_grant_skips_non_managers(self):
+        from apps.accounts.admin import grant_acting_tier
+
+        qs = User.objects.filter(pk=self.tier1.pk)
+        grant_acting_tier(None, self._request(self.superadmin), qs)
+        self.assertFalse(User.objects.get(pk=self.tier1.pk).profile.acting_tier_access)
+
+    def test_non_superuser_cannot_grant(self):
+        from apps.accounts.admin import grant_acting_tier
+
+        # The manager (is_staff) tries to elevate themselves — must be refused.
+        qs = User.objects.filter(pk=self.manager.pk)
+        grant_acting_tier(None, self._request(self.manager), qs)
+        self.assertFalse(User.objects.get(pk=self.manager.pk).profile.acting_tier_access)

@@ -160,13 +160,16 @@ def _is_duplicate(category, value, exclude_pk=None):
     return manual.exists() or TicketIOC.objects.filter(category=category, value=value).exists()
 
 
-def create_manual_iocs(entries, user):
+def create_manual_iocs(entries, user, source_subtask=None):
     """Add the analyst's typed IOCs.
 
     ``entries`` are cleaned dicts of category / value / file_name / note. Each is
     either **created**, **restored** (the same indicator was removed earlier — bring
     that record back with its original MAN- id) or reported a **duplicate** (the
     value already exists on a ticket or as an active manual entry).
+
+    ``source_subtask`` is the Forensics / RCA request the entries were pushed from
+    (apps.incidents.rca.push_iocs); hand-typed entries leave it empty.
 
     Returns a list of ``(entry, outcome)`` so the caller can report the results.
     """
@@ -181,16 +184,19 @@ def create_manual_iocs(entries, user):
             removed = AnalystIOC.objects.filter(
                 category=category, ioc_detail=value, is_active=False).first()
             if removed is not None:
-                AnalystIOC.objects.filter(pk=removed.pk).update(
+                restored = dict(
                     is_active=True, removed_by=None, removed_at=None,
                     file_name=file_name, added_by=user)
+                if source_subtask is not None:
+                    restored['source_subtask'] = source_subtask
+                AnalystIOC.objects.filter(pk=removed.pk).update(**restored)
                 outcome = 'restored'
             else:
                 # ext_id is unique and derived from the row's own pk, so it is
                 # written in a second step behind a throwaway placeholder.
                 record = AnalystIOC.objects.create(
                     ext_id=f'tmp-{uuid4().hex}', category=category, ioc_detail=value,
-                    file_name=file_name, added_by=user)
+                    file_name=file_name, added_by=user, source_subtask=source_subtask)
                 AnalystIOC.objects.filter(pk=record.pk).update(ext_id=f'MAN-{record.pk:04d}')
                 outcome = 'created'
             if entry.get('note'):

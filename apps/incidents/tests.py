@@ -77,6 +77,7 @@ from apps.incidents.reports import (
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
     build_ticket_report_context, build_ticket_report_sections,
     generate_ticket_report, generate_ticket_report_pdf, _iter_paragraphs,
+    _report_ticket_id,
 )
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -482,8 +483,11 @@ class TicketReportExportTest(TestCase):
         content = report.content
         text = _docx_text(content)
 
-        self.assertEqual(report.filename, f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx')
-        self.assertIn(self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1), text)
+        self.assertEqual(
+            report.filename,
+            f'report_{_report_ticket_id(self.ticket)}_{REPORT_TEMPLATE_VERSION}.docx',
+        )
+        self.assertIn(_report_ticket_id(self.ticket), text)
         self.assertNotIn('คำสั่ง', text)
         # 'File Name' is an empty Section-4 row dropped in compact mode; unlike
         # 'Hash', it is not a substring of the Section-8 checklist labels.
@@ -576,7 +580,10 @@ class TicketReportExportTest(TestCase):
             response['Content-Type'],
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         )
-        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.docx', response['Content-Disposition'])
+        self.assertIn(
+            f'report_{_report_ticket_id(self.ticket)}_{REPORT_TEMPLATE_VERSION}.docx',
+            response['Content-Disposition'],
+        )
         content = b''.join(response.streaming_content)
         self.assertIn('Suspicious SoftEther Signed File', _docx_text(content))
 
@@ -612,8 +619,12 @@ class TicketReportExportTest(TestCase):
         response = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f'<title>Incident Report {self.ticket.ticket_id}</title>', html=True)
-        self.assertContains(response, self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1))
+        self.assertContains(
+            response,
+            f'<title>Incident Report {_report_ticket_id(self.ticket)}</title>',
+            html=True,
+        )
+        self.assertContains(response, _report_ticket_id(self.ticket))
         self.assertContains(response, 'ซ่อนช่องที่ไม่มีข้อมูล')
         self.assertNotContains(response, '<th>คำสั่ง</th>')
         self.assertNotContains(response, '<th>Hash</th>')
@@ -646,12 +657,12 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            f'<title>Event Report {self.event_ticket.ticket_id}</title>',
+            f'<title>Event Report {_report_ticket_id(self.event_ticket)}</title>',
             html=True,
         )
         self.assertContains(response, 'Alert Event REPORT')
         self.assertContains(response, 'แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ')
-        self.assertContains(response, self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1))
+        self.assertContains(response, _report_ticket_id(self.event_ticket))
         self.assertContains(response, '1.13 รายละเอียด')
         self.assertContains(response, 'Multiple failed sign-ins were observed.')
         self.assertContains(response, '&#9745;</span>&#160;Event')
@@ -671,10 +682,10 @@ class TicketReportExportTest(TestCase):
 
         self.assertEqual(
             report.filename,
-            f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.docx',
+            f'report_{_report_ticket_id(self.event_ticket)}_{EVENT_REPORT_TEMPLATE_VERSION}.docx',
         )
         self.assertIn('Alert Event REPORT', text)
-        self.assertIn(self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1), text)
+        self.assertIn(_report_ticket_id(self.event_ticket), text)
         self.assertIn('1.13 รายละเอียด', text)
         self.assertIn('Multiple failed sign-ins were observed.', text)
         self.assertIn('☑ Event', text)
@@ -701,10 +712,10 @@ class TicketReportExportTest(TestCase):
 
         self.assertEqual(
             report.filename,
-            f'report_{self.event_ticket.ticket_id}_{EVENT_REPORT_TEMPLATE_VERSION}.pdf',
+            f'report_{_report_ticket_id(self.event_ticket)}_{EVENT_REPORT_TEMPLATE_VERSION}.pdf',
         )
         self.assertIn('Alert Event REPORT', text)
-        self.assertIn(self.event_ticket.ticket_id.replace('SOC-', 'SOC-EVE-', 1), text)
+        self.assertIn(_report_ticket_id(self.event_ticket), text)
         self.assertIn('Multiple failed sign-ins were observed.', text)
         self.assertNotIn('Indicators of Compromise', text)
         self.assertNotIn('Containment', text)
@@ -741,24 +752,40 @@ class TicketReportExportTest(TestCase):
         self.assertIn('Hash', text)
 
     def test_report_number_prefix_tracks_classification_without_changing_ticket_id(self):
-        stored_ticket_id = self.ticket.ticket_id
+        # Report number = SOC-<TYPE>-YYYYMM-NNNN, a presentation-only token on the
+        # immutable case reference. TYPE flips with classification (number
+        # preserved); the stored ticket_id is never touched.
+        stored_ticket_id = self.ticket.ticket_id  # SOC-YYYYMM-NNNN
+        period, _, seq = stored_ticket_id[len('SOC-'):].rpartition('-')
 
+        # Incident -> INC.
         incident_report = build_ticket_report_context(self.ticket)
         self.assertEqual(
-            incident_report['ticket_id'],
-            stored_ticket_id.replace('SOC-', 'SOC-INC-', 1),
+            incident_report['ticket_id'], f'SOC-INC-{period}-{seq}',
         )
 
+        # A classification flip only swaps the token; the number is preserved.
         self.ticket.classification = Ticket.CLASSIFICATION_EVENT
         self.ticket.save(update_fields=['classification'])
         event_report = build_ticket_report_context(self.ticket)
-
         self.assertEqual(
-            event_report['ticket_id'],
-            stored_ticket_id.replace('SOC-', 'SOC-EVE-', 1),
+            event_report['ticket_id'], f'SOC-EVE-{period}-{seq}',
         )
+
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.ticket_id, stored_ticket_id)
+
+    def test_report_number_uses_explicit_kind_token_for_ticket_based_report_types(self):
+        # Forward seam: a ticket-based report kind (RCA/VAPT/Hardening) reuses the
+        # PARENT case number and stamps its own token (SOC-RCA-YYYYMM-NNNN).
+        stored_ticket_id = self.ticket.ticket_id
+        period, _, seq = stored_ticket_id[len('SOC-'):].rpartition('-')
+
+        for kind, token in (('RCA', 'RCA'), ('VAPT', 'VAPT'), ('HARD', 'HARD')):
+            self.assertEqual(
+                _report_ticket_id(self.ticket, kind=kind),
+                f'SOC-{token}-{period}-{seq}',
+            )
 
     def test_ticket_report_pdf_endpoint_streams_valid_pdf_and_updates_metadata(self):
         self.client.force_login(self.t1)
@@ -766,7 +793,10 @@ class TicketReportExportTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
-        self.assertIn(f'report_{self.ticket.ticket_id}_{REPORT_TEMPLATE_VERSION}.pdf', response['Content-Disposition'])
+        self.assertIn(
+            f'report_{_report_ticket_id(self.ticket)}_{REPORT_TEMPLATE_VERSION}.pdf',
+            response['Content-Disposition'],
+        )
 
         content = b''.join(response.streaming_content)
         self.assertTrue(content.startswith(b'%PDF'))
@@ -774,7 +804,7 @@ class TicketReportExportTest(TestCase):
         self.assertGreaterEqual(len(pdf.pages), 1)
         text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
         normalized_text = ' '.join(text.split())
-        self.assertIn(self.ticket.ticket_id.replace('SOC-', 'SOC-INC-', 1), normalized_text)
+        self.assertIn(_report_ticket_id(self.ticket), normalized_text)
         self.assertIn('Suspicious SoftEther Signed File', normalized_text)
         # 'File Name' is an empty Section-4 row dropped in compact mode; 'Hash'
         # can no longer be used as the marker (it is in a Section-8 checklist label).
@@ -7677,3 +7707,83 @@ class IncidentDatetimeLocalizationTest(TestCase):
 
         self.assertIn('2026-09-07T08:00', rendered)      # local time, correct
         self.assertNotIn('2026-09-07T01:00', rendered)   # never the raw UTC
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
+# Acting-tier SOC Manager — temporary Tier 1 + Tier 2 access                   #
+# ──────────────────────────────────────────────────────────────────────────── #
+
+class ActingTierManagerCreateTest(TestCase):
+    """A SOC Manager granted acting-tier access gains Tier-1/2 create powers."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.manager = _make_user('act_mgr', UserProfile.ROLE_SOC_MANAGER)
+
+    def _grant(self, on=True):
+        prof = self.manager.profile
+        prof.acting_tier_access = on
+        prof.save(update_fields=['acting_tier_access'])
+
+    # ── without a grant: unchanged manager behaviour ───────────────────── #
+
+    def test_manager_without_grant_cannot_open_create_ticket(self):
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.get(reverse('create_ticket'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_manager_without_grant_cannot_open_create_triage(self):
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.get(reverse('create_triage'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_nav_hides_open_new_case_without_grant(self):
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.get(reverse('ticket_list'))
+        self.assertNotContains(resp, reverse('create_ticket'))
+
+    # ── with a grant: full Tier-1/2 create powers ──────────────────────── #
+
+    def test_manager_with_grant_can_open_create_pages(self):
+        self._grant()
+        self.client.login(username='act_mgr', password='testpass123')
+        self.assertEqual(self.client.get(reverse('create_ticket')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('create_project_incident')).status_code, 200)
+        self.assertEqual(self.client.get(reverse('create_triage')).status_code, 200)
+
+    def test_manager_with_grant_can_create_and_drive_own_case(self):
+        self._grant()
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=TicketForm.ROUTE_ESCALATE_T2,
+        ))
+        self.assertEqual(resp.status_code, 302)
+        ticket = Ticket.objects.latest('id')
+        # Created as the manager, and the TIER1_CREATOR escalate edge fired.
+        self.assertEqual(ticket.created_by, self.manager)
+        self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
+
+    def test_manager_with_grant_counts_as_tier2(self):
+        # Drive a TIER2 edge: an escalated case returned to Tier 1.
+        self._grant()
+        ticket = _make_ticket(
+            status=Ticket.STATUS_ESCALATED_T2, created_by=self.manager,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+        )
+        ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, note='ส่งกลับ Tier 1')
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
+
+    def test_nav_shows_open_new_case_with_grant(self):
+        self._grant()
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.get(reverse('ticket_list'))
+        self.assertContains(resp, reverse('create_ticket'))
+        # The acting-tier banner warns the manager they are currently elevated.
+        self.assertContains(resp, 'โหมดทำงานระดับ Tier ชั่วคราว')
+
+    def test_banner_hidden_without_grant(self):
+        self.client.login(username='act_mgr', password='testpass123')
+        resp = self.client.get(reverse('ticket_list'))
+        self.assertNotContains(resp, 'โหมดทำงานระดับ Tier ชั่วคราว')

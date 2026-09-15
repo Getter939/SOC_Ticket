@@ -171,6 +171,27 @@ def record_subtask_status_change(
     )
 
 
+def record_rca_change(subtask, section_label, summary, user, source='rca'):
+    """One summary row for an edit to a Forensics / RCA request's report.
+
+    The report is many small rows (timeline, root causes, indicators), so a
+    per-field diff would bury the story; this records which section changed,
+    how, and by whom — e.g. "Timeline: +18 แถว (นำเข้าไฟล์ timeline.csv)".
+    """
+    if not summary:
+        return None
+    return TicketFieldChange.objects.create(
+        ticket_id=subtask.ticket_id,
+        subtask=subtask,
+        field_name='rca',
+        field_label=f'รายงาน RCA — {section_label}'[:120],
+        old_value='',
+        new_value=summary,
+        changed_by=user,
+        source=source,
+    )
+
+
 def ioc_snapshot(ticket):
     """A stable, human-readable list of the ticket's structured indicators.
 
