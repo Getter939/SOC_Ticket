@@ -344,9 +344,17 @@ def dashboard(request):
     assignee_heatmap = sorted(
         heat.values(), key=lambda x: (x['load'], x['total']), reverse=True)
     # Template can't index a dict by a loop variable — pre-build status-ordered
-    # cell lists aligned to assignee_heatmap_statuses.
+    # cell lists aligned to assignee_heatmap_statuses, a label+count 'breakdown'
+    # for the expandable detail row, and a 0-100 'load_pct' for the mini load
+    # bar (scaled to the busiest actionable queue, so the widest bar is full).
+    max_load = max((a['load'] for a in assignee_heatmap), default=0)
     for a in assignee_heatmap:
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
+        a['breakdown'] = [
+            {'label': col['label'], 'count': cell}
+            for col, cell in zip(workload_columns, a['cells'])
+        ]
+        a['load_pct'] = round(a['load'] / max_load * 100) if max_load else 0
 
     unassigned_active = active_qs.filter(assigned_to__isnull=True).count()
 

@@ -103,20 +103,41 @@
 
     .chart-hint { margin: 0 0 .5rem; color: var(--ui-muted); font-size: 12px; }
     .workload-table { table-layout: fixed; }
-    .workload-table th { white-space: normal; overflow-wrap: break-word; padding: 8px 5px; }
-    .workload-table th:first-child { width: 23%; }
+    .workload-table th, .workload-table td { vertical-align: middle; padding: 6px 8px; }
+    .workload-table th { white-space: normal; overflow-wrap: break-word; }
+    .workload-table col.wl-c-name    { width: 30%; }
+    .workload-table col.wl-c-actionable { width: 15%; }
+    .workload-table col.wl-c-waiting { width: 15%; }
+    .workload-table col.wl-c-load    { width: 40%; }
     .workload-table td.name { white-space: normal; overflow-wrap: anywhere; }
     .workload-table .heat-actionable { font-weight: 700; }
-    .workload-table .heat-empty { background: var(--ui-surface); }
-    .workload-table .heat-light { background: rgba(255,193,7,.18); }
+    .workload-table .heat-light  { background: rgba(255,193,7,.18); }
     .workload-table .heat-medium { background: rgba(253,126,20,.30); }
-    .workload-table .heat-heavy { background: rgba(220,53,69,.40); }
+    .workload-table .heat-heavy  { background: rgba(220,53,69,.40); }
+    /* summary-first rows: click a row to reveal its status breakdown */
+    .wl-row { cursor: pointer; }
+    .wl-row:hover { background: rgba(13,110,253,.05); }
+    .wl-row:focus-visible { outline: 2px solid #0d6efd; outline-offset: -2px; }
+    .wl-chevron { font-size: 11px; color: #adb5bd; margin-right: 6px;
+                  transition: transform .15s ease; }
+    .wl-row[aria-expanded="true"] .wl-chevron { transform: rotate(90deg); color: #495057; }
+    .wl-bar { background: var(--ui-surface, #f1f3f5); border-radius: 4px;
+              height: 16px; width: 100%; overflow: hidden; }
+    .wl-bar-fill { height: 100%; border-radius: 4px; min-width: 3px; }
+    .wl-detail > td { background: #fbfcfd; padding: 4px 10px 8px 30px; }
+    .wl-detail-inner { display: flex; flex-wrap: wrap; gap: 6px; }
+    .wl-chip { font-size: 12px; background: #eef1f4; color: #495057;
+               border-radius: 10px; padding: 2px 9px; }
+    .wl-chip strong { color: #212529; }
+    .wl-chip-zero { opacity: .45; }
+    .wl-unassigned > td { background: rgba(255,193,7,.10);
+                          border-top: 2px solid #ffe08a; font-weight: 600; }
     .workload-scroll { max-height: 440px; overflow: auto; }
     .workload-table thead th { position: sticky; top: 0; z-index: 1; }
     .workload-note { color: var(--ui-muted); font-size: 12px; }
     .pipeline-chart { position: relative; height: 460px; }
     @media (max-width: 575.98px) {
-        .workload-table { min-width: 480px; }
+        .workload-table { min-width: 420px; }
         .pipeline-chart { height: 620px; }
     }
 </style>
@@ -230,53 +251,78 @@
 
     <!-- 2L — Analyst workload heatmap -->
     <div class="col-xl-6">
-        <div class="panel p-3 h-100">
+        <div class="panel p-3">
             <div class="panel-title mb-2">
                 <i class="bi bi-people me-1"></i>Analyst Workload — งานที่ต้องดำเนินการเอง
             </div>
             <p class="chart-hint mb-2">
-                <i class="bi bi-info-circle me-1"></i>นับเฉพาะสถานะที่นักวิเคราะห์ต้องลงมือเอง —
-                เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 แยกไว้ในคอลัมน์ “รอคนอื่น”
+                <i class="bi bi-info-circle me-1"></i>เรียงตามงานที่ต้องลงมือเอง (Actionable) —
+                เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 นับเป็น “Waiting”. คลิกแถวเพื่อดูรายละเอียดสถานะ
             </p>
             <div class="table-responsive workload-scroll">
                 <table class="heat-table workload-table">
+                    <colgroup>
+                        <col class="wl-c-name">
+                        <col class="wl-c-actionable">
+                        <col class="wl-c-waiting">
+                        <col class="wl-c-load">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th class="text-start">Analyst</th>
-                            {% for column in workload_columns %}
-                            <th title="{{ column.description }}" aria-label="{{ column.description }}">{{ column.label }}</th>
-                            {% endfor %}
-                            <th class="heat-actionable" title="Actionable — งานที่ต้องดำเนินการเอง">ต้องทำ</th>
-                            <th class="heat-blocked-col">รอคนอื่น</th>
+                            <th class="heat-actionable" title="งานที่นักวิเคราะห์ต้องดำเนินการเอง">Actionable<br><span class="fw-normal">ต้องทำ</span></th>
+                            <th class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">Waiting<br><span class="fw-normal">รอคนอื่น</span></th>
+                            <th class="text-start">Load</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in assignee_heatmap %}
-                        <tr class="{% if forloop.first and row.load %}heat-top{% endif %}">
-                            <td class="name">{{ row.name }}</td>
-                            {% for cell in row.cells %}
-                            <td class="{% if cell == 0 %}heat-empty{% elif cell <= 2 %}heat-light{% elif cell <= 5 %}heat-medium{% else %}heat-heavy{% endif %}">
-                                {% if cell == 0 %}<span class="heat-zero">—</span>{% else %}{{ cell|intcomma }}{% endif %}
-                            </td>
-                            {% endfor %}
+                        <tr class="wl-row {% if forloop.first and row.load %}heat-top{% endif %}"
+                            data-wl-toggle="wl-detail-{{ forloop.counter }}"
+                            role="button" tabindex="0" aria-expanded="false"
+                            aria-controls="wl-detail-{{ forloop.counter }}">
+                            <td class="name"><i class="bi bi-chevron-right wl-chevron"></i>{{ row.name }}</td>
                             <td class="heat-actionable">{{ row.load|intcomma }}</td>
-                            {# Blocked = somebody else's turn: greyed, never heat-coloured. #}
-                            <td class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">
+                            {# Waiting = somebody else's turn: greyed, never heat-coloured. #}
+                            <td class="heat-blocked-col">
                                 {% if row.blocked %}{{ row.blocked|intcomma }}{% else %}<span class="heat-zero">—</span>{% endif %}
+                            </td>
+                            <td>
+                                <div class="wl-bar" title="{{ row.load|intcomma }} actionable">
+                                    <div class="wl-bar-fill {% if row.load <= 2 %}heat-light{% elif row.load <= 5 %}heat-medium{% else %}heat-heavy{% endif %}"
+                                         style="width: {{ row.load_pct }}%;"></div>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr class="wl-detail" id="wl-detail-{{ forloop.counter }}" hidden>
+                            <td colspan="4">
+                                <div class="wl-detail-inner">
+                                    {% for item in row.breakdown %}
+                                    <span class="wl-chip {% if item.count == 0 %}wl-chip-zero{% endif %}">{{ item.label }} <strong>{{ item.count|intcomma }}</strong></span>
+                                    {% endfor %}
+                                </div>
                             </td>
                         </tr>
                         {% empty %}
                         <tr>
-                            <td class="name text-muted" colspan="{{ assignee_heatmap_statuses|length|add:3 }}">
+                            <td class="name text-muted" colspan="4">
                                 ไม่มีงานที่มอบหมาย (No assigned active cases)
                             </td>
                         </tr>
                         {% endfor %}
+                        {% if unassigned_active %}
+                        <tr class="wl-unassigned">
+                            <td class="name"><i class="bi bi-person-dash me-1"></i>Unassigned · ยังไม่มอบหมาย</td>
+                            <td class="heat-actionable">{{ unassigned_active|intcomma }}</td>
+                            <td class="heat-blocked-col"><span class="heat-zero">—</span></td>
+                            <td></td>
+                        </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
             <p class="workload-note mt-2 mb-0">
-                Unassigned: <strong>{{ unassigned_active|intcomma }}</strong> · รวมใน Pipeline แต่ไม่รวมในตารางนักวิเคราะห์
+                Unassigned = เคสที่ยังไม่มอบหมาย ต้องหาผู้รับผิดชอบ · นับรวมใน Pipeline
             </p>
         </div>
     </div>
@@ -589,6 +635,26 @@
 
         window.location.reload();
     }, AUTO_REFRESH_MS);
+})();
+</script>
+
+<!-- ── Analyst Workload: expand a row to reveal its status breakdown ────────── -->
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+    document.querySelectorAll('.wl-row[data-wl-toggle]').forEach(function (row) {
+        function toggle() {
+            var detail = document.getElementById(row.getAttribute('data-wl-toggle'));
+            if (!detail) return;
+            var opening = detail.hasAttribute('hidden');
+            if (opening) { detail.removeAttribute('hidden'); }
+            else { detail.setAttribute('hidden', ''); }
+            row.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        }
+        row.addEventListener('click', toggle);
+        row.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+    });
 })();
 </script>
 
