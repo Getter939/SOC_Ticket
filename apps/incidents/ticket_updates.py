@@ -12,6 +12,7 @@ from django.db import transaction
 from . import history
 from .models import Ticket, TicketAttachment, TicketLog, TicketSubtask
 from .notifications import notify_response_request_completed
+from .staging import adopt_staged
 from .ticket_evidence import add_ticket_attachments
 
 
@@ -21,6 +22,7 @@ class TicketEditResult:
 
     ticket: Ticket
     changes: tuple = field(default_factory=tuple)
+    attachments: tuple[TicketAttachment, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -32,8 +34,12 @@ class SubtaskUpdateResult:
     completion_notified: bool = False
 
 
-def save_ticket_edit(*, ticket, actor, edit_form, reason):
-    """Save a validated TicketEditForm with field-level and summary audit rows."""
+def save_ticket_edit(*, ticket, actor, edit_form, reason, evidence_token=None):
+    """Save validated content and staged evidence together with their audit rows.
+
+    The edit view locks the ticket and checks upload permission before supplying
+    an evidence token. Staged files remain available if this transaction fails.
+    """
     with transaction.atomic():
         before = history.snapshot_saved(ticket)
         before_iocs = history.ioc_snapshot(ticket)
@@ -50,6 +56,7 @@ def save_ticket_edit(*, ticket, actor, edit_form, reason):
         if ioc_change:
             changes.append(ioc_change)
         changes = tuple(changes)
+        attachments = tuple(adopt_staged(evidence_token, actor, ticket=updated_ticket))
         if changes:
             summary = ', '.join(change.field_label for change in changes)
             TicketLog.objects.create(
@@ -61,7 +68,15 @@ def save_ticket_edit(*, ticket, actor, edit_form, reason):
                 status_at_time=updated_ticket.status,
                 author=actor,
             )
-    return TicketEditResult(ticket=updated_ticket, changes=changes)
+        if attachments:
+            names = ', '.join(attachment.original_name for attachment in attachments)
+            TicketLog.objects.create(
+                ticket=updated_ticket,
+                note=f'แนบไฟล์หลักฐาน ({len(attachments)} ไฟล์): {names}\nเหตุผล: {reason}',
+                status_at_time=updated_ticket.status,
+                author=actor,
+            )
+    return TicketEditResult(ticket=updated_ticket, changes=changes, attachments=attachments)
 
 
 def save_subtask_update(

@@ -65,6 +65,7 @@ from .policies import (
     can_upload_subtask_result as _can_upload_subtask_result,
     can_upload_ticket_attachment as _can_upload_ticket_attachment,
     can_update_subtask as _can_update_subtask,
+    response_request_updates_frozen as _response_request_updates_frozen,
     holds_ticket_court as _holds_ticket_court,
     is_soc as _is_soc,
     is_soc_manager as _is_soc_manager,
@@ -2194,11 +2195,14 @@ def update_subtask(request, subtask_id):
     subtask = get_object_or_404(TicketSubtask, pk=subtask_id)
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=subtask.ticket_id)
 
-    can_update = _can_update_subtask(subtask, request.user)
-    if not can_update and ticket.status in Ticket.TERMINAL_STATUSES:
+    # Freeze first, permission second — the two must not be conflated, or a user
+    # who simply lacks permission is wrongly told "the item is closed" whenever
+    # the ticket happens to be terminal (e.g. a response request on a CLOSED_EVENT
+    # ticket, which is deliberately still open for its assignee to finish).
+    if _response_request_updates_frozen(subtask):
         messages.error(request, 'รายการนี้ปิดหรือยกเลิกแล้ว ไม่สามารถเพิ่มไฟล์หรืออัปเดตงานย่อยได้')
         return redirect('ticket_detail', pk=ticket.pk)
-    if not can_update:
+    if not _can_update_subtask(subtask, request.user):
         messages.error(request, 'คุณไม่มีสิทธิ์อัปเดตงานย่อยนี้')
         return redirect('ticket_detail', pk=ticket.pk)
 
@@ -2288,10 +2292,20 @@ def response_request_queue(request):
     else:
         status_filter = ''
 
-    open_count = sum(1 for s in requests_qs if s.status not in TicketSubtask.TERMINAL_STATUSES)
+    requests = list(requests_qs)
+    open_count = sum(1 for s in requests if s.status not in TicketSubtask.TERMINAL_STATUSES)
+    # Resolve each row's destination here rather than branching on the subtask
+    # type string in the template: an RCA request opens its workspace, every
+    # other response type opens the ticket's task list.
+    for req in requests:
+        req.is_rca_request = req.subtask_type == TicketSubtask.TYPE_FORENSIC_RCA
+        req.work_url = (
+            reverse('rca_workspace', args=[req.pk]) if req.is_rca_request
+            else f"{reverse('ticket_detail', args=[req.ticket_id])}#tasks"
+        )
 
     return render(request, 'incidents/response_request_queue.html', {
-        'requests': requests_qs,
+        'requests': requests,
         'status_filter': status_filter,
         'status_choices': TicketSubtask.STATUS_CHOICES,
         'open_count': open_count,
@@ -2402,13 +2416,17 @@ def delete_attachment(request, attachment_id):
 
 
 @login_required
+@transaction.atomic
 def edit_ticket(request, pk):
     """Correct a ticket's content, recording every field that moves.
 
     Deliberately cannot change status, route, or sign-off: this is a correction
     surface, not a workflow one. Use the transition controls for that.
     """
-    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
+    tickets = Ticket.objects.visible_to(request.user)
+    if request.method == 'POST':
+        tickets = tickets.select_for_update()
+    ticket = get_object_or_404(tickets, pk=pk)
     if not _can_edit_ticket(ticket, request.user):
         messages.error(
             request,
@@ -2418,10 +2436,21 @@ def edit_ticket(request, pk):
         )
         return redirect('ticket_detail', pk=pk)
 
+    can_upload_attachment = _can_upload_ticket_attachment(ticket, request.user)
+    evidence_token = ''
+    reason = ''
     if request.method == 'POST':
         form = TicketEditForm(request.POST, instance=ticket)
+        reason = (request.POST.get('reason') or '').strip()
+        if can_upload_attachment:
+            evidence_token, staged_errors = stage_uploads(request)
+            for error in staged_errors:
+                form.add_error(None, error)
+        elif request.FILES.getlist('evidence_files') or staged_for(
+            request.user, request.POST.get('evidence_token'),
+        ).exists():
+            form.add_error(None, 'คุณไม่มีสิทธิ์แนบไฟล์ในสถานะปัจจุบันของเคสนี้')
         if form.is_valid():
-            reason = (request.POST.get('reason') or '').strip()
             if not reason:
                 messages.error(request, 'กรุณาระบุเหตุผลในการแก้ไข')
             else:
@@ -2431,6 +2460,7 @@ def edit_ticket(request, pk):
                         actor=request.user,
                         edit_form=form,
                         reason=reason,
+                        evidence_token=evidence_token,
                     )
                 except ValidationError as exc:
                     messages.error(request, ' '.join(exc.messages))
@@ -2440,7 +2470,12 @@ def edit_ticket(request, pk):
                         request,
                         f'บันทึกการแก้ไข {len(result.changes)} รายการเรียบร้อยแล้ว',
                     )
-                else:
+                if result.attachments:
+                    messages.success(
+                        request,
+                        f'แนบไฟล์หลักฐาน {len(result.attachments)} ไฟล์เรียบร้อยแล้ว',
+                    )
+                if not result.changes and not result.attachments:
                     messages.info(request, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
                 return redirect('ticket_detail', pk=pk)
     else:
@@ -2449,6 +2484,11 @@ def edit_ticket(request, pk):
     return render(request, 'incidents/ticket_edit.html', {
         'ticket': ticket,
         'form': form,
+        'reason': reason,
+        'can_upload_attachment': can_upload_attachment,
+        'attachment_limits': _attachment_limits(),
+        'evidence_token': evidence_token,
+        'staged_files': staged_for(request.user, evidence_token),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
         # Correcting a ticket that is waiting on someone else is allowed but
         # worth flagging — the holder may be acting on what you are about to

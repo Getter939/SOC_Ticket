@@ -468,6 +468,12 @@
         .table thead.thead-brand th { background: var(--sidebar-bg); color: #fff; }
         .font-monospace { font-family: "Cascadia Code", "Courier New", monospace; }
 
+        /* Keep example text visibly softer than entered values in both themes. */
+        .form-control::placeholder {
+            color: var(--ui-text);
+            opacity: .2;
+        }
+
         /* Custom page components use the same semantic theme surfaces. */
         html[data-theme="dark"] body {
             background-color: var(--ui-page-bg) !important;

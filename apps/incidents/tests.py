@@ -4396,10 +4396,41 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertIsNone(att.deleted_at)
         self.assertEqual(project.attachments.count(), 1)
 
-    def test_outsider_cannot_upload_shared_evidence(self):
+    def test_tier2_can_upload_shared_evidence_outside_member_court(self):
+        project = self._reviewed_project()
+        self.client.force_login(self.t2)
+        page = self.client.get(reverse('project_incident_detail', args=[project.pk]))
+        self.assertTrue(page.context['can_upload_project_attachment'])
+        self.assertContains(page, reverse('upload_project_attachment', args=[project.pk]))
+        with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media):
+            response = self.client.post(
+                reverse('upload_project_attachment', args=[project.pk]),
+                {'file': SimpleUploadedFile('tier2.txt', b'shared investigation evidence')},
+            )
+            self.assertRedirects(response, reverse('project_incident_detail', args=[project.pk]))
+            self.assertEqual(project.attachments.get().uploaded_by, self.t2)
+            self.assertTrue(ProjectIncidentLog.objects.filter(
+                project=project, author=self.t2, note__contains='tier2.txt',
+            ).exists())
+
+    def test_tier2_cannot_upload_shared_evidence_when_all_members_are_terminal(self):
+        project = self._reviewed_project()
+        self.client.force_login(self.t2)
+        for status in Ticket.TERMINAL_STATUSES:
+            with self.subTest(status=status):
+                project.member_tickets.update(status=status)
+                page = self.client.get(reverse('project_incident_detail', args=[project.pk]))
+                self.assertFalse(page.context['can_upload_project_attachment'])
+                self.client.post(
+                    reverse('upload_project_attachment', args=[project.pk]),
+                    {'file': SimpleUploadedFile('blocked.txt', b'blocked')},
+                )
+                self.assertFalse(project.attachments.exists())
+
+    def test_out_of_court_tier1_cannot_upload_shared_evidence(self):
         project = self._reviewed_project()
         self.client.logout()
-        self.client.login(username='pi_t2', password='testpass123')
+        self.client.login(username='pi_t1', password='testpass123')
         self.client.post(
             reverse('upload_project_attachment', args=[project.pk]),
             {'file': SimpleUploadedFile('z.txt', b'z', content_type='text/plain')},

@@ -14,7 +14,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage, send_mail
 from django.template.loader import render_to_string
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 
 from .models import NotificationTemplate
 
@@ -78,7 +78,7 @@ def _request_url(subtask):
         site_url = getattr(settings, 'SITE_URL', 'http://localhost:8088').rstrip('/')
         try:
             return f'{site_url}{reverse("rca_workspace", kwargs={"subtask_id": subtask.pk})}'
-        except Exception:
+        except NoReverseMatch:
             pass
     return _ticket_url(subtask.ticket)
 

@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -124,7 +124,9 @@ def _workflow_step(subtask, report):
     """Which header stepper node is current: start → build → draft → deliver."""
     if subtask.status == TicketSubtask.STATUS_DONE:
         return 'done'
-    if report is not None and report.draft_generated_at:
+    # A stale draft means the data moved on after the last generation, so the
+    # analyst is back to building — not resting at the Draft step.
+    if report is not None and report.draft_generated_at and not report.has_stale_draft:
         return 'draft'
     if subtask.status == TicketSubtask.STATUS_IN_PROGRESS:
         return 'build'
@@ -174,7 +176,6 @@ def _workspace_context(
         'can_push_iocs': can_push_rca_iocs(subtask, request.user),
         'ioc_preview': ioc_preview,
         'timeline_max_rows': rca_service.TIMELINE_IMPORT_MAX_ROWS,
-        'attachments': subtask.attachments.select_related('uploaded_by'),
         'is_open': is_open,
         'workflow_step': _workflow_step(subtask, report),
         'idle_seconds': settings.SESSION_COOKIE_AGE,
@@ -216,7 +217,6 @@ def _workspace_context(
     elif active == 'final':
         context['final_form'] = bound.get('final_form') or RCAFinalSubmissionForm(initial={
             'result_notes': subtask.result_notes,
-            'result_file_desc': 'รายงาน RCA ฉบับสมบูรณ์',
         })
     return context
 
@@ -241,8 +241,11 @@ def rca_workspace(request, subtask_id):
         raise PermissionDenied
 
     active = request.POST.get('section', active)
+    # 'final' is delivered by rca_final_submission, not here; any other unknown
+    # key is a malformed post, not a permission problem — answer 400, matching
+    # how a bad GET ?section= is handled (fall back / reject) rather than 403.
     if active not in SECTION_KEYS - {'final'}:
-        raise PermissionDenied
+        return HttpResponseBadRequest('unknown RCA section')
 
     if active == 'general':
         form = RCASection1Form(request.POST, instance=report, prefix='general')
@@ -284,11 +287,13 @@ def rca_workspace(request, subtask_id):
                 except IntegrityError:
                     # A last-ditch guard: clean_value normalises so the formset
                     # catches most duplicates, but a concurrent save can still
-                    # collide on (rca, category, value). Report it, don't 500.
+                    # collide on (rca, category, value). Report it, don't 500 —
+                    # and re-render the BOUND groups so the analyst keeps every
+                    # value they typed across all categories.
                     messages.error(request, 'มี IOC ซ้ำในหมวดเดียวกัน กรุณาตรวจสอบ')
                     return _render_workspace(
                         request, subtask, report, 'iocs',
-                        bound={'indicator_groups': _indicator_formsets(report)},
+                        bound={'indicator_groups': groups},
                     )
                 messages.success(request, 'บันทึก IOC แล้ว')
                 return redirect(_workspace_url(subtask, 'iocs'))
@@ -425,7 +430,7 @@ def rca_final_submission(request, subtask_id):
     subtask, report = _load_workspace(subtask_id, request.user)
     if report is None or not can_edit_rca(subtask, request.user):
         raise PermissionDenied
-    form = RCAFinalSubmissionForm(request.POST, request.FILES)
+    form = RCAFinalSubmissionForm(request.POST)
     if not form.is_valid():
         messages.error(request, 'บันทึกส่วนส่งมอบไม่ได้ กรุณาตรวจสอบข้อมูล')
         return _render_workspace(
@@ -453,7 +458,6 @@ def rca_final_submission(request, subtask_id):
             request, subtask, report, 'final', bound={'final_form': form},
         )
 
-    upload = form.cleaned_data.get('result_file')
     save_subtask_update(
         ticket=subtask.ticket,
         actor=request.user,
@@ -461,12 +465,14 @@ def rca_final_submission(request, subtask_id):
         previous_status=previous_status,
         previous_notes=previous_notes,
         was_done=was_done,
-        result_upload=upload,
-        result_description=form.cleaned_data['result_file_desc'],
     )
     if complete:
         messages.success(request, 'ส่งมอบรายงานและปิดคำขอ RCA แล้ว')
     else:
+        # Saving progress on a request that was never started (a report created
+        # directly, not via rca_start) still moves it OPEN→IN_PROGRESS. The
+        # normal UI reaches the final section only once the request is already
+        # In Progress, so this is a defensive nudge for that out-of-band state.
         if previous_status == TicketSubtask.STATUS_OPEN:
             rca_service.start_request(subtask, request.user)
         messages.success(request, 'บันทึกผลการดำเนินการแล้ว')

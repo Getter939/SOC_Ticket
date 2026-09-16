@@ -6,7 +6,7 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
-## [Unreleased]
+## [v1.6.0] — 2026-09-16
 
 ### Added
 - **Forensic RCA workspace.** Forensics/RCA response requests now open a

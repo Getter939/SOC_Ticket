@@ -112,8 +112,8 @@ class RCAPrefillTest(TestCase):
 
         self.assertTrue(created)
         self.assertEqual(report.incident_name, 'Website defaced')
-        self.assertEqual(report.first_occurrence, '15 พ.ค. 2565 19:02 น.')
-        self.assertEqual(report.detected_text, '9 ก.ย. 2569 08:30 น.')
+        self.assertEqual(report.first_occurrence, _bkk(2022, 5, 15, 19, 2))
+        self.assertEqual(report.detected_at, _bkk(2026, 9, 9, 8, 30))
         self.assertEqual(report.siem_severity, 'Moderate')
         self.assertEqual(report.ncsa_severity, Ticket.NCSA_SEVERITY_SEVERE)
         self.assertEqual(report.threat_category, 'Root Intrusion')
@@ -589,7 +589,10 @@ class RCADraftTest(TestCase):
         subtask = _rca_request(ticket, self.forensic)
         rca, _ = rca_service.get_or_create_rca(subtask, self.forensic)
         rca.forensic_types = ['host_disk', 'log_timeline', 'malware']
-        rca.scope_period = '11 พ.ย. 2563 – 10 ก.ย. 2569'
+        rca.first_occurrence = _bkk(2023, 4, 21, 16, 0)
+        rca.first_occurrence_note = 'โดยประมาณ'
+        rca.scope_start = _bkk(2020, 11, 11, 0, 0)
+        rca.scope_end = _bkk(2026, 9, 10, 0, 0)
         rca.save()
         RCAAsset.objects.create(
             rca=rca, order=1, host='ginfo', ip='111.111.11.111', detail='Joomla 1.5',
@@ -633,6 +636,10 @@ class RCADraftTest(TestCase):
         self.assertNotIn('{{', text)
         self.assertIn(f'SOC-RCA-{period}', text)
         self.assertIn('เว็บไซต์ถูกเปลี่ยนหน้า', text)
+        # Section 1 datetimes: first-occurrence carries its confirmable note, and
+        # the scope renders as a Thai "start – end" range.
+        self.assertIn('21 เม.ย. 2566 16:00 น. (โดยประมาณ)', text)
+        self.assertIn('11 พ.ย. 2563 00:00 น. – 10 ก.ย. 2569 00:00 น.', text)
         self.assertIn('☑ Host / Disk Triage', text)
         self.assertIn('☐ Memory Forensic', text)
         self.assertIn('☑ High', text)          # SIEM severity
@@ -846,6 +853,29 @@ class RCAWorkspaceTest(TestCase):
             subtask=self.subtask, field_name='rca', new_value='บันทึกข้อมูลทั่วไป',
         ).exists())
 
+    def test_section_one_datetime_pickers_round_trip(self):
+        report, _ = rca_service.get_or_create_rca(self.subtask, self.forensic)
+        self.client.force_login(self.forensic)
+
+        response = self.client.post(reverse('rca_workspace', args=[self.subtask.pk]), {
+            'section': 'general',
+            'general-first_occurrence': '2023-04-21T16:00',
+            'general-first_occurrence_note': 'โดยประมาณ',
+            'general-detected_at': '2023-04-22T09:30',
+            'general-scope_start': '2023-04-01T00:00',
+            'general-scope_end': '2023-04-30T23:59',
+        })
+
+        self.assertRedirects(
+            response, f'{reverse("rca_workspace", args=[self.subtask.pk])}?section=general',
+        )
+        report.refresh_from_db()
+        self.assertEqual(report.first_occurrence, _bkk(2023, 4, 21, 16, 0))
+        self.assertEqual(report.first_occurrence_note, 'โดยประมาณ')
+        self.assertEqual(report.detected_at, _bkk(2023, 4, 22, 9, 30))
+        self.assertEqual(report.scope_start, _bkk(2023, 4, 1, 0, 0))
+        self.assertEqual(report.scope_end, _bkk(2023, 4, 30, 23, 59))
+
     def test_formset_section_save_does_not_change_section_one(self):
         report, _ = rca_service.get_or_create_rca(self.subtask, self.forensic)
         original_name = report.incident_name
@@ -938,33 +968,25 @@ class RCAWorkspaceTest(TestCase):
         report.refresh_from_db()
         self.assertEqual(report.draft_generated_by, self.forensic)
 
-    def test_final_submission_uploads_report_and_marks_request_done(self):
+    def test_final_submission_marks_request_done_without_storing_a_file(self):
+        # No file upload: the finished report is delivered physically. Mark Done
+        # records the notes, completes the request, and stores no attachment.
         rca_service.get_or_create_rca(self.subtask, self.forensic)
         self.manager.email = 'mgr@example.com'
         self.manager.save(update_fields=['email'])
         mail.outbox = []
         self.client.force_login(self.forensic)
-        upload = SimpleUploadedFile(
-            'rca-final.docx', b'final-report',
-            content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        )
 
         response = self.client.post(
             reverse('rca_final_submission', args=[self.subtask.pk]),
-            {
-                'result_notes': 'ตรวจพิสูจน์และส่งรายงานแล้ว',
-                'result_file_desc': 'รายงาน RCA ฉบับสมบูรณ์',
-                'complete': '1',
-                'result_file': upload,
-            },
+            {'result_notes': 'ตรวจพิสูจน์และส่งรายงานแล้ว', 'complete': '1'},
         )
 
         self.assertEqual(response.status_code, 302)
         self.subtask.refresh_from_db()
         self.assertEqual(self.subtask.status, TicketSubtask.STATUS_DONE)
         self.assertEqual(self.subtask.result_notes, 'ตรวจพิสูจน์และส่งรายงานแล้ว')
-        attachment = self.subtask.attachments.get()
-        self.assertEqual(attachment.description, 'รายงาน RCA ฉบับสมบูรณ์')
+        self.assertFalse(self.subtask.attachments.exists())
         # Mark Done from the workspace notifies the SOC Manager, once, with the
         # workspace link and the result notes.
         self.assertEqual(len(mail.outbox), 1)
@@ -981,7 +1003,7 @@ class RCAWorkspaceTest(TestCase):
 
         self.client.post(
             reverse('rca_final_submission', args=[self.subtask.pk]),
-            {'result_notes': 'ระหว่างดำเนินการ', 'result_file_desc': '', 'complete': '0'},
+            {'result_notes': 'ระหว่างดำเนินการ', 'complete': '0'},
         )
 
         self.subtask.refresh_from_db()
@@ -1025,6 +1047,29 @@ class RCAWorkspaceTest(TestCase):
         request.refresh_from_db()
         self.assertEqual(request.status, TicketSubtask.STATUS_DONE)
 
+    def test_update_subtask_on_event_request_reports_permission_not_closure(self):
+        # A CLOSED_EVENT response request is not frozen, so a visible user who
+        # merely lacks permission must be told exactly that — not "the item is
+        # closed", which conflating the two would produce.
+        request = _rca_request(
+            self.ticket, self.redteam,
+            subtask_type=TicketSubtask.TYPE_VA_PT, title='VA',
+        )
+        _set_ticket_status(self.ticket, Ticket.STATUS_CLOSED_EVENT)
+        self.client.force_login(self.admin)  # assigned_admin: visible, but not is_soc
+
+        response = self.client.post(
+            reverse('update_subtask', args=[request.pk]),
+            {'status': TicketSubtask.STATUS_DONE, 'result_notes': 'x'},
+            follow=True,
+        )
+
+        texts = [str(m) for m in response.context['messages']]
+        self.assertTrue(any('ไม่มีสิทธิ์' in t for t in texts), texts)
+        self.assertFalse(any('ปิดหรือยกเลิก' in t for t in texts), texts)
+        request.refresh_from_db()
+        self.assertEqual(request.status, TicketSubtask.STATUS_OPEN)
+
     def test_workspace_scripts_carry_the_csp_nonce(self):
         rca_service.get_or_create_rca(self.subtask, self.forensic)
         self.client.force_login(self.forensic)
@@ -1046,3 +1091,80 @@ class RCAWorkspaceTest(TestCase):
 
         self.assertContains(response, 'อ่านอย่างเดียว')
         self.assertNotContains(response, 'ส่งมอบและ Mark Done')
+
+    def test_start_is_refused_on_a_done_request(self):
+        rca_service.get_or_create_rca(self.subtask, self.forensic)
+        TicketSubtask.objects.filter(pk=self.subtask.pk).update(
+            status=TicketSubtask.STATUS_DONE,
+        )
+        self.client.force_login(self.forensic)
+
+        response = self.client.post(reverse('rca_start', args=[self.subtask.pk]))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_stepper_marks_delivery_complete_on_a_done_request(self):
+        rca_service.get_or_create_rca(self.subtask, self.forensic)
+        TicketSubtask.objects.filter(pk=self.subtask.pk).update(
+            status=TicketSubtask.STATUS_DONE,
+        )
+        self.client.force_login(self.forensic)
+
+        response = self.client.get(reverse('rca_workspace', args=[self.subtask.pk]))
+
+        self.assertEqual(response.context['workflow_step'], 'done')
+        # Step 4 (ส่งมอบ) reads as completed, not still-in-progress.
+        self.assertContains(response, '<span class="step done"><span class="num">4</span>', html=False)
+
+    def test_normalized_duplicate_ioc_keeps_other_typed_values(self):
+        report, _ = rca_service.get_or_create_rca(self.subtask, self.forensic)
+        self.client.force_login(self.forensic)
+        data = {'section': 'iocs'}
+        for category, _label in RCAIndicator.CATEGORY_CHOICES:
+            prefix = f'ioc-{category}'
+            if category == RCAIndicator.CAT_HASH:
+                total = '2'
+            elif category == RCAIndicator.CAT_IP:
+                total = '1'
+            else:
+                total = '0'
+            data.update({
+                f'{prefix}-TOTAL_FORMS': total, f'{prefix}-INITIAL_FORMS': '0',
+                f'{prefix}-MIN_NUM_FORMS': '0', f'{prefix}-MAX_NUM_FORMS': '1000',
+            })
+        # A within-category duplicate rejects the save, but the IP typed in
+        # another group must survive the bound re-render — not be wiped.
+        data.update({
+            'ioc-hash-0-category': RCAIndicator.CAT_HASH, 'ioc-hash-0-value': HASH_A.upper(),
+            'ioc-hash-1-category': RCAIndicator.CAT_HASH, 'ioc-hash-1-value': HASH_A,
+            'ioc-ip-0-category': RCAIndicator.CAT_IP, 'ioc-ip-0-value': '203.0.113.42',
+        })
+
+        response = self.client.post(
+            reverse('rca_workspace', args=[self.subtask.pk]), data,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '203.0.113.42')  # typed IP preserved
+        self.assertFalse(report.indicators.exists())
+
+    def test_detail_summary_counts_survive_multiple_child_rows(self):
+        # Guards the selector's len()-of-prefetch counts (replacing the cartesian
+        # Count(distinct=True) annotations): the badge numbers must stay exact
+        # when several child tables each have rows.
+        report, _ = rca_service.get_or_create_rca(self.subtask, self.forensic)
+        RCAAsset.objects.create(rca=report, host='h2', ip='192.0.2.20')
+        RCARootCause.objects.create(rca=report, cause='weak creds')
+        RCAIndicator.objects.create(
+            rca=report, category=RCAIndicator.CAT_IP, value='203.0.113.7',
+        )
+        self.client.force_login(self.manager)
+
+        response = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
+
+        row = next(
+            s for s in response.context['subtasks'] if s.pk == self.subtask.pk
+        )
+        self.assertEqual(row.rca_asset_count, report.assets.count())
+        self.assertEqual(row.rca_root_cause_count, report.root_causes.count())
+        self.assertEqual(row.rca_indicator_count, report.indicators.count())

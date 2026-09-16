@@ -149,9 +149,8 @@ def can_upload_project_attachment(project, user):
 
     The bundle has no single "court" of its own — it is a grouping, and each
     member sits in its own. So the rule is: hold the court on ANY member, or be
-    a SOC Manager. That admits exactly the people already working the incident
-    (the assigned admin of one affected system, the owner of another) without
-    opening group evidence to every SOC account.
+    a Tier 2 analyst or SOC Manager. Tier 2 may contribute shared evidence
+    throughout the active incident, independently of member stages or claims.
 
     Frozen once every member is closed, mirroring the terminal-status refusal
     in can_upload_ticket_attachment — a finished case's evidence set is fixed.
@@ -159,6 +158,9 @@ def can_upload_project_attachment(project, user):
     if project.all_closed:
         return False
     if user.is_superuser or is_soc_manager(user):
+        return True
+    profile = getattr(user, 'profile', None)
+    if profile is not None and profile.is_tier2:
         return True
     return any(
         holds_ticket_court(member, user)

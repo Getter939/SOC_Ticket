@@ -1,8 +1,8 @@
-"""Staging for evidence uploaded on the case-creation forms.
+"""Staging for evidence uploaded on the case-creation and ticket-edit forms.
 
 A browser will not repopulate an ``<input type="file">`` across a page load —
 that is a hard security rule, not a bug we can work around client-side. So when
-``create_ticket`` re-renders with a validation error, any file the analyst
+``create_ticket`` or ``edit_ticket`` re-renders with a validation error, any file the analyst
 attached is gone unless the server kept it.
 
 The flow is:

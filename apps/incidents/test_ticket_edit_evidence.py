@@ -1,0 +1,182 @@
+import tempfile
+from unittest.mock import patch
+
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+from django.urls import reverse
+from django.utils import timezone
+
+from apps.accounts.testing import MFATestCase as TestCase
+
+from .models import StagedAttachment, Ticket, TicketAttachment, TicketLog
+from .tests import _make_t1, _make_ticket
+
+
+class TicketEditEvidenceTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.creator = _make_t1('edit_evidence_creator')
+        cls.other = _make_t1('edit_evidence_other')
+
+    def setUp(self):
+        media = tempfile.TemporaryDirectory(prefix='soc_edit_evidence_')
+        self.addCleanup(media.cleanup)
+        settings = override_settings(MEDIA_ROOT=media.name)
+        settings.enable()
+        self.addCleanup(settings.disable)
+        self.ticket = _make_ticket(
+            created_by=self.creator, status=Ticket.STATUS_NEW,
+            classification=Ticket.CLASSIFICATION_INCIDENT,
+            device_name='original', issue_description='Evidence test',
+            ip_address='192.0.2.1', incident_datetime=timezone.now().replace(second=0, microsecond=0),
+            severity='High', ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            log_source='Wazuh', issue_type='SIEM',
+            detailed_issue='Investigating', detailed_issue2='Investigating Other',
+        )
+        self.url = reverse('edit_ticket', args=[self.ticket.pk])
+        self.client.force_login(self.creator)
+
+    def payload(self, **overrides):
+        fields = (
+            'classification', 'incident_name', 'severity', 'ncsa_severity',
+            'log_source', 'issue_type', 'detailed_issue', 'detailed_issue2',
+            'device_name', 'issue_description', 'ip_address',
+        )
+        data = {field: getattr(self.ticket, field) or '' for field in fields}
+        data['incident_datetime'] = timezone.localtime(
+            self.ticket.incident_datetime,
+        ).strftime('%Y-%m-%dT%H:%M')
+        data['reason'] = 'Additional investigation evidence'
+        data.update(overrides)
+        return data
+
+    def upload(self, name='evidence.log'):
+        return SimpleUploadedFile(name, b'investigation evidence')
+
+    def test_picker_matches_create_form_and_follows_upload_permission(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, 'enctype="multipart/form-data"')
+        self.assertContains(response, 'แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)')
+        self.assertContains(response, 'name="evidence_files"')
+        self.assertContains(response, 'attachment-limits-data')
+        self.client.force_login(self.other)
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'name="evidence_files"')
+        self.assertContains(response, 'ยังไม่มีสิทธิ์แนบไฟล์')
+
+    def test_saves_multiple_files_and_content_with_audit(self):
+        existing = TicketAttachment.objects.create(
+            ticket=self.ticket, file=self.upload('existing.log'),
+            original_name='existing.log', uploaded_by=self.creator,
+        )
+        response = self.client.post(self.url, self.payload(
+            device_name='corrected', evidence_files=[self.upload(), self.upload('second.txt')],
+        ))
+        self.assertRedirects(response, reverse('ticket_detail', args=[self.ticket.pk]))
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.device_name, 'corrected')
+        self.assertEqual(self.ticket.status, Ticket.STATUS_NEW)
+        self.assertEqual(self.ticket.attachments.count(), 3)
+        self.assertTrue(self.ticket.attachments.filter(pk=existing.pk).exists())
+        self.assertEqual(self.ticket.attachments.filter(uploaded_by=self.creator).count(), 3)
+        self.assertFalse(StagedAttachment.objects.exists())
+        log = TicketLog.objects.get(ticket=self.ticket, note__contains='แนบไฟล์หลักฐาน')
+        self.assertIn('evidence.log', log.note)
+        self.assertIn('Additional investigation evidence', log.note)
+        self.assertEqual(log.author, self.creator)
+
+    def test_attachment_only_edit_reports_success(self):
+        response = self.client.post(
+            self.url, self.payload(evidence_files=[self.upload()]), follow=True,
+        )
+        self.assertContains(response, 'แนบไฟล์หลักฐาน 1 ไฟล์เรียบร้อยแล้ว')
+        self.assertNotContains(response, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
+
+    def test_validation_errors_preserve_uploads_and_reason_until_retry(self):
+        for overrides in ({'device_name': ''}, {'reason': ''}):
+            with self.subTest(overrides=overrides):
+                response = self.client.post(self.url, self.payload(
+                    evidence_files=[self.upload()], **overrides,
+                ))
+                self.assertEqual(response.status_code, 200)
+                token = response.context['evidence_token']
+                self.assertContains(response, 'ไฟล์ที่ระบบเก็บไว้ให้แล้ว')
+                self.assertEqual(response.context['reason'], overrides.get(
+                    'reason', 'Additional investigation evidence',
+                ))
+                staged = StagedAttachment.objects.get(token=token)
+                self.assertTrue(staged.file.storage.exists(staged.file.name))
+                count = self.ticket.attachments.count()
+                response = self.client.post(self.url, self.payload(evidence_token=token))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.ticket.attachments.count(), count + 1)
+                self.assertFalse(StagedAttachment.objects.filter(token=token).exists())
+
+    def test_invalid_file_blocks_edit_but_keeps_valid_file_for_retry(self):
+        response = self.client.post(self.url, self.payload(
+            device_name='must not save', evidence_files=[self.upload(), self.upload('bad.exe')],
+        ))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'bad.exe')
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.device_name, 'original')
+        self.assertFalse(self.ticket.attachments.exists())
+        self.assertEqual(StagedAttachment.objects.get().original_name, 'evidence.log')
+
+    def test_file_size_and_batch_limits_block_edit(self):
+        for limit in ('apps.incidents.models.MAX_ATTACHMENT_SIZE',
+                      'apps.incidents.staging.MAX_ATTACHMENT_BATCH_SIZE',
+                      'apps.incidents.staging.MAX_ATTACHMENT_COUNT'):
+            with self.subTest(limit=limit), patch(limit, 0):
+                response = self.client.post(self.url, self.payload(evidence_files=[self.upload()]))
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.context['form'].non_field_errors())
+                self.assertFalse(self.ticket.attachments.exists())
+
+    def test_out_of_court_editor_cannot_upload_or_adopt_staged_files(self):
+        response = self.client.post(self.url, self.payload(reason='', evidence_files=[self.upload()]))
+        token = response.context['evidence_token']
+        Ticket.objects.filter(pk=self.ticket.pk).update(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        for evidence in ({'evidence_files': [self.upload()]}, {'evidence_token': token}):
+            with self.subTest(evidence=evidence):
+                response = self.client.post(self.url, self.payload(device_name='blocked', **evidence))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'คุณไม่มีสิทธิ์แนบไฟล์ในสถานะปัจจุบัน')
+                self.assertFalse(self.ticket.attachments.exists())
+                self.ticket.refresh_from_db()
+                self.assertEqual(self.ticket.device_name, 'original')
+        response = self.client.post(self.url, self.payload(device_name='text correction'))
+        self.assertEqual(response.status_code, 302)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.device_name, 'text correction')
+
+    def test_cannot_adopt_another_users_staged_files(self):
+        staged = StagedAttachment.objects.create(
+            token='a' * 32, file=self.upload(), original_name='private.log', uploaded_by=self.other,
+        )
+        response = self.client.post(self.url, self.payload(evidence_token=staged.token))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.ticket.attachments.exists())
+        self.assertTrue(StagedAttachment.objects.filter(pk=staged.pk).exists())
+
+    def test_even_superuser_cannot_upload_to_closed_ticket(self):
+        self.creator.is_superuser = True
+        self.creator.save(update_fields=['is_superuser'])
+        for status in (Ticket.STATUS_APPROVED, Ticket.STATUS_CLOSED_EVENT, Ticket.STATUS_CANCELLED):
+            with self.subTest(status=status):
+                Ticket.objects.filter(pk=self.ticket.pk).update(status=status)
+                self.client.post(self.url, self.payload(evidence_files=[self.upload()]))
+                self.assertFalse(self.ticket.attachments.exists())
+                self.assertFalse(StagedAttachment.objects.exists())
+
+    def test_attachment_failure_rolls_back_content_edit(self):
+        with patch('apps.incidents.ticket_updates.adopt_staged', side_effect=ValidationError('failed')):
+            response = self.client.post(self.url, self.payload(
+                device_name='must roll back', evidence_files=[self.upload()],
+            ))
+        self.assertEqual(response.status_code, 302)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.device_name, 'original')
+        self.assertFalse(self.ticket.field_changes.exists())
+        self.assertFalse(self.ticket.attachments.exists())

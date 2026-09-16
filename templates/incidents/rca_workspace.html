@@ -54,7 +54,7 @@
   <i class="bi bi-chevron-right sep"></i>
   <span class="step {% if step == 'draft' %}current{% elif step == 'done' %}done{% endif %}"><span class="num">3</span>Draft</span>
   <i class="bi bi-chevron-right sep"></i>
-  <span class="step {% if step == 'done' %}current{% endif %}"><span class="num">4</span>ส่งมอบ</span>
+  <span class="step {% if step == 'done' %}done{% endif %}"><span class="num">4</span>ส่งมอบ</span>
   {% endwith %}
 </div>
 
@@ -179,33 +179,21 @@
         </form>
 
         {% elif active_section == 'final' %}
-        <div class="row g-3 mb-4">
-          <div class="col-lg-7">
-            <div class="border rounded p-3 h-100">
-              <h3 class="h6">Word Draft</h3>
-              {% if rca.draft_generated_at %}
-              <p class="small mb-2">สร้างล่าสุด {{ rca.draft_generated_at|date:"d/m/Y H:i" }}{% if rca.draft_generated_by %} โดย {{ rca.draft_generated_by.get_full_name|default:rca.draft_generated_by.username }}{% endif %}</p>
-              {% if rca.has_stale_draft %}<div class="alert alert-warning py-2 small">ข้อมูลใน Workspace เปลี่ยนหลังจากสร้าง Draft ครั้งล่าสุด</div>{% endif %}
-              {% else %}<p class="small text-muted">ยังไม่เคยสร้าง Draft</p>{% endif %}
-              {% if can_generate_draft %}<form method="post" action="{% url 'rca_draft' subtask.pk %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit"><i class="bi bi-file-earmark-word me-1"></i>สร้างและดาวน์โหลด Draft</button></form>{% endif %}
-            </div>
-          </div>
-          <div class="col-lg-5">
-            <div class="border rounded p-3 h-100"><h3 class="h6">ไฟล์ที่ส่งมอบ</h3>
-              {% for attachment in attachments %}<div class="small mb-1"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' attachment.pk %}">{{ attachment.original_name }}</a>{% if attachment.description %}<div class="text-muted ms-4">{{ attachment.description }}</div>{% endif %}</div>{% empty %}<div class="small text-muted">ยังไม่มีไฟล์ส่งมอบ</div>{% endfor %}
-            </div>
-          </div>
+        <div class="border rounded p-3 mb-4">
+          <h3 class="h6">Word Draft</h3>
+          {% if rca.draft_generated_at %}
+          <p class="small mb-2">สร้างล่าสุด {{ rca.draft_generated_at|date:"d/m/Y H:i" }}{% if rca.draft_generated_by %} โดย {{ rca.draft_generated_by.get_full_name|default:rca.draft_generated_by.username }}{% endif %}</p>
+          {% if rca.has_stale_draft %}<div class="alert alert-warning py-2 small">ข้อมูลใน Workspace เปลี่ยนหลังจากสร้าง Draft ครั้งล่าสุด</div>{% endif %}
+          {% else %}<p class="small text-muted">ยังไม่เคยสร้าง Draft</p>{% endif %}
+          {% if can_generate_draft %}<form method="post" action="{% url 'rca_draft' subtask.pk %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit"><i class="bi bi-file-earmark-word me-1"></i>สร้างและดาวน์โหลด Draft</button></form>{% endif %}
+          <div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>จัดทำรายงานฉบับสมบูรณ์จาก Draft นี้ แล้วส่งมอบเป็นเอกสารทางการให้ผู้จัดการ SOC — ระบบไม่เก็บสำเนาไฟล์</div>
         </div>
         {% if can_edit %}
-        <form method="post" action="{% url 'rca_final_submission' subtask.pk %}" enctype="multipart/form-data" data-rca-edit-form>
+        <form method="post" action="{% url 'rca_final_submission' subtask.pk %}" data-rca-edit-form>
           {% csrf_token %}
           <div class="mb-3">{{ final_form.result_notes.label_tag }}{{ final_form.result_notes }}{% for error in final_form.result_notes.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
-          <div class="row g-3">
-            <div class="col-md-6">{{ final_form.result_file.label_tag }}{{ final_form.result_file }}{% for error in final_form.result_file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
-            <div class="col-md-6">{{ final_form.result_file_desc.label_tag }}{{ final_form.result_file_desc }}{% for error in final_form.result_file_desc.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
-          </div>
           <div class="d-flex justify-content-between gap-2 flex-wrap mt-4">
-            <button class="btn btn-outline-primary" type="submit" name="complete" value="0"><i class="bi bi-save me-1"></i>บันทึกผลและไฟล์</button>
+            <button class="btn btn-outline-primary" type="submit" name="complete" value="0"><i class="bi bi-save me-1"></i>บันทึกผล</button>
             <button class="btn btn-success" type="submit" name="complete" value="1" data-confirm-click="เมื่อปิดงานแล้ว ข้อมูล RCA จะเป็นแบบอ่านอย่างเดียว ยืนยันหรือไม่?"><i class="bi bi-check-circle me-1"></i>ส่งมอบและ Mark Done</button>
           </div>
         </form>

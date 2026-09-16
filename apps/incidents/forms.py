@@ -952,23 +952,41 @@ class RCASection1Form(_RCAFormMixin, forms.ModelForm):
         widget=forms.CheckboxSelectMultiple,
     )
 
+    _DATETIME_FIELDS = ('first_occurrence', 'detected_at', 'scope_start', 'scope_end')
+
     class Meta:
         model = RCAReport
         fields = [
-            'incident_name', 'first_occurrence', 'detected_text', 'scope_period',
+            'incident_name', 'first_occurrence', 'first_occurrence_note', 'detected_at',
+            'scope_start', 'scope_end',
             'forensic_types', 'importance', 'siem_severity', 'ncsa_severity',
             'threat_category', 'assets_examined', 'asset_type', 'affected_systems',
             'asset_owner', 'examiner', 'related_refs',
         ]
         widgets = {
-            'first_occurrence': forms.TextInput(),
-            'detected_text': forms.TextInput(),
-            'scope_period': forms.TextInput(),
+            'first_occurrence': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'detected_at': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'scope_start': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'scope_end': forms.DateTimeInput(
+                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
+            ),
+            'first_occurrence_note': forms.TextInput(),
             'assets_examined': forms.Textarea(attrs={'rows': 2}),
             'affected_systems': forms.Textarea(attrs={'rows': 2}),
             'asset_owner': forms.Textarea(attrs={'rows': 2}),
             'related_refs': forms.Textarea(attrs={'rows': 2}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in self._DATETIME_FIELDS:
+            self.fields[name].input_formats = ['%Y-%m-%dT%H:%M']
 
 
 class RCAAssetForm(_RCAFormMixin, forms.ModelForm):
@@ -1080,29 +1098,14 @@ class RCATimelineImportForm(forms.Form):
 
 
 class RCAFinalSubmissionForm(forms.Form):
+    # No file upload: the finished report is the physical official document the
+    # SOC Manager collects, so the system keeps only the result notes and the
+    # request's completion, not a duplicate copy on disk.
     result_notes = forms.CharField(
         required=False,
         label='สรุปผลการดำเนินการ',
         widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
     )
-    result_file = forms.FileField(
-        required=False,
-        label='รายงาน RCA ฉบับสมบูรณ์',
-        widget=forms.FileInput(attrs={'class': 'form-control'}),
-    )
-    result_file_desc = forms.CharField(
-        required=False,
-        max_length=255,
-        label='คำอธิบายไฟล์',
-        initial='รายงาน RCA ฉบับสมบูรณ์',
-        widget=forms.TextInput(attrs={'class': 'form-control'}),
-    )
-
-    def clean_result_file(self):
-        upload = self.cleaned_data.get('result_file')
-        if upload is not None:
-            validate_attachment(upload)
-        return upload
 
 
 class MultipleFileInput(forms.ClearableFileInput):

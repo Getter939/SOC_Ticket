@@ -603,6 +603,24 @@ class ResponseTeamUiTest(TestCase):
         self.assertContains(resp, 'My RCA')
         self.assertNotContains(resp, 'Their pentest')
 
+    def test_queue_row_links_rca_to_workspace_and_others_to_ticket(self):
+        t = self._ticket()
+        rca = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='My RCA', assigned_to=self.forensic, created_by=self.manager,
+        )
+        va = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Their pentest', assigned_to=self.redteam, created_by=self.manager,
+        )
+        self.client.force_login(self.manager)  # overview sees both
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertContains(resp, reverse('rca_workspace', args=[rca.pk]))
+        self.assertContains(
+            resp, f"{reverse('ticket_detail', args=[t.pk])}#tasks",
+        )
+        self.assertNotContains(resp, reverse('rca_workspace', args=[va.pk]))
+
     def test_queue_overview_for_soc_shows_all(self):
         t = self._ticket()
         TicketSubtask.objects.create(

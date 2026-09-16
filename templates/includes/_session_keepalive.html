@@ -35,6 +35,12 @@ expires on schedule. Two minutes before expiry it shows a countdown modal.
         <button type="button" class="btn btn-primary" id="session-stay-btn">
           <i class="bi bi-shield-check me-1"></i>อยู่ในระบบต่อ
         </button>
+        <a class="btn btn-primary" id="session-relogin-btn" hidden
+           href="{% url 'login' %}" target="_blank" rel="noopener">
+          <i class="bi bi-box-arrow-in-right me-1"></i>เข้าสู่ระบบใหม่ (แท็บใหม่)
+        </a>
+        <button type="button" class="btn btn-outline-secondary" id="session-dismiss-btn" hidden
+                data-bs-dismiss="modal">ปิดหน้าต่างนี้</button>
       </div>
     </div>
   </div>
@@ -59,6 +65,8 @@ function initSessionKeepalive() {
   const warnBody = document.getElementById('session-warn-body');
   const expiredBody = document.getElementById('session-expired-body');
   const stayBtn = document.getElementById('session-stay-btn');
+  const reloginBtn = document.getElementById('session-relogin-btn');
+  const dismissBtn = document.getElementById('session-dismiss-btn');
 
   let lastContact = Date.now();  // page load itself slid the clock
   let lastPing = Date.now();
@@ -70,6 +78,11 @@ function initSessionKeepalive() {
     document.addEventListener(evt, () => { activity = true; }, { passive: true }));
 
   async function ping() {
+    // lastPing is set for BOTH outcomes: a failed ping still consumes the
+    // cadence, so a genuinely dead session (server restart, sign-out in another
+    // tab) does not turn the 1 Hz tick into a request-per-second storm that
+    // just follows the 302 and re-downloads the login page.
+    lastPing = Date.now();
     try {
       const resp = await fetch(url, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -79,7 +92,6 @@ function initSessionKeepalive() {
         const data = await resp.json().catch(() => ({}));
         if (data && data.ok) {
           lastContact = Date.now();
-          lastPing = Date.now();
           activity = false;
           return true;
         }
@@ -93,6 +105,8 @@ function initSessionKeepalive() {
     warnBody.hidden = true;
     expiredBody.hidden = false;
     stayBtn.hidden = true;
+    reloginBtn.hidden = false;
+    dismissBtn.hidden = false;
     modal.show();
   }
 

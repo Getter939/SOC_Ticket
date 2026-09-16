@@ -143,8 +143,8 @@ def initial_section1(subtask):
         owner = f'{owner} ({ticket.asset_owner_name})' if owner else ticket.asset_owner_name
     return {
         'incident_name': ticket.incident_name or '',
-        'first_occurrence': thai_datetime(ticket.event_occurred_at),
-        'detected_text': thai_datetime(ticket.incident_datetime),
+        'first_occurrence': ticket.event_occurred_at,
+        'detected_at': ticket.incident_datetime,
         'importance': importance,
         'siem_severity': _SIEM_SEVERITY.get(ticket.severity, ''),
         'ncsa_severity': ticket.ncsa_severity or '',
@@ -521,6 +521,24 @@ def _evidence_cell(entry):
     return '\n'.join(parts)
 
 
+def _first_occurrence_text(rca):
+    """First-occurrence date, with the optional confirmable note appended."""
+    base = thai_datetime(rca.first_occurrence)
+    note = (rca.first_occurrence_note or '').strip()
+    if base and note:
+        return f'{base} ({note})'
+    return base or note or '-'
+
+
+def _scope_text(rca):
+    """Scope period rendered as ``start – end`` (or whichever side is set)."""
+    start = thai_datetime(rca.scope_start)
+    end = thai_datetime(rca.scope_end)
+    if start and end:
+        return f'{start} – {end}'
+    return start or end or '-'
+
+
 def _section1_context(rca):
     """The flat ``{{rca_*}}`` values for Section 1 and the page header."""
     threat = dict(Ticket.DETAILED_ISSUE_CHOICES).get(rca.threat_category, rca.threat_category)
@@ -528,9 +546,9 @@ def _section1_context(rca):
     context = {
         'rca_case_no': case_number(rca),
         'rca_incident_name': rca.incident_name or '-',
-        'rca_first_occurrence': rca.first_occurrence or '-',
-        'rca_detected': rca.detected_text or '-',
-        'rca_scope': rca.scope_period or '-',
+        'rca_first_occurrence': _first_occurrence_text(rca),
+        'rca_detected': thai_datetime(rca.detected_at) or '-',
+        'rca_scope': _scope_text(rca),
         'rca_threat_category': threat or '-',
         'rca_assets_examined': rca.assets_examined or '-',
         'rca_affected_systems': rca.affected_systems or '-',

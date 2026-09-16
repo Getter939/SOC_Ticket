@@ -3403,11 +3403,22 @@ class RCAReport(models.Model):
     )
     # ── Section 1 — prefilled from the ticket, then edited by the analyst ─ #
     incident_name = models.CharField(max_length=255, blank=True, default='', verbose_name='ชื่อเหตุการณ์')
-    first_occurrence = models.TextField(
-        blank=True, default='', verbose_name='วันที่/เวลา ที่เกิดเหตุครั้งแรก (ยืนยันได้)',
+    first_occurrence = models.DateTimeField(
+        null=True, blank=True, verbose_name='วันที่/เวลา ที่เกิดเหตุครั้งแรก',
     )
-    detected_text = models.TextField(blank=True, default='', verbose_name='วันที่/เวลา ที่ตรวจพบ')
-    scope_period = models.TextField(blank=True, default='', verbose_name='ช่วงเวลาที่ตรวจพิสูจน์ (Scope)')
+    # The "(ยืนยันได้)" nuance of the old free-text field lives here now: an
+    # optional note for an approximate or unconfirmable first-occurrence time.
+    first_occurrence_note = models.CharField(
+        max_length=255, blank=True, default='',
+        verbose_name='หมายเหตุเวลาที่เกิดเหตุ (เช่น โดยประมาณ/ยืนยันไม่ได้)',
+    )
+    detected_at = models.DateTimeField(null=True, blank=True, verbose_name='วันที่/เวลา ที่ตรวจพบ')
+    scope_start = models.DateTimeField(
+        null=True, blank=True, verbose_name='ช่วงเวลาที่ตรวจพิสูจน์ — เริ่ม',
+    )
+    scope_end = models.DateTimeField(
+        null=True, blank=True, verbose_name='ช่วงเวลาที่ตรวจพิสูจน์ — ถึง',
+    )
     # List of FORENSIC_TYPE_CHOICES keys.
     forensic_types = models.JSONField(default=list, blank=True, verbose_name='ประเภทการตรวจพิสูจน์')
     importance = models.CharField(

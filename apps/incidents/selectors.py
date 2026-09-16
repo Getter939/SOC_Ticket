@@ -5,7 +5,7 @@ workflow state and do not construct forms or HTTP responses.
 """
 
 from django.contrib.auth.models import User
-from django.db.models import Count, Prefetch
+from django.db.models import Prefetch
 
 from apps.accounts.models import UserProfile
 
@@ -24,7 +24,6 @@ from .policies import (
     can_update_subtask,
 )
 from .rca import case_number as rca_case_number
-from .reports import _report_ticket_id
 
 
 def get_ticket_detail_read_model(
@@ -61,15 +60,16 @@ def get_ticket_detail_read_model(
     for attachment in attachments:
         attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
 
+    # The RCA child tables are prefetched (not annotated with Count): five
+    # Count(distinct=True) aggregates over a single query force a five-way JOIN
+    # whose cartesian product Postgres materialises per subtask before DISTINCT
+    # collapses it. Prefetching pulls the child rows only for the RCA subtasks
+    # that have them, and the summary counts come from len() of the cached lists.
     subtasks = list(ticket.subtasks.select_related(
         'assigned_to', 'created_by', 'rca__draft_generated_by',
-    ).annotate(
-        rca_asset_count=Count('rca__assets', distinct=True),
-        rca_timeline_count=Count('rca__timeline', distinct=True),
-        rca_root_cause_count=Count('rca__root_causes', distinct=True),
-        rca_indicator_count=Count('rca__indicators', distinct=True),
-        rca_recommendation_count=Count('rca__recommendations', distinct=True),
     ).prefetch_related(
+        'rca__assets', 'rca__timeline', 'rca__root_causes',
+        'rca__indicators', 'rca__recommendations',
         Prefetch(
             'attachments',
             queryset=TicketAttachment.objects.select_related('subtask__assigned_to'),
@@ -89,9 +89,13 @@ def get_ticket_detail_read_model(
             and can_edit_rca(subtask, user)
         )
         subtask.rca_report = getattr(subtask, 'rca', None)
-        subtask.rca_case_number = (
-            rca_case_number(subtask.rca_report) if subtask.rca_report else ''
-        )
+        report = subtask.rca_report
+        subtask.rca_case_number = rca_case_number(report) if report else ''
+        subtask.rca_asset_count = len(report.assets.all()) if report else 0
+        subtask.rca_timeline_count = len(report.timeline.all()) if report else 0
+        subtask.rca_root_cause_count = len(report.root_causes.all()) if report else 0
+        subtask.rca_indicator_count = len(report.indicators.all()) if report else 0
+        subtask.rca_recommendation_count = len(report.recommendations.all()) if report else 0
         subtask.can_generate_rca_draft = can_generate_rca_draft(subtask, user)
         for attachment in subtask.attachments.all():
             attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
@@ -160,7 +164,6 @@ def get_rca_case_context(ticket):
             })
 
     return {
-        'report_number': _report_ticket_id(ticket),
         'incident_name': ticket.incident_name,
         'classification': ticket.get_classification_display() if ticket.classification else '',
         'severity': ticket.severity,

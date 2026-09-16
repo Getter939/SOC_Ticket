@@ -51,7 +51,7 @@
                 </thead>
                 <tbody>
                     {% for req in requests %}
-                    <tr class="clickable-row" data-row-href="{% if req.subtask_type == 'FORENSIC_RCA' %}{% url 'rca_workspace' req.pk %}{% else %}{% url 'ticket_detail' req.ticket.id %}#tasks{% endif %}" tabindex="0" role="link" aria-label="เปิดงาน {{ req.title }}">
+                    <tr class="clickable-row" data-row-href="{{ req.work_url }}" tabindex="0" role="link" aria-label="เปิดงาน {{ req.title }}">
                         <td><span class="req-type"><i class="bi bi-shield-shaded"></i>{{ req.get_subtask_type_display }}</span></td>
                         <td><div class="cell-primary">{{ req.title }}</div>{% if req.description %}<div class="cell-secondary text-truncate" style="max-width:260px;">{{ req.description }}</div>{% endif %}</td>
                         <td class="cell-technical"><strong>#{{ req.ticket.ticket_id }}</strong>{% if req.ticket.is_emergency %} <span class="badge bg-danger">EMG</span>{% endif %}</td>
@@ -59,7 +59,7 @@
                         <td>{% if req.created_by %}{{ req.created_by.get_full_name|default:req.created_by.username }}{% else %}-{% endif %}</td>
                         <td>{{ req.created_at|date:"d/m/Y" }}</td>
                         <td><span class="req-status {% if req.is_done %}bg-success text-white{% else %}bg-light text-dark border{% endif %}">{{ req.get_status_display }}</span></td>
-                        <td class="cell-actions"><a href="{% if req.subtask_type == 'FORENSIC_RCA' %}{% url 'rca_workspace' req.pk %}{% else %}{% url 'ticket_detail' req.ticket.id %}#tasks{% endif %}" class="btn btn-sm {% if req.subtask_type == 'FORENSIC_RCA' %}btn-warning{% else %}btn-outline-secondary{% endif %}">{% if req.subtask_type == 'FORENSIC_RCA' %}เปิด RCA{% else %}เปิดคำขอ{% endif %}</a></td>
+                        <td class="cell-actions"><a href="{{ req.work_url }}" class="btn btn-sm {% if req.is_rca_request %}btn-warning{% else %}btn-outline-secondary{% endif %}">{% if req.is_rca_request %}เปิด RCA{% else %}เปิดคำขอ{% endif %}</a></td>
                     </tr>
                     {% empty %}
                     <tr><td colspan="{% if is_overview %}8{% else %}7{% endif %}">{% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่ตรงกับสถานะที่เลือก' %}</td></tr>
