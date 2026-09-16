@@ -795,65 +795,10 @@ class TriageForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
 
-# The two legacy subtask types SOC staff may spawn freely. Response-team
-# request types (VA/PT, InfraSec, Forensics) are excluded here — those are
-# spawned by the SOC Manager through ResponseRequestForm, which routes and
-# auto-assigns them to a response-team role.
-_LEGACY_SUBTASK_TYPE_CHOICES = [
-    (TicketSubtask.TYPE_INVESTIGATION, 'Investigation'),
-    (TicketSubtask.TYPE_COUNTERMEASURE, 'Countermeasure'),
-]
-
-
-class SubtaskForm(forms.ModelForm):
-    """Intra-SOC working note on a ticket: type, title, detail. Nothing more.
-
-    Deliberately has NO assignee field. A legacy subtask fires no notification,
-    gates no transition, and never reaches the incident report, so naming an
-    assignee could not summon anyone — it only looked like it did. The picker was
-    worse than useless outside the SOC: visible_to() reaches a System Admin only
-    via ``assigned_admin`` and a System Owner only via ``system_owner``, never via
-    a subtask, so assigning one to an admin who was not this ticket's
-    assigned_admin left work they could neither see nor be told about. Their real
-    work is driven by the state machine (AWAITING_CONTAINMENT →
-    CONTAINMENT_REPORTED) and the containment_report / remediation_summary fields.
-
-    Work that must actually reach somebody goes through ResponseRequestForm, which
-    routes by type, auto-assigns, emails the responder, and blocks approval until
-    it is done.
-
-    ``TicketSubtask.assigned_to`` stays on the model — response requests set it.
-    """
-
-    subtask_type = forms.ChoiceField(
-        choices=_LEGACY_SUBTASK_TYPE_CHOICES,
-        label='ประเภท',
-        # Stable id: the detail page renders this form and ResponseRequestForm on
-        # the same page, and both would otherwise take Django's default
-        # id_subtask_type — which breaks <label for> on whichever renders second.
-        widget=forms.Select(attrs={
-            'class': 'form-select form-select-sm', 'id': 'legacy-subtask-type',
-        }),
-    )
-
-    class Meta:
-        model = TicketSubtask
-        fields = ['subtask_type', 'title', 'description']
-        # Explicit ids throughout: ResponseRequestForm renders on the same page and
-        # keeps the Django defaults for title/description, so leaving these to
-        # id_title / id_description would point this form's <label for> at the
-        # response card's inputs instead.
-        widgets = {
-            'title': forms.TextInput(attrs={
-                'class': 'form-control form-control-sm', 'id': 'legacy-subtask-title',
-                'placeholder': 'เช่น ตรวจสอบ log การเข้าถึง / บล็อก IP ที่ปลายทาง Firewall',
-            }),
-            'description': forms.Textarea(attrs={
-                'class': 'form-control form-control-sm', 'rows': 2,
-                'id': 'legacy-subtask-description',
-                'placeholder': 'รายละเอียดงานที่ต้องดำเนินการ (ไม่บังคับ)...',
-            }),
-        }
+# NOTE: The legacy intra-SOC subtask types (Investigation / Countermeasure) are
+# retired — there is no longer a form or view to create them. The two enum values
+# survive on TicketSubtask only so pre-existing historical rows keep a friendly
+# label. All new subtasks are response-team requests spawned via ResponseRequestForm.
 
 
 class ResponseRequestForm(forms.ModelForm):

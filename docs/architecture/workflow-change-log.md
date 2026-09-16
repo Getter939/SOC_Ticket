@@ -146,10 +146,15 @@ UI until the request completes rather than erroring on submit.
 
 **Surfaces updated:** manager spawn card + open-request warning on the ticket
 detail, responder update panel (status / notes / file) in the subtask section,
-"Response Requests" queue (`/incidents/response-requests/`) + nav badge, restricted
-legacy subtask form (Investigation / Countermeasure only), a cross-cutting
-"รอทีมตอบสนอง" row on the executive summary (with `?f=RESPONSE_PENDING`
-drill-down), admin registration for `TicketAttachment`, and seed/test accounts.
+"Response Requests" queue (`/incidents/response-requests/`) + nav badge, a
+cross-cutting "รอทีมตอบสนอง" row on the executive summary (with
+`?f=RESPONSE_PENDING` drill-down), admin registration for `TicketAttachment`,
+and seed/test accounts.
+
+**Later change:** the legacy intra-SOC subtask form (Investigation /
+Countermeasure) was retired — the create path was removed and the ticket-detail
+section reframed as "คำขอทีมตอบสนอง" with the response-request spawn form
+co-located in it. The two enum values remain for historical rows only.
 
 ---
 

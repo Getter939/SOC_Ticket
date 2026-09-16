@@ -1,4 +1,4 @@
-"""Write-side creation operations for legacy subtasks and response requests."""
+"""Write-side creation operations for response-team requests."""
 
 from dataclasses import dataclass
 
@@ -17,16 +17,6 @@ class SubtaskCreationResult:
 
     subtask: TicketSubtask
     notification_sent: bool | None = None
-
-
-def create_legacy_subtask(*, ticket, actor, subtask_form):
-    """Persist a validated unassigned Investigation or Countermeasure note."""
-    with transaction.atomic():
-        subtask = subtask_form.save(commit=False)
-        subtask.ticket = ticket
-        subtask.created_by = actor
-        subtask.save()
-    return SubtaskCreationResult(subtask=subtask)
 
 
 def create_response_request(*, ticket, actor, response_form):

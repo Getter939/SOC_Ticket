@@ -4,53 +4,8 @@
     <div class="section-hint">เลือกเปิดเฉพาะรายการที่ต้องการดำเนินการ</div>
   </div>
 
-  {% if can_request_response %}
-  {% if ticket.has_open_response_requests %}
-  <div class="response-pending-note small" role="status">
-    <i class="bi bi-hourglass-split me-1" aria-hidden="true"></i>รอผลจากทีมตอบสนอง — ต้องดำเนินการครบก่อนอนุมัติปิดเคส
-    <a href="#tasks">ดูงานที่ค้าง</a>
-  </div>
-  {% endif %}
-  <details class="action-disclosure" id="response-request-panel">
-    <summary>
-      <i class="bi bi-shield-shaded action-icon" aria-hidden="true"></i>
-      <span class="action-summary-copy"><span class="action-title">ส่งทีมตอบสนอง</span><span class="action-hint">ขอให้ทีมเฉพาะทางช่วยตรวจสอบ</span></span>
-      <i class="bi bi-chevron-down action-chevron" aria-hidden="true"></i>
-    </summary>
-    <div class="action-disclosure-body">
-      <p class="small text-muted">งานช่องโหว่และความปลอดภัยโครงสร้างพื้นฐานส่งให้ผู้จัดการทีม Red Team ส่วนงานนิติวิทยาศาสตร์ส่งให้นักวิเคราะห์ Forensics</p>
-      <form method="post" action="{% url 'create_response_request' ticket.pk %}" class="row g-3">
-        {% csrf_token %}
-        <div class="col-12"><label for="{{ response_request_form.subtask_type.id_for_label }}" class="form-label">ประเภทงาน <span class="text-danger">*</span></label>{{ response_request_form.subtask_type }}</div>
-        <div class="col-12"><label for="{{ response_request_form.title.id_for_label }}" class="form-label">ชื่องาน <span class="text-danger">*</span></label>{{ response_request_form.title }}</div>
-        <div class="col-12"><label for="{{ response_request_form.description.id_for_label }}" class="form-label">ขอบเขตงาน <span class="text-muted small">(ไม่บังคับ)</span></label>{{ response_request_form.description }}</div>
-        <div class="col-12"><label for="{{ response_request_form.assigned_to.id_for_label }}" class="form-label">ผู้รับผิดชอบ</label>{{ response_request_form.assigned_to }}<div class="form-text">เว้นว่างเพื่อให้ระบบมอบหมายอัตโนมัติ</div></div>
-        <div class="col-12"><button class="btn btn-outline-primary w-100" type="submit">ส่งคำขอทีมตอบสนอง</button></div>
-      </form>
-      {{ response_routing|json_script:"resp-routing-data" }}
-      {{ response_member_roles|json_script:"resp-member-roles-data" }}
-      <script nonce="{{ request.csp_nonce }}">(function(){
-        var typeSel=document.getElementById('resp-type-select');
-        var asgSel=document.getElementById('resp-assignee-select');
-        if(!typeSel||!asgSel)return;
-        var routing=JSON.parse(document.getElementById('resp-routing-data').textContent);
-        var roles=JSON.parse(document.getElementById('resp-member-roles-data').textContent);
-        function sync(){
-          var wantRole=routing[typeSel.value];
-          Array.prototype.forEach.call(asgSel.options,function(opt){
-            if(opt.value===''){opt.hidden=false;opt.disabled=false;return;}
-            var ok=roles[opt.value]===wantRole;
-            opt.hidden=!ok;opt.disabled=!ok;
-          });
-          var cur=asgSel.selectedOptions[0];
-          if(cur&&cur.hidden){asgSel.value='';}
-        }
-        typeSel.addEventListener('change',sync);
-        sync();
-      })();</script>
-    </div>
-  </details>
-  {% endif %}
+  {# Response-team requests are created and listed in the #tasks section of the #}
+  {# ticket detail page (co-located with the request list). #}
 
   {% if can_reassess_emergency %}
   <details class="action-disclosure">

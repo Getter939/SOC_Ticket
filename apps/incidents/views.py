@@ -26,7 +26,7 @@ from apps.wazuh_ingest.models import WazuhAlert
 from .forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentForm,
     ProjectIncidentTargetForm, ProjectIncidentTargetFormSet,
-    ResponseRequestForm, SubtaskForm,
+    ResponseRequestForm,
     SubtaskUpdateForm, TicketEditForm, TicketForm, TicketReviewForm, TriageForm,
 )
 from .models import (
@@ -93,7 +93,6 @@ from .ticket_evidence import (
     restore_ticket_attachment,
 )
 from .subtask_creation import (
-    create_legacy_subtask,
     create_response_request as create_response_request_operation,
 )
 from .ticket_updates import save_subtask_update, save_ticket_edit
@@ -1411,10 +1410,8 @@ def ticket_detail(request, pk):
 
     valid_status_choices = _valid_soc_status_choices(ticket, request.user)
     attachment_form = AttachmentForm()
-    subtask_form = SubtaskForm()
     subtask_update_form = SubtaskUpdateForm()
     response_request_form = ResponseRequestForm()
-    can_create_subtask = request.user.is_superuser or (profile and profile.is_soc)
     read_model = get_ticket_detail_read_model(
         ticket=ticket,
         user=request.user,
@@ -1469,9 +1466,7 @@ def ticket_detail(request, pk):
         'T1_ROUTE_OWNER': Ticket.T1_ROUTE_OWNER,
         'can_reassess_emergency': ticket.can_reassess_emergency(request.user),
         'CLASSIFICATION_CHOICES': Ticket.CLASSIFICATION_CHOICES,
-        'subtask_form': subtask_form,
         'subtask_update_form': subtask_update_form,
-        'can_create_subtask': can_create_subtask,
     })
 
 
@@ -2118,29 +2113,7 @@ def ip_lookup(request):
     return JsonResponse(result)
 
 
-# ── Subtask views (Investigation / Countermeasure) ─────────────────────── #
-
-@login_required
-def create_subtask(request, pk):
-    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
-    profile = getattr(request.user, 'profile', None)
-    if not request.user.is_superuser and (profile is None or not profile.is_soc):
-        messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC เท่านั้นที่สามารถสร้างงานย่อยได้')
-        return redirect('ticket_detail', pk=pk)
-
-    if request.method == 'POST':
-        form = SubtaskForm(request.POST)
-        if form.is_valid():
-            result = create_legacy_subtask(
-                ticket=ticket,
-                actor=request.user,
-                subtask_form=form,
-            )
-            messages.success(request, f'สร้างงานย่อย "{result.subtask.title}" เรียบร้อยแล้ว')
-        else:
-            messages.error(request, 'ไม่สามารถสร้างงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
-    return redirect('ticket_detail', pk=pk)
-
+# ── Subtask views (response-team requests) ─────────────────────────────── #
 
 @login_required
 @require_POST

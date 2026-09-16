@@ -139,7 +139,17 @@ def get_ticket_detail_read_model(
         'response_routing': response_routing,
         'response_member_roles': response_member_roles,
         'subtasks': subtasks,
-        'open_subtask_count': sum(not subtask.is_done for subtask in subtasks),
+        # Response-team requests are the live list; retired legacy Investigation/
+        # Countermeasure rows (if any historical ones exist) render read-only in a
+        # separate collapsed block.
+        'response_subtasks': [s for s in subtasks if s.is_response_request],
+        'legacy_subtasks': [s for s in subtasks if not s.is_response_request],
+        # Nav badge counts open response-team requests only — retired legacy
+        # subtasks never count as "ค้าง".
+        'open_subtask_count': sum(
+            subtask.is_response_request and not subtask.is_done
+            for subtask in subtasks
+        ),
         'evidence_count': len(attachments) + len(alert_links),
     }
 

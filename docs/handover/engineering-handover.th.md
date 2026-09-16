@@ -251,9 +251,11 @@ UI สอดคล้องกัน: การ์ด Emergency ในหน้�
 **Response Request** คือ `TicketSubtask` ชนิดพิเศษที่ SOC Manager ออกไปยังทีม
 นอกศูนย์ SOC และดำเนินไป **คู่ขนาน** กับงาน containment
 
-- `TicketSubtask.TYPE_CHOICES` มี 5 ชนิด สองชนิดแรกเป็น subtask ปกติฝั่ง SOC
-  (`INVESTIGATION`, `COUNTERMEASURE`) ส่วนอีกสามชนิดใน `RESPONSE_TYPES`
-  คือคำขอทีมตอบสนอง:
+- `TicketSubtask.TYPE_CHOICES` มี 5 ชนิด สองชนิดแรก (`INVESTIGATION`,
+  `COUNTERMEASURE`) **เลิกใช้แล้ว** — ไม่มีฟอร์มหรือวิวให้สร้างอีกต่อไป
+  คงค่าไว้เพียงเพื่อให้แถวเดิมที่มีอยู่แสดงชื่อได้ และแสดงแบบอ่านอย่างเดียวใน
+  บล็อก "บันทึกภายในเดิม" ที่พับไว้ subtask ใหม่ทั้งหมดเป็นคำขอทีมตอบสนอง
+  สามชนิดใน `RESPONSE_TYPES`:
 
   | ชนิด | ส่งถึง |
   |---|---|

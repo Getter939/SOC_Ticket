@@ -39,7 +39,6 @@ urlpatterns = [
     path('attachment/<int:attachment_id>/download/', views.download_attachment, name='download_attachment'),
     path('attachment/<int:attachment_id>/preview/', views.preview_attachment, name='preview_attachment'),
     path('log/edit/<int:log_id>/', views.edit_log, name='edit_log'),
-    path('ticket/<int:pk>/subtask/new/', views.create_subtask, name='create_subtask'),
     path('ticket/<int:pk>/response-request/new/', views.create_response_request, name='create_response_request'),
     path('subtask/<int:subtask_id>/update/', views.update_subtask, name='update_subtask'),
     # Forensic Analyst RCA workspace

@@ -2699,6 +2699,10 @@ class TicketSubtask(models.Model):
     independently of the parent ticket's main status.
     """
 
+    # RETIRED legacy intra-SOC note types. No form or view creates these any
+    # more (the create path was removed); the two values and their labels are
+    # kept only so pre-existing historical rows still render a friendly name via
+    # get_subtask_type_display. They route nowhere and gate nothing.
     TYPE_INVESTIGATION = 'INVESTIGATION'
     TYPE_COUNTERMEASURE = 'COUNTERMEASURE'
     # Response-team request types — spawned by the SOC Manager and routed by

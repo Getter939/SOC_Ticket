@@ -29,7 +29,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.incidents.management import seed_actors
-from apps.incidents.models import Ticket, TicketLog, TicketSubtask
+from apps.incidents.models import Ticket, TicketLog
 
 REFERENCE_ACTIVE = 'DEMO-CEO-001'
 REFERENCE_CLOSED = 'DEMO-CEO-002'
@@ -378,37 +378,11 @@ class Command(BaseCommand):
         return ticket
 
     def _add_subtasks(self, ticket, t1, t2, admin, base):
-        rows = [
-            ('INVESTIGATION', 'ตรวจสอบ log การเข้าถึง VPN ย้อนหลัง 30 วัน', t2,
-             'ตรวจสอบ log ของ FortiGate VPN ย้อนหลัง 30 วัน เทียบกับบัญชีสิทธิ์สูง'
-             'ทั้ง 24 บัญชี',
-             'ไม่พบการเข้าถึงจาก IP ต่างประเทศรายการอื่น นอกเหนือจากเหตุการณ์นี้ '
-             'บัญชีอื่นไม่ได้รับผลกระทบ', 33),
-            ('COUNTERMEASURE', 'เพิกถอน session และรีเซ็ตรหัสผ่าน svc-hr-admin', admin,
-             'เพิกถอน session VPN ทั้งหมด บังคับรีเซ็ตรหัสผ่าน และปิดบัญชีชั่วคราว'
-             'จนกว่าจะยืนยันความปลอดภัย',
-             'ดำเนินการเสร็จเวลา 02:41 น. ยืนยันว่าไม่มี session ค้างอยู่ในระบบ', 62),
-            ('INVESTIGATION', 'ยืนยันปริมาณข้อมูลที่ถูกส่งออกจริง', t2,
-             'เทียบ log ไฟร์วอลล์กับรายการไฟล์ที่ถูกรวบรวมไว้ใน C:\\Windows\\Temp\\a\\ '
-             'เพื่อระบุขอบเขตข้อมูลที่รั่วไหล',
-             'ออกไปจริง 18 MB เป็นไฟล์ทดสอบที่ผู้โจมตีสร้างเอง ฐานข้อมูลบุคลากร '
-             '2.3 GB ไม่ถูกส่งออก ยืนยันด้วยการเทียบ hash', 141),
-            ('COUNTERMEASURE', 'ปิดช่องโหว่ CVE-2026-21893 และบังคับ MFA', admin,
-             'ติดตั้งแพตช์บน VPN gateway ในช่วง maintenance window และขยายนโยบาย '
-             'MFA ให้ครอบคลุมบัญชีสิทธิ์สูง',
-             'ติดตั้งแพตช์และรีบูตเสร็จเวลา 04:00 น. บังคับ MFA ครบ 24 บัญชี '
-             'เวลา 05:10 น.', 155),
-        ]
-        for kind, title, assignee, desc, result, mins in rows:
-            st = TicketSubtask.objects.create(
-                ticket=ticket, subtask_type=kind, title=title,
-                description=desc, status='DONE', assigned_to=assignee,
-                result_notes=result, created_by=t1,
-            )
-            TicketSubtask.objects.filter(pk=st.pk).update(
-                created_at=base + timedelta(minutes=mins),
-                updated_at=base + timedelta(minutes=mins + 20),
-            )
+        # Legacy Investigation/Countermeasure subtasks are retired — the create
+        # path is gone and they no longer surface in the ticket UI. The demo
+        # narrative for investigation/containment lives in the ticket log and the
+        # containment_report / remediation_summary fields instead.
+        return
 
     # ── output ───────────────────────────────────────────────────────── #
 
@@ -436,7 +410,6 @@ class Command(BaseCommand):
         w(f'    Severity    : {closed.severity} (emergency={closed.is_emergency})')
         w(f'    History     : {TicketLog.objects.filter(ticket=closed).count()} entries '
           f'(incl. Tier 2 escalation + 1 rejection loop)')
-        w(f'    Subtasks    : {TicketSubtask.objects.filter(ticket=closed).count()} (all DONE)')
         w(f'    Verified by : {closed.verified_by} | Approved by: {closed.approved_by}')
         contained_in = closed.closed_at - closed.incident_datetime
         hrs, rem = divmod(int(contained_in.total_seconds()), 3600)

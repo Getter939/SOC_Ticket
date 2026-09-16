@@ -235,7 +235,7 @@ onto its own wrapped row, which space-between then left-aligned.
   <a href="#overview">ภาพรวม</a>
   <a href="#technical">ข้อมูลทางเทคนิค</a>
   {% if ticket.action_required or ticket.action_precautions or ticket.actions_taken_summary or ticket.next_steps_summary %}<a href="#response">การตอบสนอง</a>{% endif %}
-  <a href="#tasks">งานย่อย{% if open_subtask_count %} <span class="nav-count">· {{ open_subtask_count }} ค้าง</span>{% endif %}</a>
+  <a href="#tasks">คำขอทีมตอบสนอง{% if open_subtask_count %} <span class="nav-count">· {{ open_subtask_count }} ค้าง</span>{% endif %}</a>
   <a href="#evidence">หลักฐาน{% if evidence_count %} <span class="nav-count">· {{ evidence_count }}</span>{% endif %}</a>
   <a href="#timeline">กิจกรรม</a>
 </nav>
@@ -337,49 +337,79 @@ onto its own wrapped row, which space-between then left-aligned.
       <div class="card-header">
         <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
           <div>
-            <h2 class="section-title">งานย่อยและคำขอทีมตอบสนอง{% if subtasks %} <span class="signal-badge signal-neutral align-middle">{{ subtasks|length }}</span>{% endif %}</h2>
-            <div class="section-hint">งานคู่ขนานภายในทีม SOC (Investigation / Countermeasure) และคำขอทีมตอบสนอง (Forensic Analyst / Red Team Manager)</div>
+            <h2 class="section-title">คำขอทีมตอบสนอง{% if response_subtasks %} <span class="signal-badge signal-neutral align-middle">{{ response_subtasks|length }}</span>{% endif %}</h2>
+            <div class="section-hint">มอบหมายงานเฉพาะทางให้ทีมตอบสนอง — VA / Pentest และความปลอดภัยโครงสร้างพื้นฐานส่งให้ผู้จัดการทีม Red Team ส่วนงานนิติวิทยาศาสตร์ / RCA ส่งให้นักวิเคราะห์ Forensics ทุกคำขอที่ยังไม่เสร็จจะกันไม่ให้อนุมัติปิดเคส</div>
           </div>
-          {# The add form used to sit below the whole list, so on a busy ticket it #}
-          {# was buried behind every existing row. The trigger lives in the header #}
-          {# and the form opens at the top of the section instead. #}
-          {% if can_create_subtask and not is_terminal %}
+          {# Manager-only create trigger. The form opens at the top of the section #}
+          {# so create and the request list live in one place. #}
+          {% if can_request_response %}
           <button class="btn btn-sm btn-primary flex-shrink-0" type="button" data-bs-toggle="collapse"
-                  data-bs-target="#new-subtask" aria-expanded="false" aria-controls="new-subtask">
-            <i class="bi bi-plus-lg me-1"></i>เพิ่มงานย่อย
+                  data-bs-target="#new-response-request" aria-expanded="false" aria-controls="new-response-request">
+            <i class="bi bi-shield-shaded me-1"></i>ส่งคำขอ
           </button>
           {% endif %}
         </div>
       </div>
       <div class="card-body">
-        {% if can_create_subtask and not is_terminal %}
-        <div class="collapse mb-3" id="new-subtask">
-          <form method="post" action="{% url 'create_subtask' ticket.pk %}" class="subtask-new">{% csrf_token %}
+        {% if ticket.has_open_response_requests %}
+        <div class="response-pending-note small mb-3" role="status">
+          <i class="bi bi-hourglass-split me-1" aria-hidden="true"></i>รอผลจากทีมตอบสนอง — ต้องดำเนินการให้ครบทุกคำขอก่อนจึงจะอนุมัติปิดเคสได้
+        </div>
+        {% endif %}
+        {% if can_request_response %}
+        <div class="collapse mb-3" id="new-response-request">
+          <form method="post" action="{% url 'create_response_request' ticket.pk %}" class="subtask-new">{% csrf_token %}
             <div class="row g-2">
             <div class="col-12">
-              <p class="small text-muted mb-0">บันทึกภายในทีม SOC — ไม่ส่งอีเมลแจ้งเตือน ไม่เปลี่ยนสถานะ Ticket และไม่ปรากฏในรายงาน หากต้องการมอบหมายงานให้ผู้อื่นจริง ให้ใช้ "ส่งทีมตอบสนอง"</p>
+              <p class="small text-muted mb-0">ระบบจะแจ้งอีเมลผู้รับผิดชอบและมอบหมายอัตโนมัติเมื่อมีผู้รับผิดชอบในบทบาทนั้นเพียงคนเดียว</p>
             </div>
             <div class="col-md-4">
-              <label class="form-label small mb-1" for="{{ subtask_form.subtask_type.id_for_label }}">{{ subtask_form.subtask_type.label }}</label>
-              {{ subtask_form.subtask_type }}
+              <label class="form-label small mb-1" for="{{ response_request_form.subtask_type.id_for_label }}">ประเภทงาน <span class="text-danger">*</span></label>
+              {{ response_request_form.subtask_type }}
             </div>
             <div class="col-md-8">
-              <label class="form-label small mb-1" for="{{ subtask_form.title.id_for_label }}">{{ subtask_form.title.label }}</label>
-              {{ subtask_form.title }}
+              <label class="form-label small mb-1" for="{{ response_request_form.title.id_for_label }}">ชื่องาน <span class="text-danger">*</span></label>
+              {{ response_request_form.title }}
             </div>
             <div class="col-12">
-              <label class="form-label small mb-1" for="{{ subtask_form.description.id_for_label }}">{{ subtask_form.description.label }}</label>
-              {{ subtask_form.description }}
+              <label class="form-label small mb-1" for="{{ response_request_form.description.id_for_label }}">ขอบเขตงาน <span class="text-muted">(ไม่บังคับ)</span></label>
+              {{ response_request_form.description }}
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-1" for="{{ response_request_form.assigned_to.id_for_label }}">ผู้รับผิดชอบ</label>
+              {{ response_request_form.assigned_to }}
+              <div class="form-text">เว้นว่างเพื่อให้ระบบมอบหมายอัตโนมัติ</div>
             </div>
             <div class="col-12 d-flex justify-content-end gap-2">
-              <button class="btn btn-sm btn-light border" type="button" data-bs-toggle="collapse" data-bs-target="#new-subtask">ยกเลิก</button>
-              <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-save me-1"></i>บันทึก</button>
+              <button class="btn btn-sm btn-light border" type="button" data-bs-toggle="collapse" data-bs-target="#new-response-request">ยกเลิก</button>
+              <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-send me-1"></i>ส่งคำขอทีมตอบสนอง</button>
             </div>
             </div>
           </form>
+          {{ response_routing|json_script:"resp-routing-data" }}
+          {{ response_member_roles|json_script:"resp-member-roles-data" }}
+          <script nonce="{{ request.csp_nonce }}">(function(){
+            var typeSel=document.getElementById('resp-type-select');
+            var asgSel=document.getElementById('resp-assignee-select');
+            if(!typeSel||!asgSel)return;
+            var routing=JSON.parse(document.getElementById('resp-routing-data').textContent);
+            var roles=JSON.parse(document.getElementById('resp-member-roles-data').textContent);
+            function sync(){
+              var wantRole=routing[typeSel.value];
+              Array.prototype.forEach.call(asgSel.options,function(opt){
+                if(opt.value===''){opt.hidden=false;opt.disabled=false;return;}
+                var ok=roles[opt.value]===wantRole;
+                opt.hidden=!ok;opt.disabled=!ok;
+              });
+              var cur=asgSel.selectedOptions[0];
+              if(cur&&cur.hidden){asgSel.value='';}
+            }
+            typeSel.addEventListener('change',sync);
+            sync();
+          })();</script>
         </div>
         {% endif %}
-        {% for subtask in subtasks %}
+        {% for subtask in response_subtasks %}
         {% with is_resp=subtask.is_response_request %}
         <div class="subtask-row">
           <div>
@@ -485,10 +515,40 @@ onto its own wrapped row, which space-between then left-aligned.
         {% endwith %}
         {% empty %}
         <div class="subtask-empty">
-          <i class="bi bi-list-task d-block mb-2" style="font-size:1.4rem;opacity:.45;"></i>
-          <p class="mb-0">ยังไม่มีงานย่อยหรือคำขอ</p>
+          <i class="bi bi-shield-shaded d-block mb-2" style="font-size:1.4rem;opacity:.45;"></i>
+          <p class="mb-0">ยังไม่มีคำขอทีมตอบสนอง</p>
         </div>
         {% endfor %}
+
+        {% if legacy_subtasks %}
+        {# Retired intra-SOC Investigation/Countermeasure notes. No longer #}
+        {# created; shown read-only so historical cases keep their record. #}
+        <details class="subtask-status-history mt-3">
+          <summary><i class="bi bi-archive me-1"></i>บันทึกภายในเดิม (เลิกใช้แล้ว) · {{ legacy_subtasks|length }}</summary>
+          <div class="mt-2">
+            {% for subtask in legacy_subtasks %}
+            <div class="subtask-row">
+              <div>
+                <div class="fw-bold small mb-1">{{ subtask.title }}</div>
+                {% if subtask.description %}<div class="small text-muted mb-1">{{ subtask.description }}</div>{% endif %}
+                <div class="small text-muted mb-1"><i class="bi bi-calendar-plus me-1"></i>สร้างเมื่อ {{ subtask.created_at|date:"d/m/Y H:i" }}</div>
+                {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
+                {% for att in subtask.attachments.all %}
+                <div class="small d-flex align-items-center gap-1"><i class="bi bi-paperclip me-1"></i><a href="{% url 'download_attachment' att.pk %}">{{ att.original_name }}</a>
+                  {% if att.preview_kind %}<a href="{% url 'preview_attachment' att.pk %}" target="_blank" rel="noopener" title="ดูตัวอย่างในแท็บใหม่"><i class="bi bi-eye"></i></a>{% endif %}
+                </div>
+                {% endfor %}
+              </div>
+              <div class="text-end">
+                <span class="badge bg-secondary d-block mb-1">งานภายใน · {{ subtask.get_subtask_type_display }}</span>
+                <span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span>
+                {% if subtask.assigned_to %}<div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-person me-1"></i>{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
       </div>
     </section>
 

@@ -366,8 +366,9 @@ class WorkflowUiContractTest(TestCase):
         self.assertContains(detail, 'mgr_forward')
         self.assertContains(detail, 'name="emergency_assessment"')
         self.assertContains(detail, 'การดำเนินการเพิ่มเติม')
-        self.assertContains(detail, 'id="response-request-panel"')
-        self.assertNotContains(detail, 'id="response-request-panel" open')
+        self.assertContains(detail, 'id="new-response-request"')
+        # Collapsed by default (no Bootstrap "show" class on the panel).
+        self.assertNotContains(detail, 'show" id="new-response-request"')
 
     def test_manager_forward_requires_an_explicit_assessment(self):
         triage = self.make_ticket(
@@ -487,14 +488,14 @@ class ResponseTeamUiTest(TestCase):
         t = self._ticket()
         self.client.force_login(self.manager)
         resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
-        self.assertContains(resp, 'id="response-request-panel"')
+        self.assertContains(resp, 'id="new-response-request"')
         self.assertContains(resp, reverse('create_response_request', args=[t.pk]))
 
     def test_non_manager_does_not_see_spawn_card(self):
         t = self._ticket()
         self.client.force_login(self.t1)
         resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
-        self.assertNotContains(resp, 'id="response-request-panel"')
+        self.assertNotContains(resp, 'id="new-response-request"')
 
     def test_spawn_card_emits_assignee_filter_data(self):
         # The client-side per-type assignee filter needs the routing map, each

@@ -309,9 +309,12 @@ Terminology: this system says **OLA**, not SLA (renamed in migrations
 A **Response Request** is a specialised `TicketSubtask` the SOC Manager spawns
 to a team outside the SOC, running **in parallel** to containment.
 
-- `TicketSubtask.TYPE_CHOICES` holds five types. Two are the ordinary
-  SOC-spawned kinds (`INVESTIGATION`, `COUNTERMEASURE`); the three in
-  `RESPONSE_TYPES` are response requests:
+- `TicketSubtask.TYPE_CHOICES` holds five types. Two (`INVESTIGATION`,
+  `COUNTERMEASURE`) are **retired** — there is no longer a form or view to
+  create them; the values survive only so pre-existing historical rows keep a
+  friendly label, and they render read-only in a collapsed "บันทึกภายในเดิม"
+  block on the ticket detail. All new subtasks are the three response-request
+  types in `RESPONSE_TYPES`:
 
   | Type | Routes to |
   |---|---|

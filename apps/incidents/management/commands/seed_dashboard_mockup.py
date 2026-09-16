@@ -819,42 +819,11 @@ class Command(BaseCommand):
         return notes[status]
 
     def _create_subtasks(self, ticket, spec, t1, admin, timeline):
-        if spec['classification'] != Ticket.CLASSIFICATION_INCIDENT:
-            return
-        if spec['status'] in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW):
-            return
-        base = timeline.get(Ticket.STATUS_AWAITING_CONTAINMENT, ticket.created_at)
-        done = spec['status'] in (
-            Ticket.STATUS_CONTAINMENT_REPORTED,
-            Ticket.STATUS_PENDING_MANAGER,
-            Ticket.STATUS_APPROVED,
-        )
-        sub_specs = [
-            (TicketSubtask.TYPE_INVESTIGATION, 'Validate scope and collect evidence'),
-            (TicketSubtask.TYPE_COUNTERMEASURE, 'Apply containment and verify telemetry'),
-        ]
-        for offset, (kind, title) in enumerate(sub_specs):
-            subtask = TicketSubtask.objects.create(
-                ticket=ticket,
-                subtask_type=kind,
-                title=title,
-                description=(
-                    'Mockup work item tracking the concrete investigation or containment '
-                    'activity for this incident. Evidence is summarized in the parent ticket log.'
-                ),
-                status=TicketSubtask.STATUS_DONE if done else TicketSubtask.STATUS_IN_PROGRESS,
-                assigned_to=admin,
-                result_notes=(
-                    'Completed with timestamped evidence and no unresolved blocker.'
-                    if done else 'In progress; latest telemetry is being reviewed.'
-                ),
-                created_by=t1,
-            )
-            created = base + timedelta(minutes=8 + offset * 12)
-            TicketSubtask.objects.filter(pk=subtask.pk).update(
-                created_at=created,
-                updated_at=created + timedelta(minutes=20),
-            )
+        # Legacy Investigation/Countermeasure subtasks are retired — they no
+        # longer have a create path and would only populate the historical block.
+        # Investigation/containment work is represented by the ticket log and the
+        # containment_report / remediation_summary fields instead.
+        return
 
     def _issue_description(self, spec):
         scenario = spec['scenario']

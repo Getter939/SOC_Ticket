@@ -7,9 +7,10 @@ from django.urls import reverse
 
 from apps.accounts.models import UserProfile
 
+from django.urls import NoReverseMatch
+
 from .models import Ticket, TicketSubtask
 from .subtask_creation import (
-    create_legacy_subtask,
     create_response_request,
     resolve_response_assignee,
 )
@@ -74,23 +75,10 @@ class SubtaskCreationServiceTest(TestCase):
             email='forensic@example.com',
         )
 
-    def test_legacy_subtask_is_unassigned_and_has_its_creator(self):
-        ticket = _ticket(created_by=self.t1)
-
-        result = create_legacy_subtask(
-            ticket=ticket,
-            actor=self.t1,
-            subtask_form=_SubtaskForm(
-                TicketSubtask.TYPE_INVESTIGATION,
-                'Collect authentication logs',
-                'Preserve logs for correlation.',
-            ),
-        )
-
-        self.assertEqual(result.subtask.ticket, ticket)
-        self.assertEqual(result.subtask.created_by, self.t1)
-        self.assertIsNone(result.subtask.assigned_to)
-        self.assertFalse(result.subtask.is_response_request)
+    def test_legacy_subtask_creation_is_retired(self):
+        # The Investigation/Countermeasure create endpoint no longer exists.
+        with self.assertRaises(NoReverseMatch):
+            reverse('create_subtask', args=[1])
 
     @patch('apps.incidents.subtask_creation.notify_response_request_created', return_value=True)
     def test_response_request_auto_assigns_the_only_eligible_responder(self, notify_created):
@@ -130,24 +118,6 @@ class SubtaskCreationServiceTest(TestCase):
             ),
             self.forensic,
         )
-
-    def test_legacy_subtask_endpoint_uses_the_creation_service(self):
-        ticket = _ticket(created_by=self.t1)
-        self.client.force_login(self.t1)
-
-        response = self.client.post(
-            reverse('create_subtask', args=[ticket.pk]),
-            {
-                'subtask_type': TicketSubtask.TYPE_COUNTERMEASURE,
-                'title': 'Block the command-and-control address',
-                'description': 'Add the address to the firewall deny list.',
-            },
-        )
-
-        self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
-        subtask = TicketSubtask.objects.get(ticket=ticket)
-        self.assertEqual(subtask.created_by, self.t1)
-        self.assertIsNone(subtask.assigned_to)
 
     @patch('apps.incidents.subtask_creation.notify_response_request_created', return_value=True)
     def test_response_request_endpoint_auto_assigns_the_eligible_responder(self, notify_created):
