@@ -309,6 +309,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'remediation_other': ticket.remediation_other or '',
         'signoff_admin': _signoff_name(ticket.assigned_admin),
         'signoff_approver': _signoff_name(ticket.approved_by),
+        'signoff_reporter': _signoff_name(ticket.created_by),
         'template_version': _report_template_version(ticket),
         'generated_at': _format_dt(generated_at),
         # Checkbox states (☑/☐) driven by the ticket's actual values.
@@ -866,15 +867,20 @@ def _find_docx_placeholder_paragraph(doc, placeholder):
     return None
 
 
+_SIGNOFF_MARKERS = ('{{signoff_admin}}', '{{signoff_approver}}', '{{signoff_reporter}}')
+
+
 def _remove_docx_signoff(doc):
-    """Drop the two-column sign-off table (the signature blocks) from a filled
+    """Drop every two-column sign-off table (the signature blocks) from a filled
     DOCX. Called when signatures are toggled off. Must run before placeholder
-    replacement, while the ``{{signoff_admin}}`` marker is still present."""
+    replacement, while the ``{{signoff_*}}`` markers are still present. The
+    incident form now carries two such tables — the reporter/approver block after
+    section 7 and the executor/approver block after section 8 — so this removes
+    all of them, not just the first."""
     for table in list(doc.tables):
         text = '\n'.join(cell.text for row in table.rows for cell in row.cells)
-        if '{{signoff_admin}}' in text or '{{signoff_approver}}' in text:
+        if any(marker in text for marker in _SIGNOFF_MARKERS):
             table._tbl.getparent().remove(table._tbl)
-            return
 
 
 def _append_docx_evidence_images(paragraph, images):

@@ -5985,6 +5985,22 @@ class ReportSectionEightTest(TestCase):
         # The 'อื่นๆ ระบุ' line ticks because remediation_other is filled.
         self.assertIn('☑ อื่นๆ ระบุ', text)
 
+    def test_section_eight_opens_a_new_page(self):
+        # Preview: the section-8 band carries the page-break class.
+        self.client.force_login(self.t1)
+        response = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertContains(response, 'section-band page-break')
+
+        # Committed DOCX: a hard page break precedes the section-8 heading, so it
+        # always starts on a fresh page regardless of how far section 7 flows.
+        doc = Document(str(REPORT_TEMPLATE_PATH))
+        body_xml = doc.element.body.xml
+        heading = '8. สรุปผลการดำเนินการแก้ไข'
+        self.assertIn(heading, body_xml)
+        before_heading = body_xml.split(heading, 1)[0]
+        self.assertIn('w:type="page"', before_heading)
+
     def test_other_line_ticks_only_when_filled(self):
         # Filled (setUpTestData): ☑ in both preview and docx.
         self.client.force_login(self.t1)
@@ -6078,6 +6094,23 @@ class ReportSignatureToggleTest(TestCase):
         on = _docx_text(
             generate_ticket_report(self.ticket.pk, show_signoff=True).content)
         self.assertIn('ผู้ดำเนินการแก้ไข', on)
+
+    def test_reporter_signoff_follows_the_same_toggle(self):
+        # The reporter/approver block after section 7 appears (preview + DOCX)
+        # only when signatures are on, exactly like the executor block.
+        self.client.force_login(self.t1)
+        off = self.client.get(reverse('ticket_report_preview', args=[self.ticket.pk]))
+        self.assertNotContains(off, 'ผู้รายงานเหตุการณ์')
+        on = self.client.get(
+            reverse('ticket_report_preview', args=[self.ticket.pk]),
+            {'show_signoff': '1'})
+        self.assertContains(on, 'ผู้รายงานเหตุการณ์')
+
+        docx_off = _docx_text(generate_ticket_report(self.ticket.pk).content)
+        self.assertNotIn('ผู้รายงานเหตุการณ์', docx_off)
+        docx_on = _docx_text(
+            generate_ticket_report(self.ticket.pk, show_signoff=True).content)
+        self.assertIn('ผู้รายงานเหตุการณ์', docx_on)
 
 
 class IocUserCommandFieldsTest(TestCase):

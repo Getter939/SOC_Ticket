@@ -18,7 +18,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_SECTION_START
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
@@ -53,6 +53,11 @@ MUTED = '5B6775'
 BODY_FONT = 'TH Sarabun New'
 SYMBOL_FONT = 'DejaVu Sans'   # supplies ☐/☑ glyphs
 BODY_PT = 16   # body text size; bumped from 14 at the SOC's request
+# TH Sarabun New carries a very large built-in line gap, so Word's "single"
+# (and any "multiple") line spacing leaves a huge blank band between lines. An
+# EXACT line height ignores that gap; 22pt comfortably clears 16pt Thai text
+# with stacked vowel+tone marks while pulling checklist rows tightly together.
+TIGHT_LINE_PT = 22
 
 # ── low-level helpers ──────────────────────────────────────────────────── #
 
@@ -138,6 +143,17 @@ def _first_paragraph(cell):
     p.paragraph_format.space_after = Pt(0)
     p.paragraph_format.space_before = Pt(0)
     return p
+
+
+def set_tight_lines(paragraph):
+    """Exact line height + no inter-paragraph spacing, so consecutive lines
+    (checkbox rows, wrapped text) sit close instead of carrying Sarabun's
+    oversized default line gap."""
+    pf = paragraph.paragraph_format
+    pf.line_spacing = Pt(TIGHT_LINE_PT)
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(0)
+    return paragraph
 
 
 def add_runs(paragraph, segments):
@@ -294,7 +310,7 @@ def add_freetext_box(doc, placeholder, min_height_pt=None):
     set_table_borders(table)
     cell = table.rows[0].cells[0]
     set_cell_margins(cell, top=40, bottom=40)
-    p = _first_paragraph(cell)
+    p = set_tight_lines(_first_paragraph(cell))
     add_runs(p, [(placeholder, BODY_FONT, BODY_PT, TEXT, False)])
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
     return table
@@ -313,34 +329,36 @@ def add_remediation_section(doc):
     for key, label in REMEDIATION_CHECKLIST:
         p = _first_paragraph(cell) if first else cell.add_paragraph()
         first = False
+        # Exact leading so the long tick-box list sits close together (a plain
+        # multiple keeps most of Sarabun's oversized line gap).
+        set_tight_lines(p)
         add_runs(p, [
             (f'{{{{chk_rem_{key}}}}}', SYMBOL_FONT, BODY_PT, TEXT, False),
             (f' {label}', BODY_FONT, BODY_PT, TEXT, False),
         ])
-    other = cell.add_paragraph()
+    other = set_tight_lines(cell.add_paragraph())
     add_runs(other, [
         ('{{chk_rem_other}} ', SYMBOL_FONT, BODY_PT, TEXT, False),
         ('อื่นๆ ระบุ  {{remediation_other}}', BODY_FONT, BODY_PT, TEXT, False),
     ])
-    p1 = cell.add_paragraph()
+    p1 = set_tight_lines(cell.add_paragraph())
     add_runs(p1, [('ผลการตรวจสอบ / Investigation Findings:', BODY_FONT, BODY_PT, TEXT, True)])
-    p2 = cell.add_paragraph()
+    p2 = set_tight_lines(cell.add_paragraph())
     add_runs(p2, [('{{remediation_summary}}', BODY_FONT, BODY_PT, TEXT, False)])
-    p3 = cell.add_paragraph()
+    p3 = set_tight_lines(cell.add_paragraph())
     add_runs(p3, [('มาตรการควบคุม / Countermeasure:', BODY_FONT, BODY_PT, TEXT, True)])
-    p4 = cell.add_paragraph()
+    p4 = set_tight_lines(cell.add_paragraph())
     add_runs(p4, [('{{containment_report}}', BODY_FONT, BODY_PT, TEXT, False)])
     doc.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
-def add_signoff(doc):
+def add_signoff_block(doc, blocks):
+    """A two-column sign-off table. ``blocks`` is [(name_placeholder, role), ...]
+    — each column is a dotted line, the name placeholder, the role label, and a
+    blank date line. Kept together on one page."""
     table = doc.add_table(rows=1, cols=2)
     set_table_widths(table, [3.3, 3.3])
     clear_table_borders(table)
-    blocks = [
-        ('{{signoff_admin}}', 'ผู้ดำเนินการแก้ไข'),
-        ('{{signoff_approver}}', 'ผู้อนุมัติ'),
-    ]
     for col, (name_ph, role) in enumerate(blocks):
         cell = table.rows[0].cells[col]
         lines = [
@@ -357,6 +375,29 @@ def add_signoff(doc):
     # Keep the whole sign-off block together on one page.
     trPr = table.rows[0]._tr.get_or_add_trPr()
     trPr.append(OxmlElement('w:cantSplit'))
+
+
+def add_reporter_signoff(doc):
+    """Reporter/approver sign-off for the incident-report body (sections 1-7)."""
+    add_signoff_block(doc, [
+        ('{{signoff_reporter}}', 'ผู้รายงานเหตุการณ์'),
+        ('{{signoff_approver}}', 'ผู้อนุมัติ'),
+    ])
+
+
+def add_signoff(doc):
+    """Executor/approver sign-off closing the remediation summary (section 8)."""
+    add_signoff_block(doc, [
+        ('{{signoff_admin}}', 'ผู้ดำเนินการแก้ไข'),
+        ('{{signoff_approver}}', 'ผู้อนุมัติ'),
+    ])
+
+
+def add_page_break(doc):
+    """Force the next content onto a new page."""
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(0)
+    p.add_run().add_break(WD_BREAK.PAGE)
 
 
 def add_appendix(doc):
@@ -414,6 +455,11 @@ def build(output_path=OUTPUT_PATH):
 
     add_section_band(doc, '7. ข้อควรระวังในการดำเนินการ')
     add_freetext_box(doc, '{{action_precautions}}')
+
+    # Sign-off for the incident-report body, then section 8 opens a fresh page.
+    doc.add_paragraph().paragraph_format.space_after = Pt(4)
+    add_reporter_signoff(doc)
+    add_page_break(doc)
 
     add_section_band(doc, '8. สรุปผลการดำเนินการแก้ไข')
     add_remediation_section(doc)

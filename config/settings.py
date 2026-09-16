@@ -178,9 +178,9 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # shared console left logged in with the browser still open. SESSION_COOKIE_AGE
 # is the inactivity window and SESSION_SAVE_EVERY_REQUEST slides it on every
 # request, so an analyst who is actively working is never logged out mid-task,
-# while an abandoned session dies in SESSION_IDLE_MINUTES. Raise it via .env if
-# UAT testers find 30 minutes disruptive.
-SESSION_COOKIE_AGE = config('SESSION_IDLE_MINUTES', default=30, cast=int) * 60
+# while an abandoned session dies after 60 minutes by default. Override the
+# inactivity window via SESSION_IDLE_MINUTES in .env when needed.
+SESSION_COOKIE_AGE = config('SESSION_IDLE_MINUTES', default=60, cast=int) * 60
 SESSION_SAVE_EVERY_REQUEST = True
 
 # Required for HTTPS POSTs once TLS terminates at a proxy (Django checks Origin

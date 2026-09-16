@@ -74,11 +74,14 @@
     </div>
 
     <div class="card section-card mb-3">
-      <div class="card-header"><h2 class="section-title h6 mb-0">หลักฐานประกอบเคส</h2></div>
+      <div class="card-header"><h2 class="section-title h6 mb-0">หลักฐานเฉพาะ Ticket #{{ ticket.ticket_id }}</h2></div>
       <div class="card-body">
         {% if can_upload_attachment %}
           {% include 'incidents/_evidence_picker.html' with picker_label='แนบไฟล์หลักฐาน (รูปภาพ / เอกสาร)' %}
-          <div class="field-hint mt-2">ไฟล์จะถูกแนบกับเคสนี้เมื่อบันทึกการแก้ไข โดยหลักฐานเดิมยังคงอยู่</div>
+          <div class="field-hint mt-2">ไฟล์จะถูกแนบเฉพาะ Ticket #{{ ticket.ticket_id }} เมื่อบันทึกการแก้ไข โดยหลักฐานเดิมยังคงอยู่</div>
+          {% if ticket.project_incident_id %}
+          <div class="field-hint mt-1">หลักฐานของแต่ละ Ticket แยกจากกัน หากต้องการแนบหลักฐานส่วนกลางของเหตุการณ์ ให้ใช้ส่วน “หลักฐานส่วนกลาง” ใน <a href="{% url 'project_incident_detail' ticket.project_incident_id %}">Project Incident {{ ticket.project_incident.project_code }}</a></div>
+          {% endif %}
         {% else %}
           <p class="text-muted small mb-0">คุณแก้ไขข้อมูลเคสได้ แต่ยังไม่มีสิทธิ์แนบไฟล์ในสถานะปัจจุบัน การแนบไฟล์เป็นสิทธิ์ของผู้รับผิดชอบขั้นตอนปัจจุบัน และไม่สามารถเพิ่มหลักฐานหลังปิดหรือยกเลิกเคสได้</p>
         {% endif %}

@@ -9,8 +9,8 @@ from django.utils import timezone
 
 from apps.accounts.testing import MFATestCase as TestCase
 
-from .models import StagedAttachment, Ticket, TicketAttachment, TicketLog
-from .tests import _make_t1, _make_ticket
+from .models import ProjectIncident, StagedAttachment, Ticket, TicketAttachment, TicketLog
+from .tests import _make_t1, _make_t2, _make_ticket
 
 
 class TicketEditEvidenceTest(TestCase):
@@ -92,6 +92,54 @@ class TicketEditEvidenceTest(TestCase):
         )
         self.assertContains(response, 'แนบไฟล์หลักฐาน 1 ไฟล์เรียบร้อยแล้ว')
         self.assertNotContains(response, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
+
+    def test_member_editor_and_project_uploads_keep_evidence_separate(self):
+        project = ProjectIncident.objects.create(title='Two affected systems', created_by=self.creator)
+        self.ticket.project_incident = project
+        self.ticket.bundle_suffix = 'A'
+        self.ticket.save(update_fields=['project_incident', 'bundle_suffix'])
+        sibling = _make_ticket(
+            created_by=self.creator, status=Ticket.STATUS_NEW,
+            project_incident=project, bundle_suffix='B',
+        )
+        sibling_file = TicketAttachment.objects.create(
+            ticket=sibling, file=self.upload('system-b.log'),
+            original_name='system-b.log', uploaded_by=self.creator,
+        )
+        editor = self.client.get(self.url)
+        self.assertContains(editor, f'หลักฐานเฉพาะ Ticket #{self.ticket.ticket_id}')
+        response = self.client.post(self.url, self.payload(
+            evidence_files=[self.upload('system-a.log')],
+        ))
+        self.assertRedirects(response, reverse('ticket_detail', args=[self.ticket.pk]))
+        self.assertEqual(self.ticket.attachments.get().original_name, 'system-a.log')
+        self.assertEqual(sibling.attachments.get(), sibling_file)
+        self.assertFalse(project.attachments.exists())
+
+        # Uploading central evidence later does not copy it into either member.
+        tier2 = _make_t2('shared_evidence_tier2')
+        self.client.force_login(tier2)
+        response = self.client.post(
+            reverse('upload_project_attachment', args=[project.pk]),
+            {'file': self.upload('shared-case.log')},
+        )
+        self.assertRedirects(response, reverse('project_incident_detail', args=[project.pk]))
+        self.assertEqual(project.attachments.get().original_name, 'shared-case.log')
+        self.assertEqual(self.ticket.attachments.count(), 1)
+        self.assertEqual(sibling.attachments.count(), 1)
+
+        pages = (
+            ('ticket_detail', self.ticket.pk, 'system-a.log'),
+            ('ticket_detail', sibling.pk, 'system-b.log'),
+            ('project_incident_detail', project.pk, 'shared-case.log'),
+        )
+        for route, pk, own_file in pages:
+            with self.subTest(route=route, pk=pk):
+                page = self.client.get(reverse(route, args=[pk]))
+                self.assertContains(page, own_file)
+                for other_file in ('system-a.log', 'system-b.log', 'shared-case.log'):
+                    if other_file != own_file:
+                        self.assertNotContains(page, other_file)
 
     def test_validation_errors_preserve_uploads_and_reason_until_retry(self):
         for overrides in ({'device_name': ''}, {'reason': ''}):
