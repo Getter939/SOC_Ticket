@@ -372,16 +372,20 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('Grace Hopper', html)
 
     def test_category_sections_render_even_without_data(self):
-        """Pipeline, OLA pressure, and the trend/table sections all render."""
+        """The active queue follows the workload/pipeline row, ahead of volume."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertNotIn('Avg MTTR by Category', html)   # removed in Session 3C
-        # The redundant resolved-by-category chart was replaced by OLA pressure.
         self.assertNotIn('Resolved Tickets by Incident Category', html)
-        self.assertIn('OLA Pressure', html)
-        self.assertIn('Threat Types', html)              # the kept category chart
+        self.assertNotIn('OLA Pressure', html)
+        self.assertNotIn('Threat Types', html)
+        self.assertNotIn('chartOla', html)
+        self.assertNotIn('chartByCategory', html)
         self.assertIn('Daily Case Volume', html)
-        self.assertIn('Recent Active Cases', html)
+        self.assertIn('Active Cases —', html)
+        self.assertLess(html.index('Analyst Workload'), html.index('id="chartPipeline"'))
+        self.assertLess(html.index('id="chartPipeline"'), html.index('id="recent-cases"'))
+        self.assertLess(html.index('id="recent-cases"'), html.index('id="chartDaily"'))
 
     def test_dashboard_auto_refresh_script_renders_with_visibility_guard(self):
         """The dashboard refreshes periodically without interrupting hidden tabs."""
@@ -400,31 +404,18 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn("sessionStorage.setItem(STORE_KEY", html)
         self.assertIn("sessionStorage.getItem(STORE_KEY", html)
 
-    def test_ola_scope_note_shown_only_to_managers(self):
-        """The 'team-wide count, queue-scoped list' OLA note appears for SOC
-        managers (whose deep-linked list is restricted) but not other roles."""
-        note = 'นับจากทั้งทีม'
-        _make_ticket(status=Ticket.STATUS_NEW)
-        # SOC staff (self.soc) — list isn't restricted, so no note.
-        self.assertNotIn(note, self._get().content.decode())
-        # SOC manager — list is scoped to their queue, so the note shows.
-        mgr = _make_user('soc_mgr_note', UserProfile.ROLE_SOC_MANAGER)
-        self.client.force_login(mgr)
-        self.assertIn(note, self.client.get(DASHBOARD_URL).content.decode())
-
     def test_pipeline_chart_renders(self):
-        """Pipeline stacked-bar replaces the MTTR chart in Row 3L."""
+        """Pipeline remains available after moving beside analyst workload."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertIn('chartPipeline', html)
         self.assertIn('Pipeline', html)
 
     def test_charts_render_interactive_controls(self):
-        """Charts support filtering, toggling, and retaining a selected trend point."""
+        """Charts support filtering and retaining a selected trend point."""
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertIn('applyDashboardFilters', html)
-        self.assertIn('chart.toggleDataVisibility', html)
         self.assertIn('dailyChartSelection', html)
 
     def test_pipeline_by_severity_structure_and_zero_fill(self):
@@ -566,40 +557,44 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
         self.assertIsNone(self._get().context['critical_soonest_deadline'])
 
-    def test_ola_pressure_buckets_active_by_deadline(self):
-        """Active tickets land in the correct time-to-deadline bucket."""
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)   # overdue
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=0.5)  # due ≤1h
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=2)    # due 1–4h
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=10)   # on-track
-        buckets = {b['key']: b['count'] for b in self._get().context['ola_pressure']}
-        self.assertEqual(buckets['overdue'], 1)
-        self.assertEqual(buckets['due_1h'], 1)
-        self.assertEqual(buckets['due_4h'], 1)
-        self.assertEqual(buckets['on_track'], 1)
+    def test_unassigned_count_reconciles_with_workload_and_respects_filters(self):
+        assigned = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=assigned.pk).update(assigned_to=self.soc)
+        _make_ticket(status=Ticket.STATUS_NEW)
+        _make_ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        _make_ticket(status=Ticket.STATUS_APPROVED)
 
-    def test_ola_pressure_counts_active_only(self):
-        """Terminal tickets are excluded, even if their deadline is in the past."""
-        _make_ticket(status=Ticket.STATUS_APPROVED, ola_offset_hours=-1)
-        buckets = {b['key']: b['count'] for b in self._get().context['ola_pressure']}
-        self.assertEqual(sum(buckets.values()), 0)
+        ctx = self._get().context
+        self.assertEqual(ctx['unassigned_active'], 2)
+        self.assertEqual(
+            sum(row['total'] for row in ctx['assignee_heatmap']) + ctx['unassigned_active'],
+            ctx['active_total'],
+        )
+        self.assertEqual(self._get(status=Ticket.STATUS_NEW).context['unassigned_active'], 1)
+        self.assertEqual(self._get(severity='Critical').context['unassigned_active'], 0)
 
-    def test_ola_pressure_severity_breakdown(self):
-        """Each bucket carries its per-severity mix (for the tooltip / sub-label)."""
-        t = _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)
-        Ticket.objects.filter(pk=t.pk).update(severity='Critical')
-        overdue = next(b for b in self._get().context['ola_pressure']
-                       if b['key'] == 'overdue')
-        self.assertEqual(overdue['count'], 1)
-        sevs = {s['label']: s['count'] for s in overdue['severities']}
-        self.assertEqual(sevs.get('Critical'), 1)
+    def test_workload_headline_excludes_waiting_cases(self):
+        own = _make_ticket(status=Ticket.STATUS_NEW)
+        blocked = _make_ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
+        Ticket.objects.filter(pk__in=[own.pk, blocked.pk]).update(assigned_to=self.soc)
+        response = self._get()
+        row = response.context['assignee_heatmap'][0]
+        self.assertEqual((row['load'], row['blocked'], row['total']), (1, 1, 2))
+        self.assertContains(response, '<td class="heat-actionable">1</td>', html=True)
 
-    def test_ola_attention_is_overdue_plus_due_1h(self):
-        """Headline 'need attention' count = overdue + due-within-1h (not on-track)."""
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=-1)   # overdue
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=0.5)  # due ≤1h
-        _make_ticket(status=Ticket.STATUS_NEW, ola_offset_hours=10)   # on-track
-        self.assertEqual(self._get().context['ola_attention'], 2)
+    def test_volume_title_and_window_match_buckets(self):
+        for date_range, title in (
+            ('today', 'Hourly Case Volume (วันนี้)'),
+            ('week', 'Daily Case Volume (7 วัน)'),
+            ('month', 'Daily Case Volume (30 วัน)'),
+            ('all', 'Daily Case Volume (30 วัน)'),
+        ):
+            with self.subTest(date_range=date_range):
+                response = self._get(date_range=date_range)
+                ctx = response.context
+                self.assertContains(response, title)
+                trend = ctx['daily_trend_filtered']
+                self.assertEqual(ctx['volume_window'], f"{trend[0]['date']} – {trend[-1]['date']}")
 
     # ── Filters still scope the active counts ──────────────────────────── #
 

@@ -10,7 +10,6 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from apps.incidents import ola as ola_buckets
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 
 # ====================================================================== #
@@ -245,25 +244,6 @@ def dashboard(request):
         for sev in severity_order
     ]
 
-    # ── By Threat Type doughnut ──────────────────────────────────────────── #
-    # Distribution of all tickets by detailed_issue (the threat type —
-    # Malicious Logic, Reconnaissance, DoS, …). Display labels via
-    # DETAILED_ISSUE_CHOICES; blank/unset excluded so the chart stays clean.
-    detailed_display = dict(Ticket.DETAILED_ISSUE_CHOICES)
-    by_category = list(
-        all_tickets.exclude(detailed_issue__isnull=True).exclude(detailed_issue='')
-                   .values('detailed_issue').annotate(count=Count('id')).order_by('-count')
-    )
-    # Cap to top 5 + an aggregated "อื่นๆ" (Others) bucket so the doughnut
-    # stays readable (presentation only — see STEP 6c).
-    top_cat = by_category[:5]
-    rest_cat = by_category[5:]
-    by_category_labels = [detailed_display.get(b['detailed_issue'], b['detailed_issue']) for b in top_cat]
-    by_category_data   = [b['count'] for b in top_cat]
-    if rest_cat:
-        by_category_labels.append('อื่นๆ')
-        by_category_data.append(sum(b['count'] for b in rest_cat))
-
     # ── Recent active cases — full active queue for the detail table ──────── #
     # The ENTIRE active queue is sent to the template (not a 15-row slice) so
     # the client-side script can sort + paginate the whole dataset without a
@@ -280,11 +260,6 @@ def dashboard(request):
         .with_severity_rank()
         .order_by('-sev_rank', '-created_at')
     )
-
-    # ── Pre-zipped (label, value) pairs for the visually-hidden a11y tables ─ #
-    chart_tables = {
-        'by_category':    list(zip(by_category_labels, by_category_data)),
-    }
 
     # ====================================================================== #
     # Management dashboard KPIs (Session 3) — additive.                       #
@@ -335,6 +310,17 @@ def dashboard(request):
     # actionable queue. 'blocked' is shown for visibility but is somebody
     # else's turn; 'total' remains every open ticket they opened.
     assignee_heatmap_statuses = [(s, status_map[s]) for s in _ANALYST_OWN_STATUSES]
+    workload_labels = {
+        Ticket.STATUS_NEW: 'แจ้งใหม่',
+        Ticket.STATUS_T1_REVIEW: 'ทบทวน',
+        Ticket.STATUS_MONITORING: 'เฝ้าระวัง',
+        Ticket.STATUS_AWAITING_OWNER: 'ติดตามเจ้าของ',
+        Ticket.STATUS_OWNER_REMEDIATED: 'ตรวจผลแก้ไข',
+    }
+    workload_columns = [
+        {'label': workload_labels.get(slug, display), 'description': display}
+        for slug, display in assignee_heatmap_statuses
+    ]
     heatmap_slugs = [s for s, _ in assignee_heatmap_statuses]
     heat = {}
     for r in (active_qs.filter(assigned_to__isnull=False)
@@ -362,39 +348,7 @@ def dashboard(request):
     for a in assignee_heatmap:
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
 
-    # Avg MTTR by threat type was removed with the Row 3 panel in Session 3C.
-    # OLA pressure — active queue bucketed by time-to-deadline. Answers the
-    # manager's "what needs attention now?" Each bucket carries its severity mix
-    # so a Critical that's overdue stands out (tooltip). Respects the same active
-    # GET filters as the other active panels. Bucket thresholds live in
-    # apps.incidents.ola (single source of truth, shared with the list filter).
-    # Only tickets WITH a contain deadline are bucketed — Medium/Low are
-    # notification-only (no contain OLA), so they're excluded from the chart.
-    ola_sev_order = ['Critical', 'High', 'Medium', 'Low', 'Unknown']
-    ola_counts = {key: {} for key, _, _ in ola_buckets.OLA_BUCKETS}
-    for r in (active_qs.filter(ola_contain_deadline__isnull=False)
-              .annotate(ola_bucket=ola_buckets.bucket_case(now))
-              .values('ola_bucket', 'severity').annotate(c=Count('id'))):
-        bucket = ola_counts.get(r['ola_bucket'])
-        if bucket is not None:
-            sev = r['severity'] if r['severity'] in ola_sev_order else 'Unknown'
-            bucket[sev] = bucket.get(sev, 0) + r['c']
-    ola_pressure = [
-        {
-            'key':   key,
-            'label': label,
-            'color': color,
-            'count': sum(ola_counts[key].values()),
-            'severities': [
-                {'label': sev, 'count': ola_counts[key][sev]}
-                for sev in ola_sev_order if ola_counts[key].get(sev)
-            ],
-        }
-        for key, label, color in ola_buckets.OLA_BUCKETS
-    ]
-    # Headline: active cases needing attention now (overdue + due within 1h).
-    ola_attention = (sum(ola_counts[ola_buckets.OVERDUE].values())
-                     + sum(ola_counts[ola_buckets.DUE_1H].values()))
+    unassigned_active = active_qs.filter(assigned_to__isnull=True).count()
 
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
     # line has no gaps. Window depends on date_range:
@@ -438,15 +392,19 @@ def dashboard(request):
             daily_trend_labels.append(f"{day.day:02d} {MONTH_ABBR[day.month]}")
 
     daily_trend_data = [d['count'] for d in daily_trend_filtered]
+    if date_range == 'today':
+        volume_title = 'Hourly Case Volume (วันนี้) — ปริมาณคดีรายชั่วโมง'
+    elif date_range == 'week':
+        volume_title = 'Daily Case Volume (7 วัน) — ปริมาณคดีรายวัน'
+    else:
+        volume_title = 'Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน'
+    volume_window = f"{daily_trend_filtered[0]['date']} – {daily_trend_filtered[-1]['date']}"
 
     return render(request, 'dashboard/dashboard.html', {
         'stats':               stats,
         'now':                 now,
         'pipeline_by_severity': pipeline_by_severity,
         'pipeline_rows':        pipeline_rows,
-        'by_category_labels':  by_category_labels,
-        'by_category_data':    by_category_data,
-        'chart_tables':        chart_tables,
         'recent_tickets':      recent_tickets,
         # ── Management KPIs (Session 3) ────────────────────────────────── #
         'active_total':              active_total,
@@ -455,10 +413,12 @@ def dashboard(request):
         'closed_this_month':         closed_this_month,
         'closed_last_month':         closed_last_month,
         'closed_delta':              closed_delta,
+        'unassigned_active':         unassigned_active,
         'assignee_heatmap':          assignee_heatmap,
         'assignee_heatmap_statuses': assignee_heatmap_statuses,
-        'ola_pressure':              ola_pressure,
-        'ola_attention':             ola_attention,
+        'workload_columns':          workload_columns,
+        'volume_title':              volume_title,
+        'volume_window':             volume_window,
         'daily_trend_filtered':      daily_trend_filtered,
         'daily_trend_labels':        daily_trend_labels,
         'daily_trend_data':          daily_trend_data,
@@ -470,13 +430,6 @@ def dashboard(request):
             'status':     status_filter,
             'severity':   severity_filter,
         },
-        # SOC managers are scoped to their own queue in the ticket list, so the
-        # OLA deep-link can land on a shorter list than the team-wide chart
-        # counts. Flag it so the template can note the difference (managers only).
-        'is_manager_view': bool(
-            profile and not request.user.is_superuser
-            and getattr(profile, 'is_soc_manager', False)
-        ),
     })
 
 

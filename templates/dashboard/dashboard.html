@@ -101,68 +101,23 @@
     .detail-table td { vertical-align: middle; }
     .sev-pill { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 10px; color:#fff; }
 
-    .threat-chart-layout {
-        display: grid;
-        grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
-        align-items: center;
-        gap: 0.75rem 1rem;
-        min-height: 230px;
-    }
-    .threat-chart-canvas {
-        width: 190px;
-        height: 190px;
-        justify-self: start;
-    }
-    .threat-legend {
-        display: grid;
-        gap: 0.45rem;
-        align-content: center;
-        font-size: 12px;
-        line-height: 1.25;
-    }
-    .threat-legend-item {
-        display: grid;
-        grid-template-columns: 14px minmax(0, 1fr) auto;
-        align-items: start;
-        gap: 0.5rem;
-        width: 100%;
-        padding: 0.25rem;
-        border: 0;
-        border-radius: 4px;
-        background: transparent;
-        font: inherit;
-        text-align: left;
-        color: #495057;
-        cursor: pointer;
-    }
-    .threat-legend-item:hover,
-    .threat-legend-item:focus-visible {
-        background: #f1f3f5;
-        outline: none;
-    }
-    .threat-legend-item.is-muted { opacity: 0.45; }
-    .chart-hint {
-        margin: 0 0 0.5rem;
-        color: #6c757d;
-        font-size: 12px;
-    }
-    .threat-legend-swatch {
-        width: 14px;
-        height: 14px;
-        border-radius: 3px;
-        margin-top: 1px;
-    }
-    .threat-legend-label {
-        overflow-wrap: anywhere;
-    }
-    .threat-legend-value {
-        color: #212529;
-        font-weight: 700;
-        white-space: nowrap;
-    }
+    .chart-hint { margin: 0 0 .5rem; color: var(--ui-muted); font-size: 12px; }
+    .workload-table { table-layout: fixed; }
+    .workload-table th { white-space: normal; overflow-wrap: break-word; padding: 8px 5px; }
+    .workload-table th:first-child { width: 23%; }
+    .workload-table td.name { white-space: normal; overflow-wrap: anywhere; }
+    .workload-table .heat-actionable { font-weight: 700; }
+    .workload-table .heat-empty { background: var(--ui-surface); }
+    .workload-table .heat-light { background: rgba(255,193,7,.18); }
+    .workload-table .heat-medium { background: rgba(253,126,20,.30); }
+    .workload-table .heat-heavy { background: rgba(220,53,69,.40); }
+    .workload-scroll { max-height: 440px; overflow: auto; }
+    .workload-table thead th { position: sticky; top: 0; z-index: 1; }
+    .workload-note { color: var(--ui-muted); font-size: 12px; }
+    .pipeline-chart { position: relative; height: 460px; }
     @media (max-width: 575.98px) {
-        .threat-chart-layout { grid-template-columns: 1fr; }
-        .threat-chart-canvas { justify-self: center; }
+        .workload-table { min-width: 480px; }
+        .pipeline-chart { height: 620px; }
     }
 </style>
 
@@ -270,11 +225,11 @@
     </div>
 </div>
 
-<!-- ══ ROW 2: Assignee heatmap (60%) + Incident status doughnut (40%) ═══════ -->
+<!-- ══ ROW 2: Analyst workload + Pipeline (equal width) ═══════ -->
 <div class="row g-3 mb-3">
 
     <!-- 2L — Analyst workload heatmap -->
-    <div class="col-lg-7">
+    <div class="col-xl-6">
         <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-people me-1"></i>Analyst Workload — งานที่ต้องดำเนินการเอง
@@ -283,16 +238,16 @@
                 <i class="bi bi-info-circle me-1"></i>นับเฉพาะสถานะที่นักวิเคราะห์ต้องลงมือเอง —
                 เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 แยกไว้ในคอลัมน์ “รอคนอื่น”
             </p>
-            <div class="table-responsive">
-                <table class="heat-table">
+            <div class="table-responsive workload-scroll">
+                <table class="heat-table workload-table">
                     <thead>
                         <tr>
                             <th class="text-start">Analyst</th>
-                            {% for slug, display in assignee_heatmap_statuses %}
-                            <th>{{ display }}</th>
+                            {% for column in workload_columns %}
+                            <th title="{{ column.description }}" aria-label="{{ column.description }}">{{ column.label }}</th>
                             {% endfor %}
+                            <th class="heat-actionable" title="Actionable — งานที่ต้องดำเนินการเอง">ต้องทำ</th>
                             <th class="heat-blocked-col">รอคนอื่น</th>
-                            <th>Total</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -300,19 +255,15 @@
                         <tr class="{% if forloop.first and row.load %}heat-top{% endif %}">
                             <td class="name">{{ row.name }}</td>
                             {% for cell in row.cells %}
-                            <td style="background:
-                                {% if cell == 0 %}#fff
-                                {% elif cell <= 2 %}#fff3cd
-                                {% elif cell <= 5 %}rgba(253,126,20,0.40)
-                                {% else %}rgba(220,53,69,0.60){% endif %};">
+                            <td class="{% if cell == 0 %}heat-empty{% elif cell <= 2 %}heat-light{% elif cell <= 5 %}heat-medium{% else %}heat-heavy{% endif %}">
                                 {% if cell == 0 %}<span class="heat-zero">—</span>{% else %}{{ cell|intcomma }}{% endif %}
                             </td>
                             {% endfor %}
+                            <td class="heat-actionable">{{ row.load|intcomma }}</td>
                             {# Blocked = somebody else's turn: greyed, never heat-coloured. #}
                             <td class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">
                                 {% if row.blocked %}{{ row.blocked|intcomma }}{% else %}<span class="heat-zero">—</span>{% endif %}
                             </td>
-                            <td>{{ row.total|intcomma }}</td>
                         </tr>
                         {% empty %}
                         <tr>
@@ -324,55 +275,20 @@
                     </tbody>
                 </table>
             </div>
+            <p class="workload-note mt-2 mb-0">
+                Unassigned: <strong>{{ unassigned_active|intcomma }}</strong> · รวมใน Pipeline แต่ไม่รวมในตารางนักวิเคราะห์
+            </p>
         </div>
     </div>
 
-    <!-- 2R — Ticket distribution doughnut by threat type -->
-    <div class="col-lg-5">
-        <div class="panel p-3 h-100">
-            <div class="panel-title mb-2">
-                <i class="bi bi-pie-chart me-1"></i>Threat Types / สัดส่วนประเภทเหตุการณ์
-            </div>
-            {% if by_category_labels %}
-            <div class="threat-chart-layout">
-                <div class="threat-chart-canvas">
-                    <canvas id="chartByCategory" role="img"
-                            aria-label="สัดส่วน Ticket แยกตามประเภทเหตุการณ์ (5 อันดับแรก + อื่นๆ)"></canvas>
-                </div>
-                <div id="threatTypesLegend" class="threat-legend"
-                     aria-label="Threat type legend"></div>
-            </div>
-            <div class="visually-hidden">
-            <table>
-                <caption>Tickets by threat type</caption>
-                <thead><tr><th>ประเภทเหตุการณ์</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for label, value in chart_tables.by_category %}
-                    <tr><td>{{ label }}</td><td>{{ value }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-            {% else %}
-            <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
-                <span style="font-size:13px;">No data</span>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
-<!-- ══ ROW 3: Pipeline (50%) + Resolved by threat type (50%) ════════════════ -->
-<div class="row g-3 mb-3">
-
-    <!-- 3L — Pipeline by status × severity (stacked bar) -->
-    <div class="col-md-6">
+    <!-- 2R — Pipeline by status × severity (horizontal stacked bars) -->
+    <div class="col-xl-6">
         <div class="panel p-3 h-100">
             <h6 class="panel-title mb-2">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะที่กำลังดำเนินการ
             </h6>
             <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a segment to filter the dashboard.</p>
-            <div style="height:320px;">
+            <div class="pipeline-chart">
                 <canvas id="chartPipeline" role="img"
                         aria-label="Pipeline chart showing active ticket counts by workflow status and severity"></canvas>
             </div>
@@ -402,75 +318,9 @@
         </div>
     </div>
 
-    <!-- 3R — OLA pressure: active queue bucketed by time-to-deadline -->
-    <div class="col-md-6">
-        <div class="panel p-3 h-100">
-            <div class="panel-title mb-2">
-                <i class="bi bi-stopwatch me-1"></i>OLA Pressure — สถานะ OLA ของคดีที่กำลังดำเนินการ
-            </div>
-            {% if stats.active %}
-            <div class="text-muted mb-2" style="font-size:12px;">
-                {{ stats.active|intcomma }} active · {{ ola_attention|intcomma }} need attention (overdue + ≤1h)
-            </div>
-            <div style="height:230px;">
-                <canvas id="chartOla" role="img"
-                        aria-label="คดีที่กำลังดำเนินการแยกตามเวลาที่เหลือก่อนครบกำหนด OLA"></canvas>
-            </div>
-            {% if is_manager_view %}
-            <div class="text-muted mt-2" style="font-size:11px;">
-                <i class="bi bi-info-circle me-1"></i>นับจากทั้งทีม — รายการที่เปิดจะแสดงเฉพาะคิวที่รอผู้จัดการตรวจสอบ
-            </div>
-            {% endif %}
-            <div class="visually-hidden">
-            <table>
-                <caption>Active tickets by time to OLA deadline</caption>
-                <thead><tr><th>สถานะ OLA</th><th>จำนวน</th></tr></thead>
-                <tbody>
-                    {% for b in ola_pressure %}
-                    <tr><td>{{ b.label }}</td><td>{{ b.count }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-            {% else %}
-            <div class="d-flex align-items-center justify-content-center text-muted" style="height:230px;">
-                <span style="font-size:13px;">No active cases</span>
-            </div>
-            {% endif %}
-        </div>
-    </div>
 </div>
 
-<!-- ══ ROW 4: Monthly trend (full width) ════════════════════════════════════ -->
-<div class="row g-3 mb-3">
-    <div class="col-12">
-        <div class="panel p-3">
-            <div class="panel-title mb-2">
-                <i class="bi bi-graph-up me-1"></i>Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน
-            </div>
-            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a point to keep its date and total visible.</p>
-            <div style="height:200px;">
-                <canvas id="chartDaily" role="img" aria-label="ปริมาณคดีรายวัน"></canvas>
-            </div>
-            <p id="dailyChartSelection" class="chart-hint mb-0" role="status">
-                Select a point to view its exact total.
-            </p>
-            <div class="visually-hidden">
-            <table>
-                <caption>Daily case volume</caption>
-                <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
-                <tbody>
-                    {% for row in daily_trend_filtered %}
-                    <tr><td>{{ row.date }}</td><td>{{ row.count }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ══ ROW 5: Detail table — recent active cases (full width) ═══════════════ -->
+<!-- ══ ROW 3: Detail table — active cases (full width) ═══════════════ -->
 <style>
     /* Recent-cases detail table — explicit dark header so it can never render
        white-on-white (the row stays dark regardless of Bootstrap state). */
@@ -482,11 +332,11 @@
     .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
                    border-radius:10px; color:#fff; white-space:nowrap; }
 </style>
-<div class="row g-3">
+<div class="row g-3 mb-3">
     <div class="col-12">
         <div class="panel" id="recent-cases">
             <div class="p-3 pb-2 panel-title">
-                <i class="bi bi-list-ul me-1"></i>Recent Active Cases — รายละเอียดคดี
+                <i class="bi bi-list-ul me-1"></i>Active Cases — รายละเอียดคดี
             </div>
             <div class="table-responsive">
                 <table class="table table-sm detail-table mb-0 align-middle">
@@ -555,7 +405,7 @@
             {% if recent_tickets %}
             <div class="d-flex flex-wrap justify-content-between align-items-center px-3 py-2 gap-2">
                 <div class="text-muted" style="font-size:13px;" data-role="showing"></div>
-                <nav data-role="pager" aria-label="Recent active cases pages" hidden>
+                <nav data-role="pager" aria-label="Active cases pages" hidden>
                     <ul class="pagination pagination-sm mb-0">
                         <li class="page-item"><a class="page-link" href="#" data-role="prev" aria-label="Previous">«</a></li>
                         <li class="page-item disabled"><span class="page-link" data-role="page-info">1 / 1</span></li>
@@ -564,6 +414,36 @@
                 </nav>
             </div>
             {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ══ ROW 4: Case volume trend (full width) ════════════════════════════════════ -->
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="panel p-3">
+            <div class="panel-title mb-2">
+                <i class="bi bi-graph-up me-1"></i>{{ volume_title }}
+            </div>
+            <p class="chart-hint">{{ volume_window }} ICT · จำนวนคดีที่สร้างตามตัวกรองที่เลือก</p>
+            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a point to keep its date and total visible.</p>
+            <div style="height:200px;">
+                <canvas id="chartDaily" role="img" aria-label="{{ volume_title }}"></canvas>
+            </div>
+            <p id="dailyChartSelection" class="chart-hint mb-0" role="status">
+                Select a point to view its exact total.
+            </p>
+            <div class="visually-hidden">
+            <table>
+                <caption>Daily case volume</caption>
+                <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
+                <tbody>
+                    {% for row in daily_trend_filtered %}
+                    <tr><td>{{ row.date }}</td><td>{{ row.count }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
         </div>
     </div>
 </div>
@@ -583,7 +463,7 @@
     const pageInfo = panel.querySelector('[data-role="page-info"]');
     const prevBtn  = panel.querySelector('[data-role="prev"]');
     const nextBtn  = panel.querySelector('[data-role="next"]');
-    const PAGE = 15;
+    const PAGE = 10;
 
     // Initial state mirrors the server default: severity DESC, created DESC tiebreak.
     let sortKey = 'sev', sortNum = true, sortDir = 'desc', page = 1;
@@ -713,21 +593,20 @@
 </script>
 
 <!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
-{{ by_category_labels|json_script:"by-category-labels" }}
-{{ by_category_data|json_script:"by-category-data" }}
 {{ pipeline_by_severity|json_script:"pipeline-by-severity" }}
-{{ ola_pressure|json_script:"ola-pressure" }}
 {{ daily_trend_labels|json_script:"daily-labels" }}
 {{ daily_trend_data|json_script:"daily-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script nonce="{{ request.csp_nonce }}">
-const THREAT_COLORS = ['#2f4858', '#6d5f8d', '#21889b', '#9b5f7e', '#59677c', '#8a8f98'];
 
 // Legibility floor: every chart label ≥ 13px.
 Chart.defaults.font.size = 13;
+Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--ui-text').trim();
+Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--ui-border').trim();
 Chart.defaults.plugins.legend.labels.font = { size: 13 };
 Chart.defaults.plugins.tooltip.bodyFont   = { size: 13 };
 Chart.defaults.maintainAspectRatio = false;
+const dashboardCharts = [];
 
 function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
 
@@ -740,97 +619,7 @@ function applyDashboardFilters(filters) {
     window.location.search = params.toString();
 }
 
-// ── Threat type doughnut (top 5 + Others, capped in the view) ──
-{% if by_category_labels %}
-(function () {
-    const labels = readJSON('by-category-labels');
-    const values = readJSON('by-category-data');
-    const total = values.reduce((sum, value) => sum + value, 0);
-    const colors = labels.map((_, i) => THREAT_COLORS[i % THREAT_COLORS.length]);
-
-    const chart = new Chart(document.getElementById('chartByCategory'), {
-        type: 'doughnut',
-        data: {
-            labels,
-            datasets: [{
-                data: values,
-                backgroundColor: colors,
-                borderColor: '#ffffff',
-                borderWidth: 2,
-                hoverOffset: 4,
-            }]
-        },
-        options: {
-            responsive: true,
-            cutout: '58%',
-            onClick: (_, elements) => {
-                if (!elements.length) return;
-                const index = elements[0].index;
-                chart.toggleDataVisibility(index);
-                chart.update();
-                updateLegendItem(index);
-            },
-            onHover: (event, elements) => {
-                event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: item => {
-                            const value = item.parsed || 0;
-                            const pct = total ? Math.round((value / total) * 100) : 0;
-                            return `${item.label}: ${value} (${pct}%)`;
-                        },
-                    }
-                }
-            },
-        }
-    });
-
-    const legend = document.getElementById('threatTypesLegend');
-    const legendItems = [];
-    function updateLegendItem(index) {
-        const isVisible = chart.getDataVisibility(index);
-        const item = legendItems[index];
-        item.classList.toggle('is-muted', !isVisible);
-        item.setAttribute('aria-pressed', String(isVisible));
-    }
-    labels.forEach((label, i) => {
-        const value = values[i] || 0;
-        const pct = total ? Math.round((value / total) * 100) : 0;
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'threat-legend-item';
-        item.setAttribute('aria-pressed', 'true');
-        item.title = 'Show or hide ' + label;
-
-        const swatch = document.createElement('span');
-        swatch.className = 'threat-legend-swatch';
-        swatch.style.backgroundColor = colors[i];
-        swatch.setAttribute('aria-hidden', 'true');
-
-        const labelEl = document.createElement('span');
-        labelEl.className = 'threat-legend-label';
-        labelEl.textContent = label;
-
-        const valueEl = document.createElement('span');
-        valueEl.className = 'threat-legend-value';
-        valueEl.textContent = value.toLocaleString() + ' (' + pct + '%)';
-
-        item.append(swatch, labelEl, valueEl);
-        item.addEventListener('click', () => {
-            chart.toggleDataVisibility(i);
-            chart.update();
-            updateLegendItem(i);
-        });
-        legendItems.push(item);
-        legend.appendChild(item);
-    });
-})();
-{% endif %}
-
-// ── Pipeline by status × severity (stacked vertical bar) ──
+// ── Pipeline by status × severity (horizontal stacked bars) ──
 (function () {
     const pbs = readJSON('pipeline-by-severity');
     const statuses   = pbs.statuses;    // [[slug, display], ...] active STATUS order
@@ -849,33 +638,35 @@ function applyDashboardFilters(filters) {
         borderRadius: 3,
     }));
 
-    // Column totals (sum across severities) for the above-bar labels.
+    // Total active cases at each workflow status.
     const totals = statuses.map((_, i) =>
         datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
     const maxTotal = Math.max(0, ...totals);
 
-    // afterDraw plugin: draw the stack total above each column.
+    // Draw the total at the end of each horizontal stack.
     const totalLabelPlugin = {
         id: 'pipelineTotals',
         afterDatasetsDraw(chart) {
             const { ctx, scales: { x, y } } = chart;
             ctx.save();
             ctx.font = 'bold 12px sans-serif';
-            ctx.fillStyle = '#343a40';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ui-text').trim();
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
             totals.forEach((t, i) => {
                 if (t === 0) return;
-                ctx.fillText(t, x.getPixelForValue(i), y.getPixelForValue(t) - 4);
+                ctx.fillText(t, x.getPixelForValue(t) + 6, y.getPixelForValue(i));
             });
             ctx.restore();
         }
     };
 
-    new Chart(document.getElementById('chartPipeline'), {
+    const chart = new Chart(document.getElementById('chartPipeline'), {
         type: 'bar',
         data: { labels, datasets },
         options: {
+            indexAxis: 'y',
+            layout: { padding: { right: 36 } },
             responsive: true,
             onClick: (_, elements) => {
                 if (!elements.length) return;
@@ -888,25 +679,45 @@ function applyDashboardFilters(filters) {
             onHover: (event, elements) => {
                 event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
             },
-            // Headroom so the above-bar total isn't clipped.
             scales: {
                 x: {
+                    stacked: true, beginAtZero: true,
+                    suggestedMax: maxTotal + 1,
+                    grid: { color: Chart.defaults.borderColor },
+                    ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
+                    title: { display: true, text: 'จำนวนคดี', font: { size: 13 } },
+                },
+                y: {
                     stacked: true,
                     grid: { display: false },
                     ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        font: { size: 12 },
-                        autoSkip: false,   // show every label, never skip
+                        font: { size: 13 }, autoSkip: false,
+                        // Keep workflow names readable without rotating or truncating them.
+                        callback: function (value) {
+                            const label = this.getLabelForValue(value);
+                            const words = typeof Intl.Segmenter === 'function'
+                                ? Array.from(new Intl.Segmenter('th', { granularity: 'word' })
+                                    .segment(label), part => part.segment)
+                                : label.split(/(?<=\s)/);
+                            const limit = Math.min(200, this.chart.width * .35);
+                            const ctx = this.chart.ctx;
+                            ctx.save();
+                            ctx.font = '13px ' + Chart.defaults.font.family;
+                            const lines = [];
+                            let line = '';
+                            words.forEach(word => {
+                                if (line && ctx.measureText(line + word).width > limit) {
+                                    lines.push(line.trim());
+                                    line = '';
+                                }
+                                line += word;
+                            });
+                            if (line.trim()) lines.push(line.trim());
+                            ctx.restore();
+                            return lines;
+                        },
                     },
                 },
-                y: {
-                    stacked: true, beginAtZero: true,
-                    suggestedMax: maxTotal + 1,
-                    grid: { color: '#e9ecef' },
-                    ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
-                    title: { display: true, text: 'จำนวนคดี', font: { size: 13 } },
-                }
             },
             plugins: {
                 legend: { position: 'top', labels: { font: { size: 13 } } },
@@ -914,8 +725,8 @@ function applyDashboardFilters(filters) {
                     callbacks: {
                         // Labels are already the full status names.
                         title: items => items[0].label,
-                        label: item => `${item.dataset.label}: ${item.parsed.y}`,
-                        // Full column total (sum across severities) for that status.
+                        label: item => `${item.dataset.label}: ${item.parsed.x}`,
+                        // Full stack total (sum across severities) for that status.
                         footer: items => [
                             'Total: ' + totals[items[0].dataIndex],
                             'Click to filter the dashboard',
@@ -926,78 +737,8 @@ function applyDashboardFilters(filters) {
         },
         plugins: [totalLabelPlugin],
     });
+    dashboardCharts.push(chart);
 })();
-
-// ── OLA pressure (active queue by time-to-deadline, urgency ramp) ──
-{% if stats.active %}
-(function () {
-    const rows = readJSON('ola-pressure');
-    const data = rows.map(r => r.count);
-
-    // Draw the count at the end of each bar. Severity mix lives in the tooltip.
-    const endLabel = {
-        id: 'olaEnd',
-        afterDatasetsDraw(chart) {
-            const { ctx, scales: { x, y } } = chart;
-            ctx.save();
-            ctx.font = 'bold 13px sans-serif';
-            ctx.fillStyle = '#343a40';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            data.forEach((v, i) => {
-                if (!v) return;
-                ctx.fillText(v, x.getPixelForValue(v) + 8, y.getPixelForValue(i));
-            });
-            ctx.restore();
-        }
-    };
-
-    new Chart(document.getElementById('chartOla'), {
-        type: 'bar',
-        data: {
-            labels: rows.map(r => r.label),
-            datasets: [{
-                data,
-                backgroundColor: rows.map(r => r.color),
-                borderRadius: 4, borderSkipped: false, maxBarThickness: 30,
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            layout: { padding: { right: 36 } },
-            // Click a bar → open the ticket list filtered to that OLA bucket.
-            onClick: (evt, els) => {
-                if (els.length) window.location =
-                    "{% url 'ticket_list' %}?ola=" + rows[els[0].index].key;
-            },
-            onHover: (evt, els) => {
-                evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
-            },
-            scales: {
-                x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e9ecef' } },
-                y: { grid: { display: false }, ticks: { font: { size: 13 } } },
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: items => items[0].label,
-                        // Total + per-severity breakdown for the hovered bucket.
-                        label: item => {
-                            const r = rows[item.dataIndex];
-                            const lines = ['Total: ' + r.count, 'คลิกเพื่อดูรายการ'];
-                            r.severities.forEach(s => lines.push('  ' + s.label + ': ' + s.count));
-                            return lines;
-                        },
-                    }
-                }
-            },
-        },
-        plugins: [endLabel],
-    });
-})();
-{% endif %}
 
 // ── Daily trend (line, blue with gradient fill) ──
 (function () {
@@ -1008,7 +749,7 @@ function applyDashboardFilters(filters) {
     const grad = canvas.getContext('2d').createLinearGradient(0, 0, 0, 200);
     grad.addColorStop(0, 'rgba(13,110,253,0.30)');
     grad.addColorStop(1, 'rgba(13,110,253,0.02)');
-    new Chart(canvas, {
+    const chart = new Chart(canvas, {
         type: 'line',
         data: {
             labels: labels,
@@ -1048,6 +789,23 @@ function applyDashboardFilters(filters) {
             responsive: true,
         }
     });
+    dashboardCharts.push(chart);
 })();
+
+window.addEventListener('themechange', () => {
+    const style = getComputedStyle(document.documentElement);
+    const color = style.getPropertyValue('--ui-text').trim();
+    const border = style.getPropertyValue('--ui-border').trim();
+    dashboardCharts.forEach(chart => {
+        chart.options.plugins.legend.labels.color = color;
+        for (const axis of Object.values(chart.options.scales)) {
+            axis.ticks.color = color;
+            axis.title.color = color;
+            axis.grid.color = border;
+            axis.border.color = border;
+        }
+        chart.update('none');
+    });
+});
 </script>
 {% endblock %}
