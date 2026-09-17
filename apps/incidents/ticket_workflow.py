@@ -7,6 +7,7 @@ and notifications so each workflow action has one application-level home.
 
 from dataclasses import dataclass, field
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -16,6 +17,7 @@ from .notifications import (
     notify_containment_alert,
     notify_containment_submitted,
     notify_manager_triage_pending,
+    notify_system_owner_created,
     notify_system_owner_closed,
 )
 
@@ -44,6 +46,51 @@ def step_back(*, ticket, actor, reason):
     """Move a ticket back one approved workflow step."""
     target_status = ticket.step_back(actor, reason)
     return TicketWorkflowResult(ticket=ticket, target_status=target_status)
+
+
+def submit_preparation(*, ticket, actor, propose_monitoring=False):
+    """Submit a saved preparation to the lane selected by its creator."""
+    if ticket.status != Ticket.STATUS_NEW:
+        raise ValidationError('Ticket นี้ถูกส่งเข้าสู่กระบวนการแล้ว')
+
+    if ticket.classification == Ticket.CLASSIFICATION_EVENT:
+        target = Ticket.STATUS_ESCALATED_T2
+        note = 'ส่ง Ticket ที่จัดเตรียมแล้วให้ Tier 2 ยืนยัน Event ก่อนปิด'
+    elif ticket.t1_route in (Ticket.T1_ROUTE_ADMIN, Ticket.T1_ROUTE_OWNER):
+        target = Ticket.STATUS_PENDING_MGR_TRIAGE
+        lane = 'System Admin' if ticket.t1_route == Ticket.T1_ROUTE_ADMIN else 'System Owner'
+        note = f'ส่ง Ticket ที่จัดเตรียมแล้วให้ผู้จัดการ SOC ตรวจ — เส้นทาง {lane}'
+    else:
+        target = Ticket.STATUS_ESCALATED_T2
+        note = 'ส่ง Ticket ที่จัดเตรียมแล้วให้ Tier 2 ตรวจสอบ'
+
+    with transaction.atomic():
+        ticket.transition_to(target, actor, note)
+        if propose_monitoring and target == Ticket.STATUS_ESCALATED_T2:
+            ticket.monitoring_proposed = True
+            ticket.save(update_fields=['monitoring_proposed'])
+
+    warnings = []
+    if ticket.system_owner and ticket.system_owner.email:
+        if not notify_system_owner_created(ticket):
+            warnings.append('Ticket ถูกส่งแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
+    if target == Ticket.STATUS_PENDING_MGR_TRIAGE:
+        notify_manager_triage_pending(ticket)
+    return TicketWorkflowResult(
+        ticket=ticket, target_status=target, warnings=tuple(warnings),
+    )
+
+
+def return_for_completion(*, ticket, actor, reason):
+    """Return initial manager review to the creator with an audited reason."""
+    reason = (reason or '').strip()
+    if not reason:
+        raise ValidationError('กรุณาระบุสิ่งที่ต้องแก้ไขหรือหลักฐานที่ต้องเพิ่มเติม')
+    note = f'ส่งกลับให้ผู้เปิด Ticket ดำเนินการให้ครบถ้วน — เหตุผล: {reason}'
+    ticket.transition_to(Ticket.STATUS_T1_REVIEW, actor, note)
+    return TicketWorkflowResult(
+        ticket=ticket, target_status=Ticket.STATUS_T1_REVIEW,
+    )
 
 
 def complete_t2_review(*, ticket, actor, review_form, next_status, decision_note, fallback_label):

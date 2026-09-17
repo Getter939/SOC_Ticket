@@ -209,12 +209,26 @@ def preview_attachment(request, attachment_id):
     """
     att = get_object_or_404(TicketAttachment, pk=attachment_id)
     get_object_or_404(Ticket.objects.visible_to(request.user), pk=att.ticket_id)
+    return render_inline_attachment_preview(request, att, extra_ctx={'ticket': att.ticket})
 
+
+def render_inline_attachment_preview(request, att, *, extra_ctx):
+    """Shared body of the inline preview for a Ticket or Project Incident
+    attachment. The caller has already loaded the row and enforced its own
+    authorization; ``extra_ctx`` carries whatever the template needs to link
+    back (``ticket`` or ``project``). Only image and text/log/CSV files preview —
+    anything else 404s (its button is not shown).
+
+    Images are re-encoded through Pillow into a ``data:`` URI so the raw upload
+    is never served (no stored-XSS via a spoofed SVG/HTML); text is decoded
+    defensively and rendered autoescaped. This is why it is safe to render inline
+    where the download views deliberately force a download.
+    """
     kind = att.preview_kind
     if not kind:
         raise Http404('ไฟล์ชนิดนี้ไม่รองรับการแสดงตัวอย่าง')
 
-    ctx = {'attachment': att, 'ticket': att.ticket, 'kind': kind}
+    ctx = {'attachment': att, 'kind': kind, **extra_ctx}
 
     if kind == 'image':
         try:

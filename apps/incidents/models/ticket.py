@@ -140,7 +140,7 @@ class Ticket(models.Model):
     MONITORING_DURATION_DAYS = 30
 
     STATUS_CHOICES = [
-        (STATUS_NEW,                  'แจ้งเหตุใหม่'),
+        (STATUS_NEW,                  'กำลังจัดเตรียม (ยังไม่ส่ง)'),
         (STATUS_ESCALATED_T2,         'ส่งต่อให้ Tier 2'),
         (STATUS_MONITORING,           'กำลังเฝ้าระวัง (Monitoring)'),
         (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
@@ -293,6 +293,7 @@ class Ticket(models.Model):
         ],
         # ── SOC Manager pre-containment review (blocking, Incident-only) ─ #
         STATUS_PENDING_MGR_TRIAGE: [
+            STATUS_T1_REVIEW,            # manager returns an incomplete case to its creator
             STATUS_AWAITING_CONTAINMENT,   # manager forwards → admin lane (t1_route=ADMIN)
             STATUS_AWAITING_OWNER,         # manager forwards → owner lane (t1_route=OWNER)
         ],
@@ -365,6 +366,7 @@ class Ticket(models.Model):
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_CLOSED_EVENT):    'MANAGER',
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_ESCALATED_T2):    'MANAGER',
         (STATUS_T1_REVIEW,            STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
+        (STATUS_PENDING_MGR_TRIAGE,   STATUS_T1_REVIEW):            'MANAGER',
         # SOC Manager pre-containment review forwards to the fixed lane.
         (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_CONTAINMENT): 'MANAGER',
         (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_OWNER):       'MANAGER',
@@ -1570,6 +1572,16 @@ class Ticket(models.Model):
             return False
         return self.t2_claimed_by_id != user.pk
 
+    def creator_analyst_can_act(self, user):
+        """Return whether ``user`` is this ticket's Tier 1/Tier 2 creator.
+
+        Tier 2 is temporarily allowed to open cases and therefore must receive
+        the same creator rights as Tier 1 on preparation, returned-review,
+        monitoring, editing, and evidence surfaces.
+        """
+        from ..actor_access import is_creator_analyst
+        return is_creator_analyst(self, user)
+
     @staticmethod
     def _person_label(user):
         return (user.get_full_name() or user.username) if user else None
@@ -1635,7 +1647,7 @@ class Ticket(models.Model):
             if (
                 not user.is_superuser
                 and self.status in self.CREATOR_REVIEW_STATUSES
-                and user.pk != self.created_by_id
+                and not self.creator_analyst_can_act(user)
             ):
                 raise ValidationError(
                     'เฉพาะผู้เปิด Ticket นี้เท่านั้นที่สามารถตรวจสอบ/เพิ่มบันทึกในขั้นตอนนี้ได้'
@@ -1776,16 +1788,9 @@ class Ticket(models.Model):
         if user.is_superuser:
             pass
         elif required_perm == 'TIER1_CREATOR':
-            # TEMP: Tier 2 may also drive their own case's creator edges so they
-            # can open and route tickets on their own (revert to is_tier1-only
-            # when the Tier-1-only creation gate is restored).
-            if profile is None or not (profile.is_tier1 or profile.is_tier2):
+            if not self.creator_analyst_can_act(user):
                 raise ValidationError(
-                    'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถดำเนินการนี้ได้'
-                )
-            if user.pk != self.created_by_id:
-                raise ValidationError(
-                    'เฉพาะผู้เปิด Ticket นี้ (Tier 1) เท่านั้นที่สามารถดำเนินการต่อได้'
+                    'เฉพาะนักวิเคราะห์ผู้เปิด Ticket นี้เท่านั้นที่สามารถดำเนินการต่อได้'
                 )
         elif required_perm == 'TIER2':
             if profile is None or not profile.is_tier2:

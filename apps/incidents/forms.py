@@ -743,6 +743,48 @@ class TicketEditForm(TicketReviewForm):
     """
 
 
+class TicketPreparationEditForm(TicketReviewForm):
+    """Full creator edit surface while a generated Ticket is not submitted."""
+
+    t1_route = forms.ChoiceField(
+        choices=TicketForm.ROUTE_CHOICES,
+        required=False,
+        label='เมื่อเป็น Incident จะดำเนินการ',
+        widget=forms.RadioSelect(attrs={'class': 'route-radio'}),
+    )
+    assigned_admin = UserChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label='ผู้ดูแลระบบที่รับผิดชอบ',
+        empty_label='-- ยังไม่ระบุ --',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    class Meta(TicketReviewForm.Meta):
+        fields = [*TicketReviewForm.Meta.fields, 'assigned_admin']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['assigned_admin'].queryset = User.objects.filter(
+            profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
+            is_active=True,
+        ).order_by('first_name', 'username')
+
+    def clean(self):
+        cleaned = super().clean()
+        classification = cleaned.get('classification')
+        route = cleaned.get('t1_route')
+        if classification == Ticket.CLASSIFICATION_INCIDENT:
+            if route not in dict(TicketForm.ROUTE_CHOICES):
+                self.add_error('t1_route', 'กรุณาเลือกการดำเนินการสำหรับ Incident')
+            elif route == TicketForm.ROUTE_ASSIGN_ADMIN and not cleaned.get('assigned_admin'):
+                self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+        elif classification == Ticket.CLASSIFICATION_EVENT:
+            cleaned['t1_route'] = ''
+            cleaned['assigned_admin'] = None
+        return cleaned
+
+
 class AdminAssignmentForm(forms.ModelForm):
     assigned_admin = UserChoiceField(queryset=User.objects.none())
 

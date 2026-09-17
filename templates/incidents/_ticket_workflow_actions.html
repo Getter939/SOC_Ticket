@@ -47,6 +47,20 @@
 
       {% if is_terminal %}
       <div class="alert alert-light border text-center text-muted small workflow-primary">รายการนี้สิ้นสุดแล้ว ดูรายละเอียดการดำเนินการได้ในประวัติ</div>
+      {% elif can_submit_preparation %}
+      <div class="card shadow-sm border-primary workflow-primary">
+        <div class="card-header"><h5 class="mb-0">Ticket อยู่ระหว่างจัดเตรียม</h5><small>หมายเลข Ticket ถูกออกแล้ว คุณยังแก้ข้อมูลและเพิ่มหลักฐานได้ก่อนส่ง</small></div>
+        <div class="card-body">
+          <p class="small text-muted">ตรวจสอบข้อมูลและหลักฐานให้ครบถ้วน เมื่อส่งแล้ว Ticket จะเข้าสู่คิวตามการจัดประเภทและเส้นทางที่เลือกไว้</p>
+          <form method="post" class="js-submit-loading">{% csrf_token %}
+            <input type="hidden" name="action" value="submit_preparation">
+            {% if ticket.classification == 'EVENT' or not ticket.t1_route %}
+            <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="propose_monitoring" id="prep-monitoring" value="1"><label class="form-check-label" for="prep-monitoring">แนะนำให้ Tier 2 พิจารณาเฝ้าระวัง</label></div>
+            {% endif %}
+            <button class="btn btn-primary w-100" type="submit"><i class="bi bi-send me-1"></i>ส่ง Ticket เข้าสู่กระบวนการ</button>
+          </form>
+        </div>
+      </div>
       {% elif can_t2_review %}
       <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดย Tier 2</h5><small>ตรวจสอบข้อมูลและยืนยันการจัดประเภท</small></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><div class="mb-3"><label class="form-label fw-bold">Indicators of Compromise (IOC)</label>{% include 'incidents/_structured_ioc_fields.html' with form=t2_review_form %}</div>{% if can_monitor and ticket.monitoring_proposed %}<div class="alert alert-info small py-2 mb-2"><i class="bi bi-hand-thumbs-up me-1"></i>Tier 1 แนะนำให้เฝ้าระวังเคสนี้</div>{% endif %}<label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}{% if can_monitor %}<button class="btn btn-outline-primary" type="submit" name="status" value="MONITORING" style="border-color:#4c6ef5;color:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>เฝ้าระวัง {{ monitoring_duration_days }} วัน (ยังไม่ชี้ขาด)</button>{% endif %}</div></form></div></div>
       {% include 'incidents/_detailed_issue_cascade.html' %}
@@ -79,6 +93,14 @@
           <textarea id="manager-review-note" name="decision_note" class="form-control mb-3" rows="3" required></textarea>
           <button class="btn btn-primary w-100" type="submit">{% if ticket.t1_route == T1_ROUTE_OWNER %}ส่งต่อให้เจ้าของระบบ{% else %}ส่งต่อให้ผู้ดูแลระบบ{% endif %}</button>
         </form>
+        {% if can_return_for_completion %}
+        <hr>
+        <form method="post">{% csrf_token %}<input type="hidden" name="action" value="return_for_completion">
+          <label for="return-completion-reason" class="form-label fw-bold">ส่งกลับให้ผู้เปิดดำเนินการให้ครบถ้วน</label>
+          <textarea id="return-completion-reason" name="return_reason" class="form-control mb-2" rows="3" required placeholder="ระบุข้อมูลหรือหลักฐานที่ยังขาด"></textarea>
+          <button class="btn btn-outline-secondary w-100" type="submit"><i class="bi bi-arrow-return-left me-1"></i>ส่งกลับเพื่อดำเนินการให้ครบถ้วน</button>
+        </form>
+        {% endif %}
       </div></div>
       {% elif can_submit_containment %}
       <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดยผู้ดูแลระบบ</h5></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}

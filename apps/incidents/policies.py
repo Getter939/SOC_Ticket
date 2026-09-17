@@ -8,6 +8,7 @@ incident action.
 
 from apps.wazuh_ingest.models import WazuhAlert
 
+from .actor_access import is_creator_analyst
 from .models import Ticket, TriageRecord
 
 
@@ -23,7 +24,7 @@ def user_can_drive(ticket, user, permission):
     if profile is None:
         return False
     if permission == 'TIER1_CREATOR':
-        return profile.is_tier1 and user.pk == ticket.created_by_id
+        return is_creator_analyst(ticket, user)
     if permission == 'TIER2':
         return profile.is_tier2
     if permission == 'MANAGER':
@@ -56,7 +57,7 @@ def holds_ticket_court(ticket, user):
         Ticket.STATUS_MONITORING,
         Ticket.STATUS_OWNER_REMEDIATED,
     ):
-        return profile.is_tier1 and ticket.created_by_id == user.pk
+        return is_creator_analyst(ticket, user)
     if ticket.status in Ticket.TIER2_QUEUE_STATUSES:
         return profile.is_tier2 and not ticket.t2_claim_blocks(user)
     if ticket.status in Ticket.MANAGER_QUEUE_STATUSES:
@@ -72,7 +73,7 @@ def holds_ticket_court(ticket, user):
         # the case; the owner keeps the right for the day one does log in.
         if profile.is_system_owner and ticket.system_owner_id == user.pk:
             return True
-        return profile.is_tier1 and ticket.created_by_id == user.pk
+        return is_creator_analyst(ticket, user)
     return False
 
 
@@ -91,6 +92,11 @@ def can_upload_ticket_attachment(ticket, user):
     if ticket.status in Ticket.TERMINAL_STATUSES:
         return False
     if user.is_superuser:
+        return True
+    # Evidence is append-only and fully attributed. The analyst who opened an
+    # active case may therefore finish its evidence set after routing it, even
+    # while another role owns the current workflow decision.
+    if is_creator_analyst(ticket, user):
         return True
     return holds_ticket_court(ticket, user)
 
@@ -240,7 +246,7 @@ def can_edit_ticket(ticket, user):
     if profile is None:
         return False
     if ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == user.pk:
-        return profile.is_tier1
+        return is_creator_analyst(ticket, user)
     if ticket.t2_claim_blocks(user):
         return False
     return is_soc(user)

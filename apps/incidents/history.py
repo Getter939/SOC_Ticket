@@ -48,6 +48,8 @@ TRACKED_FIELDS = {
     'action_precautions':    'ข้อควรระวัง',
     'actions_taken_summary': 'เรื่องที่ดำเนินการแล้ว',
     'next_steps_summary':    'การดำเนินการลำดับถัดไป',
+    't1_route':             'เส้นทางการจัดการ',
+    'assigned_admin':       'ผู้ดูแลระบบที่รับผิดชอบ',
     'containment_report':    'รายงานการควบคุม',
     'remediation_summary':   'ผลการตรวจสอบ',
     'remediation_checklist': 'เช็กลิสต์สรุปผลการดำเนินการแก้ไข',

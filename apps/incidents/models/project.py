@@ -223,6 +223,14 @@ class ProjectIncidentAttachment(models.Model):
     class Meta:
         ordering = ['uploaded_at']
 
+    @property
+    def preview_kind(self):
+        """'image', 'text', or '' — same inline-preview rule as TicketAttachment.
+        Imported lazily: attachments.py imports Ticket, which imports this module
+        at class-definition time, so a top-level import here would be circular."""
+        from .attachments import preview_kind_for
+        return preview_kind_for(self.original_name)
+
 
 # Late import to avoid a circular dependency: Ticket imports ProjectIncident at
 # class-definition time, while ProjectIncident only needs Ticket at call time.

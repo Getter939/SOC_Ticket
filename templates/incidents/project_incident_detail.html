@@ -81,6 +81,9 @@
           <span class="text-muted small">— {{ attachment.uploaded_at|date:"d M Y H:i" }}{% if attachment.uploaded_by %} · {{ attachment.uploaded_by.get_full_name|default:attachment.uploaded_by.username }}{% endif %}</span>
           {% if attachment.description %}<div class="text-muted small ms-4">{{ attachment.description }}</div>{% endif %}
         </a>
+        {% if attachment.preview_kind %}
+        <a href="{% url 'preview_project_attachment' attachment.pk %}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary flex-shrink-0" title="ดูตัวอย่างในแท็บใหม่"><i class="bi bi-eye"></i></a>
+        {% endif %}
         {% if can_upload_project_attachment %}
         <button class="btn btn-sm btn-outline-danger flex-shrink-0" type="button" data-bs-toggle="modal" data-bs-target="#deleteProjectAtt{{ attachment.pk }}"><i class="bi bi-trash"></i></button>
         {% endif %}

@@ -140,6 +140,8 @@
       {% if is_terminal %}
       <div class="hero-operational-label">ผลการดำเนินการ</div>
       <div class="hero-operational-value">กระบวนการของ Ticket นี้สิ้นสุดแล้ว</div>
+      {% elif can_submit_preparation %}
+      <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">เพิ่มข้อมูลและหลักฐานให้ครบ แล้วส่ง Ticket เข้าสู่กระบวนการ</div>
       {% elif t2_claim_visible and t2_claim_state == 'unclaimed' %}
       <div class="hero-operational-label">ขั้นตอนสำหรับคุณ</div><div class="hero-operational-value">รับ Ticket ก่อนเริ่มตรวจสอบ</div>
       {% elif can_t2_review %}
@@ -159,9 +161,10 @@
       {% endif %}
       {% if ticket.ola_contain_deadline and not is_terminal %}<div class="small text-muted mt-1">Contain OLA: {{ ticket.ola_contain_deadline|date:"d/m/Y H:i" }}</div>{% endif %}
     </div>
-    {% if can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or can_conclude_monitoring or transition_actions or t2_claim_state == 'unclaimed' or t2_claim_state == 'mine' %}
+    {% if can_submit_preparation or can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or can_conclude_monitoring or transition_actions or t2_claim_state == 'unclaimed' or t2_claim_state == 'mine' %}
     <a class="btn btn-primary btn-sm px-3" href="#workflow-actions">
-      {% if t2_claim_visible and t2_claim_state == 'unclaimed' %}รับเรื่องและตรวจสอบ
+      {% if can_submit_preparation %}จัดเตรียมและส่ง Ticket
+      {% elif t2_claim_visible and t2_claim_state == 'unclaimed' %}รับเรื่องและตรวจสอบ
       {% elif can_t2_review %}ตรวจสอบข้อมูล Tier 2
       {% elif can_assign_admin %}เลือกเส้นทางการจัดการ
       {% elif can_mgr_forward %}ตรวจสอบและส่งต่อ

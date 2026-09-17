@@ -19,7 +19,7 @@
   <div class="alert alert-info d-flex gap-2">
     <i class="bi bi-info-circle-fill"></i>
     <div class="small">
-      หน้านี้แก้ไข<strong>เนื้อหาของเคส</strong> และแนบหลักฐานได้ตามสิทธิ์ในสถานะปัจจุบัน — ไม่เปลี่ยนสถานะ ไม่เปลี่ยนเส้นทางการมอบหมาย
+      หน้านี้แก้ไข<strong>เนื้อหาของเคส</strong> และแนบหลักฐานได้ตามสิทธิ์ในสถานะปัจจุบัน — {% if is_preparation %}รายการนี้ยังอยู่ระหว่างจัดเตรียม จึงแก้การจัดประเภท เส้นทาง และผู้รับผิดชอบได้ก่อนส่ง{% else %}ไม่เปลี่ยนสถานะ ไม่เปลี่ยนเส้นทางการมอบหมาย{% endif %}
       และไม่แตะลายเซ็นผู้ตรวจ/ผู้อนุมัติ ทุกฟิลด์ที่เปลี่ยนจะถูกบันทึกไว้พร้อมค่าเดิม ผู้แก้ไข และเวลา
     </div>
   </div>
@@ -112,4 +112,5 @@
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% include 'incidents/_occurred_copy_script.html' %}
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
+{% include 'includes/_session_keepalive.html' %}
 {% endblock %}

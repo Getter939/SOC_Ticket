@@ -185,8 +185,7 @@
     {% for section in sections %}
       {% if section.number == '8' %}
         {% if show_signoff %}
-        {# Reporter/approver sign-off for the incident report body (sections 1-7).
-           Section 8 then opens on a fresh page. #}
+        {# Reporter/approver sign-off for sections 1-7; section 8 starts on a fresh page. #}
         <table class="signoff">
           <tbody>
             <tr>

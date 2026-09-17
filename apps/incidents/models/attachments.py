@@ -159,6 +159,18 @@ def validate_attachment_batch(uploaded_files):
         )
 
 
+def preview_kind_for(original_name):
+    """'image', 'text', or '' — how (if at all) a file with this name can be
+    shown inline without a download. Shared by TicketAttachment and
+    ProjectIncidentAttachment so both offer the same inline preview."""
+    ext = _attachment_extension(original_name)
+    if ext in PREVIEW_IMAGE_EXTENSIONS:
+        return 'image'
+    if ext in PREVIEW_TEXT_EXTENSIONS:
+        return 'text'
+    return ''
+
+
 def attachment_upload_path(instance, filename):
     return f'ticket_attachments/{instance.ticket.ticket_id}/{filename}'
 
@@ -217,12 +229,7 @@ class TicketAttachment(models.Model):
     def preview_kind(self):
         """'image', 'text', or '' — how (if at all) this file can be shown inline
         without a download. Drives the 'ดูตัวอย่าง' link and preview_attachment."""
-        ext = _attachment_extension(self.original_name)
-        if ext in PREVIEW_IMAGE_EXTENSIONS:
-            return 'image'
-        if ext in PREVIEW_TEXT_EXTENSIONS:
-            return 'text'
-        return ''
+        return preview_kind_for(self.original_name)
 
 
 def staged_attachment_upload_path(instance, filename):

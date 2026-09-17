@@ -21,6 +21,7 @@ from ..models import (
 from ..staging import (
     staged_for, stage_uploads,
 )
+from .attachments import render_inline_attachment_preview
 from ..report_content import GUIDANCE_COORDINATION_NOTE
 from ..policies import (
     can_add_project_member as _can_add_project_member,
@@ -334,6 +335,23 @@ def download_project_attachment(request, attachment_id):
     )
     response['X-Content-Type-Options'] = 'nosniff'
     return response
+
+
+@login_required
+def preview_project_attachment(request, attachment_id):
+    """Render one shared bundle attachment inline, in its own tab.
+
+    Same authorization as download_project_attachment (the viewer must be able to
+    see a member ticket), and the same safe rendering as preview_attachment —
+    images re-encoded to a data: URI, text shown autoescaped. Only image and
+    text/log/CSV files preview; anything else 404s.
+    """
+    attachment = get_object_or_404(ProjectIncidentAttachment, pk=attachment_id)
+    if not attachment.project.member_tickets.visible_to(request.user).exists():
+        raise Http404('ไม่พบไฟล์แนบ')
+    return render_inline_attachment_preview(
+        request, attachment, extra_ctx={'project': attachment.project},
+    )
 
 
 @login_required

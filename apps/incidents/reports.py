@@ -647,7 +647,7 @@ def _load_ticket(ticket_id):
             'project_incident', 'created_by', 'created_by__profile',
             'verified_by', 'approved_by', 'assigned_admin',
         )
-        .prefetch_related('attachments', 'iocs')
+        .prefetch_related('attachments', 'iocs', 'project_incident__attachments')
         .get(pk=ticket_id)
     )
 
@@ -1050,34 +1050,60 @@ def _user_label(user, include_phone=False):
     return label
 
 
+# Caption label that marks an image as case-wide evidence carried down from the
+# Project Incident (case bundle), so a report reader can tell shared evidence
+# apart from this system's own. Bilingual, to match the report's field labels.
+SHARED_EVIDENCE_CAPTION_LABEL = 'หลักฐานส่วนกลางของเคส / Shared case evidence'
+
+
+def _iter_report_evidence_attachments(ticket):
+    """Yield ``(attachment, caption_prefix)`` for the report's image evidence.
+
+    This ticket's own attachments come first with no prefix; the parent Project
+    Incident's shared evidence follows, labelled, so bundle-wide screenshots
+    appear in every member's report without being mistaken for this system's own
+    evidence. Both streams share the one count/byte budget in
+    ``_report_evidence_images``.
+    """
+    for attachment in ticket.attachments.all():
+        yield attachment, ''
+    project = ticket.project_incident
+    if project is not None:
+        for attachment in project.attachments.all():
+            yield attachment, SHARED_EVIDENCE_CAPTION_LABEL
+
+
 def _has_image_evidence(ticket):
     """True if any attachment is an image, by extension — a cheap pre-check used
-    to decide whether Section 5 stays even when it carries no evidence text."""
+    to decide whether Section 5 stays even when it carries no evidence text.
+    Shared bundle evidence counts too, since it is embedded in the report."""
     return any(
         Path(attachment.original_name).suffix.lower() in REPORT_IMAGE_EXTENSIONS
-        for attachment in ticket.attachments.all()
+        for attachment, _ in _iter_report_evidence_attachments(ticket)
     )
 
 
 def _report_evidence_images(ticket):
     """Return bounded, normalized presentation copies of image evidence.
 
-    Every attachment still appears in the textual evidence list. Files that are
-    not images, are corrupt, exceed the decoded-pixel guard, or would push the
-    report over its image budget are therefore listed without a preview instead
-    of making the export fail.
+    Covers both this ticket's own attachments and the parent Project Incident's
+    shared evidence (labelled via the caption). Files that are not images, are
+    corrupt, exceed the decoded-pixel guard, or would push the report over its
+    image budget are skipped instead of making the export fail.
     """
     images = []
     total_bytes = 0
 
-    for attachment in ticket.attachments.all():
+    for attachment, caption_prefix in _iter_report_evidence_attachments(ticket):
         if len(images) >= REPORT_IMAGE_MAX_COUNT:
             break
         if Path(attachment.original_name).suffix.lower() not in REPORT_IMAGE_EXTENSIONS:
             continue
 
         try:
-            image = _prepare_report_evidence_image(attachment)
+            image = _prepare_report_evidence_image(
+                attachment, caption_prefix=caption_prefix,
+            )
         except PREVIEW_IMAGE_ERRORS as exc:
             logger.warning(
                 'Skipping attachment %s in report image preview: %s',
@@ -1109,7 +1135,9 @@ def build_attachment_preview_image(attachment):
     )
 
 
-def _prepare_report_evidence_image(attachment, max_dimension=REPORT_IMAGE_MAX_DIMENSION):
+def _prepare_report_evidence_image(
+    attachment, max_dimension=REPORT_IMAGE_MAX_DIMENSION, caption_prefix='',
+):
     with attachment.file.open('rb') as source_file, Image.open(source_file) as source:
         width, height = source.size
         if width * height > REPORT_IMAGE_MAX_PIXELS:
@@ -1143,10 +1171,16 @@ def _prepare_report_evidence_image(attachment, max_dimension=REPORT_IMAGE_MAX_DI
             prepared.save(output, format='JPEG', quality=85, optimize=True)
             content_type = 'image/jpeg'
 
+        # File names are intentionally omitted from the report — the caption is
+        # the analyst's description, or blank. Shared bundle evidence is prefixed
+        # with a label so it reads as case-wide, not this system's own; the label
+        # stands alone when the shared file has no description.
+        caption = attachment.description or ''
+        if caption_prefix:
+            caption = f'[{caption_prefix}] {caption}'.rstrip()
+
         return ReportEvidenceImage(
-            # File names are intentionally omitted from the report — the
-            # caption is the analyst's description, or blank.
-            caption=attachment.description or '',
+            caption=caption,
             content=output.getvalue(),
             content_type=content_type,
             width_px=prepared.width,

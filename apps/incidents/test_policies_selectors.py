@@ -105,6 +105,11 @@ class IncidentPolicyMatrixTest(SimpleTestCase):
         for user, permission, expected in cases:
             with self.subTest(user=user.pk, permission=permission):
                 self.assertEqual(user_can_drive(ticket, user, permission), expected)
+        self.assertTrue(user_can_drive(
+            _ticket(Ticket.STATUS_NEW, creator=self.t2.pk),
+            self.t2,
+            'TIER1_CREATOR',
+        ))
 
     def test_ticket_court_matrix(self):
         cases = (

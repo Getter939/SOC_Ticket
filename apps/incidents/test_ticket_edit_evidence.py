@@ -182,22 +182,17 @@ class TicketEditEvidenceTest(TestCase):
                 self.assertTrue(response.context['form'].non_field_errors())
                 self.assertFalse(self.ticket.attachments.exists())
 
-    def test_out_of_court_editor_cannot_upload_or_adopt_staged_files(self):
-        response = self.client.post(self.url, self.payload(reason='', evidence_files=[self.upload()]))
-        token = response.context['evidence_token']
+    def test_creator_can_append_evidence_while_an_active_ticket_is_out_of_court(self):
         Ticket.objects.filter(pk=self.ticket.pk).update(status=Ticket.STATUS_AWAITING_CONTAINMENT)
-        for evidence in ({'evidence_files': [self.upload()]}, {'evidence_token': token}):
-            with self.subTest(evidence=evidence):
-                response = self.client.post(self.url, self.payload(device_name='blocked', **evidence))
-                self.assertEqual(response.status_code, 200)
-                self.assertContains(response, 'คุณไม่มีสิทธิ์แนบไฟล์ในสถานะปัจจุบัน')
-                self.assertFalse(self.ticket.attachments.exists())
-                self.ticket.refresh_from_db()
-                self.assertEqual(self.ticket.device_name, 'original')
-        response = self.client.post(self.url, self.payload(device_name='text correction'))
+        response = self.client.post(
+            self.url,
+            self.payload(device_name='corrected', evidence_files=[self.upload()]),
+        )
         self.assertEqual(response.status_code, 302)
         self.ticket.refresh_from_db()
-        self.assertEqual(self.ticket.device_name, 'text correction')
+        self.assertEqual(self.ticket.device_name, 'corrected')
+        attachment = self.ticket.attachments.get()
+        self.assertEqual(attachment.uploaded_by, self.creator)
 
     def test_cannot_adopt_another_users_staged_files(self):
         staged = StagedAttachment.objects.create(

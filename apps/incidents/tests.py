@@ -75,9 +75,10 @@ from apps.incidents.views import (
 from apps.incidents.reports import (
     EVENT_REPORT_TEMPLATE_PATH, EVENT_REPORT_TEMPLATE_VERSION,
     REPORT_TEMPLATE_PATH, REPORT_TEMPLATE_VERSION,
+    SHARED_EVIDENCE_CAPTION_LABEL,
     build_ticket_report_context, build_ticket_report_sections,
     generate_ticket_report, generate_ticket_report_pdf, _iter_paragraphs,
-    _report_ticket_id,
+    _has_image_evidence, _report_evidence_images, _report_ticket_id,
 )
 from apps.wazuh_ingest.models import WazuhAlert
 
@@ -3108,6 +3109,121 @@ class AttachmentPreviewTest(TestCase):
         self.assertContains(response, '<table')
 
 
+def _png_upload(name='shot.png', color='#334455'):
+    """A real, decodable PNG SimpleUploadedFile for evidence tests."""
+    buf = BytesIO()
+    Image.new('RGB', (120, 80), color).save(buf, 'PNG')
+    return SimpleUploadedFile(name, buf.getvalue(), content_type='image/png')
+
+
+class ProjectAttachmentPreviewTest(TestCase):
+    """Shared bundle evidence previews inline with the same rules as ticket
+    evidence: member-visibility auth, image re-encoded to a data: URI, and only
+    previewable types succeed."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_t1('proj_prev_soc')
+        cls.outsider = _make_user('proj_prev_out', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.project = ProjectIncident.objects.create(title='Multi-host case')
+        # A member ticket the soc user can see makes the bundle visible to them.
+        _make_ticket(created_by=cls.soc, project_incident=cls.project)
+        cls.image = ProjectIncidentAttachment.objects.create(
+            project=cls.project, file=_png_upload(),
+            original_name='shot.png', uploaded_by=cls.soc,
+        )
+        cls.zipfile = ProjectIncidentAttachment.objects.create(
+            project=cls.project,
+            file=SimpleUploadedFile('evidence.zip', b'PK\x03\x04zip'),
+            original_name='evidence.zip', uploaded_by=cls.soc,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def _url(self, att):
+        return reverse('preview_project_attachment', args=[att.pk])
+
+    def test_unauthenticated_redirected_to_login(self):
+        response = self.client.get(self._url(self.image))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
+
+    def test_non_member_viewer_gets_404(self):
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(self._url(self.image)).status_code, 404)
+
+    def test_non_previewable_type_404(self):
+        self.client.force_login(self.soc)
+        self.assertEqual(self.client.get(self._url(self.zipfile)).status_code, 404)
+
+    def test_soft_deleted_attachment_404(self):
+        self.image.deleted_at = timezone.now()
+        self.image.save(update_fields=['deleted_at'])
+        try:
+            self.client.force_login(self.soc)
+            self.assertEqual(self.client.get(self._url(self.image)).status_code, 404)
+        finally:
+            self.image.deleted_at = None
+            self.image.save(update_fields=['deleted_at'])
+
+    def test_image_re_encoded_to_data_uri(self):
+        self.client.force_login(self.soc)
+        response = self.client.get(self._url(self.image))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data:image/png;base64,')
+        self.assertContains(response, self.project.project_code)
+
+
+class SharedEvidenceInMemberReportTest(TestCase):
+    """Shared Project Incident evidence is folded into each member ticket's
+    report images, labelled so it reads as case-wide, not system-specific."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_t1('shared_ev_soc')
+        cls.project = ProjectIncident.objects.create(title='Shared-evidence case')
+        cls.ticket = _make_ticket(created_by=cls.soc, project_incident=cls.project)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def test_shared_image_is_embedded_and_labelled(self):
+        ProjectIncidentAttachment.objects.create(
+            project=self.project, file=_png_upload('bundlewide.png'),
+            original_name='bundlewide.png', description='攻撃元 host', uploaded_by=self.soc,
+        )
+        images = _report_evidence_images(self.ticket)
+        self.assertEqual(len(images), 1)
+        self.assertTrue(images[0].caption.startswith(f'[{SHARED_EVIDENCE_CAPTION_LABEL}]'))
+        self.assertIn('攻撃元 host', images[0].caption)
+        self.assertTrue(_has_image_evidence(self.ticket))
+
+    def test_ticket_own_evidence_comes_before_shared_and_is_unlabelled(self):
+        TicketAttachment.objects.create(
+            ticket=self.ticket, file=_png_upload('own.png'),
+            original_name='own.png', uploaded_by=self.soc,
+        )
+        ProjectIncidentAttachment.objects.create(
+            project=self.project, file=_png_upload('shared.png'),
+            original_name='shared.png', uploaded_by=self.soc,
+        )
+        images = _report_evidence_images(self.ticket)
+        self.assertEqual(len(images), 2)
+        # Ticket-own first, with no shared label; the bundle image second, labelled.
+        self.assertFalse(images[0].caption.startswith('['))
+        self.assertTrue(images[1].caption.startswith(f'[{SHARED_EVIDENCE_CAPTION_LABEL}]'))
+
+    def test_shared_evidence_absent_when_ticket_has_no_bundle(self):
+        solo = _make_ticket(created_by=self.soc)
+        self.assertEqual(_report_evidence_images(solo), ())
+        self.assertFalse(_has_image_evidence(solo))
+
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # 16. Attachment upload size limit                                              #
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -3208,7 +3324,7 @@ class AttachmentUploadTypeTest(TestCase):
 # ──────────────────────────────────────────────────────────────────────────── #
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_attachment_test_media_'))
 class AttachmentWorkflowPermissionTest(TestCase):
-    """Ticket-level uploads belong to the role currently handling the ticket."""
+    """Active tickets accept attributed evidence from their creator or handler."""
 
     @classmethod
     def setUpTestData(cls):
@@ -3257,6 +3373,12 @@ class AttachmentWorkflowPermissionTest(TestCase):
         self._upload(self.admin, ticket)
         self.assertTrue(TicketAttachment.objects.filter(
             ticket=ticket, uploaded_by=self.admin).exists())
+
+    def test_creator_can_append_evidence_during_containment(self):
+        ticket = self._ticket(status=Ticket.STATUS_AWAITING_CONTAINMENT)
+        self._upload(self.creator, ticket)
+        self.assertTrue(TicketAttachment.objects.filter(
+            ticket=ticket, uploaded_by=self.creator).exists())
 
     def test_system_owner_can_upload_while_owner_is_handling_ticket(self):
         ticket = self._ticket(status=Ticket.STATUS_AWAITING_OWNER)

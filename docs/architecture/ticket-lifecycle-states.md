@@ -63,6 +63,7 @@ flowchart TD
 
     %% ── SOC Manager pre-containment review (blocking) ───────
     PENDING_MGR_TRIAGE[ผู้จัดการ SOC ตรวจก่อนมอบหมาย<br/>flag Emergency + ส่งต่อ<br/>PENDING_MGR_TRIAGE] --> D_ROUTE{เส้นทางที่ Tier 1 เลือก?<br/>t1_route}
+    PENDING_MGR_TRIAGE -->|ส่งกลับพร้อมเหตุผล<br/>ข้อมูล/หลักฐานยังไม่ครบ| T1_REVIEW
     D_ROUTE -->|Admin| AWAITING_CONTAINMENT
     D_ROUTE -->|Owner| AWAITING_OWNER
 
@@ -136,7 +137,7 @@ flowchart TD
 | MONITORING | PENDING_MGR_TRIAGE (something happened → Incident) / ESCALATED_T2 (window closed quietly → Event, Tier 2 confirms close) | Tier 1 (creator) — Tier 2 sets the 30-day window; each case is monitored at most once |
 | PENDING_MGR_EVENT_REVIEW | CLOSED_EVENT (confirm) / ESCALATED_T2 (reject → classification back to Incident) | **SOC Manager** |
 | T1_REVIEW | PENDING_MGR_TRIAGE | Tier 1 (creator) |
-| PENDING_MGR_TRIAGE | AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** |
+| PENDING_MGR_TRIAGE | T1_REVIEW (return for completion) / AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** — return requires a written reason |
 | AWAITING_CONTAINMENT | CONTAINMENT_REPORTED | Assigned Admin |
 | CONTAINMENT_REPORTED | AWAITING_CONTAINMENT (ไม่สำเร็จ) / CLOSED_EVENT (จัดเป็น Event) / APPROVED (ไม่ฉุกเฉิน) / PENDING_MANAGER (ฉุกเฉิน) | **Tier 2** |
 | AWAITING_OWNER | PENDING_T2_REVIEW (record owner's fix + attach, hand to Tier 2 — one action) | Tier 1 (creator) |

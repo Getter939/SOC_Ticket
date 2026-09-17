@@ -122,7 +122,7 @@ class UiSmokeTest(TestCase):
         resp = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'Critical')           # severity badge
-        self.assertContains(resp, 'แจ้งเหตุใหม่')        # status label, not raw code
+        self.assertContains(resp, 'กำลังจัดเตรียม')      # status label, not raw code
         self.assertContains(resp, 'สรุปเหตุการณ์')
         self.assertContains(resp, 'ขอบเขตและข้อมูลทางเทคนิค')
         self.assertContains(resp, 'ประวัติการดำเนินการ')

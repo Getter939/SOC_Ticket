@@ -7,7 +7,7 @@ drifting apart.
 """
 
 FOOTER_LEFT = 'ส่วนปฏิบัติการความมั่นคงปลอดภัยไซเบอร์ (ปปกก)   โทร.0-2574-8209-10'
-FOOTER_RIGHT = 'INCIDENT REPORT CONTAINMENT แบบฟอร์มรายงานเหตุการณ์ผิดปกติ'
+FOOTER_RIGHT = 'INCIDENT REPORT CONTAINMENT แบบฟอร์มรายงานเหตุการณ์ผิดปกติ v3.4'
 EVENT_FOOTER_RIGHT = 'ALERT EVENT REPORT แบบฟอร์มแจ้งเหตุการณ์ผิดปกติ'
 
 # Global coordination note appended once when standard guidance is inserted on

@@ -70,13 +70,15 @@ def load_alert_bundle(alert_ids, user, *, lock=False):
 
 
 def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(),
-                            evidence_token='', propose_monitoring=False):
-    """Persist a validated TicketForm with all source records and evidence."""
+                            evidence_token='', propose_monitoring=False,
+                            submit_immediately=True):
+    """Persist a ticket preparation, optionally submitting it immediately."""
     with transaction.atomic():
         locked_triage = _lock_triage(triage, actor) if triage else None
         ticket = form.save(commit=False)
         ticket.created_by = actor
         ticket.assigned_to = actor
+        set_preparation_route(ticket, form.cleaned_data.get('t1_route'))
 
         locked_alert, locked_alerts = _lock_ticket_alert_sources(
             ticket=ticket,
@@ -90,12 +92,13 @@ def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(),
 
         source_alerts = locked_alerts or ([locked_alert] if locked_alert else [])
         _link_alerts(ticket, source_alerts, actor)
-        _apply_initial_ticket_route(ticket, actor, form.cleaned_data.get('t1_route'))
+        if submit_immediately:
+            _apply_initial_ticket_route(ticket, actor, form.cleaned_data.get('t1_route'))
 
         # Tier 1's monitoring recommendation: only meaningful once the case has
         # landed at Tier 2 review (ESCALATED_T2). Advisory — only Tier 2 can grant
         # it — and cleared by transition_to when the case leaves that review.
-        if propose_monitoring and ticket.status == Ticket.STATUS_ESCALATED_T2:
+        if submit_immediately and propose_monitoring and ticket.status == Ticket.STATUS_ESCALATED_T2:
             ticket.monitoring_proposed = True
             ticket.save(update_fields=['monitoring_proposed'])
 
@@ -118,7 +121,33 @@ def create_ticket_from_form(*, form, actor, triage=None, alert_bundle_ids=(),
         _log_alert_bundle(ticket, source_alerts, actor)
         adopt_staged(evidence_token, actor, ticket=ticket)
 
-    return CaseCreationResult(ticket=ticket, warnings=_ticket_creation_warnings(ticket))
+    warnings = _ticket_creation_warnings(ticket) if submit_immediately else ()
+    return CaseCreationResult(ticket=ticket, warnings=warnings)
+
+
+def set_preparation_route(ticket, route):
+    """Store a preparation's intended route without advancing its workflow."""
+    if ticket.classification == Ticket.CLASSIFICATION_EVENT:
+        ticket.t1_route = ''
+        ticket.assigned_admin = None
+    elif route == TicketForm.ROUTE_ASSIGN_ADMIN:
+        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+    elif route == TicketForm.ROUTE_DIRECT_OWNER:
+        ticket.t1_route = Ticket.T1_ROUTE_OWNER
+        ticket.assigned_admin = None
+    else:
+        # A blank persisted lane means submit this Incident to Tier 2.
+        ticket.t1_route = ''
+        ticket.assigned_admin = None
+
+
+def preparation_form_route(ticket):
+    """Return the TicketForm route value represented by persisted draft data."""
+    if ticket.t1_route == Ticket.T1_ROUTE_ADMIN:
+        return TicketForm.ROUTE_ASSIGN_ADMIN
+    if ticket.t1_route == Ticket.T1_ROUTE_OWNER:
+        return TicketForm.ROUTE_DIRECT_OWNER
+    return TicketForm.ROUTE_ESCALATE_T2
 
 
 def create_project_incident_from_forms(

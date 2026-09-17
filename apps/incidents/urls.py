@@ -20,6 +20,7 @@ urlpatterns = [
     path('project-incident/new/', views.create_project_incident, name='create_project_incident'),
     path('project-incident/<int:pk>/', views.project_incident_detail, name='project_incident_detail'),
     path('project-attachment/<int:attachment_id>/download/', views.download_project_attachment, name='download_project_attachment'),
+    path('project-attachment/<int:attachment_id>/preview/', views.preview_project_attachment, name='preview_project_attachment'),
     # Shared bundle evidence — same lifecycle as ticket attachments.
     path('project-incident/<int:pk>/attachment/', views.upload_project_attachment, name='upload_project_attachment'),
     path('project-attachment/<int:attachment_id>/delete/', views.delete_project_attachment, name='delete_project_attachment'),

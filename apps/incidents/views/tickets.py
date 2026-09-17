@@ -11,7 +11,8 @@ from apps.incidents import history
 from apps.wazuh_ingest.models import WazuhAlert
 from ..forms import (
     AdminAssignmentForm, AttachmentForm, ResponseRequestForm,
-    SubtaskUpdateForm, TicketEditForm, TicketForm, TicketReviewForm,
+    SubtaskUpdateForm, TicketEditForm, TicketForm, TicketPreparationEditForm,
+    TicketReviewForm,
 )
 from ..models import (
     Ticket,
@@ -34,6 +35,8 @@ from ..cancellation_views import cancellation_context
 from ..case_creation import (
     create_ticket_from_form,
     load_alert_bundle,
+    preparation_form_route,
+    set_preparation_route,
 )
 from ..ticket_updates import save_ticket_edit
 from ..ticket_workflow import (
@@ -42,11 +45,13 @@ from ..ticket_workflow import (
     complete_t2_review,
     conclude_monitoring,
     manager_forward,
+    return_for_completion,
     reassess_emergency,
     reclassify_as_event,
     record_remediation_check,
     start_monitoring,
     step_back,
+    submit_preparation,
     submit_containment,
     transition_ticket,
 )
@@ -156,12 +161,21 @@ def create_ticket(request):
                     alert_bundle_ids=alert_bundle_ids,
                     evidence_token=evidence_token,
                     propose_monitoring=bool(request.POST.get('propose_monitoring')),
+                    submit_immediately=(
+                        request.POST.get('submission_intent') != 'save_preparation'
+                    ),
                 )
             except ValidationError as exc:
                 form.add_error(None, exc.message)
             else:
                 for warning in result.warnings:
                     messages.warning(request, warning)
+                if result.ticket.status == Ticket.STATUS_NEW:
+                    messages.success(
+                        request,
+                        f'บันทึก Ticket #{result.ticket.ticket_id} ไว้เป็นรายการจัดเตรียมแล้ว '
+                        'คุณสามารถแก้ไขและแนบหลักฐานก่อนส่งเข้าสู่กระบวนการ',
+                    )
                 # The browser only gets here on a genuine save, so this is the
                 # one place it is safe to drop the localStorage draft. Clearing
                 # it on the form's submit event instead would wipe the draft
@@ -247,6 +261,10 @@ def ticket_detail(request, pk):
     profile = getattr(request.user, 'profile', None)
     is_terminal = ticket.status in Ticket.TERMINAL_STATUSES
     can_upload_attachment = _can_upload_ticket_attachment(ticket, request.user)
+    can_submit_preparation = (
+        ticket.status == Ticket.STATUS_NEW
+        and ticket.creator_analyst_can_act(request.user)
+    )
 
     can_submit_containment = (
         not is_terminal
@@ -293,6 +311,13 @@ def ticket_detail(request, pk):
             or ticket.project_incident.emergency_decided_at is not None
         )
         and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
+    )
+    can_return_for_completion = (
+        ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
+        and (
+            request.user.is_superuser
+            or (profile is not None and profile.is_soc_manager)
+        )
     )
     mgr_forward_target = (
         Ticket.STATUS_AWAITING_OWNER
@@ -367,7 +392,37 @@ def ticket_detail(request, pk):
     if request.method == 'POST':
         action = request.POST.get('action')
 
-        if action == 'reassess_emergency':
+        if action == 'submit_preparation':
+            if not can_submit_preparation:
+                messages.error(request, 'คุณไม่มีสิทธิ์ส่ง Ticket รายการนี้')
+            else:
+                try:
+                    result = submit_preparation(
+                        ticket=ticket,
+                        actor=request.user,
+                        propose_monitoring=bool(request.POST.get('propose_monitoring')),
+                    )
+                    messages.success(request, 'ส่ง Ticket เข้าสู่กระบวนการเรียบร้อยแล้ว')
+                    for warning in result.warnings:
+                        messages.warning(request, warning)
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
+        elif action == 'return_for_completion':
+            if not can_return_for_completion:
+                messages.error(request, 'คุณไม่มีสิทธิ์ส่ง Ticket นี้กลับให้ผู้เปิดดำเนินการ')
+            else:
+                try:
+                    return_for_completion(
+                        ticket=ticket,
+                        actor=request.user,
+                        reason=request.POST.get('return_reason', ''),
+                    )
+                    messages.success(request, 'ส่ง Ticket กลับให้ผู้เปิดดำเนินการให้ครบถ้วนแล้ว')
+                except ValidationError as e:
+                    messages.error(request, e.message)
+
+        elif action == 'reassess_emergency':
             value = request.POST.get('emergency_value', '') in ('1', 'true', 'True', 'on')
             reason = request.POST.get('emergency_reason', '').strip()
             try:
@@ -659,6 +714,8 @@ def ticket_detail(request, pk):
         'profile': profile,
         'is_terminal': is_terminal,
         'can_upload_attachment': can_upload_attachment,
+        'can_submit_preparation': can_submit_preparation,
+        'can_return_for_completion': can_return_for_completion,
         'can_submit_containment': can_submit_containment,
         'checklist_items': checklist_items,
         'checklist_trailing': checklist_trailing,
@@ -716,8 +773,15 @@ def edit_ticket(request, pk):
     can_upload_attachment = _can_upload_ticket_attachment(ticket, request.user)
     evidence_token = ''
     reason = ''
+    is_preparation = ticket.status == Ticket.STATUS_NEW
     if request.method == 'POST':
-        form = TicketEditForm(request.POST, instance=ticket)
+        if is_preparation:
+            posted = request.POST.copy()
+            if not posted.get('t1_route'):
+                posted['t1_route'] = preparation_form_route(ticket)
+            form = TicketPreparationEditForm(posted, instance=ticket)
+        else:
+            form = TicketEditForm(request.POST, instance=ticket)
         reason = (request.POST.get('reason') or '').strip()
         if can_upload_attachment:
             evidence_token, staged_errors = stage_uploads(request)
@@ -728,6 +792,8 @@ def edit_ticket(request, pk):
         ).exists():
             form.add_error(None, 'คุณไม่มีสิทธิ์แนบไฟล์ในสถานะปัจจุบันของเคสนี้')
         if form.is_valid():
+            if is_preparation:
+                set_preparation_route(ticket, form.cleaned_data.get('t1_route'))
             if not reason:
                 messages.error(request, 'กรุณาระบุเหตุผลในการแก้ไข')
             else:
@@ -756,10 +822,17 @@ def edit_ticket(request, pk):
                     messages.info(request, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
                 return redirect('ticket_detail', pk=pk)
     else:
-        form = TicketEditForm(instance=ticket)
+        if is_preparation:
+            form = TicketPreparationEditForm(
+                instance=ticket,
+                initial={'t1_route': preparation_form_route(ticket)},
+            )
+        else:
+            form = TicketEditForm(instance=ticket)
 
     return render(request, 'incidents/ticket_edit.html', {
         'ticket': ticket,
+        'is_preparation': is_preparation,
         'form': form,
         'reason': reason,
         'can_upload_attachment': can_upload_attachment,
