@@ -182,9 +182,9 @@ def _transition_actions(ticket, user):
             # No OWNER_REMEDIATED branch: that edge is gone. Sending a case
             # back to the owner is Tier 2's call, made at PENDING_T2_REVIEW.
             if ticket.status == Ticket.STATUS_PENDING_T2_REVIEW:
-                label = 'Reject -> back to owner'
+                label = 'ตีกลับ → ส่งคืนเจ้าของระบบ'
             else:
-                label = 'Send to owner (direct)'
+                label = 'ส่งให้เจ้าของระบบ (โดยตรง)'
         actions.append({'status': next_status, 'label': label})
     return actions
 

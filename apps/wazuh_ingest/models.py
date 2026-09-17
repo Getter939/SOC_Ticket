@@ -17,11 +17,11 @@ class WazuhAlert(models.Model):
     TRIAGE_FALSE_POSITIVE = 'FALSE_POSITIVE'
     TRIAGE_ESCALATED = 'ESCALATED'
     TRIAGE_STATUS_CHOICES = [
-        (TRIAGE_PENDING, 'Pending'),
-        (TRIAGE_TRIAGING, 'Triaging'),
+        (TRIAGE_PENDING, 'รอคัดกรอง'),
+        (TRIAGE_TRIAGING, 'กำลังคัดกรอง'),
         (TRIAGE_TRUE_POSITIVE, 'Incident'),
         (TRIAGE_FALSE_POSITIVE, 'Event'),
-        (TRIAGE_ESCALATED, 'Escalated'),
+        (TRIAGE_ESCALATED, 'ส่งต่อแล้ว'),
     ]
 
     TIER_T1 = 'T1'
@@ -30,7 +30,7 @@ class WazuhAlert(models.Model):
     TIER_CHOICES = [
         (TIER_T1, 'T1'),
         (TIER_T2, 'T2'),
-        (TIER_MANAGER, 'Manager'),
+        (TIER_MANAGER, 'ผู้จัดการ'),
     ]
 
     CATEGORY_MALWARE = 'Malware'
@@ -67,8 +67,8 @@ class WazuhAlert(models.Model):
     KIND_DETECTION = 'DETECTION'
     KIND_VULNERABILITY = 'VULNERABILITY'
     KIND_CHOICES = [
-        (KIND_DETECTION, 'Detection'),
-        (KIND_VULNERABILITY, 'Vulnerability'),
+        (KIND_DETECTION, 'การตรวจจับ'),
+        (KIND_VULNERABILITY, 'ช่องโหว่'),
     ]
 
     # The rule group Wazuh tags every vulnerability-detector alert with. This is

@@ -16,10 +16,10 @@ SOURCE_OTHER       = 'OTHER'
 SOURCE_CHOICES = [
     (SOURCE_SIEM,        'ระบบเฝ้าระวัง (SIEM)'),
     (SOURCE_ADMIN,       'ผู้ดูแลระบบ (Admin)'),
-    (SOURCE_TI,          'Threat Intelligence (TI)'),
-    (SOURCE_EMAIL,       'Email'),
-    (SOURCE_PHONE,       'Phone / Hotline'),
-    (SOURCE_USER_REPORT, 'User / Internal Report'),
+    (SOURCE_TI,          'ข้อมูลข่าวกรองภัยคุกคาม (TI)'),
+    (SOURCE_EMAIL,       'อีเมล'),
+    (SOURCE_PHONE,       'โทรศัพท์ / สายด่วน'),
+    (SOURCE_USER_REPORT, 'ผู้ใช้ / รายงานภายใน'),
     (SOURCE_EXTERNAL,    'หน่วยงานภายนอก (External Organization)'),
     (SOURCE_OTHER,       'Other'),
 ]

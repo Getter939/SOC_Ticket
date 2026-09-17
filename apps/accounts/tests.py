@@ -238,7 +238,7 @@ class PasswordManagementSecurityTest(TestCase):
 
         used_link = Client().get(reset_path)
         self.assertEqual(used_link.status_code, 200)
-        self.assertContains(used_link, 'invalid or expired')
+        self.assertContains(used_link, 'ไม่ถูกต้องหรือหมดอายุแล้ว')
 
     def test_reset_link_expires_after_the_configured_timeout(self):
         self._request_reset()
@@ -250,7 +250,7 @@ class PasswordManagementSecurityTest(TestCase):
             response = Client().get(reset_path)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'invalid or expired')
+        self.assertContains(response, 'ไม่ถูกต้องหรือหมดอายุแล้ว')
 
     def test_reset_requests_are_limited_per_email(self):
         for _ in range(4):

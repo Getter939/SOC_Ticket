@@ -84,8 +84,8 @@ def send_welcome_email_action(modeladmin, request, queryset):
             send_mail(subject, message, settings.DEFAULT_FROM_EMAIL or None, [user.email])
             success_count += 1
         except Exception:
-            messages.error(request, f'Unable to send account details for {user.username}.')
-    messages.success(request, f'Sent account details to {success_count} user(s).')
+            messages.error(request, f'ไม่สามารถส่งข้อมูลบัญชีให้ {user.username} ได้')
+    messages.success(request, f'ส่งข้อมูลบัญชีให้ผู้ใช้ {success_count} คนแล้ว')
 
 
 @admin.action(description='Send secure password-reset links to selected users')
@@ -98,15 +98,15 @@ def send_password_reset_link(modeladmin, request, queryset):
             send_password_reset_email(user=user, request=request)
             success_count += 1
         except Exception:
-            messages.error(request, f'Unable to send a reset link for {user.username}.')
-    messages.success(request, f'Sent {success_count} secure password-reset link(s).')
+            messages.error(request, f'ไม่สามารถส่งลิงก์รีเซ็ตให้ {user.username} ได้')
+    messages.success(request, f'ส่งลิงก์รีเซ็ตรหัสผ่านแล้ว {success_count} รายการ')
 
 
 @admin.action(description='Grant temporary Tier 1/2 access (SOC Managers)')
 def grant_acting_tier(modeladmin, request, queryset):
     """Temporarily elevate selected SOC Managers to Tier 1 + Tier 2 work."""
     if not request.user.is_superuser:
-        messages.error(request, 'Only superusers may grant acting-tier access.')
+        messages.error(request, 'เฉพาะ superuser เท่านั้นที่ให้สิทธิ์รักษาการ Tier ได้')
         return
     granted = skipped = 0
     now = timezone.now()
@@ -123,7 +123,7 @@ def grant_acting_tier(modeladmin, request, queryset):
         ])
         granted += 1
     if granted:
-        messages.success(request, f'Granted acting-tier access to {granted} SOC Manager(s).')
+        messages.success(request, f'ให้สิทธิ์รักษาการ Tier แก่ผู้จัดการ SOC {granted} คนแล้ว')
     if skipped:
         messages.warning(
             request,
@@ -135,7 +135,7 @@ def grant_acting_tier(modeladmin, request, queryset):
 def revoke_acting_tier(modeladmin, request, queryset):
     """Withdraw a previously granted acting-tier elevation."""
     if not request.user.is_superuser:
-        messages.error(request, 'Only superusers may revoke acting-tier access.')
+        messages.error(request, 'เฉพาะ superuser เท่านั้นที่เพิกถอนสิทธิ์รักษาการ Tier ได้')
         return
     revoked = 0
     for user in queryset.select_related('profile'):
@@ -149,7 +149,7 @@ def revoke_acting_tier(modeladmin, request, queryset):
             'acting_tier_access', 'acting_tier_granted_by', 'acting_tier_granted_at',
         ])
         revoked += 1
-    messages.success(request, f'Revoked acting-tier access from {revoked} user(s).')
+    messages.success(request, f'เพิกถอนสิทธิ์รักษาการ Tier จากผู้ใช้ {revoked} คนแล้ว')
 
 
 class UserAdmin(BaseUserAdmin):
@@ -213,7 +213,7 @@ class UserAdmin(BaseUserAdmin):
         if is_new_user and obj.email:
             try:
                 send_password_reset_email(user=obj, request=request)
-                messages.success(request, f'Sent a secure first-password link to {obj.email}.')
+                messages.success(request, f'ส่งลิงก์ตั้งรหัสผ่านครั้งแรกไปที่ {obj.email} แล้ว')
             except Exception:
                 messages.error(
                     request,

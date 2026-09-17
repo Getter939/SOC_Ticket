@@ -11,7 +11,7 @@
 <form method="post">
     {% csrf_token %}<input type="hidden" name="action" value="acknowledge">
     <div class="form-check mb-3"><input type="checkbox" class="form-check-input" name="saved" value="yes" id="saved" required><label for="saved" class="form-check-label">ฉันได้บันทึกรหัสสำรองเหล่านี้ไว้ในที่ปลอดภัยแล้ว</label></div>
-    <button type="submit" class="btn btn-primary w-100">เข้าสู่ SOC Support System</button>
+    <button type="submit" class="btn btn-primary w-100">เข้าสู่ระบบสนับสนุนงาน SOC</button>
 </form>
 {% else %}
 <h1 class="h3">การยืนยันตัวตนแบบสองขั้นตอน</h1>

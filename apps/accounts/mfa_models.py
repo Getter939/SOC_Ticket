@@ -110,12 +110,12 @@ class MFAAudit(models.Model):
     event = models.CharField(
         max_length=32,
         choices=[
-            ('enrolled', 'Authenticator enrolled'),
-            ('verified', 'Authenticator verified'),
-            ('failed', 'Verification failed'),
-            ('recovery_used', 'Recovery code used'),
-            ('codes_generated', 'Recovery codes generated'),
-            ('reset', 'Authenticator reset'),
+            ('enrolled', 'ลงทะเบียนแอปยืนยันตัวตนแล้ว'),
+            ('verified', 'ยืนยันตัวตนสำเร็จ'),
+            ('failed', 'ยืนยันตัวตนไม่สำเร็จ'),
+            ('recovery_used', 'ใช้รหัสกู้คืนแล้ว'),
+            ('codes_generated', 'สร้างรหัสกู้คืนแล้ว'),
+            ('reset', 'รีเซ็ตแอปยืนยันตัวตนแล้ว'),
         ],
     )
     reason = models.TextField(blank=True)

@@ -2369,7 +2369,7 @@ class TriageWorkflowIntegrityTest(TestCase):
             'alert_bundle': [primary.pk, supporting.pk],
         })
         self.assertEqual(form_response.status_code, 200)
-        self.assertContains(form_response, 'Alert Bundle (2 Alerts)')
+        self.assertContains(form_response, 'ชุดการแจ้งเตือน (2 รายการ)')
         self.assertEqual(
             form_response.context['form'].initial['wazuh_alert'], primary.pk
         )

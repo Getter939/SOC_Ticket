@@ -272,13 +272,13 @@ class GlobalSearchViewTest(TestCase):
         self.client.login(username='sysadm', password='testpass123')
         resp = self.client.get(reverse('global_search'), {'q': 'malwarebox'})
         self.assertFalse(resp.context['can_search_triage'])
-        self.assertNotContains(resp, 'Triage Records')
+        self.assertNotContains(resp, 'บันทึกการคัดกรอง')
 
     def test_triage_card_is_shown_to_soc(self):
         self.client.login(username='t1', password='testpass123')
         resp = self.client.get(reverse('global_search'), {'q': 'malwarebox'})
         self.assertTrue(resp.context['can_search_triage'])
-        self.assertContains(resp, 'Triage Records')
+        self.assertContains(resp, 'บันทึกการคัดกรอง')
 
     def test_total_counts_the_whole_result_set_not_the_page(self):
         """The header read `ticket_results|length`, which is the page size —

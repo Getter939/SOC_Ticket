@@ -1008,7 +1008,7 @@ class EscalationQueueFilterTest(TestCase):
     def test_emergency_filter_control_is_gone(self):
         self._ticket()
         response = self._get()
-        self.assertNotContains(response, 'Normal only')
+        self.assertNotContains(response, 'เฉพาะเคสปกติ')
         self.assertNotContains(response, 'name="emergency"')
 
     def test_emergency_signal_survives_as_tint_and_badge(self):
@@ -1016,7 +1016,7 @@ class EscalationQueueFilterTest(TestCase):
         self._ticket(is_emergency=True)
         response = self._get()
         self.assertContains(response, 'table-danger')
-        self.assertContains(response, 'EMERGENCY')
+        self.assertContains(response, '>ฉุกเฉิน<')
 
     # ── Stage filter and the other sorts ─────────────────────────────────── #
 

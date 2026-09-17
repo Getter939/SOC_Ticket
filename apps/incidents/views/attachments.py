@@ -42,7 +42,7 @@ logger = logging.getLogger('apps.incidents.views')
 def upload_attachment(request, pk):
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     if not _can_upload_ticket_attachment(ticket, request.user):
-        messages.error(request, 'You cannot upload attachments while this ticket is in its current status.')
+        messages.error(request, 'ไม่สามารถอัปโหลดไฟล์แนบได้ในสถานะปัจจุบันของเคสนี้')
         return redirect('ticket_detail', pk=pk)
     if request.method == 'POST':
         form = AttachmentForm(request.POST, request.FILES)

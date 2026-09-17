@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}ประวัติ Ticket — SOC Support System{% endblock %}
+{% block title %}ประวัติ Ticket — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <style>
@@ -48,7 +48,7 @@
             <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
                 <a href="?status=CANCELLED{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CANCELLED' %}active{% endif %}">ยกเลิกแล้ว</a>
-                <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
+                <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">ทั้งหมด</a>
                 <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
                 <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>
             </div>
@@ -61,7 +61,7 @@
                 <div class="col-md-2">
                     <label class="form-label small fw-bold mb-1">ความรุนแรง</label>
                     <select name="severity" class="form-select form-select-sm">
-                        <option value="">All</option>
+                        <option value="">ทั้งหมด</option>
                         {% for value, label in severity_choices %}
                             <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
@@ -70,15 +70,15 @@
                 <div class="col-md-2">
                     <label class="form-label small fw-bold mb-1">ประเภท</label>
                     <select name="classification" class="form-select form-select-sm">
-                        <option value="">All</option>
+                        <option value="">ทั้งหมด</option>
                         {% for value, label in classification_choices %}
                             <option value="{{ value }}" {% if classification_filter == value %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">Emergency</label>
-                    <select name="emergency" class="form-select form-select-sm"><option value="">All</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option></select>
+                    <label class="form-label small fw-bold mb-1">ความฉุกเฉิน</label>
+                    <select name="emergency" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>เฉพาะเคสฉุกเฉิน</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>เฉพาะเคสปกติ</option></select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small fw-bold mb-1">เรียงตาม</label>
@@ -87,7 +87,7 @@
                 <div class="col-md-2">
                     <label class="form-label small fw-bold mb-1">ผู้อนุมัติ/ปิดเคส</label>
                     <select name="approved_by" class="form-select form-select-sm">
-                        <option value="">All</option>
+                        <option value="">ทั้งหมด</option>
                         {% for user in approver_choices %}
                             <option value="{{ user.id }}" {% if approved_by_filter == user.id|stringformat:"s" %}selected{% endif %}>
                                 {{ user.get_full_name|default:user.username }}
@@ -142,7 +142,7 @@
                             <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
                             {% endif %}
                             {% if ticket.is_emergency %}
-                            <div class="mt-1"><span class="emg-flag">EMERGENCY</span></div>
+                            <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
                             {% endif %}
                         </td>
                         <td class="cell-primary">{{ ticket.device_name }}</td>

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}My Queue — SOC Support System{% endblock %}
+{% block title %}คิวงาน Tier 1 — ระบบสนับสนุนงาน SOC{% endblock %}
 {% block content %}
 <div class="page-header"><div><h1 class="page-header__title"><i class="bi bi-inbox-fill me-2"></i>คิวงานของฉัน</h1><p class="page-header__subtitle">My Queue · งานที่รอ Tier 1 ดำเนินการ รายการรับแจ้งด้วยตนเอง และ Ticket ที่อยู่ในความรับผิดชอบของคุณ</p></div><div class="page-header__actions"><a class="btn btn-dark" href="{% url 'create_triage' %}">เพิ่มรายการรับแจ้ง</a></div></div>
 
@@ -70,7 +70,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     {# which tracks lifecycle moves only — never note edits or emergency toggles  #}
     {# (see Ticket.status_changed_at). Labelling it "last updated" made an        #}
     {# actively-worked case look stale.                                           #}
-    <thead class="table-light"><tr><th>Ticket</th><th>สถานะ</th><th>ความรุนแรง</th><th>OLA</th><th>ระบบ / บริการ</th><th>สถานะเปลี่ยนเมื่อ</th><th class="text-end"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <thead class="table-light"><tr><th>เคส</th><th>สถานะ</th><th>ความรุนแรง</th><th>OLA</th><th>ระบบ / บริการ</th><th>สถานะเปลี่ยนเมื่อ</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
     <tbody>{% for ticket in my_tickets %}<tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}"
       data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
@@ -84,7 +84,7 @@ stays above the tabs so the most urgent signal shows on every tab.
   </table></div>
 </div>
 {% if page_obj.paginator.num_pages > 1 %}
-<nav class="mb-4" aria-label="Ticket pagination">
+<nav class="mb-4" aria-label="การแบ่งหน้าเคส">
   <ul class="pagination pagination-sm justify-content-center mb-0">
     {% if page_obj.has_previous %}
       <li class="page-item"><a class="page-link" href="?tab=tickets&page={{ page_obj.previous_page_number }}">«</a></li>
@@ -102,7 +102,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 <div class="tab-pane fade {% if active_tab == 'monitoring' %}show active{% endif %}" id="tab-monitoring" role="tabpanel" aria-labelledby="tab-btn-monitoring">
 <div class="card ops-card mb-4 rounded-top-0">
   <div class="table-responsive"><table class="table table-hover align-middle operational-table">
-    <thead class="table-light"><tr><th>Ticket</th><th>สถานะเฝ้าระวัง</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>ครบกำหนด</th><th class="text-end"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <thead class="table-light"><tr><th>เคส</th><th>สถานะเฝ้าระวัง</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>ครบกำหนด</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
     <tbody>{% for ticket in monitoring_tickets %}<tr class="clickable-row" data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
       <td>{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</td>
@@ -119,7 +119,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}" id="tab-manual" role="tabpanel" aria-labelledby="tab-btn-manual">
 <div class="card ops-card mb-4 rounded-top-0">
   <div class="table-responsive"><table class="table table-hover align-middle operational-table">
-  <thead class="table-light"><tr><th>รับแจ้งเมื่อ</th><th>แหล่งที่มา</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th class="text-end">Actions</th></tr></thead>
+  <thead class="table-light"><tr><th>รับแจ้งเมื่อ</th><th>แหล่งที่มา</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th class="text-end">การดำเนินการ</th></tr></thead>
   <tbody>{% for triage in manual_queue %}<tr><td class="small">{{ triage.created_at|date:"d/m/Y H:i" }}</td><td>{{ triage.get_source_display }}</td><td style="max-width:460px;"><div>{{ triage.alert_description|truncatechars:120 }}</div>{% if triage.release_reason %}<small class="text-muted">Release ล่าสุด: {{ triage.release_reason }}</small>{% endif %}</td><td>{% if triage.claimed_by %}{{ triage.claimed_by.get_full_name|default:triage.claimed_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td><td class="text-end">
     {% if not triage.claimed_by %}<form class="d-inline" method="post" action="{% url 'claim_manual_triage' triage.pk %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">รับรายการ (Claim)</button></form>
     {% elif triage.claimed_by_id == request.user.id %}<a class="btn btn-sm btn-success" href="{% url 'create_ticket' %}?triage_id={{ triage.pk }}">สร้าง Ticket (Create Ticket)</a><a class="btn btn-sm btn-primary" href="{% url 'create_project_incident' %}?triage_id={{ triage.pk }}"><i class="bi bi-diagram-3 me-1"></i>Project Incident (หลายระบบ)</a><button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseManual{{ triage.pk }}">คืนคิว (Release)</button><button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#dismissManual{{ triage.pk }}">ปิดรายการ (ไม่เปิดเคส)</button>
@@ -133,7 +133,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 {# The only trail a DISMISSED report leaves — it never becomes a ticket, so #}
 {# it appears in no ticket list and no dashboard. See triage_list.          #}
 <div class="tab-pane fade {% if active_tab == 'history' %}show active{% endif %}" id="tab-history" role="tabpanel" aria-labelledby="tab-btn-history">
-<div class="card ops-card rounded-top-0"><div class="card-header bg-white d-flex justify-content-end align-items-center"><a class="small text-decoration-none" href="{% url 'global_search' %}">ค้นหาประวัติทั้งหมด <i class="bi bi-arrow-right-short"></i></a></div><div class="table-responsive"><table class="table table-sm align-middle operational-table"><thead><tr><th>ดำเนินการเมื่อ</th><th>รายละเอียด</th><th>ผลลัพธ์</th><th>Ticket</th></tr></thead><tbody>{% for triage in manual_history %}<tr><td class="cell-secondary text-nowrap">{{ triage.resolved_at|date:"d/m/Y H:i"|default:"-" }}</td><td>{{ triage.alert_description|truncatechars:90 }}</td><td>{% if triage.ticket %}{% if triage.ticket.is_event %}<span class="badge bg-secondary">Event</span>{% else %}<span class="badge bg-danger">Incident</span>{% endif %}{% elif triage.project_incident %}<span class="badge bg-primary">Project Incident</span>{% else %}<span class="badge bg-light text-dark border">ปิด (ไม่เปิดเคส)</span>{% endif %}</td><td class="cell-technical">{% if triage.ticket %}<a href="{% url 'ticket_detail' triage.ticket.pk %}">#{{ triage.ticket.ticket_id }}</a>{% elif triage.project_incident %}<a href="{% url 'project_incident_detail' triage.project_incident.pk %}">Bundle #{{ triage.project_incident.pk }}</a>{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="4">{% include 'includes/_empty_state.html' with icon='bi-clock-history' title='คุณยังไม่ได้ดำเนินการรายการใด' description='ประวัติการคัดแยกและการสร้างเคสล่าสุดของคุณจะปรากฏที่นี่' %}</td></tr>{% endfor %}</tbody></table></div></div>
+<div class="card ops-card rounded-top-0"><div class="card-header bg-white d-flex justify-content-end align-items-center"><a class="small text-decoration-none" href="{% url 'global_search' %}">ค้นหาประวัติทั้งหมด <i class="bi bi-arrow-right-short"></i></a></div><div class="table-responsive"><table class="table table-sm align-middle operational-table"><thead><tr><th>ดำเนินการเมื่อ</th><th>รายละเอียด</th><th>ผลลัพธ์</th><th>เคส</th></tr></thead><tbody>{% for triage in manual_history %}<tr><td class="cell-secondary text-nowrap">{{ triage.resolved_at|date:"d/m/Y H:i"|default:"-" }}</td><td>{{ triage.alert_description|truncatechars:90 }}</td><td>{% if triage.ticket %}{% if triage.ticket.is_event %}<span class="badge bg-secondary">Event</span>{% else %}<span class="badge bg-danger">Incident</span>{% endif %}{% elif triage.project_incident %}<span class="badge bg-primary">Project Incident</span>{% else %}<span class="badge bg-light text-dark border">ปิด (ไม่เปิดเคส)</span>{% endif %}</td><td class="cell-technical">{% if triage.ticket %}<a href="{% url 'ticket_detail' triage.ticket.pk %}">#{{ triage.ticket.ticket_id }}</a>{% elif triage.project_incident %}<a href="{% url 'project_incident_detail' triage.project_incident.pk %}">ชุดเคส #{{ triage.project_incident.pk }}</a>{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="4">{% include 'includes/_empty_state.html' with icon='bi-clock-history' title='คุณยังไม่ได้ดำเนินการรายการใด' description='ประวัติการคัดแยกและการสร้างเคสล่าสุดของคุณจะปรากฏที่นี่' %}</td></tr>{% endfor %}</tbody></table></div></div>
 </div>
 
 </div>{# /tab-content #}

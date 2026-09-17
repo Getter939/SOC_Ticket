@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}เปิด Project Incident — SOC Support System{% endblock %}
+{% block title %}เปิด Project Incident — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 {% include 'incidents/_incident_form_styles.html' %}
@@ -64,7 +64,7 @@
 
     <!-- ── Shared incident facts ── -->
     <div class="form-section">
-      <div class="section-header">1. ข้อมูลเหตุการณ์ (ใช้ร่วมกันทุก Ticket) <small>Shared incident facts</small></div>
+      <div class="section-header">1. ข้อมูลเหตุการณ์ (ใช้ร่วมกันทุก Ticket) <small>ข้อมูลเหตุการณ์ร่วม</small></div>
       <div class="row g-3">
         <div class="col-12">
           <label class="form-label fw-semibold">{{ form.title.label }} <span class="required-star">*</span></label>
@@ -97,7 +97,7 @@
           {% if form.log_source.errors %}<div class="text-danger small">{{ form.log_source.errors }}</div>{% endif %}
         </div>
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Reference ID</label>
+          <label class="form-label fw-semibold">เลขอ้างอิง</label>
           {{ form.reference_id }}
           {% if form.reference_id.errors %}<div class="text-danger small">{{ form.reference_id.errors }}</div>{% endif %}
         </div>
@@ -126,7 +126,7 @@
     </div>
 
     <div class="form-section">
-      <div class="section-header">2. ประเภทภัยคุกคาม <small>Category</small></div>
+      <div class="section-header">2. ประเภทภัยคุกคาม <small>หมวดหมู่</small></div>
       <div class="row g-3">
         <div class="col-md-4">
           <label class="form-label fw-semibold">ประเภทภัยคุกคาม</label>
@@ -147,7 +147,7 @@
     </div>
 
     <div class="form-section">
-      <div class="section-header">3. IoC / MITRE / มาตรการ (ใช้ร่วมกัน) <small>Shared IoC &amp; containment</small></div>
+      <div class="section-header">3. IoC / MITRE / มาตรการ (ใช้ร่วมกัน) <small>IOC และการควบคุมร่วม</small></div>
       <div class="row g-3">
         <div class="col-md-6">
           <label class="form-label fw-semibold">IP ปลายทางที่น่าสงสัย</label>
@@ -247,7 +247,7 @@
               {% if tform.system_detail.errors %}<div class="text-danger small">{{ tform.system_detail.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
-              <label class="form-label small fw-semibold mb-1">IP Addresses</label>
+              <label class="form-label small fw-semibold mb-1">ที่อยู่ IP</label>
               {{ tform.ip_address }}
               <div class="field-hint">{{ tform.ip_address.help_text }}</div>
               {% if tform.ip_address.errors %}<div class="text-danger small">{{ tform.ip_address.errors }}</div>{% endif %}
@@ -282,7 +282,7 @@
     </div>
 
     <div class="form-section">
-      <div class="section-header">5. หลักฐานร่วม <small>Shared evidence for every member Ticket</small></div>
+      <div class="section-header">5. หลักฐานร่วม <small>หลักฐานร่วมสำหรับทุกเคสย่อย</small></div>
       {% include 'incidents/_evidence_picker.html' with picker_hint='หลักฐานส่วนกลางของเหตุการณ์ — สมาชิกที่ได้รับสิทธิ์ใน Ticket ใด ๆ ของกลุ่มจะเข้าถึงได้ (เลือกจากหลายโฟลเดอร์ได้)' %}
     </div>
 
@@ -320,7 +320,7 @@
         {{ target_formset.empty_form.system_detail }}
       </div>
       <div class="col-md-3">
-        <label class="form-label small fw-semibold mb-1">IP Addresses</label>
+        <label class="form-label small fw-semibold mb-1">ที่อยู่ IP</label>
         {{ target_formset.empty_form.ip_address }}
         <div class="field-hint">{{ target_formset.empty_form.ip_address.help_text }}</div>
       </div>

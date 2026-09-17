@@ -30,7 +30,7 @@ analyst already has visibility of this ticket.
         <div class="col-lg-6">
           <dl class="row mb-0">
             <dt class="col-5 text-muted">ระบบ/อุปกรณ์</dt><dd class="col-7">{{ case.device_name|default:'-' }}</dd>
-            <dt class="col-5 text-muted">IP Address</dt><dd class="col-7" style="white-space:pre-line;">{{ case.ip_address|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ที่อยู่ IP</dt><dd class="col-7" style="white-space:pre-line;">{{ case.ip_address|default:'-' }}</dd>
             <dt class="col-5 text-muted">OS</dt><dd class="col-7">{{ case.operating_system|default:'-' }}</dd>
             <dt class="col-5 text-muted">เจ้าของทรัพย์สิน</dt><dd class="col-7">{{ case.asset_owner|default:'-' }}{% if case.asset_owner_name %} ({{ case.asset_owner_name }}){% endif %}</dd>
             <dt class="col-5 text-muted">เกิดเหตุ</dt><dd class="col-7">{{ case.event_occurred_at|date:"d/m/Y H:i"|default:'-' }}</dd>
@@ -64,7 +64,7 @@ analyst already has visibility of this ticket.
         <div class="text-muted small mb-1">Alert ที่เชื่อมโยง</div>
         <div class="table-responsive">
           <table class="table table-sm small mb-0">
-            <thead><tr><th>เวลา</th><th>Rule</th><th>Level</th><th>Agent</th></tr></thead>
+            <thead><tr><th>เวลา</th><th>Rule</th><th>ระดับ</th><th>Agent</th></tr></thead>
             <tbody>
               {% for link in case.alert_links %}
               <tr>

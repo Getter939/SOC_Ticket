@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}เข้าสู่ระบบ — SOC Support System{% endblock %}
+{% block title %}เข้าสู่ระบบ — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <div class="container login-shell">
@@ -8,9 +8,9 @@
         <div class="col-md-5 col-lg-4">
             <div class="text-center mb-3">
                 <div class="login-emblem text-primary"><i class="bi bi-shield-lock-fill"></i></div>
-                <h2 class="fw-bold text-dark">SOC Support System</h2>
+                <h2 class="fw-bold text-dark">ระบบสนับสนุนงาน SOC</h2>
                 <p class="text-muted mb-1">พื้นที่ปฏิบัติงานสำหรับเจ้าหน้าที่ SOC ที่ได้รับอนุญาต</p>
-                <p class="login-reassurance mb-0"><i class="bi bi-shield-check me-1"></i>Secure access for authorized personnel</p>
+                <p class="login-reassurance mb-0"><i class="bi bi-shield-check me-1"></i>สำหรับเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น</p>
             </div>
 
             <div class="card border-0 shadow-lg">
@@ -25,14 +25,14 @@
                             </div>
                         {% endif %}
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Username</label>
+                            <label class="form-label fw-bold">ชื่อผู้ใช้</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-end-0"><i class="bi bi-person"></i></span>
                                 <input type="text" name="username" class="form-control bg-light border-start-0" placeholder="ชื่อผู้ใช้งาน" autocomplete="username" autofocus required>
                             </div>
                         </div>
                         <div class="mb-4">
-                            <label class="form-label fw-bold">Password</label>
+                            <label class="form-label fw-bold">รหัสผ่าน</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-end-0"><i class="bi bi-key"></i></span>
                                 <input type="password" name="password" class="form-control bg-light border-start-0" placeholder="รหัสผ่าน" autocomplete="current-password" required>
@@ -46,7 +46,7 @@
             </div>
 
             <div class="text-center mt-3">
-                <a class="login-reset-link small d-inline-block mb-2" href="{% url 'password_reset' %}">Forgot password? Send a secure reset link</a>
+                <a class="login-reset-link small d-inline-block mb-2" href="{% url 'password_reset' %}">ลืมรหัสผ่าน? ส่งลิงก์รีเซ็ตรหัสผ่าน</a>
                 <p class="small text-muted">
                     ลืมรหัสผ่านหรือขอเข้าใช้งาน? <br>
                     <span class="text-primary">ติดต่อ Admin แผนก IT</span>

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load humanize %}
 
-{% block title %}Executive SOC Dashboard — SOC Support System{% endblock %}
+{% block title %}แดชบอร์ด SOC สำหรับผู้บริหาร — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 {% if cancelled_count %}<div class="alert alert-secondary">ยกเลิกแล้ว {{ cancelled_count }} รายการ — ไม่นับเป็นงานที่แก้ไขสำเร็จ</div>{% endif %}
@@ -94,7 +94,7 @@
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
 <div class="page-header">
     <div>
-        <h1 class="page-header__title"><i class="bi bi-graph-up-arrow me-2"></i>Executive SOC Dashboard</h1>
+        <h1 class="page-header__title"><i class="bi bi-graph-up-arrow me-2"></i>แดชบอร์ด SOC สำหรับผู้บริหาร</h1>
         <p class="page-header__subtitle">สรุปความเสี่ยงและผลการดำเนินงานสำหรับการตัดสินใจของผู้บริหาร</p>
     </div>
     <span class="page-header__meta">
@@ -110,13 +110,13 @@
         </span>
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
             <a href="?date_range=today{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">Today</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">วันนี้</a>
             <a href="?date_range=week{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">This Week</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">สัปดาห์นี้</a>
             <a href="?date_range=month{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">This Month</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">เดือนนี้</a>
             <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">All Time</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">ทั้งหมด</a>
         </div>
 
         <div class="vr d-none d-md-block"></div>
@@ -158,19 +158,19 @@
                     {% if overall_status == 'GOOD' %}
                     <div class="verdict-box verdict-good">
                         <i class="bi bi-check-lg" aria-hidden="true"></i>
-                        <div class="verdict-label">GOOD</div>
+                        <div class="verdict-label">ปกติ</div>
                         <div class="verdict-sub">ไม่มี Incident ค้าง</div>
                     </div>
                     {% elif overall_status == 'WAITING' %}
                     <div class="verdict-box verdict-waiting">
                         <i class="bi bi-hourglass-split" aria-hidden="true"></i>
-                        <div class="verdict-label">WAITING</div>
+                        <div class="verdict-label">รอดำเนินการ</div>
                         <div class="verdict-sub">มี Incident ที่รอดำเนินการ</div>
                     </div>
                     {% else %}
                     <div class="verdict-box verdict-warning">
                         <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
-                        <div class="verdict-label">WARNING</div>
+                        <div class="verdict-label">ต้องเฝ้าระวัง</div>
                         <div class="verdict-sub">มี Incident ที่ต้องจัดการทันที</div>
                     </div>
                     {% endif %}
@@ -291,7 +291,7 @@
                     </tr>
                     {% endfor %}
                     <tr>
-                        <td>Emergency</td>
+                        <td>ความฉุกเฉิน</td>
                         {% for cell in pipeline_emergency_row %}
                         <td>{{ cell }}</td>
                         {% endfor %}
@@ -322,7 +322,7 @@
                 <table class="table table-sm detail-table mb-0 align-middle">
                     <thead>
                         <tr>
-                            <th>Ticket ID</th>
+                            <th>เลขที่เคส (ID)</th>
                             <th>รายละเอียด</th>
                             <th>ผู้รับผิดชอบ</th>
                             <th>สถานะ Emergency</th>
@@ -371,7 +371,7 @@
                             <td>
                                 {% if t.is_emergency %}
                                 <span class="priority-pill priority-emergency">
-                                    <i class="bi bi-exclamation-octagon-fill me-1" aria-hidden="true"></i>EMERGENCY
+                                    <i class="bi bi-exclamation-octagon-fill me-1" aria-hidden="true"></i>ฉุกเฉิน
                                 </span>
                                 {% else %}
                                 <span class="priority-pill priority-normal">ปกติ</span>
@@ -394,11 +394,11 @@
                 <div class="text-muted" style="font-size:13px;">
                     แสดง {{ page_obj.start_index }}–{{ page_obj.end_index }} จาก {{ page_obj.paginator.count|intcomma }} รายการ
                 </div>
-                <nav aria-label="Executive ticket detail pages">
+                <nav aria-label="หน้ารายละเอียดเคสสำหรับผู้บริหาร">
                     <ul class="pagination pagination-sm mb-0">
                         {% if page_obj.has_previous %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="Previous">«</a>
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="ก่อนหน้า">«</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">«</span></li>
@@ -408,7 +408,7 @@
                         </li>
                         {% if page_obj.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="Next">»</a>
+                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="ถัดไป">»</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">»</span></li>

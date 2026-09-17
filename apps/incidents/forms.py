@@ -33,7 +33,7 @@ class ManualIOCEntryForm(forms.Form):
                                    'data-ioc-category': '', 'aria-label': 'ประเภท / Category'}),
     )
     value = forms.CharField(
-        max_length=500, label='IOC detail',
+        max_length=500, label='รายละเอียด IOC',
         widget=forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'IOC detail',
                                       'autocomplete': 'off', 'aria-label': 'IOC detail'}),
     )
@@ -325,8 +325,8 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
     wazuh_alert = forms.ModelChoiceField(
         queryset=WazuhAlert.objects.none(),
         required=False,
-        label='Wazuh Alert (optional)',
-        empty_label='None — manual ticket',
+        label='การแจ้งเตือน Wazuh (ไม่บังคับ)',
+        empty_label='ไม่มี — เปิดเคสด้วยตนเอง',
         widget=forms.Select(attrs={'class': 'form-select', 'id': 'id_wazuh_alert'}),
     )
 

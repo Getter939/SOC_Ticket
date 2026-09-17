@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
 
-{% block title %}Wazuh Triage — SOC Support System{% endblock %}
+{% block title %}คัดกรองการแจ้งเตือนจาก Wazuh — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <div class="page-header">
   <div>
-    <h1 class="page-header__title"><i class="bi bi-shield-fill-exclamation me-2"></i>Wazuh Triage</h1>
+    <h1 class="page-header__title"><i class="bi bi-shield-fill-exclamation me-2"></i>คัดกรองการแจ้งเตือนจาก Wazuh</h1>
     <p class="page-header__subtitle">รับ Alert แล้วสร้าง Ticket เพื่อจัดประเภท Event/Incident และเลือกเส้นทางในหน้าถัดไป</p>
   </div>
   <div class="page-header__actions">
@@ -67,7 +67,7 @@
   </div>
 
   <div class="d-flex flex-wrap align-items-center gap-2">
-    <span class="small fw-bold text-muted" style="min-width:6.5rem;">Wazuh level</span>
+    <span class="small fw-bold text-muted" style="min-width:6.5rem;">ระดับความอันตรายจาก Wazuh</span>
     {% for facet in level_facets %}
     <a href="{% querystring rule_level_filter=facet.key page=None %}"
        class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
@@ -207,7 +207,7 @@ ticket has no alternative and asks for nothing — see triage_action.
 {# 3. {% querystring %} carries the live filter/sort through, same as the     #}
 {# Tier 2 queue.                                                              #}
 {% if page_obj.paginator.num_pages > 1 %}
-<nav class="mt-3" aria-label="Triage queue pages">
+<nav class="mt-3" aria-label="หน้าคิวคัดกรอง">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
     <li class="page-item"><a class="page-link" href="{% querystring page=page_obj.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>

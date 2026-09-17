@@ -131,7 +131,7 @@ class DashboardAccessTest(TestCase):
         self.client.force_login(self.sys_admin)
         response = self.client.get(reverse('ticket_list'))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-label="SOC Dashboard"')
+        self.assertNotContains(response, 'data-label="แดชบอร์ด SOC"')
 
     def test_response_team_is_redirected_to_their_queue(self):
         """Response-only access: Forensic / Red Team must not see org-wide
@@ -156,7 +156,7 @@ class DashboardAccessTest(TestCase):
         self.client.force_login(forensic)
         response = self.client.get(reverse('response_request_queue'))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-label="SOC Dashboard"')
+        self.assertNotContains(response, 'data-label="แดชบอร์ด SOC"')
 
     def test_unauthenticated_user_redirected_to_login(self):
         response = self.client.get(DASHBOARD_URL)
@@ -313,12 +313,12 @@ class DashboardManagementViewTest(TestCase):
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
         self.assertIn('Total Active Cases', html)
-        self.assertIn('Critical Severity', html)
+        self.assertIn('ความรุนแรงระดับวิกฤต', html)
         self.assertIn('Closed This Month', html)
         # The headline figure on this card is stats.mttr_median, so the label
         # says Median; the mean is carried in the sub-line below it.
-        self.assertIn('Median Time to Resolve (MTTR)', html)
-        self.assertIn('Avg', html)
+        self.assertIn('เวลามัธยฐานในการแก้ไข (MTTR)', html)
+        self.assertIn('เฉลี่ย', html)
         # Header timestamp + filter bar still present
         self.assertIn('ข้อมูล ณ เวลา:', html)
         self.assertIn('date_range=today', html)
@@ -509,7 +509,7 @@ class DashboardManagementViewTest(TestCase):
         """Status Updated column renders and status_changed_at is populated."""
         _make_ticket(status=Ticket.STATUS_NEW)
         resp = self._get()
-        self.assertIn('Status Updated', resp.content.decode())
+        self.assertIn('อัปเดตสถานะล่าสุด', resp.content.decode())
         self.assertIsNotNone(resp.context['recent_tickets'][0].status_changed_at)
 
     def test_recent_cases_status_color_pill(self):
@@ -550,8 +550,8 @@ class DashboardManagementViewTest(TestCase):
         self.assertTrue(d['overdue'])
         self.assertNotIn('-', d['label'])
         body = resp.content.decode()
-        self.assertIn('overdue by', body)
-        self.assertNotIn('m left', body)
+        self.assertIn('ใกล้ครบกำหนดที่สุด: เกินกำหนด', body)
+        self.assertNotIn('ใกล้ครบกำหนดที่สุด: เหลือ', body)
 
     def test_critical_soonest_deadline_none_without_critical(self):
         _make_ticket(status=Ticket.STATUS_NEW)  # default High, not Critical
@@ -797,11 +797,11 @@ class ExecutiveDashboardViewTest(TestCase):
 
     def test_sidebar_link_visible_only_to_executive_or_superuser(self):
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertIn('Executive Dashboard', html)
+        self.assertIn('แดชบอร์ดผู้บริหาร', html)
 
         self.client.force_login(self.soc)
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertNotIn('Executive Dashboard', html)
+        self.assertNotIn('แดชบอร์ดผู้บริหาร', html)
 
     def test_executive_sidebar_hides_the_ticket_links(self):
         # K11. visible_to() returns none() for executives, so Active Tickets /
@@ -809,16 +809,16 @@ class ExecutiveDashboardViewTest(TestCase):
         # reachable (an empty 200 leaks nothing) — the nav just stops offering
         # the dead end.
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertNotIn('Active Tickets', html)
-        self.assertNotIn('Ticket History', html)
-        self.assertNotIn('IOC Search', html)
+        self.assertNotIn('เคสที่กำลังดำเนินการอยู่', html)
+        self.assertNotIn('ประวัติเคสที่ปิดไปแล้ว', html)
+        self.assertNotIn('ค้นหา IOC', html)
 
         # ...but SOC staff still get them.
         self.client.force_login(self.soc)
         html = self.client.get(DASHBOARD_URL).content.decode()
-        self.assertIn('Active Tickets', html)
-        self.assertIn('Ticket History', html)
-        self.assertIn('IOC Search', html)
+        self.assertIn('เคสที่กำลังดำเนินการอยู่', html)
+        self.assertIn('ประวัติเคสที่ปิดไปแล้ว', html)
+        self.assertIn('ค้นหา IOC', html)
 
     def test_executive_ticket_list_stays_reachable_and_empty(self):
         response = self.client.get(reverse('ticket_list'))

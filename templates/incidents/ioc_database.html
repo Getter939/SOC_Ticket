@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}IOC Database — SOC Support System{% endblock %}
+{% block title %}ฐานข้อมูล IOC — ระบบสนับสนุนงาน SOC{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1 class="page-header__title">IOC Database</h1>
+    <h1 class="page-header__title">ฐานข้อมูล IOC</h1>
     <p class="page-header__subtitle">แหล่งรวม IOC จาก Ticket และที่ Forensic Analyst บันทึกเอง</p>
   </div>
-  <a class="btn btn-outline-secondary btn-sm" href="{% url 'global_search' %}">IOC Search</a>
+  <a class="btn btn-outline-secondary btn-sm" href="{% url 'global_search' %}">ค้นหา IOC</a>
 </div>
 
 {# ── Manual entry (collapsed by default) ── #}
@@ -55,23 +55,23 @@
       <label class="form-label small fw-bold mb-1">ค้นหา / Search</label>
       <div class="input-group input-group-sm">
         <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
-        <input type="text" name="q" class="form-control" value="{{ query }}" maxlength="255" placeholder="Value, ID, or Note">
+        <input type="text" name="q" class="form-control" value="{{ query }}" maxlength="255" placeholder="ค่า, ID หรือหมายเหตุ">
       </div>
     </div>
     <div class="col-md-2">
       <label class="form-label small fw-bold mb-1">สถานะ / Status</label>
       <select name="status" class="form-select form-select-sm">
         <option value="all">ทั้งหมด / All</option>
-        <option value="not_checked" {% if status_filter == 'not_checked' %}selected{% endif %}>Not Checked</option>
-        <option value="checked" {% if status_filter == 'checked' %}selected{% endif %}>Checked</option>
+        <option value="not_checked" {% if status_filter == 'not_checked' %}selected{% endif %}>ยังไม่ได้ตรวจสอบ</option>
+        <option value="checked" {% if status_filter == 'checked' %}selected{% endif %}>ตรวจสอบแล้ว</option>
       </select>
     </div>
     <div class="col-md-2">
       <label class="form-label small fw-bold mb-1">แหล่งที่มา / Source</label>
       <select name="source" class="form-select form-select-sm">
         <option value="all">ทั้งหมด / All</option>
-        <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>Ticket</option>
-        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>Manual</option>
+        <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>เคส</option>
+        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>บันทึกเอง</option>
       </select>
     </div>
     <div class="col-md-2">
@@ -92,20 +92,20 @@
   </form>
 </div></div>
 
-<div class="text-muted small mb-2">Total {{ counts.total }} · <span class="text-danger">Not Checked {{ counts.not_checked }}</span> · <span class="text-success">Checked {{ counts.checked }}</span></div>
+<div class="text-muted small mb-2">ทั้งหมด {{ counts.total }} · <span class="text-danger">ยังไม่ได้ตรวจสอบ {{ counts.not_checked }}</span> · <span class="text-success">ตรวจสอบแล้ว {{ counts.checked }}</span></div>
 
 <div class="card"><div class="card-body">
   <div class="table-responsive">
     <table class="table table-sm align-middle" data-ioc-table>
       <thead><tr>
-        <th class="sortable" data-key="category" role="button" tabindex="0">Category<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="value" role="button" tabindex="0">Indicator<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="note" role="button" tabindex="0">Note<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="source" role="button" tabindex="0">Source<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="tickets" data-num="1" role="button" tabindex="0">On tickets<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="last" data-num="1" role="button" tabindex="0">Last activity<span class="sort-arrow"></span></th>
-        <th>Action</th>
+        <th class="sortable" data-key="category" role="button" tabindex="0">หมวดหมู่<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="value" role="button" tabindex="0">ตัวบ่งชี้<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="note" role="button" tabindex="0">หมายเหตุ<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="status" role="button" tabindex="0">สถานะ<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="source" role="button" tabindex="0">แหล่งที่มา<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="tickets" data-num="1" role="button" tabindex="0">อยู่ในเคส<span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="last" data-num="1" role="button" tabindex="0">กิจกรรมล่าสุด<span class="sort-arrow"></span></th>
+        <th>การดำเนินการ</th>
       </tr></thead>
       <tbody>
       {% for row in database %}
@@ -125,11 +125,11 @@
             <input type="hidden" name="value" value="{{ row.value }}">
             <input type="hidden" name="next" value="{{ current_path }}">
             <input class="form-check-input" type="checkbox" name="checked" value="1" id="chk-{{ forloop.counter }}" {% if row.status == 'checked' %}checked{% endif %}>
-            <label class="form-check-label small {% if row.status == 'checked' %}text-success{% else %}text-danger{% endif %}" for="chk-{{ forloop.counter }}">{% if row.status == 'checked' %}Checked{% else %}Not Checked{% endif %}</label>
+            <label class="form-check-label small {% if row.status == 'checked' %}text-success{% else %}text-danger{% endif %}" for="chk-{{ forloop.counter }}">{% if row.status == 'checked' %}ตรวจสอบแล้ว{% else %}ยังไม่ได้ตรวจสอบ{% endif %}</label>
           </form>
         </td>
         <td><span class="badge {% if 'analyst' in row.sources and 'ticket' in row.sources %}bg-primary{% elif 'analyst' in row.sources %}bg-info text-dark{% else %}bg-secondary{% endif %}">{{ row.source_label }}</span></td>
-        <td>{% if row.ticket_count %}<a href="{% url 'global_search' %}?q={{ row.value|urlencode }}">{{ row.ticket_count }} ticket{{ row.ticket_count|pluralize }}</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>{% if row.ticket_count %}<a href="{% url 'global_search' %}?q={{ row.value|urlencode }}">{{ row.ticket_count }} เคส{{ row.ticket_count|pluralize }}</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
         <td class="small">{{ row.last_seen|date:'d/m/Y H:i'|default:'—' }}</td>
         <td>
           {% if row.analyst_rec %}
@@ -150,17 +150,17 @@
       </tbody>
     </table>
   </div>
-  <nav aria-label="IOC database pages" class="d-flex gap-3 small">
-    {% if database.has_previous %}<a href="{% querystring page=database.previous_page_number %}">Previous</a>{% endif %}
+  <nav aria-label="หน้าฐานข้อมูล IOC" class="d-flex gap-3 small">
+    {% if database.has_previous %}<a href="{% querystring page=database.previous_page_number %}">ก่อนหน้า</a>{% endif %}
     <span>{{ database.number }} / {{ database.paginator.num_pages }}</span>
-    {% if database.has_next %}<a href="{% querystring page=database.next_page_number %}">Next</a>{% endif %}
+    {% if database.has_next %}<a href="{% querystring page=database.next_page_number %}">ถัดไป</a>{% endif %}
   </nav>
 </div></div>
 
 {# ── Modals ── #}
 <div class="ioc-modal" id="ioc-note-modal" hidden>
   <div class="ioc-modal__dialog card"><div class="card-body">
-    <h2 class="h6">Note</h2>
+    <h2 class="h6">หมายเหตุ</h2>
     <p class="small text-muted mb-2 font-monospace text-break" id="ioc-note-target"></p>
     <form method="post" action="{% url 'ioc_note_save' %}" class="mb-0">
       {% csrf_token %}
@@ -187,10 +187,10 @@
       <select name="category" id="ioc-edit-category" class="form-select form-select-sm mb-2" data-edit-category-select>
         {% for code, label in manual_category_choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
       </select>
-      <label class="form-label small fw-bold mb-1">IOC detail</label>
+      <label class="form-label small fw-bold mb-1">รายละเอียด IOC</label>
       <input type="text" name="value" id="ioc-edit-value" class="form-control form-control-sm mb-2" maxlength="500" autocomplete="off">
       <div id="ioc-edit-file-name-wrap" hidden>
-        <label class="form-label small fw-bold mb-1">File name</label>
+        <label class="form-label small fw-bold mb-1">ชื่อไฟล์</label>
         <input type="text" name="file_name" id="ioc-edit-file-name" class="form-control form-control-sm mb-2" maxlength="255" autocomplete="off">
       </div>
       <div class="d-flex gap-2 justify-content-end mt-2">

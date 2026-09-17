@@ -9,7 +9,7 @@
       </div>
       {% endif %}
       {% if is_terminal and ticket.status != 'CANCELLED' %}
-      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 verify</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
+      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 ตรวจสอบ</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
       {% endif %}
 
       {% comment %}
@@ -70,10 +70,10 @@
           <label class="form-label fw-bold">เส้นทางการจัดการ <span class="text-danger">*</span></label>
           <div class="form-check"><input class="form-check-input" type="radio" name="t1_route" value="{{ T1_ROUTE_ADMIN }}" id="route-admin" checked><label class="form-check-label" for="route-admin">มอบหมายผู้ดูแลระบบ (System Admin)</label></div>
           <div class="form-check mb-2"><input class="form-check-input" type="radio" name="t1_route" value="{{ T1_ROUTE_OWNER }}" id="route-owner"><label class="form-check-label" for="route-owner">ให้เจ้าของระบบแก้ไขเอง (Direct-to-Owner)</label></div>
-          <div id="t1-admin-block"><label class="form-label fw-bold">System Admin <span class="text-danger">*</span></label>{{ assignment_form.assigned_admin }}</div>
+          <div id="t1-admin-block"><label class="form-label fw-bold">ผู้ดูแลระบบ <span class="text-danger">*</span></label>{{ assignment_form.assigned_admin }}</div>
           <label class="form-label fw-bold mt-3">บันทึกการทบทวน <span class="text-danger">*</span></label>
           <textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
-          <button class="btn btn-primary w-100" type="submit" title="Route to SOC Manager review">ส่งให้ผู้จัดการ SOC ตรวจสอบ</button>
+          <button class="btn btn-primary w-100" type="submit" title="ส่งให้ผู้จัดการ SOC ตรวจสอบ">ส่งให้ผู้จัดการ SOC ตรวจสอบ</button>
         </form>
       </div></div>
       <script nonce="{{ request.csp_nonce }}">(function(){var f=document.getElementById('t1-route-form');if(!f)return;var b=document.getElementById('t1-admin-block');var s=b.querySelector('select');function sync(){var admin=f.querySelector('input[name=t1_route]:checked').value==='{{ T1_ROUTE_ADMIN }}';b.style.display=admin?'':'none';if(s)s.required=admin;}f.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
@@ -119,7 +119,7 @@
           </div>
         </details>
         {% endif %}
-        <label class="form-label fw-bold">ผลการตรวจสอบ <small class="text-muted fw-normal">(Investigation findings)</small></label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ <small class="text-muted fw-normal">(Countermeasure)</small> <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit" title="Submit for Tier 2 review">ส่งให้ Tier 2 ตรวจสอบ</button></form></div></div>
+        <label class="form-label fw-bold">ผลการตรวจสอบ <small class="text-muted fw-normal">(Investigation findings)</small></label><textarea name="remediation_summary" class="form-control mb-3" rows="5">{{ ticket.remediation_summary }}</textarea><label class="form-label fw-bold">มาตรการตอบโต้ <small class="text-muted fw-normal">(Countermeasure)</small> <span class="text-danger">*</span></label><textarea name="containment_report" class="form-control mb-3" rows="5" required>{{ ticket.containment_report }}</textarea><label class="form-label fw-bold">หมายเหตุ</label><textarea name="note" class="form-control mb-3" rows="2"></textarea><button class="btn btn-warning w-100" type="submit" title="ส่งให้ Tier 2 ตรวจสอบ">ส่งให้ Tier 2 ตรวจสอบ</button></form></div></div>
       {% elif can_conclude_monitoring %}
       <div class="card shadow-sm workflow-primary" style="border:1px solid #4c6ef5;"><div class="card-header text-white" style="background:#4c6ef5;"><h5 class="mb-0"><i class="bi bi-binoculars-fill me-1"></i>สรุปผลการเฝ้าระวัง</h5><small>Monitoring — เลือกผลเมื่อครบกำหนด หรือเมื่อมีเหตุการณ์เกิดขึ้น</small></div><div class="card-body">
         <div class="mb-2">{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</div>

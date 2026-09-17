@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ page_title|default:"Ticket ที่กำลังดำเนินการ" }} — SOC Support System{% endblock %}
+{% block title %}{{ page_title|default:"Ticket ที่กำลังดำเนินการ" }} — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <style>
@@ -98,11 +98,11 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <label class="form-label small fw-bold mb-1">Emergency</label>
+                <label class="form-label small fw-bold mb-1">ความฉุกเฉิน</label>
                 <select name="emergency" class="form-select form-select-sm">
                     <option value="">ทั้งหมด</option>
-                    <option value="1" {% if emergency_filter == '1' %}selected{% endif %}>Emergency only</option>
-                    <option value="0" {% if emergency_filter == '0' %}selected{% endif %}>Normal only</option>
+                    <option value="1" {% if emergency_filter == '1' %}selected{% endif %}>เฉพาะเคสฉุกเฉิน</option>
+                    <option value="0" {% if emergency_filter == '0' %}selected{% endif %}>เฉพาะเคสปกติ</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -142,14 +142,14 @@
         <table class="table table-hover align-middle operational-table ticket-table">
             <thead>
                 <tr>
-                    <th class="ps-4">Ticket ID</th>
+                    <th class="ps-4">เลขที่เคส</th>
                     <th>เรื่องที่แจ้ง</th>
                     <th>ความรุนแรง</th>
                     <th>ประเภท</th>
                     <th>OLA</th>
-                    <th>Source</th>
-                    <th>System Admin</th>
-                    <th>Initial Tier 1</th>
+                    <th>แหล่งที่มา</th>
+                    <th>ผู้ดูแลระบบ</th>
+                    <th>Tier 1 ผู้รับเรื่อง</th>
                     <th>วันที่แจ้ง</th>
                     <th>สถานะ</th>
                     <th></th>
@@ -173,7 +173,7 @@
                         <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
                         {% endif %}
                         {% if ticket.is_emergency %}
-                        <div class="mt-1"><span class="emg-flag">EMERGENCY</span></div>
+                        <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
                         {% endif %}
                         {% if show_returned_to_admin_indicator and ticket.status == 'AWAITING_CONTAINMENT' and ticket.is_returned_to_admin %}
                         <div class="mt-1"><span class="badge text-dark border border-warning-subtle" style="background:#fff3cd;"><i class="bi bi-arrow-return-left me-1" aria-hidden="true"></i>Tier 2 ส่งกลับ</span></div>
@@ -244,7 +244,7 @@
 </div>
 
 {% if page_obj.paginator.num_pages > 1 %}
-<nav class="mt-3" aria-label="Ticket pages">
+<nav class="mt-3" aria-label="หน้ารายการเคส">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
       <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if classification_filter %}&classification={{ classification_filter }}{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}{% if ola_filter %}&ola={{ ola_filter }}{% endif %}&sort={{ sort }}">«</a></li>

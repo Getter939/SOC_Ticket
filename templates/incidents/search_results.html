@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}ค้นหา IOC — SOC Support System{% endblock %}
+{% block title %}ค้นหา IOC — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -33,7 +33,7 @@
     {# capped result set used to report its own slice size as the total.   #}
 <div class="card ops-card mb-4">
         <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
-            <h2 class="h6 fw-bold mb-0"><i class="bi bi-ticket-perforated me-2 text-danger"></i>Tickets <span class="badge rounded-pill bg-light text-dark border ms-1">{{ ticket_total }}</span></h2>
+            <h2 class="h6 fw-bold mb-0"><i class="bi bi-ticket-perforated me-2 text-danger"></i>เคส <span class="badge rounded-pill bg-light text-dark border ms-1">{{ ticket_total }}</span></h2>
             {% if ticket_results.paginator.num_pages > 1 %}
             <span class="small">หน้า {{ ticket_results.number }} / {{ ticket_results.paginator.num_pages }}</span>
             {% endif %}
@@ -43,8 +43,8 @@
                 <thead>
                     <tr>
                         <th>เลข Ticket</th>
-                        <th>IP Source</th>
-                        <th>Destination IoC</th>
+                        <th>IP ต้นทาง</th>
+                        <th>IoC ปลายทาง</th>
                         <th>รายละเอียด</th>
                         <th>สถานะ</th>
                         <th>วันที่แจ้ง</th>
@@ -72,7 +72,7 @@
         </div>
         {% if ticket_results.paginator.num_pages > 1 %}
         <div class="card-body py-2">
-          <nav aria-label="Ticket results pages">
+          <nav aria-label="หน้าผลการค้นหาเคส">
             <ul class="pagination pagination-sm justify-content-center mb-0">
               {% if ticket_results.has_previous %}
               <li class="page-item"><a class="page-link" href="{% querystring tp=ticket_results.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>
@@ -93,7 +93,7 @@
     {% if can_search_triage %}
 <div class="card ops-card mb-4">
         <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
-            <h2 class="h6 fw-bold mb-0"><i class="bi bi-clipboard2-pulse me-2 text-danger"></i>Triage Records <span class="badge rounded-pill bg-light text-dark border ms-1">{{ triage_total }}</span></h2>
+            <h2 class="h6 fw-bold mb-0"><i class="bi bi-clipboard2-pulse me-2 text-danger"></i>บันทึกการคัดกรอง <span class="badge rounded-pill bg-light text-dark border ms-1">{{ triage_total }}</span></h2>
             {% if triage_results.paginator.num_pages > 1 %}
             <span class="small">หน้า {{ triage_results.number }} / {{ triage_results.paginator.num_pages }}</span>
             {% endif %}
@@ -103,7 +103,7 @@
                 <thead>
                     <tr>
                         <th>แหล่งที่มา</th>
-                        <th>Source IP</th>
+                        <th>IP ต้นทาง</th>
                         <th>รายละเอียด Alert</th>
                         <th>การตัดสินใจ</th>
                         <th>วันที่</th>
@@ -120,7 +120,7 @@
                         <td>{{ triage.created_at|date:"d/m/Y" }}</td>
                         <td>
                             {% if triage.ticket_id %}
-                            <a href="{% url 'ticket_detail' triage.ticket_id %}" class="btn btn-sm btn-outline-info">Ticket</a>
+                            <a href="{% url 'ticket_detail' triage.ticket_id %}" class="btn btn-sm btn-outline-info">เคส</a>
                             {% endif %}
                         </td>
                     </tr>
@@ -134,7 +134,7 @@
         </div>
         {% if triage_results.paginator.num_pages > 1 %}
         <div class="card-body py-2">
-          <nav aria-label="Triage results pages">
+          <nav aria-label="หน้าผลการค้นหาบันทึกคัดกรอง">
             <ul class="pagination pagination-sm justify-content-center mb-0">
               {% if triage_results.has_previous %}
               <li class="page-item"><a class="page-link" href="{% querystring rp=triage_results.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>

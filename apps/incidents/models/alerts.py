@@ -16,8 +16,8 @@ class TicketAlertLink(models.Model):
     ROLE_PRIMARY = 'PRIMARY'
     ROLE_SUPPORTING = 'SUPPORTING'
     ROLE_CHOICES = [
-        (ROLE_PRIMARY, 'Primary alert'),
-        (ROLE_SUPPORTING, 'Supporting alert'),
+        (ROLE_PRIMARY, 'การแจ้งเตือนหลัก'),
+        (ROLE_SUPPORTING, 'การแจ้งเตือนประกอบ'),
     ]
 
     ticket = models.ForeignKey(

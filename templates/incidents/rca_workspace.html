@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}RCA {{ case_number }} — SOC Support System{% endblock %}
+{% block title %}RCA {{ case_number }} — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <style>
@@ -35,7 +35,7 @@
 
 <div class="page-header">
   <div>
-    <div class="small text-muted mb-1"><a href="{% url 'ticket_detail' ticket.pk %}#tasks">Ticket #{{ ticket.ticket_id }}</a> / Forensics &amp; RCA</div>
+    <div class="small text-muted mb-1"><a href="{% url 'ticket_detail' ticket.pk %}#tasks">เคส #{{ ticket.ticket_id }}</a> / Forensics &amp; RCA</div>
     <h1 class="page-header__title"><i class="bi bi-file-earmark-medical me-2"></i>{{ case_number|default:'RCA Workspace' }}</h1>
     <p class="page-header__subtitle mb-0">{{ subtask.title }} · {{ subtask.get_status_display }}</p>
   </div>
@@ -52,7 +52,7 @@
   <i class="bi bi-chevron-right sep"></i>
   <span class="step {% if step == 'build' %}current{% elif step == 'draft' or step == 'done' %}done{% endif %}"><span class="num">2</span>จัดทำข้อมูล</span>
   <i class="bi bi-chevron-right sep"></i>
-  <span class="step {% if step == 'draft' %}current{% elif step == 'done' %}done{% endif %}"><span class="num">3</span>Draft</span>
+  <span class="step {% if step == 'draft' %}current{% elif step == 'done' %}done{% endif %}"><span class="num">3</span>ฉบับร่าง</span>
   <i class="bi bi-chevron-right sep"></i>
   <span class="step {% if step == 'done' %}done{% endif %}"><span class="num">4</span>ส่งมอบ</span>
   {% endwith %}
@@ -150,7 +150,7 @@
             <div class="col-md-4">ซ้ำ: <strong>{{ ioc_preview.duplicate|length }}</strong></div>
             <div class="col-md-4">มาจาก Ticket: <strong>{{ ioc_preview.from_ticket|length }}</strong></div>
             <div class="col-md-4">ส่งแล้ว: <strong>{{ ioc_preview.already_pushed|length }}</strong></div>
-            <div class="col-md-4">Exclude: <strong>{{ ioc_preview.excluded|length }}</strong> · ไม่รองรับ: <strong>{{ ioc_preview.unsupported|length }}</strong></div>
+            <div class="col-md-4">ไม่รวม: <strong>{{ ioc_preview.excluded|length }}</strong> · ไม่รองรับ: <strong>{{ ioc_preview.unsupported|length }}</strong></div>
           </div>
           {% if ioc_preview.create or ioc_preview.restore %}
           <div class="rca-preview-list bg-body rounded border p-2 my-3">
@@ -180,7 +180,7 @@
 
         {% elif active_section == 'final' %}
         <div class="border rounded p-3 mb-4">
-          <h3 class="h6">Word Draft</h3>
+          <h3 class="h6">ฉบับร่าง Word</h3>
           {% if rca.draft_generated_at %}
           <p class="small mb-2">สร้างล่าสุด {{ rca.draft_generated_at|date:"d/m/Y H:i" }}{% if rca.draft_generated_by %} โดย {{ rca.draft_generated_by.get_full_name|default:rca.draft_generated_by.username }}{% endif %}</p>
           {% if rca.has_stale_draft %}<div class="alert alert-warning py-2 small">ข้อมูลใน Workspace เปลี่ยนหลังจากสร้าง Draft ครั้งล่าสุด</div>{% endif %}

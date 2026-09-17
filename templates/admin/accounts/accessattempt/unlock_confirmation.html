@@ -11,10 +11,10 @@
             <input type="hidden" name="{{ action_checkbox_name }}" value="{{ attempt.pk }}">
         {% endfor %}
 
-        <p>You are about to unlock the following username/IP lockout pair{{ attempts|length|pluralize }}.</p>
+        <p>คุณกำลังจะปลดล็อกคู่ชื่อผู้ใช้/IP ที่ถูกล็อกต่อไปนี้</p>
         <table>
             <thead>
-                <tr><th>Username</th><th>IP address</th><th>Failed attempts</th><th>Latest attempt</th></tr>
+                <tr><th>ชื่อผู้ใช้</th><th>ที่อยู่ IP</th><th>จำนวนครั้งที่ล้มเหลว</th><th>ครั้งล่าสุด</th></tr>
             </thead>
             <tbody>
                 {% for attempt in attempts %}
@@ -32,13 +32,13 @@
             <p class="errornote">{{ error }}</p>
         {% endif %}
         <div class="form-row">
-            <label for="id_reason">Reason for unlock:</label>
+            <label for="id_reason">เหตุผลในการปลดล็อก:</label>
             <textarea id="id_reason" name="reason" rows="4" required>{{ reason }}</textarea>
-            <p class="help">This is saved in the immutable lockout-reset audit trail.</p>
+            <p class="help">ข้อมูลนี้จะถูกบันทึกในประวัติการปลดล็อกที่แก้ไขไม่ได้</p>
         </div>
         <div class="submit-row">
-            <input type="submit" value="Unlock selected account(s)">
-            <a class="button cancel-link" href="{% url opts|admin_urlname:'changelist' %}">Cancel</a>
+            <input type="submit" value="ปลดล็อกบัญชีที่เลือก">
+            <a class="button cancel-link" href="{% url opts|admin_urlname:'changelist' %}">ยกเลิก</a>
         </div>
     </form>
 </div>

@@ -8,7 +8,7 @@
 
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3-fill text-primary me-2"></i>{{ project.project_code }}</h4>
-    <span class="badge bg-primary-subtle text-primary border border-primary">Project Incident (Case Bundle)</span>
+    <span class="badge bg-primary-subtle text-primary border border-primary">เหตุการณ์รวมหลายระบบ (Project Incident)</span>
     {% if project.cancelled_member_count %}
       <span class="badge bg-secondary">ยกเลิก {{ project.cancelled_member_count }} รายการ</span>
       <span class="badge bg-light text-dark">แก้ไขสำเร็จ {{ project.resolved_member_count }} · ปิดแบบ Event {{ project.event_closed_member_count }}</span>
@@ -39,23 +39,23 @@
     <div class="card-body">
       <p class="small text-muted">ประเมิน Emergency หนึ่งครั้งสำหรับทั้ง Project Incident และส่งต่อ Member Ticket ที่รอทั้งหมดตามเส้นทางที่ Tier 1 เลือก</p>
       <form method="post">{% csrf_token %}<input type="hidden" name="action" value="project_mgr_forward">
-        <div class="mb-3"><div class="fw-semibold mb-1">Emergency Assessment <span class="text-danger">*</span></div>
-          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-normal" value="normal" required><label class="form-check-label" for="assessment-normal">Normal</label></div>
-          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-emergency" value="emergency"><label class="form-check-label text-danger fw-semibold" for="assessment-emergency">Emergency</label></div>
+        <div class="mb-3"><div class="fw-semibold mb-1">การประเมินความฉุกเฉิน <span class="text-danger">*</span></div>
+          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-normal" value="normal" required><label class="form-check-label" for="assessment-normal">ปกติ</label></div>
+          <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="emergency_assessment" id="assessment-emergency" value="emergency"><label class="form-check-label text-danger fw-semibold" for="assessment-emergency">ฉุกเฉิน</label></div>
         </div>
         <label class="form-label fw-semibold">บันทึกการตรวจ <span class="text-danger">*</span></label><textarea class="form-control mb-3" name="decision_note" rows="3" required></textarea>
-        <button class="btn btn-warning" type="submit">Review and forward all pending members</button>
+        <button class="btn btn-warning" type="submit">ตรวจสอบและส่งต่อเคสย่อยที่รอทั้งหมด</button>
       </form>
     </div>
   </div>
   {% elif project.emergency_decided_at %}
   <div class="card border-light shadow-sm mb-4">
     <div class="card-body d-flex flex-wrap align-items-center gap-3">
-      <div><span class="fw-semibold">Project Emergency:</span> {% if project.is_emergency %}<span class="badge bg-danger">Emergency</span>{% else %}<span class="badge bg-success">Normal</span>{% endif %}</div>
+      <div><span class="fw-semibold">สถานะฉุกเฉินของ Project:</span> {% if project.is_emergency %}<span class="badge bg-danger">ฉุกเฉิน</span>{% else %}<span class="badge bg-success">ปกติ</span>{% endif %}</div>
       <div class="small text-muted">ประเมินโดย {{ project.emergency_decided_by.get_full_name|default:project.emergency_decided_by.username|default:"-" }} · {{ project.emergency_decided_at|date:"d M Y H:i" }}</div>
       {% if can_manage_project and not project.all_closed %}
       <form method="post" class="ms-auto">{% csrf_token %}<input type="hidden" name="action" value="project_reassess_emergency"><input type="hidden" name="emergency_value" value="{% if project.is_emergency %}0{% else %}1{% endif %}">
-        <div class="input-group input-group-sm"><input class="form-control" name="emergency_reason" required placeholder="เหตุผลในการประเมินใหม่"><button class="btn {% if project.is_emergency %}btn-outline-success{% else %}btn-outline-danger{% endif %}" type="submit">{% if project.is_emergency %}Reassess as Normal{% else %}Reassess as Emergency{% endif %}</button></div>
+        <div class="input-group input-group-sm"><input class="form-control" name="emergency_reason" required placeholder="เหตุผลในการประเมินใหม่"><button class="btn {% if project.is_emergency %}btn-outline-success{% else %}btn-outline-danger{% endif %}" type="submit">{% if project.is_emergency %}ประเมินใหม่เป็นปกติ{% else %}ประเมินใหม่เป็นฉุกเฉิน{% endif %}</button></div>
       </form>
       {% endif %}
     </div>
@@ -140,10 +140,10 @@
       {% if project.actions_taken_summary or project.next_steps_summary %}
       <div class="row g-3 border-top pt-3 mb-3">
         {% if project.actions_taken_summary %}
-        <div class="col-md-6"><div class="small text-muted fw-semibold">Actions taken</div><div style="white-space:pre-line;">{{ project.actions_taken_summary }}</div></div>
+        <div class="col-md-6"><div class="small text-muted fw-semibold">การดำเนินการที่ทำแล้ว</div><div style="white-space:pre-line;">{{ project.actions_taken_summary }}</div></div>
         {% endif %}
         {% if project.next_steps_summary %}
-        <div class="col-md-6"><div class="small text-muted fw-semibold">Next steps</div><div style="white-space:pre-line;">{{ project.next_steps_summary }}</div></div>
+        <div class="col-md-6"><div class="small text-muted fw-semibold">ขั้นตอนถัดไป</div><div style="white-space:pre-line;">{{ project.next_steps_summary }}</div></div>
         {% endif %}
       </div>
       {% endif %}
@@ -213,7 +213,7 @@
           <td><span class="fw-semibold">{{ ticket.bundle_ref }}</span><div class="text-muted small">{{ ticket.ticket_id }}</div></td>
           <td>{{ ticket.device_name }}{% if ticket.ip_address %}<div class="text-muted small">{{ ticket.ip_address }}</div>{% endif %}{% if ticket.operating_system %}<div class="text-muted small"><i class="bi bi-pc-display me-1"></i>{{ ticket.operating_system }}</div>{% endif %}</td>
           <td>{{ ticket.asset_owner|default:"—" }}</td>
-           <td>{% if ticket.classification == 'EVENT' %}<span class="badge bg-secondary">Event</span> <span class="text-muted">Tier 2 ยืนยัน</span>{% elif ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">Owner</span>{% if ticket.system_owner %} {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% endif %}{% else %}<span class="badge bg-light text-dark border">Admin</span>{% if ticket.assigned_admin %} {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% else %} —{% endif %}{% endif %}</td>
+           <td>{% if ticket.classification == 'EVENT' %}<span class="badge bg-secondary">Event</span> <span class="text-muted">Tier 2 ยืนยัน</span>{% elif ticket.t1_route == 'OWNER' %}<span class="badge bg-light text-dark border">เจ้าของระบบ</span>{% if ticket.system_owner %} {{ ticket.system_owner.get_full_name|default:ticket.system_owner.username }}{% endif %}{% else %}<span class="badge bg-light text-dark border">ผู้ดูแลระบบ</span>{% if ticket.assigned_admin %} {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% else %} —{% endif %}{% endif %}</td>
           <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
           <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
           <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
@@ -268,7 +268,7 @@
                 {% if add_member_form.system_detail.errors %}<div class="text-danger small">{{ add_member_form.system_detail.errors }}</div>{% endif %}
               </div>
               <div class="col-md-6">
-                <label class="form-label fw-semibold">IP Addresses</label>
+                <label class="form-label fw-semibold">ที่อยู่ IP</label>
                 {{ add_member_form.ip_address }}
                 {% if add_member_form.ip_address.help_text %}<div class="form-text">{{ add_member_form.ip_address.help_text }}</div>{% endif %}
                 {% if add_member_form.ip_address.errors %}<div class="text-danger small">{{ add_member_form.ip_address.errors }}</div>{% endif %}

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Ticket #{{ ticket.ticket_id }} — SOC Support System{% endblock %}
+{% block title %}เคส #{{ ticket.ticket_id }} — ระบบสนับสนุนงาน SOC{% endblock %}
 {% block content %}
 <style>
   .ticket-hero { border:1px solid var(--ui-border); border-left:4px solid #667386; border-radius:var(--ui-radius-sm); padding:1.2rem 1.25rem; background:#fff; color:var(--ui-text); }
@@ -130,7 +130,7 @@
   {# Incident vs Event is context, not a state signal — plain eyebrow text, no badge. #}
   {% if ticket.classification %}<div class="hero-eyebrow mb-1">{{ ticket.get_classification_display }}</div>{% endif %}
   <div class="d-flex align-items-center gap-1 mb-2">
-    <h1 class="ticket-title mb-0"><span class="title-lead">Ticket</span><span id="ticket-reference">#{{ ticket.ticket_id }}</span></h1>
+    <h1 class="ticket-title mb-0"><span class="title-lead">เคส</span><span id="ticket-reference">#{{ ticket.ticket_id }}</span></h1>
     <button class="copy-button" type="button" data-copy-target="ticket-reference" aria-label="คัดลอก Ticket Reference" title="คัดลอก Ticket Reference"><i class="bi bi-copy" aria-hidden="true"></i></button>
   </div>
   <div class="hero-subject mb-2">{{ ticket.device_name }}{% if ticket.incident_name %} <span class="text-muted">·</span> {{ ticket.incident_name }}{% endif %}</div>
@@ -159,7 +159,7 @@
       {% else %}
       <div class="hero-operational-label">กำลังรอการดำเนินการจาก</div><div class="hero-operational-value">{{ ticket.court_holder_label|default:"ยังไม่มีผู้รับผิดชอบในขั้นตอนนี้" }}</div>
       {% endif %}
-      {% if ticket.ola_contain_deadline and not is_terminal %}<div class="small text-muted mt-1">Contain OLA: {{ ticket.ola_contain_deadline|date:"d/m/Y H:i" }}</div>{% endif %}
+      {% if ticket.ola_contain_deadline and not is_terminal %}<div class="small text-muted mt-1">OLA การควบคุม: {{ ticket.ola_contain_deadline|date:"d/m/Y H:i" }}</div>{% endif %}
     </div>
     {% if can_submit_preparation or can_t2_review or can_assign_admin or can_mgr_forward or can_submit_containment or can_conclude_monitoring or transition_actions or t2_claim_state == 'unclaimed' or t2_claim_state == 'mine' %}
     <a class="btn btn-primary btn-sm px-3" href="#workflow-actions">
@@ -269,7 +269,7 @@ onto its own wrapped row, which space-between then left-aligned.
               <dt>เวลาที่ตรวจพบ</dt><dd>{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</dd>
               <dt>เวลาที่เกิดเหตุ</dt><dd>{{ ticket.event_occurred_at|date:"d M Y H:i"|default:"-" }}</dd>
               <dt>เวลาที่แจ้งผู้ได้รับผลกระทบ</dt><dd>{{ ticket.affected_notified_at|date:"d M Y H:i"|default:"-" }}</dd>
-              <dt>Reference ID</dt><dd>{% if ticket.reference_id %}<span id="external-reference">{{ ticket.reference_id }}</span><button class="copy-button ms-1" type="button" data-copy-target="external-reference" aria-label="คัดลอก Reference ID" title="คัดลอก Reference ID"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
+              <dt>เลขอ้างอิง</dt><dd>{% if ticket.reference_id %}<span id="external-reference">{{ ticket.reference_id }}</span><button class="copy-button ms-1" type="button" data-copy-target="external-reference" aria-label="คัดลอก Reference ID" title="คัดลอก Reference ID"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
               <dt>ความรุนแรง (สกมช.)</dt><dd>{{ ticket.get_ncsa_severity_display|default:"-" }}</dd>
               <dt>แหล่งที่มา (Source)</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>แหล่งข้อมูล (Log Source)</dt><dd>{{ ticket.log_source|default:"-" }}</dd>
@@ -285,8 +285,8 @@ onto its own wrapped row, which space-between then left-aligned.
           </div>
           <div class="col-md-6">
             <dl class="detail-grid mb-3">
-              <dt>IP Addresses</dt><dd class="font-monospace">{% if ticket.ip_address %}<span id="source-addresses">{{ ticket.ip_address }}</span><button class="copy-button ms-1" type="button" data-copy-target="source-addresses" aria-label="คัดลอก IP Addresses" title="คัดลอก IP Addresses"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
-              <dt>Destination</dt><dd class="font-monospace">{% if ticket.destination_ip %}<span id="destination-addresses">{{ ticket.destination_ip }}</span><button class="copy-button ms-1" type="button" data-copy-target="destination-addresses" aria-label="คัดลอก Destination" title="คัดลอก Destination"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
+              <dt>ที่อยู่ IP</dt><dd class="font-monospace">{% if ticket.ip_address %}<span id="source-addresses">{{ ticket.ip_address }}</span><button class="copy-button ms-1" type="button" data-copy-target="source-addresses" aria-label="คัดลอก IP Addresses" title="คัดลอก IP Addresses"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
+              <dt>ปลายทาง</dt><dd class="font-monospace">{% if ticket.destination_ip %}<span id="destination-addresses">{{ ticket.destination_ip }}</span><button class="copy-button ms-1" type="button" data-copy-target="destination-addresses" aria-label="คัดลอก Destination" title="คัดลอก Destination"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
             </dl>
             {% regroup ticket.iocs.all by get_category_display as ioc_groups %}
             {% if ioc_groups %}
@@ -562,7 +562,7 @@ onto its own wrapped row, which space-between then left-aligned.
         <div class="timeline">
           {% for log in logs %}
           <details class="timeline-entry" {% if forloop.first %}open{% endif %}>
-            <summary><div class="d-flex justify-content-between align-items-start gap-2"><div><span class="badge bg-light text-dark border me-1">{{ log.status_display }}</span><span class="small fw-semibold">{% if log.author %}{{ log.author.get_full_name|default:log.author.username }}{% else %}Unknown user{% endif %}</span>{% if log.was_edited %}<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle ms-1" title="รายการนี้ถูกแก้ไขหลังบันทึก">แก้ไขแล้ว</span>{% endif %}</div><small class="text-muted text-nowrap">{{ log.created_at|date:"d M Y H:i" }}</small></div></summary>
+            <summary><div class="d-flex justify-content-between align-items-start gap-2"><div><span class="badge bg-light text-dark border me-1">{{ log.status_display }}</span><span class="small fw-semibold">{% if log.author %}{{ log.author.get_full_name|default:log.author.username }}{% else %}ไม่ทราบผู้ใช้{% endif %}</span>{% if log.was_edited %}<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle ms-1" title="รายการนี้ถูกแก้ไขหลังบันทึก">แก้ไขแล้ว</span>{% endif %}</div><small class="text-muted text-nowrap">{{ log.created_at|date:"d M Y H:i" }}</small></div></summary>
             <div class="timeline-note">{{ log.note|linebreaksbr }}</div>
             {# The timeline is the audit trail, so a rewrite must not erase what #}
             {# was there — every earlier version stays visible here. #}
@@ -623,7 +623,7 @@ onto its own wrapped row, which space-between then left-aligned.
           <span class="section-hint ms-auto">Alert หลักกำหนดเวลาตรวจพบและ OLA</span>
         </summary>
         <div class="table-responsive px-3 pb-3"><table class="table table-sm align-middle mb-0">
-          <thead><tr><th>ประเภท</th><th>เวลาตรวจพบ</th><th>Agent</th><th>Level</th><th>Rule</th></tr></thead>
+          <thead><tr><th>ประเภท</th><th>เวลาตรวจพบ</th><th>Agent</th><th>ระดับ</th><th>Rule</th></tr></thead>
           <tbody>{% for link in alert_links %}<tr>
             <td>{% if link.role == 'PRIMARY' %}<span class="signal-badge signal-neutral">หลัก</span>{% else %}<span class="text-muted small">ประกอบ</span>{% endif %}</td>
             <td class="small font-monospace">{{ link.alert.timestamp|date:"Y-m-d H:i" }}</td>

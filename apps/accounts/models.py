@@ -16,13 +16,13 @@ class UserProfile(models.Model):
     ROLE_REDTEAM_MANAGER = 'REDTEAM_MANAGER'
 
     ROLE_CHOICES = [
-        (ROLE_SOC_STAFF,       'SOC Staff'),
-        (ROLE_SOC_MANAGER,     'SOC Manager'),
-        (ROLE_SYSTEM_ADMIN,    'System Admin'),
-        (ROLE_SYSTEM_OWNER,    'System Owner'),
-        (ROLE_EXECUTIVE,       'Executive'),
-        (ROLE_FORENSIC,        'Forensic Analyst'),
-        (ROLE_REDTEAM_MANAGER, 'Red Team Manager'),
+        (ROLE_SOC_STAFF,       'เจ้าหน้าที่ SOC'),
+        (ROLE_SOC_MANAGER,     'ผู้จัดการ SOC'),
+        (ROLE_SYSTEM_ADMIN,    'ผู้ดูแลระบบ'),
+        (ROLE_SYSTEM_OWNER,    'เจ้าของระบบ'),
+        (ROLE_EXECUTIVE,       'ผู้บริหาร'),
+        (ROLE_FORENSIC,        'นักวิเคราะห์นิติวิทยาศาสตร์ดิจิทัล'),
+        (ROLE_REDTEAM_MANAGER, 'ผู้จัดการ Red Team'),
     ]
 
     TIER_T1 = 'T1'

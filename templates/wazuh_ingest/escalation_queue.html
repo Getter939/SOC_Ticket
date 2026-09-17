@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}Tier 2 Queue — SOC Support System{% endblock %}
+{% block title %}คิวงาน Tier 2 — ระบบสนับสนุนงาน SOC{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div><h1 class="page-header__title"><i class="bi bi-arrow-up-circle-fill me-2"></i>Tier 2 Queue</h1><p class="page-header__subtitle">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
-  <div class="page-header__actions"><span class="badge bg-warning text-dark">{{ escalated_count }} tickets</span></div>
+  <div><h1 class="page-header__title"><i class="bi bi-arrow-up-circle-fill me-2"></i>คิวงาน Tier 2</h1><p class="page-header__subtitle">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
+  <div class="page-header__actions"><span class="badge bg-warning text-dark">{{ escalated_count }} เคส</span></div>
 </div>
 {% comment %}
 Pills, not dropdowns: with three low-cardinality scopes a select cost three
@@ -49,7 +49,7 @@ emergency. Claim state is what the table cannot answer on its own.
         <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
         <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
         <option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option>
-        <option value="severity" {% if sort == 'severity' %}selected{% endif %}>Severity</option>
+        <option value="severity" {% if sort == 'severity' %}selected{% endif %}>ความรุนแรง</option>
       </select>
     </form>
   </div>
@@ -62,13 +62,13 @@ emergency. Claim state is what the table cannot answer on its own.
   {# a signal the red row tint and the default sort already carry. The badge   #}
   {# moved into the Ticket cell, and Tier 1 into the system cell — together    #}
   {# ~200px back, which is what kept the table from fitting a 1280px laptop.   #}
-  <thead class="table-light"><tr><th>Ticket</th><th>ขั้นตอน</th><th>Severity</th><th>ระบบ / บริการ</th><th>OLA</th><th>รอมานาน</th><th>ผู้รับเรื่อง</th><th class="text-end">Review</th></tr></thead>
+  <thead class="table-light"><tr><th>เคส</th><th>ขั้นตอน</th><th>ความรุนแรง</th><th>ประเภท</th><th>ระบบ / บริการ</th><th>OLA</th><th>รอมานาน</th><th>ผู้รับเรื่อง</th><th class="text-end">ตรวจสอบ</th></tr></thead>
   <tbody>{% for ticket in tickets %}<tr class="clickable-row {% if ticket.is_emergency %}table-danger{% endif %}"
       data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link"
       aria-label="เปิด Ticket {{ ticket.ticket_id }}">
     <td>
       <a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a>
-      {% if ticket.is_emergency %}<div class="mt-1"><span class="badge bg-danger">EMERGENCY</span></div>{% endif %}
+      {% if ticket.is_emergency %}<div class="mt-1"><span class="badge bg-danger">ฉุกเฉิน</span></div>{% endif %}
       {# Members of one multi-system incident otherwise read as unrelated rows. #}
       {% if ticket.project_incident_id %}<div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>{{ ticket.bundle_ref }}</a></div>{% endif %}
     </td>
@@ -77,6 +77,7 @@ emergency. Claim state is what the table cannot answer on its own.
     {# the badge does not need to repeat it on every line.                     #}
     <td>{% if ticket.status == 'ESCALATED_T2' %}<span class="badge" style="{{ ticket.status_pill_css }}">รอตรวจสอบ</span>{% elif ticket.status == 'CONTAINMENT_REPORTED' %}<span class="badge" style="{{ ticket.status_pill_css }}">ควบคุม (Admin)</span>{% else %}<span class="badge" style="{{ ticket.status_pill_css }}">แก้ไข (Owner)</span>{% endif %}</td>
     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+    <td>{% if ticket.classification == 'EVENT' %}<span class="badge bg-secondary">Event</span>{% elif ticket.classification == 'INCIDENT' %}<span class="badge bg-danger">Incident</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
     {# max-width, not column count, is what bounds an auto-layout table: the #}
     {# description's min-content width is otherwise what sets the table's.   #}
     <td style="max-width:20rem;">
@@ -102,7 +103,7 @@ emergency. Claim state is what the table cannot answer on its own.
       <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseTicket{{ ticket.pk }}"><i class="bi bi-arrow-counterclockwise me-1"></i>คืนคิว</button>
       {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
     </td>
-  </tr>{% empty %}<tr><td colspan="8">
+  </tr>{% empty %}<tr><td colspan="9">
     {% if stage_filter or claim_filter %}
       {% url 'escalation_queue' as empty_action_url %}
       {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก' description='ลองเปลี่ยนขั้นตอนหรือสถานะการรับเรื่องเพื่อดูรายการอื่นในคิว' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
@@ -124,7 +125,7 @@ emergency. Claim state is what the table cannot answer on its own.
 {# page, so stage/claim/sort survive paging and a future filter needs no edit  #}
 {# here — unlike the hand-built param chain in incidents/ticket_list.html.     #}
 {% if page_obj.paginator.num_pages > 1 %}
-<nav class="mt-3" aria-label="Tier 2 queue pages">
+<nav class="mt-3" aria-label="หน้าคิว Tier 2">
   <ul class="pagination pagination-sm justify-content-center">
     {% if page_obj.has_previous %}
     <li class="page-item"><a class="page-link" href="{% querystring page=page_obj.previous_page_number %}" aria-label="หน้าก่อนหน้า">&laquo;</a></li>

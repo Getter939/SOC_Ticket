@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load humanize %}
 
-{% block title %}Dashboard — SOC Support System{% endblock %}
+{% block title %}แดชบอร์ด — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 {% if stats.cancelled %}<div class="alert alert-secondary">ยกเลิกแล้ว {{ stats.cancelled }} รายการ — แยกจากจำนวนงานที่แก้ไขสำเร็จและระยะเวลาเฉลี่ยในการแก้ไข</div>{% endif %}
@@ -144,7 +144,7 @@
 
 <!-- ── Header + last-updated timestamp ─────────────────────────────────────── -->
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-    <h4 class="mb-0 fw-bold">SOC Dashboard</h4>
+    <h4 class="mb-0 fw-bold">แดชบอร์ด SOC</h4>
     <span class="text-muted" style="font-size:13px;">
         <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
     </span>
@@ -156,31 +156,31 @@
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
             {% with q_status=filters.status q_sev=filters.severity %}
             <a href="?date_range=today{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">Today</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">วันนี้</a>
             <a href="?date_range=week{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">This Week</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">สัปดาห์นี้</a>
             <a href="?date_range=month{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">This Month</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">เดือนนี้</a>
             <a href="?date_range=all{% if q_status %}&status={{ q_status }}{% endif %}{% if q_sev %}&severity={{ q_sev }}{% endif %}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">All Time</a>
+               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">ทั้งหมด</a>
             {% endwith %}
         </div>
 
         <form method="get" class="filter-form">
             <input type="hidden" name="date_range" value="{{ filters.date_range }}">
             <div class="filter-field">
-                <label class="mini-label text-muted mb-0" for="dash-filter-status">Status</label>
+                <label class="mini-label text-muted mb-0" for="dash-filter-status">สถานะ</label>
                 <select name="status" id="dash-filter-status" class="form-select form-select-sm js-autosubmit">
-                    <option value="">All</option>
+                    <option value="">ทั้งหมด</option>
                     {% for code, label in status_choices %}
                     <option value="{{ code }}" {% if filters.status == code %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="filter-field">
-                <label class="mini-label text-muted mb-0" for="dash-filter-severity">Severity</label>
+                <label class="mini-label text-muted mb-0" for="dash-filter-severity">ระดับความรุนแรง</label>
                 <select name="severity" id="dash-filter-severity" class="form-select form-select-sm js-autosubmit">
-                    <option value="">All</option>
+                    <option value="">ทั้งหมด</option>
                     {% for code, label in severity_choices %}
                     <option value="{{ code }}" {% if filters.severity == code %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -206,12 +206,12 @@
     <div class="col">
         <div class="stat-card b-red">
             <div class="stat-value text-danger">{{ active_critical|intcomma }}</div>
-            <div class="stat-label">Critical Severity</div>
+            <div class="stat-label">ความรุนแรงระดับวิกฤต</div>
             {% if critical_soonest_deadline %}
             {% with d=critical_soonest_deadline %}
             <div class="stat-sub fw-bold
                 {% if d.overdue or d.minutes_remaining < 60 %}text-danger{% elif d.minutes_remaining < 240 %}text-warning{% else %}text-success{% endif %}">
-                {% if d.overdue %}Soonest: overdue by {{ d.label }}{% else %}Soonest: {{ d.label }} left{% endif %}
+                {% if d.overdue %}ใกล้ครบกำหนดที่สุด: เกินกำหนด {{ d.label }}{% else %}ใกล้ครบกำหนดที่สุด: เหลือ {{ d.label }}{% endif %}
             </div>
             {% endwith %}
             {% endif %}
@@ -224,11 +224,11 @@
             <div class="stat-value text-success">{{ closed_this_month|intcomma }}</div>
             <div class="stat-label">Closed This Month / ปิดเดือนนี้</div>
             {% if closed_delta > 0 %}
-            <div class="stat-sub text-success">+{{ closed_delta|intcomma }} vs last month</div>
+            <div class="stat-sub text-success">+{{ closed_delta|intcomma }} เทียบกับเดือนก่อน</div>
             {% elif closed_delta < 0 %}
-            <div class="stat-sub text-danger">{{ closed_delta|intcomma }} vs last month</div>
+            <div class="stat-sub text-danger">{{ closed_delta|intcomma }} เทียบกับเดือนก่อน</div>
             {% else %}
-            <div class="stat-sub text-muted">Same as last month</div>
+            <div class="stat-sub text-muted">เท่ากับเดือนก่อน</div>
             {% endif %}
         </div>
     </div>
@@ -236,11 +236,11 @@
     <!-- 4. MTTR -->
     <div class="col">
         <div class="stat-card b-orange">
-            <div class="stat-value text-warning">{{ stats.mttr_median|default:"—" }} hrs</div>
+            <div class="stat-value text-warning">{{ stats.mttr_median|default:"—" }} ชม.</div>
             {# The headline figure is the median; the mean is in the sub-line. #}
-            <div class="stat-label">Median Time to Resolve (MTTR)</div>
+            <div class="stat-label">เวลามัธยฐานในการแก้ไข (MTTR)</div>
             <div class="stat-sub text-muted">
-                Avg {{ stats.mttr_mean|default:"—" }} hrs · n={{ stats.mttr_n|default:0 }} · last 30d
+                เฉลี่ย {{ stats.mttr_mean|default:"—" }} ชม. · n={{ stats.mttr_n|default:0 }} · 30 วันล่าสุด
             </div>
         </div>
     </div>
@@ -270,9 +270,9 @@
                     <thead>
                         <tr>
                             <th class="text-start">Analyst</th>
-                            <th class="heat-actionable" title="งานที่นักวิเคราะห์ต้องดำเนินการเอง">Actionable<br><span class="fw-normal">ต้องทำ</span></th>
-                            <th class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">Waiting<br><span class="fw-normal">รอคนอื่น</span></th>
-                            <th class="text-start">Load</th>
+                            <th class="heat-actionable" title="งานที่นักวิเคราะห์ต้องดำเนินการเอง">ต้องทำ<br><span class="fw-normal">ต้องทำ</span></th>
+                            <th class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">รอดำเนินการ<br><span class="fw-normal">รอคนอื่น</span></th>
+                            <th class="text-start">ภาระงาน</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -288,7 +288,7 @@
                                 {% if row.blocked %}{{ row.blocked|intcomma }}{% else %}<span class="heat-zero">—</span>{% endif %}
                             </td>
                             <td>
-                                <div class="wl-bar" title="{{ row.load|intcomma }} actionable">
+                                <div class="wl-bar" title="{{ row.load|intcomma }} ต้องทำ">
                                     <div class="wl-bar-fill {% if row.load <= 2 %}heat-light{% elif row.load <= 5 %}heat-medium{% else %}heat-heavy{% endif %}"
                                          style="width: {{ row.load_pct }}%;"></div>
                                 </div>
@@ -333,14 +333,14 @@
             <h6 class="panel-title mb-2">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะที่กำลังดำเนินการ
             </h6>
-            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a segment to filter the dashboard.</p>
+            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>คลิกที่ส่วนของกราฟเพื่อกรองแดชบอร์ด</p>
             <div class="pipeline-chart">
                 <canvas id="chartPipeline" role="img"
-                        aria-label="Pipeline chart showing active ticket counts by workflow status and severity"></canvas>
+                        aria-label="กราฟแสดงจำนวนเคสที่กำลังดำเนินการตามสถานะและระดับความรุนแรง"></canvas>
             </div>
             <div class="visually-hidden">
             <table>
-                <caption>Ticket counts by workflow status and severity</caption>
+                <caption>จำนวนเคสตามสถานะและระดับความรุนแรง</caption>
                 <thead>
                     <tr>
                         <th>ความรุนแรง</th>
@@ -389,13 +389,13 @@
                     <thead class="table-dark">
                         <tr>
                             <th>#</th>
-                            <th class="sortable" data-key="ticket" data-num="1" role="button" tabindex="0">Ticket ID<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="sev" data-num="1" role="button" tabindex="0">Severity<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="created" data-num="1" role="button" tabindex="0">Created (ICT)<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="type" role="button" tabindex="0">Type<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="ticket" data-num="1" role="button" tabindex="0">เลขที่เคส (ID)<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="sev" data-num="1" role="button" tabindex="0">ความรุนแรง<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="created" data-num="1" role="button" tabindex="0">วันที่สร้าง (ICT)<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="type" role="button" tabindex="0">ประเภท<span class="sort-ind"></span></th>
                             <th class="sortable" data-key="openedBy" role="button" tabindex="0">ผู้เปิดเคส / Opened by<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="status" role="button" tabindex="0">Status<span class="sort-ind"></span></th>
-                            <th class="sortable" data-key="sc" data-num="1" role="button" tabindex="0">Status Updated (ICT)<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="status" role="button" tabindex="0">สถานะ<span class="sort-ind"></span></th>
+                            <th class="sortable" data-key="sc" data-num="1" role="button" tabindex="0">อัปเดตสถานะล่าสุด (ICT)<span class="sort-ind"></span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -453,9 +453,9 @@
                 <div class="text-muted" style="font-size:13px;" data-role="showing"></div>
                 <nav data-role="pager" aria-label="Active cases pages" hidden>
                     <ul class="pagination pagination-sm mb-0">
-                        <li class="page-item"><a class="page-link" href="#" data-role="prev" aria-label="Previous">«</a></li>
+                        <li class="page-item"><a class="page-link" href="#" data-role="prev" aria-label="ก่อนหน้า">«</a></li>
                         <li class="page-item disabled"><span class="page-link" data-role="page-info">1 / 1</span></li>
-                        <li class="page-item"><a class="page-link" href="#" data-role="next" aria-label="Next">»</a></li>
+                        <li class="page-item"><a class="page-link" href="#" data-role="next" aria-label="ถัดไป">»</a></li>
                     </ul>
                 </nav>
             </div>
@@ -472,16 +472,14 @@
                 <i class="bi bi-graph-up me-1"></i>{{ volume_title }}
             </div>
             <p class="chart-hint">{{ volume_window }} ICT · จำนวนคดีที่สร้างตามตัวกรองที่เลือก</p>
-            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>Click a point to keep its date and total visible.</p>
+            <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>คลิกที่จุดเพื่อแสดงวันที่และยอดรวมค้างไว้</p>
             <div style="height:200px;">
                 <canvas id="chartDaily" role="img" aria-label="{{ volume_title }}"></canvas>
             </div>
-            <p id="dailyChartSelection" class="chart-hint mb-0" role="status">
-                Select a point to view its exact total.
-            </p>
+            <p id="dailyChartSelection" class="chart-hint mb-0" role="status"></p>
             <div class="visually-hidden">
             <table>
-                <caption>Daily case volume</caption>
+                <caption>จำนวนเคสรายวัน</caption>
                 <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
                 <tbody>
                     {% for row in daily_trend_filtered %}
@@ -794,8 +792,8 @@ function applyDashboardFilters(filters) {
                         label: item => `${item.dataset.label}: ${item.parsed.x}`,
                         // Full stack total (sum across severities) for that status.
                         footer: items => [
-                            'Total: ' + totals[items[0].dataIndex],
-                            'Click to filter the dashboard',
+                            'รวม: ' + totals[items[0].dataIndex],
+                            'คลิกเพื่อกรองแดชบอร์ด',
                         ],
                     }
                 }
@@ -830,8 +828,7 @@ function applyDashboardFilters(filters) {
             onClick: (_, elements) => {
                 if (!elements.length) return;
                 const index = elements[0].index;
-                selection.textContent = labels[index] + ': ' + data[index] + ' case' +
-                    (data[index] === 1 ? '' : 's');
+                selection.textContent = labels[index] + ': ' + data[index] + ' เคส';
             },
             onHover: (event, elements) => {
                 event.native.target.style.cursor = elements.length ? 'pointer' : 'default';

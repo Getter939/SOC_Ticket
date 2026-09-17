@@ -242,7 +242,7 @@ class IOCDatabaseTests(MFATestCase):
                     'category': 'hash', 'value': HASH}).status_code, 403)
                 self.assertEqual(self.client.post(reverse('analyst_ioc_remove'), {
                     'pk': rec.pk}).status_code, 403)
-                self.assertNotContains(self.client.get(reverse('global_search')), 'data-label="IOC Database"')
+                self.assertNotContains(self.client.get(reverse('global_search')), 'data-label="ฐานข้อมูล IOC"')
 
     def test_login_required(self):
         self.assertEqual(self.client.get(reverse('ioc_database')).status_code, 302)

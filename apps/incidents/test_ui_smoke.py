@@ -54,7 +54,7 @@ class UiSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="theme-toggle"')
         self.assertContains(resp, 'role="switch"')
-        self.assertContains(resp, 'aria-label="Switch to dark mode"')
+        self.assertContains(resp, 'aria-label="สลับเป็น Dark Mode"')
         self.assertContains(resp, "prefers-color-scheme: dark")
         self.assertContains(resp, "localStorage.setItem(storageKey, theme)")
 
@@ -65,8 +65,8 @@ class UiSmokeTest(TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.ticket.ticket_id)
-        self.assertContains(resp, 'System Admin')
-        self.assertContains(resp, 'Initial Tier 1')
+        self.assertContains(resp, 'ผู้ดูแลระบบ')
+        self.assertContains(resp, 'Tier 1 ผู้รับเรื่อง')
         self.assertContains(resp, self.admin.username)
         self.assertContains(resp, self.soc_staff.username)
 
@@ -142,7 +142,7 @@ class UiSmokeTest(TestCase):
         self.client.force_login(self.admin)
         resp = self.client.get(reverse('ticket_detail', args=[self.ticket.pk]))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'Submit for Tier 2 review')
+        self.assertContains(resp, 'ส่งให้ Tier 2 ตรวจสอบ')
         self.assertContains(resp, 'Investigation findings')
         self.assertContains(resp, 'Countermeasure')
 
@@ -326,7 +326,7 @@ class WorkflowUiContractTest(TestCase):
         # straight to the admin.
         self.assertContains(
             self.client.get(reverse('ticket_detail', args=[review.pk])),
-            'Route to SOC Manager review',
+            'ส่งให้ผู้จัดการ SOC ตรวจสอบ',
         )
         # Containment verification belongs to Tier 2 now — Tier 1 gets no actions.
         t1_response = self.client.get(reverse('ticket_detail', args=[normal.pk]))
@@ -459,8 +459,8 @@ class WorkflowUiContractTest(TestCase):
         self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT, is_emergency=True)
         self.client.force_login(self.t1)
         response = self.client.get(reverse('ticket_list'), {'emergency': '1', 'sort': 'emergency'})
-        self.assertContains(response, 'Emergency only')
-        self.assertContains(response, 'EMERGENCY')
+        self.assertContains(response, 'เฉพาะเคสฉุกเฉิน')
+        self.assertContains(response, '>ฉุกเฉิน<')
 
 
 class ResponseTeamUiTest(TestCase):
@@ -636,4 +636,4 @@ class ResponseTeamUiTest(TestCase):
     def test_nav_shows_response_queue_for_forensic(self):
         self.client.force_login(self.forensic)
         resp = self.client.get(reverse('response_request_queue'))
-        self.assertContains(resp, 'Response Requests')
+        self.assertContains(resp, 'data-label="คำขอตอบสนองเหตุการณ์"')

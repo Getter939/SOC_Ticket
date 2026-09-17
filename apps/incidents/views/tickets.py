@@ -134,10 +134,10 @@ def create_ticket(request):
     if triage_id:
         triage = get_object_or_404(TriageRecord, pk=triage_id)
         if triage.ticket_id:
-            messages.info(request, 'This triage record already has a ticket.')
+            messages.info(request, 'บันทึกการคัดกรองนี้มีเคสอยู่แล้ว')
             return redirect('ticket_detail', pk=triage.ticket_id)
         if not _can_create_ticket_from_triage(triage, request.user):
-            messages.error(request, 'You are not authorized to create a ticket from this triage record.')
+            messages.error(request, 'คุณไม่มีสิทธิ์สร้างเคสจากบันทึกการคัดกรองนี้')
             return redirect('triage_list')
 
     if request.method == 'POST':
@@ -479,9 +479,9 @@ def ticket_detail(request, pk):
                 Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
             }.get(next_status)
             if not can_t2_review or next_status not in transition_codes:
-                messages.error(request, 'This Tier 2 action is not permitted for the ticket.')
+                messages.error(request, 'ไม่อนุญาตให้ดำเนินการ Tier 2 นี้กับเคสนี้')
             elif review_form.is_valid() and review_form.cleaned_data['classification'] != expected_classification:
-                messages.error(request, 'Classification must match the selected Tier 2 decision.')
+                messages.error(request, 'การจำแนกประเภทต้องตรงกับการตัดสินใจของ Tier 2 ที่เลือก')
             elif review_form.is_valid():
                 try:
                     result = complete_t2_review(
@@ -499,7 +499,7 @@ def ticket_detail(request, pk):
                 except ValidationError as e:
                     messages.error(request, e.message)
             else:
-                messages.error(request, 'Please correct the Tier 2 review information.')
+                messages.error(request, 'กรุณาแก้ไขข้อมูลการตรวจสอบของ Tier 2 ให้ถูกต้อง')
 
         elif action == 'assign_admin':
             # T1 reviews a returned Incident and picks a handling lane (Admin or
@@ -509,9 +509,9 @@ def ticket_detail(request, pk):
             note = request.POST.get('decision_note', '').strip()
             assignment_form = AdminAssignmentForm(request.POST, instance=ticket)
             if not can_assign_admin:
-                messages.error(request, 'This ticket cannot be assigned by the current user.')
+                messages.error(request, 'ผู้ใช้ปัจจุบันไม่สามารถมอบหมายเคสนี้ได้')
             elif not note:
-                messages.error(request, 'A review note is required.')
+                messages.error(request, 'กรุณาระบุหมายเหตุการตรวจสอบ')
             elif route == Ticket.T1_ROUTE_OWNER:
                 try:
                     assign_admin_or_owner_route(

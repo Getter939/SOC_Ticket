@@ -33,10 +33,10 @@ class TicketSubtask(models.Model):
     TYPE_FORENSIC_RCA = 'FORENSIC_RCA'
 
     TYPE_CHOICES = [
-        (TYPE_INVESTIGATION, 'Investigation'),
-        (TYPE_COUNTERMEASURE, 'Countermeasure'),
-        (TYPE_VA_PT, 'VA / Pentest'),
-        (TYPE_INFRA_SEC, 'Infrastructure Security'),
+        (TYPE_INVESTIGATION, 'การสืบสวน'),
+        (TYPE_COUNTERMEASURE, 'มาตรการตอบโต้'),
+        (TYPE_VA_PT, 'ประเมินช่องโหว่ / ทดสอบเจาะระบบ (VA/PT)'),
+        (TYPE_INFRA_SEC, 'ความปลอดภัยโครงสร้างพื้นฐาน (Hardening)'),
         (TYPE_FORENSIC_RCA, 'Forensics / RCA'),
     ]
 

@@ -520,8 +520,8 @@ class Ticket(models.Model):
     ]
 
     ASSET_TYPE_CHOICES = [
-        ('Computer',       'Computer'),
-        ('Server',         'Server'),
+        ('Computer',       'คอมพิวเตอร์'),
+        ('Server',         'เซิร์ฟเวอร์'),
         ('Network Device', 'Network Device'),
     ]
 

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}งานตอบสนอง (Response Requests) — SOC Support System{% endblock %}
+{% block title %}งานตอบสนอง (Response Requests) — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
 <style>
@@ -26,7 +26,7 @@
         <div class="card-body py-3">
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <span class="fw-semibold" style="font-size:.85rem;">กรองตามสถานะ:</span>
-                <a href="?" class="level-pill {% if not status_filter %}active{% endif %}">All</a>
+                <a href="?" class="level-pill {% if not status_filter %}active{% endif %}">ทั้งหมด</a>
                 {% for code, label in status_choices %}
                 <a href="?status={{ code }}" class="level-pill {% if status_filter == code %}active{% endif %}">{{ label }}</a>
                 {% endfor %}
@@ -41,7 +41,7 @@
                     <tr>
                         <th>ประเภท</th>
                         <th>หัวข้อคำขอ</th>
-                        <th>Ticket</th>
+                        <th>เคส</th>
                         {% if is_overview %}<th>ผู้รับผิดชอบ</th>{% endif %}
                         <th>ผู้ร้องขอ</th>
                         <th>วันที่</th>
@@ -54,7 +54,7 @@
                     <tr class="clickable-row" data-row-href="{{ req.work_url }}" tabindex="0" role="link" aria-label="เปิดงาน {{ req.title }}">
                         <td><span class="req-type"><i class="bi bi-shield-shaded"></i>{{ req.get_subtask_type_display }}</span></td>
                         <td><div class="cell-primary">{{ req.title }}</div>{% if req.description %}<div class="cell-secondary text-truncate" style="max-width:260px;">{{ req.description }}</div>{% endif %}</td>
-                        <td class="cell-technical"><strong>#{{ req.ticket.ticket_id }}</strong>{% if req.ticket.is_emergency %} <span class="badge bg-danger">EMG</span>{% endif %}</td>
+                        <td class="cell-technical"><strong>#{{ req.ticket.ticket_id }}</strong>{% if req.ticket.is_emergency %} <span class="badge bg-danger">ฉุกเฉิน</span>{% endif %}</td>
                         {% if is_overview %}<td>{% if req.assigned_to %}{{ req.assigned_to.get_full_name|default:req.assigned_to.username }}{% else %}-{% endif %}</td>{% endif %}
                         <td>{% if req.created_by %}{{ req.created_by.get_full_name|default:req.created_by.username }}{% else %}-{% endif %}</td>
                         <td>{{ req.created_at|date:"d/m/Y" }}</td>
