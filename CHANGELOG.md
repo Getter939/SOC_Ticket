@@ -6,6 +6,40 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
+## [v1.7.0] — 2026-09-17
+
+### Added
+- **Notification time on the incident report (Section 1.4).** Tier 2 now records
+  *"วันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ"* while verifying containment — a
+  date-time field styled like the detection time, on both the containment-review
+  and owner-fix-review cards. It is mandatory before a case can be approved or
+  routed to the SOC Manager, optional when the case is sent back, and validated
+  against the detection and occurrence times. The value appears on the ticket
+  detail page, in field-change history, and on the ticket edit form, and is added
+  as row **1.4** of the incident report — the following rows renumber to 1.5–1.19.
+  (The Event report is unchanged.)
+- **Redesigned SOC executive dashboard** with reworked layout and polished
+  charts.
+
+### Changed
+- **Action-flow adjustments and centralized evidence handling.** Attachment /
+  evidence handling was reworked across ticket create, edit, and detail, project
+  incidents, the report preview, and the workflow action panel, alongside
+  workflow/status refinements.
+- **Internal restructure of the incidents app.** `models.py` and `views.py` were
+  split into packages; behavior-preserving.
+
+### Removed
+- **Legacy intra-SOC subtask form retired.** The manual Investigation /
+  Countermeasure subtask create path was removed and the ticket-detail section
+  reframed as *"คำขอทีมตอบสนอง"*, co-locating the response-request spawn form. The
+  two enum values are kept for historical rows only — no schema change, no data
+  loss.
+
+> Migrations `incidents/0078` (status-choices alter) and `incidents/0079` (add
+> nullable `affected_notified_at`) are both additive and reversible — rollback
+> follows the deploy runbook's §4a (previous-tag checkout).
+
 ## [v1.6.0] — 2026-09-16
 
 ### Added
