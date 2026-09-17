@@ -302,7 +302,7 @@ class Command(BaseCommand):
                     "Root cause: macro-enabled .xlsm dropper opened from email.\n"
                     "Scope: single host; no lateral movement observed.\n"
                     "Recommendation: block macro execution from internet-sourced files.\n"
-                    .encode("utf-8")
+                    .encode()
                 ),
                 save=True,
             )

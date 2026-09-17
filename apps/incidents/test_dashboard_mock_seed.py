@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
-from apps.incidents.models import Ticket, TicketLog, TriageRecord
+from apps.incidents.models import Ticket, TriageRecord
 from apps.incidents.tests import _make_user, _make_t1, _make_t2
 from apps.wazuh_ingest.models import WazuhAlert
 

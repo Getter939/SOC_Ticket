@@ -15,7 +15,6 @@ Run with:  py manage.py test apps.incidents.test_lookup_search_import --settings
 
 import csv
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -360,7 +359,7 @@ def _write_csv(directory, rows, name='tracker.csv'):
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for row in rows:
-            writer.writerow({**{k: '' for k in CSV_FIELDS}, **row})
+            writer.writerow({**dict.fromkeys(CSV_FIELDS, ''), **row})
     return str(path)
 
 

@@ -993,8 +993,7 @@ def _iter_paragraphs(doc):
 def _iter_table_paragraphs(table):
     for row in table.rows:
         for cell in row.cells:
-            for paragraph in cell.paragraphs:
-                yield paragraph
+            yield from cell.paragraphs
             for nested in cell.tables:
                 yield from _iter_table_paragraphs(nested)
 
@@ -1111,49 +1110,48 @@ def build_attachment_preview_image(attachment):
 
 
 def _prepare_report_evidence_image(attachment, max_dimension=REPORT_IMAGE_MAX_DIMENSION):
-    with attachment.file.open('rb') as source_file:
-        with Image.open(source_file) as source:
-            width, height = source.size
-            if width * height > REPORT_IMAGE_MAX_PIXELS:
-                raise ValueError(
-                    f'decoded image exceeds {REPORT_IMAGE_MAX_PIXELS} pixels'
-                )
-
-            source.seek(0)  # animated formats use only their first frame
-            prepared = ImageOps.exif_transpose(source)
-            prepared.thumbnail(
-                (max_dimension, max_dimension),
-                Image.Resampling.LANCZOS,
+    with attachment.file.open('rb') as source_file, Image.open(source_file) as source:
+        width, height = source.size
+        if width * height > REPORT_IMAGE_MAX_PIXELS:
+            raise ValueError(
+                f'decoded image exceeds {REPORT_IMAGE_MAX_PIXELS} pixels'
             )
 
-            has_alpha = (
-                'A' in prepared.getbands()
-                or 'transparency' in source.info
-            )
-            output = BytesIO()
-            if source.format == 'PNG' or has_alpha:
-                prepared = prepared.convert('RGBA' if has_alpha else 'RGB')
-                prepared.save(output, format='PNG', optimize=True)
-                content_type = 'image/png'
+        source.seek(0)  # animated formats use only their first frame
+        prepared = ImageOps.exif_transpose(source)
+        prepared.thumbnail(
+            (max_dimension, max_dimension),
+            Image.Resampling.LANCZOS,
+        )
+
+        has_alpha = (
+            'A' in prepared.getbands()
+            or 'transparency' in source.info
+        )
+        output = BytesIO()
+        if source.format == 'PNG' or has_alpha:
+            prepared = prepared.convert('RGBA' if has_alpha else 'RGB')
+            prepared.save(output, format='PNG', optimize=True)
+            content_type = 'image/png'
+        else:
+            if has_alpha:
+                background = Image.new('RGB', prepared.size, 'white')
+                background.paste(prepared, mask=prepared.getchannel('A'))
+                prepared = background
             else:
-                if has_alpha:
-                    background = Image.new('RGB', prepared.size, 'white')
-                    background.paste(prepared, mask=prepared.getchannel('A'))
-                    prepared = background
-                else:
-                    prepared = prepared.convert('RGB')
-                prepared.save(output, format='JPEG', quality=85, optimize=True)
-                content_type = 'image/jpeg'
+                prepared = prepared.convert('RGB')
+            prepared.save(output, format='JPEG', quality=85, optimize=True)
+            content_type = 'image/jpeg'
 
-            return ReportEvidenceImage(
-                # File names are intentionally omitted from the report — the
-                # caption is the analyst's description, or blank.
-                caption=attachment.description or '',
-                content=output.getvalue(),
-                content_type=content_type,
-                width_px=prepared.width,
-                height_px=prepared.height,
-            )
+        return ReportEvidenceImage(
+            # File names are intentionally omitted from the report — the
+            # caption is the analyst's description, or blank.
+            caption=attachment.description or '',
+            content=output.getvalue(),
+            content_type=content_type,
+            width_px=prepared.width,
+            height_px=prepared.height,
+        )
 
 
 def _host_ip(ticket):

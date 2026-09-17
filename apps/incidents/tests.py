@@ -604,7 +604,7 @@ class TicketReportExportTest(TestCase):
     def test_ticket_report_export_failure_redirects_with_message(self):
         self.client.force_login(self.t1)
         with patch(
-            'apps.incidents.views.generate_ticket_report',
+            'apps.incidents.views.reports.generate_ticket_report',
             side_effect=ValueError('Unresolved report template placeholders: {{bogus}}'),
         ):
             response = self.client.post(
@@ -3114,7 +3114,7 @@ class AttachmentPreviewTest(TestCase):
 
 class AttachmentUploadLimitTest(TestCase):
     def test_oversize_file_rejected_by_form(self):
-        with patch('apps.incidents.models.MAX_ATTACHMENT_SIZE', 10):
+        with patch('apps.incidents.models.attachments.MAX_ATTACHMENT_SIZE', 10):
             form = AttachmentForm(
                 data={'description': ''},
                 files={'file': SimpleUploadedFile(
@@ -3139,7 +3139,7 @@ class AttachmentUploadLimitTest(TestCase):
             SimpleUploadedFile('a.log', b'0123456789'),
             SimpleUploadedFile('b.log', b'0123456789'),
         ]})
-        with patch('apps.incidents.models.MAX_ATTACHMENT_BATCH_SIZE', 12):
+        with patch('apps.incidents.models.attachments.MAX_ATTACHMENT_BATCH_SIZE', 12):
             form = AttachmentForm(data={'description': ''}, files=files)
             self.assertFalse(form.is_valid())
             self.assertIn('file', form.errors)

@@ -36,7 +36,7 @@ from .ioc_values import (
 )
 from .models import (
     AnalystIOC, IOCReviewStatus, RCAAsset, RCAIndicator, RCAReport,
-    RCARootCause, RCATimelineEntry, Ticket, TicketSubtask,
+    RCATimelineEntry, Ticket, TicketSubtask,
 )
 from .rca_content import RCA_TEMPLATE_VERSION
 from .reports import (

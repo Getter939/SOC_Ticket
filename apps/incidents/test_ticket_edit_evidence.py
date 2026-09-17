@@ -173,7 +173,7 @@ class TicketEditEvidenceTest(TestCase):
         self.assertEqual(StagedAttachment.objects.get().original_name, 'evidence.log')
 
     def test_file_size_and_batch_limits_block_edit(self):
-        for limit in ('apps.incidents.models.MAX_ATTACHMENT_SIZE',
+        for limit in ('apps.incidents.models.attachments.MAX_ATTACHMENT_SIZE',
                       'apps.incidents.staging.MAX_ATTACHMENT_BATCH_SIZE',
                       'apps.incidents.staging.MAX_ATTACHMENT_COUNT'):
             with self.subTest(limit=limit), patch(limit, 0):

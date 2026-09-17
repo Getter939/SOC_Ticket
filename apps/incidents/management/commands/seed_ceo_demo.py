@@ -24,7 +24,7 @@ history reads as a case worked over hours rather than in one instant.
 
 from datetime import timedelta
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 

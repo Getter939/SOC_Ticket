@@ -1,16 +1,14 @@
 """IOC Database: manual entry, the two-source unified view, per-indicator
 annotations (status + note), edit/remove, access boundaries and ticket integration."""
 
-import re
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.http import QueryDict
 from django.urls import NoReverseMatch, reverse
 
 from apps.accounts.models import UserProfile
 from apps.accounts.testing import MFATestCase
-from .forms import ProjectIncidentForm, TicketEditForm, TicketForm
+from .forms import TicketEditForm, TicketForm
 from .models import AnalystIOC, IOCReviewStatus, Ticket, TicketIOC
 from .reports import build_ticket_report_context
 from .tests import _pi_post_data, _ticket_post_data

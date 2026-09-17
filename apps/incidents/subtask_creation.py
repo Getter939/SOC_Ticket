@@ -7,7 +7,7 @@ from django.db import transaction
 
 from apps.accounts.models import UserProfile
 
-from .models import Ticket, TicketSubtask
+from .models import TicketSubtask
 from .notifications import notify_response_request_created
 
 
