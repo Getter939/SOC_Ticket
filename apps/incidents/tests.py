@@ -56,7 +56,8 @@ from apps.incidents import history
 from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
     AdminAssignmentForm, AttachmentForm, ProjectIncidentTargetForm,
-    ResponseRequestForm, TicketEditForm, TicketForm, TriageForm,
+    ResponseRequestForm, TicketEditForm, TicketForm, TicketPreparationEditForm,
+    TicketReviewForm, TriageForm,
 )
 from apps.incidents.models import (
     ProjectIncident, ProjectIncidentAttachment, ProjectIncidentLog,
@@ -6306,6 +6307,120 @@ class RemediationChecklistWorkflowTest(TestCase):
         self.assertNotEqual(t.remediation_summary, 'INJECTED FINDINGS')
 
 
+class AffectedNotifiedWorkflowTest(TestCase):
+    """Report row 1.4 — 'วันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ' — is captured
+    by Tier 2 while verifying containment. Mandatory to move a case forward
+    (approve / to manager), optional on the send-back edges of the same form."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('affnot_t1')
+        cls.t2 = _make_t2('affnot_t2')
+        cls.admin = _make_user('affnot_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+        cls.detected = timezone.make_aware(datetime(2026, 7, 2, 8, 0))
+
+    def _reported(self, **kw):
+        t = _make_ticket(
+            created_by=self.t1, assigned_admin=self.admin,
+            classification=Ticket.CLASSIFICATION_INCIDENT, severity='High',
+            incident_datetime=self.detected, **kw)
+        _advance_to(t, Ticket.STATUS_CONTAINMENT_REPORTED, self.t1, self.admin)
+        return t
+
+    def _owner_pending_t2(self):
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            severity='High', incident_datetime=self.detected)
+        t.t1_route = Ticket.T1_ROUTE_OWNER
+        t.save(update_fields=['t1_route'])
+        mgr = _advance_helper_manager()
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route')
+        t.transition_to(Ticket.STATUS_AWAITING_OWNER, mgr, 'to owner')
+        t.transition_to(Ticket.STATUS_PENDING_T2_REVIEW, self.t1, 'owner reported')
+        return t
+
+    def _post(self, t, status, **extra):
+        data = {'action': 'workflow_action', 'status': status,
+                'update_notes': 'note'}
+        data.update(extra)
+        return self.client.post(reverse('ticket_detail', args=[t.pk]), data)
+
+    def test_card_renders_the_datetime_input(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        r = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(r, 'name="affected_notified_at"')
+        self.assertContains(r, 'id="t2-notified-now"')
+
+    def test_admin_forward_requires_the_field(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_APPROVED)   # box left empty
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+        self.assertIsNone(t.affected_notified_at)
+
+    def test_admin_forward_with_value_saves_and_logs(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_APPROVED,
+                   affected_notified_at='2026-07-02T09:30')
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_APPROVED)
+        self.assertEqual(
+            t.affected_notified_at,
+            timezone.make_aware(datetime(2026, 7, 2, 9, 30)))
+        self.assertTrue(t.field_changes.filter(source='t2_remediation').exists())
+
+    def test_send_back_does_not_require_the_field(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_AWAITING_CONTAINMENT)
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_CONTAINMENT)
+
+    def test_future_value_rejected(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        future = (timezone.localtime() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
+        self._post(t, Ticket.STATUS_APPROVED, affected_notified_at=future)
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+
+    def test_value_before_detection_rejected(self):
+        t = self._reported()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_APPROVED,
+                   affected_notified_at='2026-07-02T07:00')  # before 08:00
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+
+    def test_value_before_occurrence_rejected(self):
+        # Occurrence 12:00, detection 08:00 — 09:30 clears detection but not
+        # occurrence, so it must still be rejected.
+        t = self._reported(
+            event_occurred_at=timezone.make_aware(datetime(2026, 7, 2, 12, 0)))
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_APPROVED,
+                   affected_notified_at='2026-07-02T09:30')
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_CONTAINMENT_REPORTED)
+
+    def test_owner_lane_forward_requires_the_field(self):
+        t = self._owner_pending_t2()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_APPROVED)
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_T2_REVIEW)
+
+    def test_owner_lane_send_back_allowed_without_the_field(self):
+        t = self._owner_pending_t2()
+        self.client.force_login(self.t2)
+        self._post(t, Ticket.STATUS_AWAITING_OWNER)
+        t.refresh_from_db()
+        self.assertEqual(t.status, Ticket.STATUS_AWAITING_OWNER)
+
+
 # ──────────────────────────────────────────────────────────────────────────── #
 # 28. Report matches the NT paper form's layout                                 #
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -6371,9 +6486,16 @@ class ReportNTFormLayoutTest(TestCase):
 
     # ── Section 1 numbering ──────────────────────────────────────────── #
 
+    def test_section_one_has_the_affected_notified_row(self):
+        rows = {r['label']: r['value'] for r in self._section('1')['rows']
+                if r.get('type') == 'kv'}
+        # New row 1.4; the trailing rows shifted down by one to 1.19.
+        self.assertIn('1.4 วันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ', rows)
+        self.assertIn('1.19 แหล่งข้อมูล', rows)
+
     def test_section_one_rows_are_numbered_sequentially(self):
         labels = [r['label'] for r in self._section('1')['rows']]
-        self.assertEqual(len(labels), 18)
+        self.assertEqual(len(labels), 19)
         for index, label in enumerate(labels, start=1):
             self.assertTrue(
                 label.startswith(f'1.{index} '),
@@ -6390,8 +6512,9 @@ class ReportNTFormLayoutTest(TestCase):
         )
         labels = [row['label'] for row in section['rows']]
 
-        self.assertNotIn('1.4 ชื่อ incident/event', labels)
-        # เกิดเหตุ (1.3) and ชื่อ (1.4) are both empty here, so ประเภท climbs to 1.3.
+        self.assertNotIn('1.5 ชื่อ incident/event', labels)
+        # เกิดเหตุ (1.3), แจ้งเหตุ (1.4) and ชื่อ (1.5) are all empty here, so
+        # ประเภท climbs from its fixed 1.6 to 1.3 once the blanks are removed.
         self.assertIn('1.3 ประเภท: event หรือ incident', labels)
         for index, label in enumerate(labels, start=1):
             self.assertTrue(label.startswith(f'1.{index} '))
@@ -6403,9 +6526,9 @@ class ReportNTFormLayoutTest(TestCase):
         )
 
         self.assertIn('1.3 ประเภท: event หรือ incident', compact)
-        self.assertNotIn('1.5 ประเภท: event หรือ incident', compact)
-        self.assertIn('1.4 ชื่อ incident/event', complete)
-        self.assertIn('1.5 ประเภท: event หรือ incident', complete)
+        self.assertNotIn('1.6 ประเภท: event หรือ incident', compact)
+        self.assertIn('1.5 ชื่อ incident/event', complete)
+        self.assertIn('1.6 ประเภท: event หรือ incident', complete)
 
     def test_only_section_one_is_numbered(self):
         """The paper form numbers section 1 only — sections 3 and 4 are plain."""
@@ -6422,13 +6545,13 @@ class ReportNTFormLayoutTest(TestCase):
     def test_checkbox_options_run_low_to_high(self):
         rows = {r['label']: r for r in self._section('1')['rows']
                 if r.get('type') == 'checks'}
-        sev = [o['label'] for o in rows['1.7 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)']['options']]
+        sev = [o['label'] for o in rows['1.8 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)']['options']]
         self.assertEqual(sev, ['Low', 'Medium', 'High', 'Critical'])
 
-        ncsa = [o['label'] for o in rows['1.8 ระดับความรุนแรง (อ้างอิงตาม สกมช.)']['options']]
+        ncsa = [o['label'] for o in rows['1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)']['options']]
         self.assertEqual(ncsa, ['ไม่ร้ายแรง', 'ร้ายแรง', 'วิกฤต'])
 
-        kind = [o['label'] for o in rows['1.5 ประเภท: event หรือ incident']['options']]
+        kind = [o['label'] for o in rows['1.6 ประเภท: event หรือ incident']['options']]
         self.assertEqual(kind, ['Event', 'Incident'])
 
     def test_reordering_did_not_change_which_option_is_ticked(self):
@@ -6436,9 +6559,9 @@ class ReportNTFormLayoutTest(TestCase):
                 if r.get('type') == 'checks'}
         ticked = lambda label: [  # noqa: E731
             o['label'] for o in rows[label]['options'] if o['checked']]
-        self.assertEqual(ticked('1.7 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)'), ['High'])
-        self.assertEqual(ticked('1.8 ระดับความรุนแรง (อ้างอิงตาม สกมช.)'), ['ร้ายแรง'])
-        self.assertEqual(ticked('1.5 ประเภท: event หรือ incident'), ['Incident'])
+        self.assertEqual(ticked('1.8 ระดับความรุนแรง (อ้างอิงตามระบบ SIEM)'), ['High'])
+        self.assertEqual(ticked('1.9 ระดับความรุนแรง (อ้างอิงตาม สกมช.)'), ['ร้ายแรง'])
+        self.assertEqual(ticked('1.6 ประเภท: event หรือ incident'), ['Incident'])
 
     # ── Section 4 User row ───────────────────────────────────────────── #
 
@@ -7907,6 +8030,52 @@ class IncidentDatetimeLocalizationTest(TestCase):
 
         self.assertIn('2026-09-07T08:00', rendered)      # local time, correct
         self.assertNotIn('2026-09-07T01:00', rendered)   # never the raw UTC
+
+
+class AffectedNotifiedFieldTest(TestCase):
+    """Report row 1.4 is editable only through the ticket edit surface, renders
+    in local time there, and shares one validation helper with the workflow."""
+
+    def test_edit_form_exposes_the_field_but_review_forms_do_not(self):
+        self.assertIn('affected_notified_at', TicketEditForm().fields)
+        # The Tier 2 escalation review and the pre-submit creator edit happen
+        # before the step that records 1.4, so they must not carry the field.
+        self.assertNotIn('affected_notified_at', TicketReviewForm().fields)
+        self.assertNotIn(
+            'affected_notified_at', TicketPreparationEditForm().fields)
+
+    def test_edit_form_renders_the_field_in_local_time(self):
+        bangkok = timezone.get_current_timezone()
+        aware = timezone.make_aware(datetime(2026, 9, 7, 9, 30), bangkok)
+        t = _make_ticket(affected_notified_at=aware)
+        t.refresh_from_db()
+        rendered = str(TicketEditForm(instance=t)['affected_notified_at'])
+        self.assertIn('2026-09-07T09:30', rendered)
+        self.assertNotIn('2026-09-07T02:30', rendered)   # never the raw UTC
+
+    def test_validation_helper_enforces_the_three_rules(self):
+        from apps.incidents.ticket_workflow import validate_affected_notified_at
+
+        t = Ticket(
+            incident_datetime=timezone.make_aware(datetime(2026, 7, 2, 8, 0)),
+            event_occurred_at=timezone.make_aware(datetime(2026, 7, 2, 12, 0)))
+        # In the future.
+        with self.assertRaises(ValidationError):
+            validate_affected_notified_at(
+                t, timezone.localtime() + timedelta(days=1))
+        # Before detection.
+        with self.assertRaises(ValidationError):
+            validate_affected_notified_at(
+                t, timezone.make_aware(datetime(2026, 7, 2, 7, 0)))
+        # After detection but before occurrence.
+        with self.assertRaises(ValidationError):
+            validate_affected_notified_at(
+                t, timezone.make_aware(datetime(2026, 7, 2, 9, 30)))
+        # Valid: at or after both, not in the future.
+        validate_affected_notified_at(
+            t, timezone.make_aware(datetime(2026, 7, 2, 12, 30)))
+        # None is always accepted at the helper level.
+        validate_affected_notified_at(t, None)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #

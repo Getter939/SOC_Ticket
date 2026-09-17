@@ -268,6 +268,7 @@ onto its own wrapped row, which space-between then left-aligned.
             <dl class="detail-grid mb-0">
               <dt>เวลาที่ตรวจพบ</dt><dd>{{ ticket.incident_datetime|date:"d M Y H:i"|default:"-" }}</dd>
               <dt>เวลาที่เกิดเหตุ</dt><dd>{{ ticket.event_occurred_at|date:"d M Y H:i"|default:"-" }}</dd>
+              <dt>เวลาที่แจ้งผู้ได้รับผลกระทบ</dt><dd>{{ ticket.affected_notified_at|date:"d M Y H:i"|default:"-" }}</dd>
               <dt>Reference ID</dt><dd>{% if ticket.reference_id %}<span id="external-reference">{{ ticket.reference_id }}</span><button class="copy-button ms-1" type="button" data-copy-target="external-reference" aria-label="คัดลอก Reference ID" title="คัดลอก Reference ID"><i class="bi bi-copy" aria-hidden="true"></i></button>{% else %}-{% endif %}</dd>
               <dt>ความรุนแรง (สกมช.)</dt><dd>{{ ticket.get_ncsa_severity_display|default:"-" }}</dd>
               <dt>แหล่งที่มา (Source)</dt><dd>{{ ticket.get_issue_type_display }}</dd>

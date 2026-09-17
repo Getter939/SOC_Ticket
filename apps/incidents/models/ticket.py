@@ -704,6 +704,14 @@ class Ticket(models.Model):
         null=True, blank=True,
         verbose_name='วันและเวลาที่เกิดเหตุการณ์',
     )
+    # When the affected party was told about the incident — report row 1.4.
+    # Tier 2 records it while verifying containment (either lane); it is required
+    # to move the case forward, but not to send it back. Nullable for legacy
+    # tickets and cases that never reach that step.
+    affected_notified_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='วันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ',
+    )
     reference_id = models.CharField(
         max_length=50, blank=True, default='',
         verbose_name='Reference',

@@ -233,16 +233,39 @@ def submit_containment(*, ticket, actor, report, remediation, note, checked_inde
     )
 
 
+def validate_affected_notified_at(ticket, value):
+    """Validate report row 1.4 — when the affected party was notified.
+
+    Shared by the Tier 2 workflow step and the ticket edit form so the rules
+    live in one place. ``value`` is an aware datetime (or None — callers decide
+    whether None is allowed). Raises ValidationError with a Thai message.
+    """
+    if value is None:
+        return
+    if value > timezone.now():
+        raise ValidationError('เวลาที่แจ้งผู้ได้รับผลกระทบต้องไม่เป็นเวลาในอนาคต')
+    if ticket.incident_datetime and value < ticket.incident_datetime:
+        raise ValidationError(
+            'เวลาที่แจ้งผู้ได้รับผลกระทบต้องไม่ก่อนเวลาที่ตรวจพบเหตุการณ์'
+        )
+    if ticket.event_occurred_at and value < ticket.event_occurred_at:
+        raise ValidationError(
+            'เวลาที่แจ้งผู้ได้รับผลกระทบต้องไม่ก่อนเวลาที่เกิดเหตุการณ์'
+        )
+
+
 def record_remediation_check(
     *, ticket, actor, checked_keys, other, findings=None, countermeasure=None,
+    affected_notified_at=None,
 ):
     """Save Tier 2's section-8 remediation checklist as it verifies containment.
 
     Stores the ticked item KEYS (unknown keys ignored) plus the free-text
     'อื่นๆ ระบุ'. ``findings`` / ``countermeasure`` are the Owner-lane's optional
     Investigation Findings / Countermeasure — accepted only when provided (the
-    Admin lane leaves them to the System Admin). Field history is recorded by the
-    caller's surrounding snapshot; this only mutates and saves.
+    Admin lane leaves them to the System Admin). ``affected_notified_at`` is
+    report row 1.4, likewise applied only when provided. Field history is
+    recorded by the caller's surrounding snapshot; this only mutates and saves.
     """
     from .report_content import REMEDIATION_CHECKLIST
 
@@ -260,6 +283,12 @@ def record_remediation_check(
     if countermeasure is not None:
         ticket.containment_report = countermeasure
         update_fields.append('containment_report')
+    # Report row 1.4. An empty submit is ignored (never clears a saved value —
+    # the send-back buttons don't require it); a provided value is validated.
+    if affected_notified_at is not None:
+        validate_affected_notified_at(ticket, affected_notified_at)
+        ticket.affected_notified_at = affected_notified_at
+        update_fields.append('affected_notified_at')
     ticket.save(update_fields=update_fields)
 
 

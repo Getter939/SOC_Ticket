@@ -275,6 +275,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         # Section 1 prints this in the Thai style used on the paper form.
         'incident_datetime': _format_dt_thai(ticket.incident_datetime),
         'event_occurred_at': _format_dt_thai(ticket.event_occurred_at),
+        'affected_notified_at': _format_dt_thai(ticket.affected_notified_at),
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),
         'reporter': _user_label(ticket.created_by, include_phone=True),

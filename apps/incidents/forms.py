@@ -736,11 +736,45 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
 class TicketEditForm(TicketReviewForm):
     """Correcting a ticket's content outside the Tier 2 review step.
 
-    Same field set as TicketReviewForm — general incident information, with no
-    ``t1_route`` and no status, so an edit can never move the ticket through the
-    workflow. Subclassed rather than duplicated so the two can't drift; the
-    parent's name reflects where it was first used, not what it can do.
+    Almost the same field set as TicketReviewForm — general incident information,
+    with no ``t1_route`` and no status, so an edit can never move the ticket
+    through the workflow. It additionally exposes ``affected_notified_at`` (report
+    row 1.4) so a value Tier 2 recorded at the review step can be corrected later.
+    Subclassed rather than duplicated so the two can't drift; the parent's name
+    reflects where it was first used, not what it can do.
     """
+
+    class Meta(TicketReviewForm.Meta):
+        fields = [*TicketReviewForm.Meta.fields, 'affected_notified_at']
+        widgets = {
+            **TicketReviewForm.Meta.widgets,
+            'affected_notified_at': forms.DateTimeInput(
+                attrs={'type': 'datetime-local'}, format='%Y-%m-%dT%H:%M',
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['affected_notified_at'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        from .ticket_workflow import validate_affected_notified_at
+
+        value = cleaned.get('affected_notified_at')
+        if value is not None:
+            # Validate against the detection / occurrence times from this same
+            # submit, not the stored ones, so an edit that moves both stays
+            # consistent. Fall back to the instance where a field is unchanged.
+            probe = Ticket(
+                incident_datetime=cleaned.get('incident_datetime'),
+                event_occurred_at=cleaned.get('event_occurred_at'),
+            )
+            try:
+                validate_affected_notified_at(probe, value)
+            except ValidationError as exc:
+                self.add_error('affected_notified_at', exc)
+        return cleaned
 
 
 class TicketPreparationEditForm(TicketReviewForm):

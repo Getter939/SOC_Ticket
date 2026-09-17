@@ -23,6 +23,7 @@ TRACKED_FIELDS = {
     'incident_name':         'ชื่อ incident/event',
     'incident_datetime':     'วันที่ เวลาที่ตรวจพบ',
     'event_occurred_at':     'วันที่ เวลาที่เกิดเหตุ',
+    'affected_notified_at':  'วันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ',
     'classification':        'ประเภท (Event/Incident)',
     'severity':              'ระดับความรุนแรง (SIEM)',
     'ncsa_severity':         'ระดับความรุนแรง (สกมช.)',

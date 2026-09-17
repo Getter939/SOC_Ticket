@@ -1,5 +1,6 @@
 import logging
 
+from django import forms as django_forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -54,6 +55,7 @@ from ..ticket_workflow import (
     submit_preparation,
     submit_containment,
     transition_ticket,
+    validate_affected_notified_at,
 )
 
 logger = logging.getLogger('apps.incidents.views')
@@ -633,6 +635,32 @@ def ticket_detail(request, pk):
             elif new_status not in transition_codes:
                 messages.error(request, 'การดำเนินการนี้ไม่ได้รับอนุญาตในขั้นตอนปัจจุบัน')
             else:
+                # Report row 1.4 — recorded on the Tier 2 review card. Required to
+                # move the case forward (approve / to manager), optional on the
+                # send-back and Event edges, which share the same <form>.
+                notified_at = None
+                notified_error = None
+                forward_targets = (
+                    Ticket.STATUS_APPROVED, Ticket.STATUS_PENDING_MANAGER,
+                )
+                if can_t2_record_remediation:
+                    raw_notified = request.POST.get('affected_notified_at', '').strip()
+                    if raw_notified:
+                        try:
+                            notified_at = django_forms.DateTimeField(
+                                input_formats=['%Y-%m-%dT%H:%M'],
+                            ).clean(raw_notified)
+                        except ValidationError:
+                            notified_error = (
+                                'รูปแบบวันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบไม่ถูกต้อง'
+                            )
+                    elif new_status in forward_targets:
+                        notified_error = (
+                            'กรุณาระบุวันที่ เวลา ที่แจ้งเหตุผู้ที่ได้รับผลกระทบ'
+                        )
+                if notified_error:
+                    messages.error(request, notified_error)
+                    return redirect('ticket_detail', pk=pk)
                 try:
                     with transaction.atomic():
                         # Tier 2's section-8 remediation checklist is saved
@@ -651,6 +679,7 @@ def ticket_detail(request, pk):
                                 other=request.POST.get('remediation_other', '').strip(),
                                 findings=findings,
                                 countermeasure=countermeasure,
+                                affected_notified_at=notified_at,
                             )
                             history.record_changes(
                                 ticket, before, request.user, source='t2_remediation',
