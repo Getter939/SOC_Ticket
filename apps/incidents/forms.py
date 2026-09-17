@@ -385,7 +385,7 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             'assigned_admin',
         ]
         widgets = {
-            'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'เช่น Malware – Suspicious SoftEther signed file on SRV-DB-01'}),
+            'incident_name':      forms.TextInput(attrs={'class': 'form-control', 'placeholder': '-'}),
             'severity':           forms.RadioSelect(attrs={'class': 'severity-radio'}),
             'incident_datetime':  forms.DateTimeInput(
                 attrs={'class': 'form-control', 'type': 'datetime-local'},
