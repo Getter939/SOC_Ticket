@@ -139,7 +139,12 @@
           {% if form.detailed_issue2.errors %}<div class="text-danger small">{{ form.detailed_issue2.errors }}</div>{% endif %}
         </div>
         <div class="col-12">
-          <label class="form-label fw-semibold">สรุปรายละเอียดเหตุการณ์โดยรวม <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold">สรุปเหตุการณ์</label>
+          {{ form.event_summary }}
+          {% if form.event_summary.errors %}<div class="text-danger small">{{ form.event_summary.errors }}</div>{% endif %}
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">รายละเอียดเหตุการณ์โดยรวม <span class="required-star">*</span></label>
           {{ form.issue_description }}
           {% if form.issue_description.errors %}<div class="text-danger small">{{ form.issue_description.errors }}</div>{% endif %}
         </div>

@@ -96,9 +96,10 @@ SECTION1_ROWS = [
         ('chk_asset_server', 'Server'),
         ('chk_asset_network', 'Network Device')]),
     ('kv', '1.13 ส่วนงานเจ้าของหรือผู้ดูแลทรัพย์สิน', 'asset_owner'),
-    # 1.14 mirrors section 2 for now — it is meant to be a shorter summary of the
-    # incident description, but there is no separate summary field yet.
-    ('kv', '1.14 รายละเอียด', 'incident_description'),
+    # 1.14 is the short summary (ticket.event_summary); section 2 carries the
+    # full write-up (ticket.issue_description). incident_summary falls back to the
+    # full detail when no summary was entered.
+    ('kv', '1.14 รายละเอียด', 'incident_summary'),
     ('kv', '1.15 สถานะปัจจุบัน', 'status'),
     ('kv', '1.16 เรื่องที่ดำเนินการแล้ว', 'actions_taken_summary'),
     ('kv', '1.17 การที่จะดำเนินการลำดับถัดไป', 'next_steps_summary'),

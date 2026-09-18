@@ -192,7 +192,14 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold" for="{{ form.issue_description.id_for_label }}">สรุปรายละเอียดเหตุการณ์ <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.event_summary.id_for_label }}">สรุปเหตุการณ์</label>
+          {{ form.event_summary }}
+          <div class="field-hint">สรุปเหตุการณ์โดยย่อ — ใช้แสดงในข้อ 1.12 ของรายงาน</div>
+          {% if form.event_summary.errors %}<div class="text-danger small">{{ form.event_summary.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="{{ form.issue_description.id_for_label }}">รายละเอียดเหตุการณ์ <span class="required-star">*</span></label>
           {{ form.issue_description }}
           <div class="field-hint">ลักษณะเหตุการณ์ ช่องโหว่/เทคนิคที่เกี่ยวข้อง วันที่และเวลาที่เริ่มพบ แหล่งที่มาของการแจ้งเตือน และผลกระทบเบื้องต้น</div>
           {% if form.issue_description.errors %}<div class="text-danger small">{{ form.issue_description.errors }}</div>{% endif %}

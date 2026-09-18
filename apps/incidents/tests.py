@@ -540,6 +540,35 @@ class TicketReportExportTest(TestCase):
                             run.text,
                         )
 
+    def test_report_1_12_uses_event_summary_while_section_2_keeps_full_detail(self):
+        self.ticket.event_summary = 'สรุปสั้นของเหตุการณ์ Summary'
+        self.ticket.issue_description = 'รายละเอียดฉบับเต็ม Full detail'
+        self.ticket.save(update_fields=['event_summary', 'issue_description'])
+
+        report = build_ticket_report_context(self.ticket)
+        sections = build_ticket_report_sections(report, self.ticket, hide_empty=False)
+        row_1_12 = next(r for r in sections[0]['rows'] if r['label'] == '1.14 รายละเอียด')
+
+        self.assertEqual(row_1_12['value'], 'สรุปสั้นของเหตุการณ์ Summary')
+        # Section 2 keeps the full write-up, not the summary.
+        self.assertEqual(sections[1]['rows'][0]['value'], 'รายละเอียดฉบับเต็ม Full detail')
+
+        # Both strings survive to the rendered DOCX.
+        docx_text = _docx_text(generate_ticket_report(self.ticket.pk, hide_empty=False).content)
+        self.assertIn('สรุปสั้นของเหตุการณ์ Summary', docx_text)
+        self.assertIn('รายละเอียดฉบับเต็ม Full detail', docx_text)
+
+    def test_report_1_12_falls_back_to_full_detail_when_summary_blank(self):
+        self.ticket.event_summary = ''
+        self.ticket.issue_description = 'รายละเอียดฉบับเต็ม Fallback detail'
+        self.ticket.save(update_fields=['event_summary', 'issue_description'])
+
+        report = build_ticket_report_context(self.ticket)
+        sections = build_ticket_report_sections(report, self.ticket, hide_empty=False)
+        row_1_12 = next(r for r in sections[0]['rows'] if r['label'] == '1.14 รายละเอียด')
+
+        self.assertEqual(row_1_12['value'], 'รายละเอียดฉบับเต็ม Fallback detail')
+
     def test_image_attachment_is_embedded_in_preview_docx_and_pdf(self):
         with tempfile.TemporaryDirectory(prefix='soc_report_image_') as media_root:
             with override_settings(MEDIA_ROOT=media_root):
@@ -1893,6 +1922,15 @@ class DirectToOwnerPathTest(TestCase):
     def test_form_accepts_direct_owner_for_high_severity(self):
         form = TicketForm(data=_owner_payload(severity='High'), user=self.t1)
         self.assertTrue(form.is_valid(), form.errors)
+
+    def test_form_accepts_and_stores_optional_event_summary(self):
+        # event_summary is optional (omitted by _owner_payload above, which still
+        # validates); when supplied it is saved on the ticket.
+        form = TicketForm(
+            data=_owner_payload(event_summary='สรุปเหตุการณ์โดยย่อ'), user=self.t1,
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['event_summary'], 'สรุปเหตุการณ์โดยย่อ')
 
     # ── Create-flow view: routes to the manager review, sends no admin email ─ #
     def test_create_view_routes_to_mgr_triage_without_email(self):

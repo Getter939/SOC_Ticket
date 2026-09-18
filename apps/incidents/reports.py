@@ -284,6 +284,9 @@ def build_ticket_report_context(ticket, generated_at=None):
         'actions_taken_summary': _value(ticket.actions_taken_summary),
         'next_steps_summary': _value(ticket.next_steps_summary),
         'incident_description': _value(ticket.issue_description),
+        # Report row 1.12: the short summary, falling back to the full detail
+        # so tickets created before event_summary existed still print something.
+        'incident_summary': _value(ticket.event_summary or ticket.issue_description),
         'host_ip': _host_ip(ticket),
         'system_name': _value(ticket.device_name),
         'asset_owner': _value(ticket.asset_owner),

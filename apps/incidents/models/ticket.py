@@ -741,6 +741,12 @@ class Ticket(models.Model):
 
     # ── Section 3: Description ───────────────────────────────────────── #
     device_name = models.CharField(max_length=100, verbose_name='ระบบ / บริการ (System/Service)')
+    # Short summary shown as report row 1.12; the full write-up lives in
+    # issue_description (report Section 2). Optional — report 1.12 falls back to
+    # issue_description when this is blank, so existing tickets are unaffected.
+    event_summary = models.TextField(
+        blank=True, default='', verbose_name='สรุปเหตุการณ์',
+    )
     issue_description = models.TextField(verbose_name='รายละเอียดเหตุการณ์')
     # Per-system note captured on the Project Incident form — one entry per
     # affected system. Distinct from issue_description, which stays the shared

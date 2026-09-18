@@ -30,6 +30,7 @@ TRACKED_FIELDS = {
     'issue_type':            'แหล่งที่มา',
     'detailed_issue':        'หมวดหมู่ภัยคุกคาม',
     'detailed_issue2':       'หมวดหมู่ย่อย',
+    'event_summary':         'สรุปเหตุการณ์',
     'issue_description':     'รายละเอียดเหตุการณ์',
     'device_name':           'ชื่ออุปกรณ์/ระบบ',
     'ip_address':            'IP Address',
