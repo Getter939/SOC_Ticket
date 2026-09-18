@@ -34,6 +34,7 @@ from scripts.build_report_template_v2 import (  # noqa: E402
     clear_table_borders,
     set_cell_margins,
     set_cell_shading,
+    set_font_size,
     set_table_borders,
 )
 from apps.incidents.report_content import (  # noqa: E402
@@ -89,7 +90,7 @@ def _style_document(doc):
     normal._element.rPr.rFonts.set(qn('w:ascii'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:hAnsi'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:cs'), BODY_FONT)
-    normal.font.size = Pt(12)
+    set_font_size(normal.font, 12)
     normal.font.color.rgb = RGBColor.from_string(TEXT)
     normal.paragraph_format.space_after = Pt(0)
     normal.paragraph_format.line_spacing = 1

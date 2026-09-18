@@ -1,0 +1,166 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="SOC workflow navigation proposal" version="24.0.0">
+  <diagram id="main-functions" name="Main functions · navigation proposal">
+    <mxGraphModel dx="1680" dy="1020" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1680" pageHeight="1020" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="background" value="" style="fillColor=#ffffff;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="0" y="0" width="1680" height="1020" />
+        </mxCell>
+        <mxCell id="primary-band" value="" style="rounded=1;arcSize=6;fillColor=#f8fafc;strokeColor=#e2e8f0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="20" y="140" width="1620" height="210" />
+        </mxCell>
+        <mxCell id="control-band" value="" style="rounded=1;arcSize=6;fillColor=#f8fafc;strokeColor=#e2e8f0;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="20" y="690" width="1620" height="230" />
+        </mxCell>
+        <mxCell id="title" value="SOC workflow — main functions" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=32;fontColor=#0f172a;fontStyle=1;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="24" width="1220" height="48" />
+        </mxCell>
+        <mxCell id="draft" value="NAVIGABLE OVERVIEW" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=16;fontColor=#64748b;fontStyle=1;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1370" y="35" width="270" height="28" />
+        </mxCell>
+        <mxCell id="subtitle" value="Read the main path, then follow the named handoff into a detail page. Internal decisions stay in that page." style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=18;fontColor=#475569;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="82" width="1580" height="36" />
+        </mxCell>
+        <mxCell id="intake" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Intake &amp; triage&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Wazuh alerts / manual reports&lt;br&gt;Claim, dismiss, or create a case&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;TIER 1 · P2&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#1e3a8a;fillColor=#eff6ff;strokeColor=#60a5fa;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="175" width="260" height="140" />
+        </mxCell>
+        <mxCell id="ticket" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Prepare a ticket&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Classify, choose route, submit&lt;br&gt;Draft / Alert Bundle supported&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;TIER 1 · P3&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#1e3a8a;fillColor=#eff6ff;strokeColor=#60a5fa;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="370" y="175" width="260" height="140" />
+        </mxCell>
+        <mxCell id="manager" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Review &amp; route&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Assess Normal / Emergency&lt;br&gt;Forward the selected lane&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;SOC MANAGER · P5&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#9f1239;fillColor=#fff1f2;strokeColor=#fb7185;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="700" y="175" width="260" height="140" />
+        </mxCell>
+        <mxCell id="handling" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Remediate &amp; verify&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Admin / Owner → Tier 2&lt;br&gt;Verify, then apply closure gates&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;P6 ADMIN / P7 OWNER · G1 / K1&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#5b21b6;fillColor=#f5f3ff;strokeColor=#a78bfa;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1030" y="175" width="260" height="140" />
+        </mxCell>
+        <mxCell id="outcome" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Terminal outcomes&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;APPROVED · CLOSED_EVENT&lt;br&gt;CANCELLED through C1&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;OUTCOME REFERENCE · P12&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#065f46;fillColor=#ecfdf5;strokeColor=#34d399;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1360" y="175" width="260" height="140" />
+        </mxCell>
+        <mxCell id="project" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Manage a Project Incident&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Create / add member tickets&lt;br&gt;Shared review; members follow own lanes&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;TIER 1 + MANAGER · P8&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#1e3a8a;fillColor=#eff6ff;strokeColor=#60a5fa;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="470" width="310" height="170" />
+        </mxCell>
+        <mxCell id="review" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;Review &amp; monitor&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Confirm Event or determine Incident&lt;br&gt;Downgrade approval / monitoring inside&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;TIER 2 + CREATOR + MANAGER · P4&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#5b21b6;fillColor=#f5f3ff;strokeColor=#a78bfa;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="500" y="470" width="320" height="170" />
+        </mxCell>
+        <mxCell id="project-note" value="Project review is inside P8.&lt;br&gt;Incident members enter the selected lane directly." style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=16;fontColor=#475569;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="905" y="465" width="370" height="64" />
+        </mxCell>
+        <mxCell id="closure-note" value="Closure gates stay on P6/P7:&lt;br&gt;notified date · no open requests&lt;br&gt;Emergency → manager sign-off" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=15;fontColor=#475569;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1040" y="570" width="320" height="84" />
+        </mxCell>
+        <mxCell id="control-title" value="SUPPORTING CONTROLS — apply at eligible stages; these are not sequential ticket stages" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=17;fontColor=#334155;fontStyle=1;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="704" width="1520" height="36" />
+        </mxCell>
+        <mxCell id="requests" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;G1 · Response Requests&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;VA/PT · Infra Security · RCA&lt;br&gt;Run in parallel; block APPROVED&lt;br&gt;while requests remain open&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;P9 → APPROVAL GATES ON P6/P7&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#155e75;fillColor=#ecfeff;strokeColor=#22d3ee;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="755" width="285" height="140" />
+        </mxCell>
+        <mxCell id="corrections" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;K1 · Corrections&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Step back / reassess Emergency&lt;br&gt;Return to the exact eligible stage&lt;br&gt;shown on the detail page&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;P11 → P5 / P6 / P7&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#9f1239;fillColor=#fff1f2;strokeColor=#fb7185;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="355" y="755" width="285" height="140" />
+        </mxCell>
+        <mxCell id="reference" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;R1 · Reference&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Closure records · emails · OLA&lt;br&gt;Applies across the lifecycle&lt;br&gt;No workflow transition implied&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;P12 · REFERENCE ONLY&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#713f12;fillColor=#fefce8;strokeColor=#eab308;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="670" y="755" width="285" height="140" />
+        </mxCell>
+        <mxCell id="cancellation" value="&lt;div style=&quot;font-size:19px;font-weight:bold;margin-bottom:10px&quot;&gt;C1 · Cancellation&lt;/div&gt;&lt;div style=&quot;font-size:15px;line-height:1.2&quot;&gt;Role / stage rules apply&lt;br&gt;Pending requests keep work moving&lt;br&gt;Successful cancellation → H10&lt;/div&gt;&lt;div style=&quot;font-size:12px;font-weight:bold;margin-top:10px&quot;&gt;P10 · ANY ACTIVE TICKET&lt;/div&gt;" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;spacing=18;fontFamily=Helvetica;fontSize=16;fontColor=#9f1239;fillColor=#fff1f2;strokeColor=#fb7185;strokeWidth=1.6;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="985" y="755" width="305" height="140" />
+        </mxCell>
+        <mxCell id="control-note" value="Matching badges appear at the affected steps.&lt;br&gt;&lt;br&gt;G1 is an approval dependency.&lt;br&gt;C1 is a separate audited process.&lt;br&gt;K1 returns to a named stage." style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=16;fontColor=#475569;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1360" y="755" width="270" height="140" />
+        </mxCell>
+        <mxCell id="intake-ticket" edge="1" parent="1" source="intake" target="ticket" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="ticket-manager" edge="1" parent="1" source="ticket" target="manager" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="manager-handling" edge="1" parent="1" source="manager" target="handling" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="handling-outcome" edge="1" parent="1" source="handling" target="outcome" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="intake-project" edge="1" parent="1" source="intake" target="project" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=0.5;exitY=1.0;entryX=0.41935483870967744;entryY=0.0;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="ticket-review" edge="1" parent="1" source="ticket" target="review" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=0.8076923076923077;exitY=1.0;entryX=0.25;entryY=0.0;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="project-review" edge="1" parent="1" source="project" target="review" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.7058823529411765;entryX=0.0;entryY=0.7058823529411765;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="review-manager" edge="1" parent="1" source="review" target="manager" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.23529411764705882;entryX=0.6153846153846154;entryY=1.0;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="860" y="510" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="project-handling" edge="1" parent="1" source="project" target="handling" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#475569;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.23529411764705882;entryX=0.38461538461538464;entryY=1.0;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="410" y="510" />
+              <mxPoint x="410" y="390" />
+              <mxPoint x="1130" y="390" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="review-outcome" edge="1" parent="1" source="review" target="outcome" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#64748b;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.47058823529411764;entryX=0.38461538461538464;entryY=1.0;exitPerimeter=0;entryPerimeter=0;dashed=0;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1460" y="550" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="cancel-outcome" edge="1" parent="1" source="cancellation" target="outcome" style="edgeStyle=none;noEdgeStyle=1;html=1;rounded=0;orthogonal=1;jumpStyle=arc;jumpSize=12;strokeWidth=2;strokeColor=#be123c;endArrow=block;endSize=10;endFill=1;exitX=1.0;exitY=0.2857142857142857;entryX=0.8461538461538461;entryY=1.0;exitPerimeter=0;entryPerimeter=0;dashed=1;dashPattern=6 4;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1320" y="795" />
+              <mxPoint x="1320" y="670" />
+              <mxPoint x="1580" y="670" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="h01" value="H01&lt;br&gt;Ticket" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="307" y="190" width="56" height="44" />
+        </mxCell>
+        <mxCell id="h04-direct" value="H04&lt;br&gt;Incident" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="633" y="190" width="64" height="44" />
+        </mxCell>
+        <mxCell id="h05-h06" value="H05&lt;br&gt;H06" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="967" y="194" width="56" height="42" />
+        </mxCell>
+        <mxCell id="h08-h09" value="H08&lt;br&gt;H09" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1297" y="194" width="56" height="42" />
+        </mxCell>
+        <mxCell id="h02" value="H02 · Project" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="66" y="376" width="138" height="42" />
+        </mxCell>
+        <mxCell id="h03" value="H03&lt;br&gt;Event / escalate" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="488" y="407" width="152" height="48" />
+        </mxCell>
+        <mxCell id="h03-project" value="H03 · Event member" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="358" y="606" width="136" height="42" />
+        </mxCell>
+        <mxCell id="h04-review" value="H04 · Incident&lt;br&gt;+ lane chosen" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="735" y="411" width="160" height="48" />
+        </mxCell>
+        <mxCell id="h05-h06-project" value="H05 / H06 · Incident members after project review" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="905" y="368" width="383" height="42" />
+        </mxCell>
+        <mxCell id="h07" value="H07 · Event confirmed" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1120" y="519" width="210" height="28" />
+        </mxCell>
+        <mxCell id="h10" value="H10 · Cancelled" style="rounded=1;arcSize=8;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;spacing=4;fontFamily=Helvetica;fontSize=14;fontColor=#334155;fillColor=#ffffff;strokeColor=#cbd5e1;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="1392" y="646" width="170" height="42" />
+        </mxCell>
+        <mxCell id="legend" value="Solid arrow = handoff between functions     |     Hnn = matching exit / entry connector     |     Pn = existing detail page" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=16;fontColor=#334155;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="944" width="1580" height="28" />
+        </mxCell>
+        <mxCell id="footer" value="Function map, not a state-transition diagram. In the 12-page operational file, cards, page references, paired detail connectors and return navigation are clickable." style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=14;fontColor=#475569;fontStyle=0;spacing=2;" vertex="1" parent="1">
+          <mxGeometry as="geometry" x="40" y="978" width="1580" height="28" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

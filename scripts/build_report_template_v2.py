@@ -61,6 +61,22 @@ TIGHT_LINE_PT = 22
 
 # ── low-level helpers ──────────────────────────────────────────────────── #
 
+def set_font_size(font, size):
+    """Set both Latin and complex-script (including Thai) sizes in points.
+
+    python-docx writes only w:sz via font.size. Without w:szCs, Word uses
+    the stock 11pt complex-script default even in a 16pt body or 22pt title.
+    This also applies to the Normal style inherited by evidence captions.
+    """
+    font.size = Pt(size)
+    rpr = font._element.get_or_add_rPr()
+    complex_size = rpr.find(qn('w:szCs'))
+    if complex_size is None:
+        complex_size = OxmlElement('w:szCs')
+        rpr.find(qn('w:sz')).addnext(complex_size)
+    complex_size.set(qn('w:val'), rpr.find(qn('w:sz')).get(qn('w:val')))
+
+
 def set_run_font(run, name=BODY_FONT, size=BODY_PT, color=TEXT, bold=False):
     run.font.name = name
     rpr = run._element.get_or_add_rPr()
@@ -70,7 +86,7 @@ def set_run_font(run, name=BODY_FONT, size=BODY_PT, color=TEXT, bold=False):
         rpr.append(rfonts)
     for attr in ('w:ascii', 'w:hAnsi', 'w:cs'):
         rfonts.set(qn(attr), name)
-    run.font.size = Pt(size)
+    set_font_size(run.font, size)
     run.font.color.rgb = RGBColor.from_string(color)
     run.bold = bold
 
@@ -213,7 +229,7 @@ def style_doc(doc):
     normal._element.rPr.rFonts.set(qn('w:ascii'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:hAnsi'), BODY_FONT)
     normal._element.rPr.rFonts.set(qn('w:cs'), BODY_FONT)
-    normal.font.size = Pt(BODY_PT)
+    set_font_size(normal.font, BODY_PT)
     normal.font.color.rgb = RGBColor.from_string(TEXT)
     # Tighter than before: cells were carrying a lot of empty vertical space.
     normal.paragraph_format.space_after = Pt(0)

@@ -516,6 +516,30 @@ class TicketReportExportTest(TestCase):
         self.assertEqual(self.ticket.report_sha256, hashlib.sha256(content).hexdigest())
         self.assertIsNotNone(self.ticket.report_generated_at)
 
+    def test_docx_exports_preserve_thai_and_latin_font_sizes(self):
+        from docx.oxml.ns import qn
+
+        for ticket in (self.ticket, self.event_ticket):
+            ticket.incident_name = 'ตรวจสอบ Server SOC'
+            ticket.issue_description = 'ตรวจสอบระบบ Server\n☑ ดำเนินการแล้ว Done'
+            ticket.save(update_fields=['incident_name', 'issue_description'])
+            with self.subTest(classification=ticket.classification):
+                report = generate_ticket_report(ticket.pk, hide_empty=False)
+                doc = Document(BytesIO(report.content))
+                self.assertIn('ตรวจสอบ Server SOC', _docx_text(report.content))
+                for paragraph in _iter_paragraphs(doc):
+                    for run in paragraph.runs:
+                        if not run.text:
+                            continue
+                        rpr = run._r.get_or_add_rPr()
+                        latin = rpr.find(qn('w:sz'))
+                        thai = rpr.find(qn('w:szCs'))
+                        self.assertIsNotNone(thai, run.text)
+                        self.assertEqual(
+                            thai.get(qn('w:val')), latin.get(qn('w:val')),
+                            run.text,
+                        )
+
     def test_image_attachment_is_embedded_in_preview_docx_and_pdf(self):
         with tempfile.TemporaryDirectory(prefix='soc_report_image_') as media_root:
             with override_settings(MEDIA_ROOT=media_root):

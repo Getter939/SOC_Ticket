@@ -1,6 +1,6 @@
 # SOC End-to-End Workflow (v1.7.0, as implemented)
 
-> **Audience:** SOC leads, analysts, developers · **Status:** Current · **Last updated:** 2026-09-17 (audited against the code)
+> **Audience:** SOC leads, analysts, developers · **Status:** Current · **Last updated:** 2026-09-18 (navigation model updated; workflow audited against the code)
 > **Scope:** the whole path from a Wazuh alert or a manual report to a closed case, including every side-flow.
 > **Editable diagram:** [soc-end-to-end-workflow-v1.7.0.drawio](soc-end-to-end-workflow-v1.7.0.drawio) (12 pages, role swimlanes; open in diagrams.net)
 > **Status-machine authority:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md) and `apps/incidents/models/ticket.py` → `Ticket.ALLOWED_TRANSITIONS`. If this page and the code disagree, the code wins.
@@ -13,50 +13,65 @@ This page draws **what the code actually does**. Anything marked **⚠** is a pl
 
 ---
 
-## 1 · Overview
+## 1 · Main functions and page handoffs
+
+The overview shows function boundaries. It intentionally leaves the internal decisions on pages 2–12. A numbered `Hnn` connector describes what crosses a page boundary; the same ID appears at the source and destination page in the editable diagram. `G1`, `K1`, `C1` and `R1` are supporting relationships, not ticket statuses.
+
+![One-page main-functions map](soc-workflow-main-functions-proposal.png)
 
 ```mermaid
 flowchart LR
-    WZ([Wazuh Indexer<br/>DETECTION alerts]) --> ING[ingest_wazuh_alerts<br/>level ≥ 10 default · dedup]
-    ING --> TQ[Wazuh Triage Queue<br/>claim → decide]
-    MAN([Manual report<br/>email · phone · TI · external]) --> MQ[My Queue — Manual tab<br/>log → claim → decide]
-    MQ -->|dismiss| DIS[Dismissed — no ticket]
-    TQ -->|convert| NEW[Ticket form verdict + route<br/>· Alert Bundle ticket · Project Incident members]
-    MQ -->|convert| NEW
-    NEW -.->|save draft| DRF[NEW — draft only]
-    DRF -.->|submit preparation| D1
-    NEW -->|send now| D1{submit: verdict + route}
-    D1 -->|Event or escalate| ESC[ESCALATED_T2<br/>Tier 2 review]
-    D1 -->|Incident: Admin / Owner| MT[PENDING_MGR_TRIAGE<br/>Normal / Emergency]
-    ESC -->|Event, Tier 1 said Event| EV([CLOSED_EVENT])
-    ESC -->|downgrade| MER[PENDING_MGR_EVENT_REVIEW]
-    MER -->|confirm| EV
-    ESC -->|watch| MON[MONITORING<br/>once, not project members]
-    MON -->|Incident + lane chosen| MT
-    MON -->|quiet → Event| ESC
-    ESC -->|Incident via T1_REVIEW| MT
-    MT -->|ADMIN| ADM[Admin lane]
-    MT -->|OWNER| OWN[Owner lane]
-    ADM --> VER[Tier 2 verification]
-    OWN --> VER
-    VER -->|reclassify Event| EV
-    VER -->|verified · Normal| OK([APPROVED])
-    VER -->|verified · Emergency| PM[PENDING_MANAGER]
-    PM -->|approve| OK
-    NEW -.->|cancel from any active stage| CAN([CANCELLED])
+    IN[Intake and triage<br/>Tier 1 · page 2]
+    TK[Prepare a ticket<br/>Tier 1 · page 3]
+    PRJ[Manage a Project Incident<br/>Tier 1 + Manager · page 8]
+    T2[Review and monitor<br/>Tier 2 + creator + Manager · page 4]
+    MGR[Review and route<br/>SOC Manager · page 5]
+    FIX[Remediate and verify<br/>Admin page 6 / Owner page 7]
+    OUT([APPROVED · CLOSED_EVENT · CANCELLED<br/>reference page 12])
+
+    IN -->|H01 · ticket form| TK
+    IN -->|H02 · project| PRJ
+    TK -->|H03 · Event / escalation| T2
+    TK -->|H04 · Incident + lane| MGR
+    PRJ -->|H03 · Event member| T2
+    PRJ -->|H05 / H06 · reviewed Incident member| FIX
+    T2 -->|H04 · Incident + lane| MGR
+    T2 -->|H07 · confirmed Event| OUT
+    MGR -->|H05 ADMIN / H06 OWNER| FIX
+    FIX -->|H08 APPROVED / H09 CLOSED_EVENT| OUT
+
+    subgraph SUPPORT[Supporting controls — parallel or cross-cutting]
+        G1[G1 · Response Requests<br/>page 9 · block APPROVED while open]
+        K1[K1 · Corrections<br/>page 11 · return to an exact eligible stage]
+        C1[C1 · Cancellation<br/>page 10 · role and stage rules]
+        R1[R1 · Emails and OLA<br/>page 12 · reference only]
+    end
+    C1 -.->|H10 · successful cancellation| OUT
 
     classDef t1 fill:#e7f0ff,stroke:#3b82f6,color:#1e3a8a;
     classDef t2 fill:#f1ebfe,stroke:#8b5cf6,color:#5b21b6;
     classDef mgr fill:#ffece7,stroke:#fb7185,color:#9f1239;
-    classDef admin fill:#fef3e2,stroke:#f59e0b,color:#8a4d0a;
-    classDef owner fill:#fdeef6,stroke:#d63384,color:#831843;
+    classDef response fill:#ecfeff,stroke:#22d3ee,color:#155e75;
+    classDef reference fill:#fefce8,stroke:#eab308,color:#713f12;
     classDef closed fill:#e6f6ec,stroke:#34d399,color:#065f46;
-    classDef cancel fill:#fdecec,stroke:#dc3545,color:#7f1d1d;
-    classDef sys fill:#f8f9fa,stroke:#6c757d,color:#343a40;
-    class WZ,ING,DIS sys; class MAN,TQ,MQ,NEW,DRF,MON t1;
-    class ESC,VER t2; class MT,PM,MER mgr; class ADM admin; class OWN owner;
-    class EV,OK closed; class CAN cancel;
+    class IN,TK,PRJ t1; class T2,FIX t2; class MGR,K1,C1 mgr;
+    class G1 response; class R1 reference; class OUT closed;
 ```
+
+| Connector | Relationship between detail pages |
+|---|---|
+| `H01` | P2 → P3: open a ticket form from eligible claimed source(s); an Alert Bundle still produces one ticket |
+| `H02` | P2 → P8: open Project Incident creation from an eligible source, or without a source |
+| `H03` | P3/P8 → P4: submitted Event or escalation enters `ESCALATED_T2`; Event project members cannot be monitored |
+| `H04` | P3/P4 → P5: Incident with Admin/Owner lane chosen enters `PENDING_MGR_TRIAGE` |
+| `H05` | P5/P8 → P6: ADMIN route enters `AWAITING_CONTAINMENT` |
+| `H06` | P5/P8 → P7: OWNER route enters `AWAITING_OWNER` |
+| `H07` | P4 → outcome: confirmed Event closes as `CLOSED_EVENT`, including manager downgrade review where required |
+| `H08` | P6/P7 → outcome: verified case closes as `APPROVED` after its notified-date, Response Request and Emergency gates pass |
+| `H09` | P6/P7 → outcome: the separate reclassification action closes as `CLOSED_EVENT` |
+| `H10` | P10 → outcome: a successful direct cancellation or approved request closes as `CANCELLED` |
+
+The detailed draw.io pages include clickable **Back to main functions** links and a footer containing their incoming, outgoing and supporting connectors. Page 12 documents outcomes; following a connector to it does not add another execution stage.
 
 ## 2 · Intake (Tier 1)
 

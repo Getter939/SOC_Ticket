@@ -135,10 +135,20 @@
     .signoff td { border: none; text-align: center; width: 50%; }
     .signoff .line { margin-bottom: 2px; }
 
-    .appendix { break-before: page; }
+    /* The whole appendix (heading + intro + clause + table) starts on a fresh
+       page and stays together. The page break lives on this wrapper, not on
+       .appendix itself: .appendix also matched table.appendix, so the table took
+       a second break onto the following page and left the heading orphaned. */
+    .appendix-block { break-before: page; page-break-before: always; }
     .appendix-intro { margin: 4px 0 8px; color: #364152; }
     .appendix-clause { margin: 0 0 6px; font-weight: 700; }
     table.appendix th { text-align: center; }
+    /* xhtml2pdf's fixed layout takes column widths from the first row's cells and
+       ignores <colgroup>. Without these the global th{width:34%} makes both
+       header cells 34%, so the table renders at ~68% width and the description
+       column wraps hard. Pin the two columns to fill the full width. */
+    table.appendix th.cat-col { width: 14%; }
+    table.appendix th.desc-col { width: 86%; }
 
     @media screen and (max-width: 820px) {
       .report-page { margin: 0; padding: 20px; box-shadow: none; }
@@ -283,14 +293,15 @@
       </tbody>
     </table>
     {% endif %}
-    <div class="section-band appendix">&#8206;*หมวดหมู่ของภัยคุกคามทางไซเบอร์</div>
+    <div class="appendix-block">
+    <div class="section-band appendix">*หมวดหมู่ของภัยคุกคามทางไซเบอร์</div>
     <p class="appendix-intro">{{ appendix_intro }}</p>
     {# Present in the DOCX builder but previously missing here, so DOCX and PDF disagreed. #}
     <p class="appendix-clause">ข้อ ๑ การจำแนกหมวดหมู่ของภัยคุกคามทางไซเบอร์</p>
     <table class="appendix">
       <colgroup><col style="width:14%"><col style="width:86%"></colgroup>
       <thead>
-        <tr><th>หมวดหมู่</th><th>คำอธิบาย</th></tr>
+        <tr><th class="cat-col">หมวดหมู่</th><th class="desc-col">คำอธิบาย</th></tr>
       </thead>
       <tbody>
         {% for category, description in appendix_categories %}
@@ -298,6 +309,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% endif %}
 
     <table id="reportFooter">
