@@ -617,7 +617,7 @@
 <nav id="sidebar">
     {% with profile=request.user.profile %}
 
-    {% if request.user.is_superuser or profile.is_soc %}
+    {% if request.user.is_superuser or profile.is_soc or profile.is_executive %}
     <div class="nav-section-label">ภาพรวม</div>
     <a href="{% url 'home' %}" data-label="แดชบอร์ด SOC"
        class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">

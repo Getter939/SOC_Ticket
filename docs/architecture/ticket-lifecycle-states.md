@@ -1,7 +1,7 @@
 # Ticket Lifecycle States
 
-> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-10
-> **Source of truth:** `apps/incidents/models.py` → `Ticket.ALLOWED_TRANSITIONS` and `Ticket.cancellation_action`
+> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-17
+> **Source of truth:** `apps/incidents/models/ticket.py` → `Ticket.ALLOWED_TRANSITIONS` and `Ticket.cancellation_action` (rules in `apps/incidents/cancellation.py`)
 
 The complete ticket lifecycle as a diagram plus a transition reference, organised
 by which role may perform each move. **`STATUS_CHOICES` defines 15 statuses: 14
@@ -29,10 +29,13 @@ Key rules (redesigned 2026-07-14):
 - **Monitoring is a watch-and-wait park, not a stage of handling** (added v1.2.3). Only Tier 2 may grant it, only from `ESCALATED_T2`, for a **fixed 30 days**, **once per case** (`has_been_monitored`). The case sits in the Tier 1 creator's court and resolves to Incident (→ SOC Manager triage) or Event (→ Tier 2 confirms the close). Expiry is computed on read — there is no scheduler. Tier 1 may *recommend* monitoring at creation; the recommendation is advisory only.
 - **The SOC Manager can step a ticket backward** along `STEP_BACK_EDGES` to correct a mis-route (e.g. the wrong admin was assigned). Step-back runs through `transition_to()`, so it inherits every invariant and the audit log instead of a parallel hand-rolled write; the `t1_route` gate allows exactly one of the two `PENDING_MANAGER` edges per ticket. No other role can move a ticket backward.
 - System Owner never uses the system — Tier 1 records the owner's fix on their behalf.
+- **A ticket can be saved as a draft before it is routed** (added 2026-09-17). On the creation form the analyst either sends it now or chooses *save preparation*. A draft stays in `NEW` (label "in preparation, not submitted") with its chosen lane remembered. The creator later sends it with **Submit preparation** (`ticket_workflow.submit_preparation`), which takes the same `NEW → ESCALATED_T2` / `NEW → PENDING_MGR_TRIAGE` edges. No emails are sent while it is only a draft. Project Incidents have no draft mode.
+- **Tier 2 must record when the affected party was notified before moving a verified case forward** (added 2026-09-17). On `CONTAINMENT_REPORTED` / `PENDING_T2_REVIEW`, the edges to `APPROVED` and `PENDING_MANAGER` are refused until `affected_notified_at` (report row 1.4) is entered. It is optional on the send-back and Event-close edges. The date may not be in the future or earlier than the detection / occurrence time (`ticket_workflow.validate_affected_notified_at`). This check lives in the ticket-detail view, not in `transition_to`.
 
 ```mermaid
 flowchart TD
-    START([เริ่มต้น]) --> NEW[สร้าง Ticket — NEW<br/>ระบุความรุนแรง + จัดประเภท + IOC]
+    START([เริ่มต้น]) --> NEW[สร้าง Ticket — NEW<br/>ระบุความรุนแรง + จัดประเภท + IOC<br/>ส่งทันที หรือบันทึกจัดเตรียมไว้ก่อน]
+    NEW -.->|บันทึกจัดเตรียม → ผู้เปิดกดส่งภายหลัง| NEW
 
     %% ── Tier 1 triage decision ──────────────────────────────
     NEW --> D1{Event หรือ Incident?<br/>ตัดสินโดย Tier 1}
@@ -159,8 +162,9 @@ including MONITORING and legacy OWNER_REMEDIATED, irrespective of Classification
 or Emergency. It applies to an individual Member Ticket, retaining group membership,
 shared evidence and linked Alerts. It does not return Alerts to triage.
 
-- The Tier 1 creator may cancel directly only at NEW. The normal creation form
-  routes tickets immediately on save, so most saved tickets require manager approval.
+- The Tier 1 creator may cancel directly only at NEW — i.e. while the ticket is still a
+  saved draft (*save preparation*). A ticket sent on save leaves NEW immediately, so
+  cancelling it requires manager approval.
 - The creator or current workflow actor may request cancellation. Tier 2 claims
   still block another Tier 2 analyst. Response-team assignment alone does not allow it.
 - The SOC Manager approves/rejects pending requests or cancels an active ticket
@@ -214,7 +218,7 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 
 **Tier 2 Queue** (`/wazuh/escalation_queue/`) shows all three Tier 2 stages: ESCALATED_T2, CONTAINMENT_REPORTED, PENDING_T2_REVIEW — each row claimable, with an OLA countdown column.
 
-**Tier 1 My Queue** (`/incidents/my-queue/`) is the Tier 1 counterpart: their own-court tickets (NEW, T1_REVIEW, AWAITING_OWNER, OWNER_REMEDIATED — `Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue. It exists because T1_REVIEW is creator-gated: when Tier 2 returns a case, only its opener may act, and before this page nothing told them.
+**Tier 1 My Queue** (`/incidents/my-queue/`) is the Tier 1 counterpart: their own-court tickets (NEW, T1_REVIEW, MONITORING, AWAITING_OWNER, OWNER_REMEDIATED — `Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue. The page has tabs for tickets, monitoring (cases with their 30-day countdown), manual intake and recent history. It exists because T1_REVIEW is creator-gated: when Tier 2 returns a case, only its opener may act, and before this page nothing told them.
 
 **OLA countdown:** every queue shows the shared `_ola_badge.html` pill, built from `apps/incidents/ola.py`. Tickets use the live **contain** deadline; Wazuh alerts use their flat 4-hour triage OLA. The badge is hidden when there is no deadline (Medium/Low are notification-only) or the work is finished.
 
@@ -226,4 +230,6 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 - [../handover/engineering-handover.md](../handover/engineering-handover.md) §3.1 — the same lifecycle in prose, with the gotchas
 - [../adr/0003-manager-verification-gate-in-model.md](../adr/0003-manager-verification-gate-in-model.md) — why the manager gate lives in the model
 - [../adr/0005-ticket-cancellation.md](../adr/0005-ticket-cancellation.md) — the cancellation process (separate from resolution)
-- [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — redesigned editable draw.io version (4 focused pages: overview, triage decisions, resolution lanes, and exceptions/controls), for diagramming in diagrams.net
+- [soc-end-to-end-workflow.md](soc-end-to-end-workflow.md) — end-to-end workflow from Wazuh alert / manual intake to closure, with every side-flow and a numbered scenario catalogue
+- [soc-end-to-end-workflow-v1.7.0.drawio](soc-end-to-end-workflow-v1.7.0.drawio) — editable 12-page draw.io version of the same (role swimlanes), for diagramming in diagrams.net
+- [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — *superseded* by the v1.7.0 file above (predates intake, draft mode, manager return and the notified-date gate)

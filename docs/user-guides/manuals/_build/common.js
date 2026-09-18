@@ -42,6 +42,7 @@ function stateName(th, code) {
   return [r(th, { bold: true, size: 28 }),
           new TextRun({ text: code, break: 1, font: MONO, size: 24, color: MUTED })];
 }
+// Sidebar / menu label. Thai since v1.7.1 (the "Thai Patch") — quote templates/base.html verbatim.
 function menuTag(t) { return r(t, { bold: true, color: BLUE }); }
 function ui(t) { return r(t, { bold: true, color: INK }); }
 
@@ -172,9 +173,9 @@ function buildManual(cfg) {
     }),
     spacer(360),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("เวอร์ชันระบบ v1.5.0", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 11 กันยายน 2026", { color: INK, size: 28 })] }),
+      children: [r("เวอร์ชันระบบ v1.7.1", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 18 กันยายน 2026", { color: INK, size: 28 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("คู่มือฉบับที่ 1.1", { color: MUTED, size: 28 })] }),
+      children: [r("คู่มือฉบับที่ 1.3", { color: MUTED, size: 28 })] }),
     spacer(700),
     new Paragraph({ alignment: AlignmentType.CENTER,
       children: [r("เอกสารใช้ภายในองค์กร — บริษัท โทรคมนาคมแห่งชาติ จำกัด (มหาชน)", { italics: true, color: MUTED, size: 26 })] }),
