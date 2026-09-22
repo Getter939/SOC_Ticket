@@ -153,6 +153,7 @@ def _ticket_post_data(**overrides):
         't1_route': TicketForm.ROUTE_ESCALATE_T2,
         'severity': 'High',
         'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'importance': Ticket.IMPORTANCE_IMPORTANT,
         # Required since the form stopped defaulting it to "now" client-side.
         'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
         'log_source': 'Wazuh',
@@ -1034,6 +1035,33 @@ class TicketReportExportTest(TestCase):
         imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
         self.assertEqual([k for k, v in imp.items() if v], ['สำคัญมาก'])
 
+    def test_importance_row_prints_the_analysts_pick(self):
+        for value, label in Ticket.IMPORTANCE_CHOICES:
+            with self.subTest(value=value):
+                self.ticket.importance = value
+                imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+                self.assertEqual([k for k, v in imp.items() if v], [label])
+
+    def test_emergency_forces_highest_importance_over_the_pick(self):
+        self.ticket.importance = Ticket.IMPORTANCE_GENERAL
+        self.ticket.is_emergency = True
+        imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+        self.assertEqual([k for k, v in imp.items() if v], ['สำคัญมาก'])
+
+    def test_blank_importance_falls_back_to_the_legacy_rule(self):
+        cases = (
+            (Ticket.CLASSIFICATION_EVENT, False, 'ปกติทั่วไป'),
+            (Ticket.CLASSIFICATION_INCIDENT, False, 'สำคัญ'),
+            (Ticket.CLASSIFICATION_EVENT, True, 'สำคัญมาก'),
+        )
+        self.ticket.importance = ''
+        for classification, emergency, expected in cases:
+            with self.subTest(classification=classification, emergency=emergency):
+                self.ticket.classification = classification
+                self.ticket.is_emergency = emergency
+                imp = self._checkbox_options(self.ticket, 'ระดับความสำคัญ')
+                self.assertEqual([k for k, v in imp.items() if v], [expected])
+
     def test_pdf_repeats_footer_on_every_page(self):
         self.client.force_login(self.t1)
         response = self.client.post(reverse('ticket_report_pdf', args=[self.ticket.pk]))
@@ -1414,6 +1442,21 @@ class T1ClassificationCreateTest(TestCase):
         ticket = Ticket.objects.latest('id')
         self.assertEqual(ticket.classification, Ticket.CLASSIFICATION_EVENT)
         self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
+
+    def test_importance_is_mandatory_and_stored(self):
+        self.client.login(username='cc_t1', password='testpass123')
+        data = _ticket_post_data()
+        del data['importance']
+        resp = self.client.post(reverse('create_ticket'), data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('importance', resp.context['form'].errors)
+        self.assertContains(resp, 'id="importance-group"')
+
+        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
+            importance=Ticket.IMPORTANCE_CRITICAL,
+        ))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Ticket.objects.latest('id').importance, Ticket.IMPORTANCE_CRITICAL)
 
     def test_successful_create_clears_localstorage_draft_on_detail(self):
         """A confirmed save is the only thing that drops the draft: the form no
@@ -4111,6 +4154,7 @@ def _pi_post_data(admin_a, admin_b, **overrides):
         'title': 'Multi-system intrusion via public-facing app',
         'severity': 'High',
         'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+        'importance': Ticket.IMPORTANCE_IMPORTANT,
         'log_source': 'Wazuh',
         'issue_type': 'SIEM',
         'detailed_issue': 'Malicious Logic',
@@ -4189,6 +4233,7 @@ class ProjectIncidentFanOutTest(TestCase):
             self.assertEqual(m.action_required, 'Isolate host and rotate credentials.')
             self.assertEqual(m.issue_description, 'Attacker pivoted across several core systems.')
             self.assertEqual(m.detailed_issue2, 'C2 Server')
+            self.assertEqual(m.importance, Ticket.IMPORTANCE_IMPORTANT)
         # Per-target facts differ.
         self.assertEqual({m.device_name for m in members}, {'HR Portal', 'AD Server'})
 
@@ -7115,6 +7160,7 @@ class TicketFieldHistoryTest(TestCase):
             'classification': Ticket.CLASSIFICATION_INCIDENT,
             'incident_name': '', 'severity': 'High',
             'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'importance': Ticket.IMPORTANCE_IMPORTANT,
             'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
             'log_source': 'Wazuh', 'issue_type': 'SIEM',
             'detailed_issue': 'Investigating',
@@ -7348,6 +7394,7 @@ class TicketEditViewTest(TestCase):
             'incident_name': ticket.incident_name or '',
             'severity': 'High',
             'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'importance': Ticket.IMPORTANCE_IMPORTANT,
             'incident_datetime': timezone.localtime().strftime('%Y-%m-%dT%H:%M'),
             'log_source': 'Wazuh', 'issue_type': 'SIEM',
             'detailed_issue': 'Investigating',

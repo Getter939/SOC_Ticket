@@ -227,6 +227,18 @@ def _ncsa_severity_field():
     )
 
 
+def _importance_field():
+    """Mandatory single-choice importance (ระดับความสำคัญ), rendered as pills
+    like ``ncsa_severity``. The model field stays blank-able so tickets created
+    before it existed remain valid; the forms are what make it mandatory."""
+    return forms.ChoiceField(
+        choices=Ticket.IMPORTANCE_CHOICES,
+        required=True,
+        label='ระดับความสำคัญ',
+        widget=forms.RadioSelect(attrs={'class': 'importance-radio'}),
+    )
+
+
 def _mitre_tactic_field():
     """Multi-select MITRE ATT&CK tactics — an incident can span several tactics.
     Stored on the model as a comma-separated string (see ``clean_mitre_tactics``
@@ -313,6 +325,7 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
         widget=forms.RadioSelect(attrs={'class': 'classification-radio'}),
     )
     ncsa_severity = _ncsa_severity_field()
+    importance = _importance_field()
     mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
     t1_route = forms.ChoiceField(
@@ -366,6 +379,7 @@ class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.Mod
             # Section 4
             'ip_address',
             'asset_type',
+            'importance',
             'operating_system',
             'asset_owner',
             'asset_owner_name',
@@ -524,6 +538,7 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
         }),
     )
     ncsa_severity = _ncsa_severity_field()
+    importance = _importance_field()
     mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
 
@@ -536,7 +551,7 @@ class ProjectIncidentForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, 
             'event_summary',
             'issue_description',
             'ioc_user', 'ioc_command', 'mitre_tactics',
-            'spread_to_others',
+            'spread_to_others', 'importance',
             'action_required', 'action_precautions',
             'actions_taken_summary', 'next_steps_summary',
         ]
@@ -686,6 +701,7 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
 
     ip_address = IPAddressListField()
     ncsa_severity = _ncsa_severity_field()
+    importance = _importance_field()
     mitre_tactics = _mitre_tactic_field()
     spread_to_others = _spread_field()
 
@@ -696,8 +712,8 @@ class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, for
             'incident_datetime', 'event_occurred_at', 'reference_id', 'log_source',
             'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'event_summary', 'issue_description', 'ip_address',
-            'asset_type', 'operating_system', 'asset_owner', 'asset_owner_name',
-            'spread_to_others',
+            'asset_type', 'importance', 'operating_system', 'asset_owner',
+            'asset_owner_name', 'spread_to_others',
             'mitre_tactics', 'action_required',
             'action_precautions', 'actions_taken_summary', 'next_steps_summary',
             # Last, so the generic field loop renders User + Command right above

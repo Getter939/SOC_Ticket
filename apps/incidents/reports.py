@@ -246,6 +246,7 @@ def build_ticket_report_context(ticket, generated_at=None):
     asset = ticket.asset_type
     asset_known = asset in {'Computer', 'Server', 'Network Device'}
     is_event_report = _is_event_report(ticket)
+    importance = ticket.report_importance
 
     # Structured indicators, grouped by category. File Name / Hash / IP / Domain
     # / URL each get their own Section 4 row; File Path (plus any legacy
@@ -323,13 +324,11 @@ def build_ticket_report_context(ticket, generated_at=None):
         'chk_sev_high': _chk(ticket.severity == 'High'),
         'chk_sev_medium': _chk(ticket.severity == 'Medium'),
         'chk_sev_low': _chk(ticket.severity == 'Low'),
-        'chk_imp_high': _chk(ticket.is_emergency),
-        'chk_imp_normal': _chk(not is_event_report and not ticket.is_emergency),
-        # 'ปกติทั่วไป' now prints on both the Event and Incident forms so the
-        # importance row reads the same on either. It only ever ticks for a
-        # non-emergency Event; on an Incident it is a blank option, present for
-        # form completeness (สำคัญ/สำคัญมาก carry the Incident's importance).
-        'chk_imp_general': _chk(is_event_report and not ticket.is_emergency),
+        # Importance is the analyst's pick, forced to สำคัญมาก by the emergency
+        # flag; legacy blank tickets fall back inside Ticket.report_importance.
+        'chk_imp_high': _chk(importance == Ticket.IMPORTANCE_CRITICAL),
+        'chk_imp_normal': _chk(importance == Ticket.IMPORTANCE_IMPORTANT),
+        'chk_imp_general': _chk(importance == Ticket.IMPORTANCE_GENERAL),
         'chk_spread_yes': _chk(ticket.spread_to_others is True),
         'chk_spread_no': _chk(ticket.spread_to_others is False),
         'chk_ncsa_critical': _chk(ticket.ncsa_severity == Ticket.NCSA_SEVERITY_CRITICAL),

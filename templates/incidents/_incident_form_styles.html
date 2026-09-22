@@ -47,6 +47,16 @@ Project Incident form's per-system target cards.
   input[value="NON_SEVERE"] + label { border-color: #198754; color: #198754; }
   input[value="NON_SEVERE"]:checked + label { background: #198754; color: #fff; }
 
+  /* Importance pills (ปกติทั่วไป / สำคัญ / สำคัญมาก) — scoped by class so the
+     lowercase values can't pick up the global severity rules above. */
+  .importance-radio { display: none; }
+  .importance-radio[value="general"] + label           { border-color: #198754; color: #198754; }
+  .importance-radio[value="general"]:checked + label   { background: #198754; color: #fff; }
+  .importance-radio[value="important"] + label         { border-color: #fd7e14; color: #fd7e14; }
+  .importance-radio[value="important"]:checked + label { background: #fd7e14; color: #fff; }
+  .importance-radio[value="critical"] + label          { border-color: #dc3545; color: #dc3545; }
+  .importance-radio[value="critical"]:checked + label  { background: #dc3545; color: #fff; }
+
   /* MITRE ATT&CK tactic multi-select checkboxes */
   .mitre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .3rem .75rem; }
   .mitre-option { display: flex; align-items: center; gap: .4rem; }

@@ -276,6 +276,7 @@ onto its own wrapped row, which space-between then left-aligned.
               <dt>ประเภทภัยคุกคาม</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
               <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
               <dt>ประเภททรัพย์สิน</dt><dd>{{ ticket.get_asset_type_display|default:"-" }}</dd>
+              <dt>ระดับความสำคัญ</dt><dd>{{ ticket.get_importance_display|default:"-" }}</dd>
               <dt>ระบบปฏิบัติการ</dt><dd>{{ ticket.operating_system|default:"-" }}</dd>
               <dt>หน่วยงานเจ้าของทรัพย์สิน</dt><dd>{{ ticket.asset_owner|default:"-" }}</dd>
               <dt>ชื่อเจ้าของทรัพย์สิน</dt><dd>{{ ticket.asset_owner_name|default:"-" }}</dd>

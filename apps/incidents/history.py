@@ -27,6 +27,7 @@ TRACKED_FIELDS = {
     'classification':        'ประเภท (Event/Incident)',
     'severity':              'ระดับความรุนแรง (SIEM)',
     'ncsa_severity':         'ระดับความรุนแรง (สกมช.)',
+    'importance':            'ระดับความสำคัญ',
     'issue_type':            'แหล่งที่มา',
     'detailed_issue':        'หมวดหมู่ภัยคุกคาม',
     'detailed_issue2':       'หมวดหมู่ย่อย',

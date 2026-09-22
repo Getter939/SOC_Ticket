@@ -178,6 +178,7 @@ def get_rca_case_context(ticket):
         'classification': ticket.get_classification_display() if ticket.classification else '',
         'severity': ticket.severity,
         'ncsa_severity': ticket.get_ncsa_severity_display() if ticket.ncsa_severity else '',
+        'importance': ticket.get_importance_display() if ticket.importance else '',
         'threat_category': ticket.get_detailed_issue_display() if ticket.detailed_issue else '',
         'device_name': ticket.device_name,
         'ip_address': ticket.ip_address,

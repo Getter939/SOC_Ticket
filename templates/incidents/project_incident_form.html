@@ -122,6 +122,17 @@
           <div class="field-hint">วิกฤต / ร้ายแรง / ไม่ร้ายแรง — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
           {% if form.ncsa_severity.errors %}<div class="text-danger small mt-1">{{ form.ncsa_severity.errors }}</div>{% endif %}
         </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">ระดับความสำคัญ <span class="required-star">*</span></label>
+          <div class="severity-group" id="importance-group">
+            {% for radio in form.importance %}
+              {{ radio.tag }}
+              <label for="{{ radio.id_for_label }}" class="{% if radio.data.selected %}selected{% endif %}">{{ radio.choice_label }}</label>
+            {% endfor %}
+          </div>
+          <div class="field-hint">ปกติทั่วไป / สำคัญ / สำคัญมาก — ใช้ร่วมกันทุก Ticket ในกลุ่ม</div>
+          {% if form.importance.errors %}<div class="text-danger small mt-1">{{ form.importance.errors }}</div>{% endif %}
+        </div>
       </div>
     </div>
 

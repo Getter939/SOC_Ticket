@@ -143,6 +143,10 @@ class RCAPrefillTest(TestCase):
         cases = (
             ({'is_emergency': True}, RCAReport.IMPORTANCE_CRITICAL),
             ({'classification': Ticket.CLASSIFICATION_EVENT}, RCAReport.IMPORTANCE_GENERAL),
+            # The analyst's pick wins over the legacy classification rule.
+            ({'importance': Ticket.IMPORTANCE_CRITICAL}, RCAReport.IMPORTANCE_CRITICAL),
+            ({'classification': Ticket.CLASSIFICATION_EVENT,
+              'importance': Ticket.IMPORTANCE_IMPORTANT}, RCAReport.IMPORTANCE_IMPORTANT),
         )
         for overrides, expected in cases:
             with self.subTest(overrides=overrides):

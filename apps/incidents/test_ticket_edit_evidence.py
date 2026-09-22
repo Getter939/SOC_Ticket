@@ -31,6 +31,7 @@ class TicketEditEvidenceTest(TestCase):
             device_name='original', issue_description='Evidence test',
             ip_address='192.0.2.1', incident_datetime=timezone.now().replace(second=0, microsecond=0),
             severity='High', ncsa_severity=Ticket.NCSA_SEVERITY_SEVERE,
+            importance=Ticket.IMPORTANCE_IMPORTANT,
             log_source='Wazuh', issue_type='SIEM',
             detailed_issue='Investigating', detailed_issue2='Investigating Other',
         )
@@ -39,7 +40,7 @@ class TicketEditEvidenceTest(TestCase):
 
     def payload(self, **overrides):
         fields = (
-            'classification', 'incident_name', 'severity', 'ncsa_severity',
+            'classification', 'incident_name', 'severity', 'ncsa_severity', 'importance',
             'log_source', 'issue_type', 'detailed_issue', 'detailed_issue2',
             'device_name', 'issue_description', 'ip_address',
         )
@@ -85,6 +86,23 @@ class TicketEditEvidenceTest(TestCase):
         self.assertIn('evidence.log', log.note)
         self.assertIn('Additional investigation evidence', log.note)
         self.assertEqual(log.author, self.creator)
+
+    def test_legacy_ticket_must_pick_importance_and_change_is_logged(self):
+        Ticket.objects.filter(pk=self.ticket.pk).update(importance='')
+        self.ticket.refresh_from_db()
+        response = self.client.post(self.url, self.payload())
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('importance', response.context['form'].errors)
+
+        response = self.client.post(
+            self.url, self.payload(importance=Ticket.IMPORTANCE_CRITICAL),
+        )
+        self.assertRedirects(response, reverse('ticket_detail', args=[self.ticket.pk]))
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.importance, Ticket.IMPORTANCE_CRITICAL)
+        self.assertTrue(TicketLog.objects.filter(
+            ticket=self.ticket, note__contains='ระดับความสำคัญ',
+        ).exists())
 
     def test_attachment_only_edit_reports_success(self):
         response = self.client.post(

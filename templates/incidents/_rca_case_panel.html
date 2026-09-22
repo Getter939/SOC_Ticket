@@ -23,6 +23,7 @@ analyst already has visibility of this ticket.
             <dt class="col-5 text-muted">ประเภท</dt><dd class="col-7">{{ case.classification|default:'-' }}</dd>
             <dt class="col-5 text-muted">ความรุนแรง (SIEM)</dt><dd class="col-7">{{ case.severity|default:'-' }}</dd>
             <dt class="col-5 text-muted">ความรุนแรง (สกมช.)</dt><dd class="col-7">{{ case.ncsa_severity|default:'-' }}</dd>
+            <dt class="col-5 text-muted">ระดับความสำคัญ</dt><dd class="col-7">{{ case.importance|default:'-' }}</dd>
             <dt class="col-5 text-muted">หมวดหมู่ภัยคุกคาม</dt><dd class="col-7">{{ case.threat_category|default:'-' }}</dd>
             <dt class="col-5 text-muted">แหล่งข้อมูล/Log</dt><dd class="col-7">{{ case.log_source|default:'-' }}{% if case.reference_id %} · {{ case.reference_id }}{% endif %}</dd>
           </dl>

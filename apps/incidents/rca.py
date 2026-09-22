@@ -130,14 +130,9 @@ def _host_ip(ticket):
 def initial_section1(subtask):
     """Section 1 values derived from the parent ticket."""
     ticket = subtask.ticket
-    is_event = ticket.classification == Ticket.CLASSIFICATION_EVENT
-    # Same mapping as the Incident/Event report's importance row.
-    if ticket.is_emergency:
-        importance = RCAReport.IMPORTANCE_CRITICAL
-    elif is_event:
-        importance = RCAReport.IMPORTANCE_GENERAL
-    else:
-        importance = RCAReport.IMPORTANCE_IMPORTANT
+    # Same value as the Incident/Event report's importance row; the Ticket and
+    # RCAReport importance choices share their stored values.
+    importance = ticket.report_importance
     owner = ticket.asset_owner or ''
     if ticket.asset_owner_name:
         owner = f'{owner} ({ticket.asset_owner_name})' if owner else ticket.asset_owner_name

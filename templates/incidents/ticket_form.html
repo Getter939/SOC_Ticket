@@ -257,7 +257,7 @@
           {% if form.spread_to_others.errors %}<div class="text-danger small mt-1">{{ form.spread_to_others.errors }}</div>{% endif %}
         </div>
 
-        <div class="col-12">
+        <div class="col-md-6">
           <div class="form-label fw-semibold d-block" id="asset-type-group-label">ประเภทของทรัพย์สิน</div>
           <div class="asset-type-group" id="asset-type-group" role="group" aria-labelledby="asset-type-group-label">
             {% for radio in form.asset_type %}
@@ -268,6 +268,20 @@
             {% endfor %}
           </div>
           {% if form.asset_type.errors %}<div class="text-danger small mt-1">{{ form.asset_type.errors }}</div>{% endif %}
+        </div>
+
+        <div class="col-md-6">
+          <div class="form-label fw-semibold" id="importance-group-label">ระดับความสำคัญ <span class="required-star">*</span></div>
+          <div class="severity-group" id="importance-group" role="group" aria-labelledby="importance-group-label">
+            {% for radio in form.importance %}
+              {{ radio.tag }}
+              <label for="{{ radio.id_for_label }}"
+                     class="importance-pill {% if radio.data.selected %}selected{% endif %}">
+                {{ radio.choice_label }}
+              </label>
+            {% endfor %}
+          </div>
+          {% if form.importance.errors %}<div class="text-danger small mt-1">{{ form.importance.errors }}</div>{% endif %}
         </div>
 
         <div class="col-12">

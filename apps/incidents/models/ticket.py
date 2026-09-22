@@ -554,6 +554,18 @@ class Ticket(models.Model):
         (NCSA_SEVERITY_NON_SEVERE, 'ไม่ร้ายแรง (Non-Severe)'),
     ]
 
+    # Analyst-chosen importance (ระดับความสำคัญ) for the report's importance
+    # row. Values match RCAReport.IMPORTANCE_* so the RCA prefill maps 1:1.
+    # See ``report_importance`` for how it combines with the emergency flag.
+    IMPORTANCE_GENERAL   = 'general'
+    IMPORTANCE_IMPORTANT = 'important'
+    IMPORTANCE_CRITICAL  = 'critical'
+    IMPORTANCE_CHOICES = [
+        (IMPORTANCE_GENERAL,   'ปกติทั่วไป'),
+        (IMPORTANCE_IMPORTANT, 'สำคัญ'),
+        (IMPORTANCE_CRITICAL,  'สำคัญมาก'),
+    ]
+
     ASSET_TYPE_CHOICES = [
         ('Computer',       'คอมพิวเตอร์'),
         ('Server',         'เซิร์ฟเวอร์'),
@@ -723,6 +735,12 @@ class Ticket(models.Model):
     ncsa_severity = models.CharField(
         max_length=20, choices=NCSA_SEVERITY_CHOICES, blank=True, default='',
         verbose_name='ระดับความรุนแรงตาม สกมช.',
+    )
+    # Blank on tickets created before the field existed; the forms make it
+    # mandatory from then on. Read it through ``report_importance``.
+    importance = models.CharField(
+        max_length=20, choices=IMPORTANCE_CHOICES, blank=True, default='',
+        verbose_name='ระดับความสำคัญ',
     )
     incident_datetime = models.DateTimeField(
         null=True, blank=True,
@@ -1279,6 +1297,22 @@ class Ticket(models.Model):
         to the manager — Tier 2 verification is the standard closing gate.
         """
         return self.is_emergency
+
+    @property
+    def report_importance(self):
+        """Importance printed on the Incident/Event and RCA reports.
+
+        The manager's emergency flag always forces สำคัญมาก. Otherwise the
+        analyst's pick wins; tickets created before the field existed fall
+        back to the old derived rule (Event → ปกติทั่วไป, else สำคัญ).
+        """
+        if self.is_emergency:
+            return self.IMPORTANCE_CRITICAL
+        if self.importance:
+            return self.importance
+        if self.classification == self.CLASSIFICATION_EVENT:
+            return self.IMPORTANCE_GENERAL
+        return self.IMPORTANCE_IMPORTANT
 
     @property
     def is_ola_triage_breached(self):
