@@ -51,9 +51,9 @@ def holds_ticket_court(ticket, user):
     if ticket.status in (
         Ticket.STATUS_NEW,
         Ticket.STATUS_T1_REVIEW,
-        # A monitored case is the opening analyst's to watch and conclude
-        # (exits are TIER1_CREATOR edges), so they hold its court too and may
-        # attach evidence gathered during the watch window.
+        # A monitored Event stays in the opening analyst's court for visibility
+        # during the watch — they may attach evidence gathered along the way.
+        # (Concluding the watch is Tier 2's, via its own TIER2-gated exit edges.)
         Ticket.STATUS_MONITORING,
         Ticket.STATUS_OWNER_REMEDIATED,
     ):

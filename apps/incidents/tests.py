@@ -7842,9 +7842,10 @@ class ManagerStepBackTest(TestCase):
 # ──────────────────────────────────────────────────────────────────────────── #
 
 class MonitoringWorkflowTest(TestCase):
-    """A case that is not yet Event or Incident: Tier 2 parks it under Tier 1 for
-    a fixed 30-day watch. Nothing happens → conclude Event; something happens →
-    issue Incident. Monitored at most once."""
+    """A watched Event: Tier 2 decides a case is an Event and puts it on a fixed
+    30-day watch (classification stays EVENT). Tier 2 concludes — nothing happens
+    → close the Event; something happens → issue Incident. Monitored at most
+    once, and only ever an Event (never an Incident)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -7871,8 +7872,8 @@ class MonitoringWorkflowTest(TestCase):
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_MONITORING)
         self.assertTrue(t.has_been_monitored)
-        # Classification reset to undetermined — the whole point of monitoring.
-        self.assertEqual(t.classification, '')
+        # Monitoring is a watch phase of an Event — classification stays EVENT.
+        self.assertEqual(t.classification, Ticket.CLASSIFICATION_EVENT)
         # 30-day deadline stamped (within a minute of now + 30d).
         expected = timezone.now() + timedelta(days=Ticket.MONITORING_DURATION_DAYS)
         self.assertAlmostEqual(
@@ -7900,12 +7901,11 @@ class MonitoringWorkflowTest(TestCase):
             t.transition_to(Ticket.STATUS_MONITORING, self.t1, 'nope')
 
     def test_a_case_is_monitored_at_most_once(self):
-        t = self._monitoring()
-        # Conclude as Event → back to ESCALATED_T2, where re-monitoring is blocked.
-        t.classification = Ticket.CLASSIFICATION_EVENT
-        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'nothing happened')
-        t.refresh_from_db()
-        self.assertTrue(t.has_been_monitored)
+        # has_been_monitored is a one-way latch: once set, no future escalation
+        # can put the case back on a watch — 30 days is the absolute window.
+        t = self._escalated()
+        t.has_been_monitored = True
+        t.save(update_fields=['has_been_monitored'])
         self.assertFalse(t.can_transition_to(Ticket.STATUS_MONITORING))
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'again?')
@@ -7913,7 +7913,7 @@ class MonitoringWorkflowTest(TestCase):
     # ── Exits ──────────────────────────────────────────────────────────── #
     def test_something_happened_issues_an_incident(self):
         t = self._monitoring()
-        self.client.force_login(self.t1)
+        self.client.force_login(self.t2)
         self.client.post(reverse('ticket_detail', args=[t.pk]), {
             'action': 'conclude_monitoring',
             'monitoring_outcome': 'incident',
@@ -7923,27 +7923,29 @@ class MonitoringWorkflowTest(TestCase):
         self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
         self.assertEqual(t.classification, Ticket.CLASSIFICATION_INCIDENT)
 
-    def test_quiet_window_concludes_as_event_via_tier2(self):
+    def test_quiet_window_closes_the_event_directly(self):
         t = self._monitoring()
-        self.client.force_login(self.t1)
+        self.client.force_login(self.t2)
         self.client.post(reverse('ticket_detail', args=[t.pk]), {
             'action': 'conclude_monitoring',
             'monitoring_outcome': 'event',
             'decision_note': 'ครบกำหนด ไม่มีเหตุ',
         })
         t.refresh_from_db()
-        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
-        self.assertEqual(t.classification, Ticket.CLASSIFICATION_EVENT)
-        # Tier 2 confirms and closes — the normal Event-close edge accepts it.
-        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirm close')
+        # Tier 2 watched it 30 days — it closes straight as an Event.
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+        self.assertEqual(t.classification, Ticket.CLASSIFICATION_EVENT)
 
-    def test_conclude_control_renders_for_the_owner(self):
+    def test_conclude_control_renders_for_tier2(self):
         t = self._monitoring()
-        self.client.force_login(self.t1)
+        self.client.force_login(self.t2)
         html = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
         self.assertIn('conclude_monitoring', html)   # the dedicated form
         self.assertIn('สรุปผลการเฝ้าระวัง', html)
+        # The opening Tier 1 only watches — no conclude control for them.
+        self.client.force_login(self.t1)
+        html_t1 = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
+        self.assertNotIn('conclude_monitoring', html_t1)
 
     def test_monitor_button_renders_in_the_tier2_decision_card(self):
         t = self._escalated()
@@ -7954,9 +7956,11 @@ class MonitoringWorkflowTest(TestCase):
         # Exactly one decision-note field in that section, not two.
         self.assertEqual(html.count('name="decision_note"'), 1)
 
-    def test_only_the_owning_tier1_may_conclude(self):
+    def test_tier1_cannot_conclude_only_tier2(self):
+        # Concluding the watch is Tier 2's call — the opening Tier 1 (who holds
+        # the case's court for visibility) may not end it.
         t = self._monitoring()
-        self.client.force_login(self.other_t1)
+        self.client.force_login(self.t1)
         self.client.post(reverse('ticket_detail', args=[t.pk]), {
             'action': 'conclude_monitoring',
             'monitoring_outcome': 'incident',
@@ -7976,66 +7980,31 @@ class MonitoringWorkflowTest(TestCase):
         self.assertEqual(forward, set())
         self.assertEqual(choices - {Ticket.STATUS_MONITORING}, set())
 
-    # ── Propose / verify (Tier 1 recommends, only Tier 2 grants) ────────── #
-    def test_tier1_proposes_monitoring_when_escalating_at_creation(self):
-        # NEW is not a resting state — a created ticket routes straight to Tier 2
-        # (ESCALATED_T2) on the escalate route, so the recommendation rides the
-        # create form.
-        self.client.force_login(self.t1)
-        resp = self.client.post(reverse('create_ticket'), _ticket_post_data(
-            propose_monitoring='1',
-        ))
-        self.assertEqual(resp.status_code, 302)
-        t = Ticket.objects.filter(created_by=self.t1).latest('id')
-        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
-        self.assertTrue(t.monitoring_proposed)
-
-    def test_recommendation_ignored_when_not_escalating_to_tier2(self):
-        # Assign-admin route lands at PENDING_MGR_TRIAGE, not Tier 2 — the flag is
-        # meaningless there and must not stick.
-        self.client.force_login(self.t1)
-        self.client.post(reverse('create_ticket'), _ticket_post_data(
-            t1_route=TicketForm.ROUTE_ASSIGN_ADMIN,
-            assigned_admin=_make_user('mon_admin', UserProfile.ROLE_SYSTEM_ADMIN).pk,
-            propose_monitoring='1',
-        ))
-        t = Ticket.objects.filter(created_by=self.t1).latest('id')
-        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
-        self.assertFalse(t.monitoring_proposed)
-
     def test_emergency_cannot_be_reassessed_while_monitoring(self):
-        # A monitored case is not yet classified, so an emergency verdict is
-        # premature — mirrors the PENDING_MGR_TRIAGE exclusion. View-proof:
-        # reassess_emergency itself refuses, not just the button.
+        # A monitored case is an Event (not heading to a manager), so an
+        # emergency verdict is premature — mirrors the PENDING_MGR_TRIAGE
+        # exclusion. View-proof: reassess_emergency itself refuses, not just the
+        # button.
         t = self._monitoring()
         self.assertFalse(t.can_reassess_emergency(self.manager))
         with self.assertRaises(ValidationError):
             t.reassess_emergency(True, self.manager, 'too early')
 
     def test_bundle_members_cannot_be_monitored(self):
-        # A Project Incident is a confirmed multi-system incident — its members
-        # are never "not yet classified", so monitoring is refused.
+        # A Project Incident is a confirmed multi-system incident — never a
+        # watchable Event, so monitoring is refused.
         project = ProjectIncident.objects.create(title='bundle', created_by=self.t1)
         t = self._escalated(project_incident=project)
         self.assertFalse(t.can_transition_to(Ticket.STATUS_MONITORING))
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'nope')
 
-    def test_the_recommendation_clears_when_tier2_acts(self):
-        t = self._escalated()
-        t.monitoring_proposed = True
-        t.save(update_fields=['monitoring_proposed'])
-        # Tier 2 grants it → flag consumed.
-        t.transition_to(Ticket.STATUS_MONITORING, self.t2, 'ok watch it')
-        t.refresh_from_db()
-        self.assertFalse(t.monitoring_proposed)
-
-    def test_tier1_cannot_set_monitoring_directly_only_propose(self):
-        # There is no Tier-1 permission edge into MONITORING — the propose flag is
-        # advisory; only Tier 2's edge writes the status.
+    def test_every_monitoring_edge_is_tier2_owned(self):
+        # Entering and concluding the watch are both Tier 2's — no Tier-1 edge
+        # touches MONITORING (entry or exit).
         for edge, perm in Ticket.TRANSITION_PERMISSIONS.items():
-            if edge[1] == Ticket.STATUS_MONITORING:
-                self.assertEqual(perm, 'TIER2')
+            if Ticket.STATUS_MONITORING in edge:
+                self.assertEqual(perm, 'TIER2', msg=f'{edge} should be TIER2')
 
     # ── Countdown badge ────────────────────────────────────────────────── #
     def test_monitoring_badge_levels(self):

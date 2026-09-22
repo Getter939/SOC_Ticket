@@ -426,8 +426,8 @@ class Command(BaseCommand):
                 is_active = False
             severity = self._severity_for(index, status)
             if status == Ticket.STATUS_MONITORING:
-                # Not yet Event or Incident — that is the whole point of monitoring.
-                classification = ''
+                # A watched Event — monitoring is a watch phase of an Event.
+                classification = Ticket.CLASSIFICATION_EVENT
             elif status == Ticket.STATUS_CLOSED_EVENT:
                 classification = Ticket.CLASSIFICATION_EVENT
             else:
@@ -518,7 +518,7 @@ class Command(BaseCommand):
             ) if status == Ticket.STATUS_MONITORING else None,
             has_been_monitored=status == Ticket.STATUS_MONITORING,
             # PENDING_MANAGER is reachable only via the emergency flag now. A
-            # monitored case is unclassified, so it never carries one.
+            # monitored case is a benign Event, so it never carries one.
             is_emergency=status != Ticket.STATUS_MONITORING and (
                 (severity == 'Critical' and spec['index'] % 9 == 0)
                 or status == Ticket.STATUS_PENDING_MANAGER
@@ -609,7 +609,7 @@ class Command(BaseCommand):
         if status == Ticket.STATUS_NEW:
             return [Ticket.STATUS_NEW]
         if status == Ticket.STATUS_MONITORING:
-            # Tier 2 parked it under Tier 1 to watch, straight off escalation.
+            # Tier 2 called it an Event and put it on a watch, straight off escalation.
             return [Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_MONITORING]
         path = [Ticket.STATUS_NEW]
         escalated = severity in ('Critical', 'High') or status in (
@@ -811,9 +811,9 @@ class Command(BaseCommand):
                 'Observed activity was blocked, explained, or unsuccessful; no containment required.'
             ),
             Ticket.STATUS_MONITORING: (
-                'Tier 2 could not yet confirm whether this is an Event or an Incident, '
-                'so it was placed under a 30-day watch and returned to Tier 1. If nothing '
-                'develops it will be closed as an Event; if activity resumes it becomes an Incident.'
+                'Tier 2 classified this as an Event and placed it under a 30-day watch. '
+                'If nothing develops Tier 2 will close it as an Event; if activity resumes '
+                'Tier 2 raises it to an Incident.'
             ),
         }
         return notes[status]

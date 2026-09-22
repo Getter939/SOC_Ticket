@@ -162,7 +162,6 @@ def create_ticket(request):
                     triage=triage,
                     alert_bundle_ids=alert_bundle_ids,
                     evidence_token=evidence_token,
-                    propose_monitoring=bool(request.POST.get('propose_monitoring')),
                     submit_immediately=(
                         request.POST.get('submission_intent') != 'save_preparation'
                     ),
@@ -349,9 +348,9 @@ def ticket_detail(request, pk):
     )
     remediation_owner_lane = ticket.status == Ticket.STATUS_PENDING_T2_REVIEW
     remediation_checklist_state = _remediation_checklist_state(ticket)
-    # Tier 2 may park an escalated case under Tier 1 for the fixed watch window
-    # — once only (has_been_monitored), and never a bundle member. Rendered
-    # inside the Tier 2 review card, alongside the Incident/Event decision.
+    # Tier 2 may put an escalated Event on the fixed watch window — once only
+    # (has_been_monitored), and never a bundle member. Rendered inside the Tier 2
+    # review card, alongside the Incident/Event decision.
     can_monitor = (
         not is_terminal
         and ticket.status == Ticket.STATUS_ESCALATED_T2
@@ -359,11 +358,11 @@ def ticket_detail(request, pk):
         and not ticket.project_incident_id
         and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
-    # The owning Tier 1 concludes the watch window: Incident (something happened)
-    # or Event (window closed quietly). The exit edges are TIER1_CREATOR.
+    # Tier 2 concludes the watch window: Incident (something happened) or close
+    # the Event (window closed quietly). The exit edges are TIER2-gated.
     can_conclude_monitoring = (
         ticket.status == Ticket.STATUS_MONITORING
-        and _user_can_drive(ticket, request.user, 'TIER1_CREATOR')
+        and (request.user.is_superuser or (profile is not None and profile.is_tier2))
     )
     # SOC Manager may spawn a response-team request (Forensic / Red Team) at any
     # active stage. Runs in parallel to containment; an open request blocks final
@@ -402,7 +401,6 @@ def ticket_detail(request, pk):
                     result = submit_preparation(
                         ticket=ticket,
                         actor=request.user,
-                        propose_monitoring=bool(request.POST.get('propose_monitoring')),
                     )
                     messages.success(request, 'ส่ง Ticket เข้าสู่กระบวนการเรียบร้อยแล้ว')
                     for warning in result.warnings:
@@ -453,9 +451,10 @@ def ticket_detail(request, pk):
             next_status = request.POST.get('status', '')
             note = request.POST.get('decision_note', '').strip()
             # The "เฝ้าระวัง" button lives in the same decision form and shares its
-            # (required) note, but it is a classification-deferring decision, not
-            # an Event/Incident call — so it routes to start_monitoring rather
-            # than the classification-matched review path below.
+            # (required) note. It is an Event decision — watch the Event before
+            # disposing of it — so it routes to start_monitoring (which stamps
+            # classification=EVENT) rather than the classification-matched review
+            # path below.
             if next_status == Ticket.STATUS_MONITORING:
                 if not can_monitor:
                     messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้ หรือเคสนี้เฝ้าระวังไม่ได้')
@@ -581,7 +580,7 @@ def ticket_detail(request, pk):
                     messages.error(request, e.message)
 
         elif action == 'conclude_monitoring':
-            # The owning Tier 1 ends the watch: Incident (something happened) or
+            # Tier 2 ends the watch: Incident (something happened) or close the
             # Event (window closed quietly).
             outcome = request.POST.get('monitoring_outcome', '')
             note = request.POST.get('decision_note', '').strip()

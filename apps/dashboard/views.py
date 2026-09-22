@@ -487,7 +487,8 @@ _EXEC_COURT_GROUPS = {
         Ticket.STATUS_NEW,
         Ticket.STATUS_T1_REVIEW,
         Ticket.STATUS_OWNER_REMEDIATED,
-        # A monitored case waits on its opening Tier 1 to conclude it.
+        # A monitored Event sits in its opening Tier 1's court for visibility
+        # during the watch (Tier 2 concludes it).
         Ticket.STATUS_MONITORING,
     ],
     'COURT_MANAGER': [
@@ -523,8 +524,8 @@ _IR_PHASES = [
                                                    # downgrade — a disposition decision, not
                                                    # recovery. Added 2026-07-23.
                                                    Ticket.STATUS_PENDING_MGR_EVENT_REVIEW,
-                                                   # Watch-and-wait — still deciding whether
-                                                   # this is even an incident. Added 2026-09-04.
+                                                   # Watch-and-wait on a benign Event before
+                                                   # Tier 2 disposes of it. Added 2026-09-04.
                                                    Ticket.STATUS_MONITORING]),
     ('CONTAINMENT',    'Containment/Eradication', [Ticket.STATUS_AWAITING_CONTAINMENT,
                                                    Ticket.STATUS_CONTAINMENT_REPORTED,

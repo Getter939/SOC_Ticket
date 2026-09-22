@@ -48,7 +48,7 @@ def step_back(*, ticket, actor, reason):
     return TicketWorkflowResult(ticket=ticket, target_status=target_status)
 
 
-def submit_preparation(*, ticket, actor, propose_monitoring=False):
+def submit_preparation(*, ticket, actor):
     """Submit a saved preparation to the lane selected by its creator."""
     if ticket.status != Ticket.STATUS_NEW:
         raise ValidationError('Ticket นี้ถูกส่งเข้าสู่กระบวนการแล้ว')
@@ -66,9 +66,6 @@ def submit_preparation(*, ticket, actor, propose_monitoring=False):
 
     with transaction.atomic():
         ticket.transition_to(target, actor, note)
-        if propose_monitoring and target == Ticket.STATUS_ESCALATED_T2:
-            ticket.monitoring_proposed = True
-            ticket.save(update_fields=['monitoring_proposed'])
 
     warnings = []
     if ticket.system_owner and ticket.system_owner.email:
@@ -148,11 +145,12 @@ def manager_forward(*, ticket, actor, want_emergency, target_status, note):
 
 
 def start_monitoring(*, ticket, actor, note):
-    """Tier 2 parks a not-yet-classified case under Tier 1 for the watch window.
+    """Tier 2 decides an escalated case is an Event and puts it on the watch.
 
     transition_to stamps the 30-day deadline, marks the ticket monitored (one
-    way), and clears the classification. No email — the case simply appears in
-    the owning Tier 1's My Queue with its countdown.
+    way), and sets the classification to EVENT (monitoring is a watch phase of
+    an Event). No email — the case simply appears in the opening Tier 1's My
+    Queue with its countdown while Tier 2 waits to conclude it.
     """
     with transaction.atomic():
         ticket.transition_to(Ticket.STATUS_MONITORING, actor, note)
@@ -163,12 +161,13 @@ def start_monitoring(*, ticket, actor, note):
 
 
 def conclude_monitoring(*, ticket, actor, outcome, note):
-    """The owning Tier 1 ends a monitoring window.
+    """Tier 2 ends a monitoring window.
 
-    ``outcome='incident'`` — something happened: classify Incident and hand to
-    the SOC Manager pre-containment triage. ``outcome='event'`` — the window
-    closed quietly: classify Event and hand to Tier 2 to confirm the close. Both
-    set the classification the exit edge's gate requires.
+    ``outcome='incident'`` — something happened during the watch: classify
+    Incident and hand to the SOC Manager pre-containment triage.
+    ``outcome='event'`` — the window closed quietly: the case is confirmed a
+    benign Event and Tier 2 closes it directly. Both set the classification the
+    exit edge's gate requires.
     """
     with transaction.atomic():
         if outcome == 'incident':
@@ -176,12 +175,15 @@ def conclude_monitoring(*, ticket, actor, outcome, note):
             target = Ticket.STATUS_PENDING_MGR_TRIAGE
         else:
             ticket.classification = Ticket.CLASSIFICATION_EVENT
-            target = Ticket.STATUS_ESCALATED_T2
+            target = Ticket.STATUS_CLOSED_EVENT
         ticket.transition_to(target, actor, note)
 
     if target == Ticket.STATUS_PENDING_MGR_TRIAGE:
         notify_manager_triage_pending(ticket)
-    return TicketWorkflowResult(ticket=ticket, target_status=target)
+        warnings = ()
+    else:
+        warnings = _owner_closed_warnings(ticket)
+    return TicketWorkflowResult(ticket=ticket, target_status=target, warnings=warnings)
 
 
 def reclassify_as_event(*, ticket, actor, note):

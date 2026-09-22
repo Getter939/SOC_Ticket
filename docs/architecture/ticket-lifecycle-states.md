@@ -26,7 +26,7 @@ Key rules (redesigned 2026-07-14):
 - **Tier 2 verifies every containment/remediation** — both the System Admin lane and the System Owner lane — before a ticket can close. Tier 2 may also **reclassify an in-flight case as an Event** and close it directly (no manager), even when the emergency flag is set. ⚠️ These two mid-containment edges are deliberately **not** covered by the downgrade gate above — a known asymmetry, see the change log.
 - **Tier 2 must claim a ticket before acting on it** (added 2026-07-23). The Tier 2 Queue has claim/release like the Tier 1 triage queue; a claim held by another analyst blocks the transition in `transition_to`. The claim clears on every transition, since the queue spans three stages.
 - **SOC Manager reviews emergency tickets only** at the closing gate (the `is_emergency` flag; severity alone never routes to the manager). Emergency tickets pass Tier 2 first, then the manager.
-- **Monitoring is a watch-and-wait park, not a stage of handling** (added v1.2.3). Only Tier 2 may grant it, only from `ESCALATED_T2`, for a **fixed 30 days**, **once per case** (`has_been_monitored`). The case sits in the Tier 1 creator's court and resolves to Incident (→ SOC Manager triage) or Event (→ Tier 2 confirms the close). Expiry is computed on read — there is no scheduler. Tier 1 may *recommend* monitoring at creation; the recommendation is advisory only.
+- **Monitoring is a watch phase of an Event, not a stage of handling** (added v1.2.3; re-anchored to Event ownership v1.7.x). Only **Tier 2** may start it, only from `ESCALATED_T2` and only as an **Event** decision (the classification stays `EVENT`), for a **fixed 30 days**, **once per case** (`has_been_monitored`). Because it is reachable only through the Event verdict, an **Incident is never monitored** and **any Event may be**. The case sits in the Tier 1 creator's court for visibility during the watch, but **Tier 2 concludes it**: close directly as an Event (→ `CLOSED_EVENT`) or, if the watch turned up something, raise it to an Incident (→ SOC Manager triage). Expiry is computed on read — there is no scheduler.
 - **The SOC Manager can step a ticket backward** along `STEP_BACK_EDGES` to correct a mis-route (e.g. the wrong admin was assigned). Step-back runs through `transition_to()`, so it inherits every invariant and the audit log instead of a parallel hand-rolled write; the `t1_route` gate allows exactly one of the two `PENDING_MANAGER` edges per ticket. No other role can move a ticket backward.
 - System Owner never uses the system — Tier 1 records the owner's fix on their behalf.
 - **A ticket can be saved as a draft before it is routed** (added 2026-09-17). On the creation form the analyst either sends it now or chooses *save preparation*. A draft stays in `NEW` (label "in preparation, not submitted") with its chosen lane remembered. The creator later sends it with **Submit preparation** (`ticket_workflow.submit_preparation`), which takes the same `NEW → ESCALATED_T2` / `NEW → PENDING_MGR_TRIAGE` edges. No emails are sent while it is only a draft. Project Incidents have no draft mode.
@@ -48,16 +48,16 @@ flowchart TD
     ESCALATED_T2[Tier 2 ทบทวน — ต้อง Claim ก่อน<br/>ESCALATED_T2] --> D2{Event หรือ Incident?<br/>ตัดสินโดย Tier 2}
     D2 -->|Event ที่ Tier 1 จัดไว้แล้ว — ยืนยันและปิด| CLOSED_EVENT
     D2 -->|Event ที่ Tier 2 ปรับจาก Incident| PENDING_MGR_EVENT_REVIEW
-    D2 -->|ยังไม่ใช่ทั้ง Event และ Incident| MONITORING
+    D2 -->|Event → เฝ้าระวัง 30 วัน| MONITORING
     D2 -->|Incident| T1_REVIEW[ส่งกลับ Tier 1 เลือกเส้นทาง<br/>T1_REVIEW]
     T1_REVIEW -->|เลือก Admin / Owner| PENDING_MGR_TRIAGE
 
-    %% ── Watch-and-wait: Tier 2 parks it, Tier 1 holds it ────
+    %% ── Watch-and-wait: a watched Event, Tier 2 owns it ────
     %% Fixed 30-day window, once per case (has_been_monitored),
     %% expiry computed on read — there is no scheduler.
-    MONITORING[กำลังเฝ้าระวัง 30 วัน — อยู่ในมือ Tier 1<br/>MONITORING] --> D8{ครบกำหนด หรือ มีเหตุเกิดขึ้น?<br/>ตัดสินโดย Tier 1 ผู้เปิดตั๋ว}
+    MONITORING[กำลังเฝ้าระวัง 30 วัน — Event ที่กำลังเฝ้าดู<br/>MONITORING] --> D8{ครบกำหนด หรือ มีเหตุเกิดขึ้น?<br/>ตัดสินโดย Tier 2}
     D8 -->|มีเหตุเกิดขึ้น → ออกเป็น Incident| PENDING_MGR_TRIAGE
-    D8 -->|ครบกำหนดโดยเงียบ → สรุปเป็น Event| ESCALATED_T2
+    D8 -->|ครบกำหนดโดยเงียบ → ปิดเป็น Event| CLOSED_EVENT
 
     %% ── Manager verifies a Tier 2 Event downgrade ───────────
     PENDING_MGR_EVENT_REVIEW[ผู้จัดการ SOC ตรวจการปิดแบบ Event<br/>PENDING_MGR_EVENT_REVIEW] --> D7{เป็น Event จริงหรือไม่?<br/>ตัดสินโดยผู้จัดการ SOC}
@@ -136,8 +136,8 @@ flowchart TD
 | From | To | Actor |
 |------|----|-------|
 | NEW | PENDING_MGR_TRIAGE (Incident) / ESCALATED_T2 (Event or Incident-escalate) | Tier 1 (creator) |
-| ESCALATED_T2 | T1_REVIEW (Incident) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) / MONITORING (not yet Event or Incident — watch 30 days) | Tier 2 (must hold the claim) |
-| MONITORING | PENDING_MGR_TRIAGE (something happened → Incident) / ESCALATED_T2 (window closed quietly → Event, Tier 2 confirms close) | Tier 1 (creator) — Tier 2 sets the 30-day window; each case is monitored at most once |
+| ESCALATED_T2 | T1_REVIEW (Incident) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) / MONITORING (Event → watch 30 days) | Tier 2 (must hold the claim) |
+| MONITORING | PENDING_MGR_TRIAGE (something happened → Incident) / CLOSED_EVENT (window closed quietly → Tier 2 closes the Event) | **Tier 2** — sets the 30-day window and concludes it; the case stays in the Tier 1 creator's court for visibility; monitored at most once |
 | PENDING_MGR_EVENT_REVIEW | CLOSED_EVENT (confirm) / ESCALATED_T2 (reject → classification back to Incident) | **SOC Manager** |
 | T1_REVIEW | PENDING_MGR_TRIAGE | Tier 1 (creator) |
 | PENDING_MGR_TRIAGE | T1_REVIEW (return for completion) / AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** — return requires a written reason |
