@@ -37,11 +37,11 @@ The permanent, public identifier for exactly one Ticket. It is used when people,
 _Avoid_: Database ID, case number, bundle reference
 
 **Manager Triage Review**:
-The SOC Manager's pre-containment checkpoint every Incident passes before it reaches a handling lane. The manager flags Emergency (or not) and forwards the Ticket to the lane Tier 1 already chose — the manager cannot change the lane. Held in the `PENDING_MGR_TRIAGE` state; a blocking step, not a parallel one.
+The SOC Manager's pre-containment checkpoint every Incident passes before it reaches a handling lane. The manager flags Emergency (or not) and forwards the Ticket to the lane already chosen (by Tier 1 at preparation, or by Tier 2 on an escalated case) — the manager cannot change the lane. "Return for completion" sends it back to whoever routed it (Tier 2 if it was ever escalated, else the creator's preparation). Held in the `PENDING_MGR_TRIAGE` state; a blocking step, not a parallel one.
 _Avoid_: Manager approval (that is the separate emergency gate at closing), triage (reserved for the Alert/report judgment)
 
 **Handling Route**:
-The lane Tier 1 picks for an Incident — System Admin or Direct-to-Owner — recorded on the Ticket (`t1_route`) so the Manager Triage Review can forward it to the fixed destination. Chosen at Ticket creation or at Tier 1 review; never changed by the manager.
+The lane chosen for an Incident — System Admin (with the responsible admin) or Direct-to-Owner — recorded on the Ticket (`t1_route`, a historical name) so the Manager Triage Review can forward it to the fixed destination. Chosen by Tier 1 at Ticket creation/preparation, or by Tier 2 when it confirms an escalated or monitored case as an Incident; required on every hand-off to the manager; never changed by the manager.
 _Avoid_: Assignment (assignment is the specific admin/owner, not the lane), disposition
 
 **Containment**:

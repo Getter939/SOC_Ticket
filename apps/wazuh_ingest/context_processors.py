@@ -38,8 +38,9 @@ def pending_triage_count(request):
 
     if user.is_superuser or (profile and profile.is_tier1):
         # My Queue badge: manual reports this analyst can pick up or already
-        # holds, plus their own-court tickets — above all cases Tier 2
-        # returned (T1_REVIEW), which previously surfaced nowhere.
+        # holds, plus their own-court tickets — including a preparation the
+        # SOC Manager returned to them (NEW). The passive "changed by Tier 2"
+        # list on My Queue is deliberately NOT counted: nothing waits on them.
         # A case still counting down in MONITORING is passive — nothing for
         # Tier 1 to do until it expires or something happens — so it must not
         # inflate this "needs action" badge. An EXPIRED watch is actionable

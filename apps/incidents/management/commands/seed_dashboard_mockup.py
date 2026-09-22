@@ -25,7 +25,7 @@ class Command(BaseCommand):
         [Ticket.STATUS_NEW] * 2
         + [Ticket.STATUS_ESCALATED_T2] * 3
         + [Ticket.STATUS_MONITORING] * 3
-        + [Ticket.STATUS_T1_REVIEW] * 3
+        + [Ticket.STATUS_PENDING_MGR_TRIAGE] * 3
         + [Ticket.STATUS_AWAITING_CONTAINMENT] * 4
         + [Ticket.STATUS_CONTAINMENT_REPORTED] * 3
         + [Ticket.STATUS_PENDING_MANAGER] * 3
@@ -525,6 +525,7 @@ class Command(BaseCommand):
             ),
             assigned_to=current_owner,
             assigned_admin=admin if self._has_admin(status, classification) else None,
+            t1_route=Ticket.T1_ROUTE_ADMIN if self._has_admin(status, classification) else "",
             verified_by=t2 if timeline.get(Ticket.STATUS_PENDING_MANAGER) or (
                 status == Ticket.STATUS_APPROVED and classification == Ticket.CLASSIFICATION_INCIDENT
             ) else None,
@@ -613,7 +614,7 @@ class Command(BaseCommand):
             return [Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_MONITORING]
         path = [Ticket.STATUS_NEW]
         escalated = severity in ('Critical', 'High') or status in (
-            Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW)
+            Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_PENDING_MGR_TRIAGE)
         if escalated:
             path.append(Ticket.STATUS_ESCALATED_T2)
             if status == Ticket.STATUS_ESCALATED_T2:
@@ -621,8 +622,9 @@ class Command(BaseCommand):
             if classification == Ticket.CLASSIFICATION_EVENT:
                 path.append(Ticket.STATUS_CLOSED_EVENT)
                 return path
-            path.append(Ticket.STATUS_T1_REVIEW)
-            if status == Ticket.STATUS_T1_REVIEW:
+            # Tier 2 confirms the Incident, picks the lane, routes to the manager.
+            path.append(Ticket.STATUS_PENDING_MGR_TRIAGE)
+            if status == Ticket.STATUS_PENDING_MGR_TRIAGE:
                 return path
         elif classification == Ticket.CLASSIFICATION_EVENT:
             path.append(Ticket.STATUS_CLOSED_EVENT)
@@ -761,7 +763,7 @@ class Command(BaseCommand):
         if status in (Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_AWAITING_CONTAINMENT,
                       Ticket.STATUS_PENDING_MANAGER):
             return t1
-        if status == Ticket.STATUS_T1_REVIEW:
+        if status == Ticket.STATUS_PENDING_MGR_TRIAGE:
             return t2
         if status == Ticket.STATUS_CONTAINMENT_REPORTED:
             return admin
@@ -785,10 +787,10 @@ class Command(BaseCommand):
                 'identity context, endpoint process tree, and recommended classification '
                 'were included so Tier 2 could make a fast decision.'
             ),
-            Ticket.STATUS_T1_REVIEW: (
-                'Tier 2 completed review and returned the case to Tier 1. Feedback: '
-                'classification is appropriate, scope is limited to the listed asset, '
-                'and containment should focus on the documented indicators.'
+            Ticket.STATUS_PENDING_MGR_TRIAGE: (
+                'Tier 2 completed review and confirmed an Incident. Scope is limited to '
+                'the listed asset; routed to the SOC Manager on the System Admin lane, '
+                'with containment focused on the documented indicators.'
             ),
             Ticket.STATUS_AWAITING_CONTAINMENT: (
                 'Tier 1 assigned containment to System Admin Santi with clear actions: '
@@ -850,7 +852,8 @@ class Command(BaseCommand):
         )
 
     def _remediation_summary(self, spec):
-        if spec['status'] in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW):
+        if spec['status'] in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2,
+                              Ticket.STATUS_PENDING_MGR_TRIAGE):
             return ''
         scenario = spec['scenario']
         return (
@@ -864,7 +867,7 @@ class Command(BaseCommand):
         if spec['status'] in (
             Ticket.STATUS_NEW,
             Ticket.STATUS_ESCALATED_T2,
-            Ticket.STATUS_T1_REVIEW,
+            Ticket.STATUS_PENDING_MGR_TRIAGE,
             Ticket.STATUS_AWAITING_CONTAINMENT,
         ):
             return ''
@@ -876,7 +879,7 @@ class Command(BaseCommand):
     def _has_admin(status, classification):
         return (
             classification == Ticket.CLASSIFICATION_INCIDENT
-            and status not in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2, Ticket.STATUS_T1_REVIEW)
+            and status not in (Ticket.STATUS_NEW, Ticket.STATUS_ESCALATED_T2)
         )
 
     @staticmethod

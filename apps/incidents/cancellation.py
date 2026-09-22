@@ -26,8 +26,12 @@ def can_cancel_directly(ticket, actor):
     if not can_request_cancellation(ticket, actor):
         return False
     profile = getattr(actor, 'profile', None)
+    # The creator's direct cancel covers an untouched preparation only. A ticket
+    # the SOC Manager returned to preparation (first_submitted_at set) has
+    # already been reviewed, so cancelling it goes through the request flow.
     return bool(is_soc_manager(actor) or (
         ticket.status == Ticket.STATUS_NEW and ticket.created_by_id == actor.pk
+        and ticket.first_submitted_at is None
         and profile and profile.is_tier1
     ))
 

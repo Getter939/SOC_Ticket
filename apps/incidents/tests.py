@@ -55,7 +55,7 @@ from apps.accounts.models import UserProfile
 from apps.incidents import history
 from apps.incidents import ola as ola_buckets
 from apps.incidents.forms import (
-    AdminAssignmentForm, AttachmentForm, ProjectIncidentTargetForm,
+    AttachmentForm, HandlingLaneForm, ProjectIncidentTargetForm,
     ResponseRequestForm, TicketEditForm, TicketForm, TicketPreparationEditForm,
     TicketReviewForm, TriageForm,
 )
@@ -1164,19 +1164,20 @@ class WorkflowTransitionTest(TestCase):
         t.refresh_from_db()
         self.assertEqual(t.status_changed_at, stamp)
 
-    def test_escalated_incident_returns_to_t1_review(self):
+    def test_escalated_incident_goes_straight_to_mgr_triage(self):
         t = self._incident()
         t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm incident')
-        self.assertEqual(t.status, Ticket.STATUS_T1_REVIEW)
-
-    def test_t1_review_to_pending_mgr_triage(self):
-        t = self._incident()
-        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm')
-        t.t1_route = Ticket.T1_ROUTE_ADMIN
-        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'route to manager')
+        t.t1_route = Ticket.T1_ROUTE_OWNER   # Tier 2 picks the lane
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'confirm incident')
         self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+
+    def test_escalated_incident_without_a_lane_cannot_reach_the_manager(self):
+        t = self._incident()
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        t.t1_route = ''
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE))
+        with self.assertRaises(ValidationError):
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'no lane')
 
     def test_full_happy_path_t2_closes_without_manager(self):
         t = self._incident(severity='High')
@@ -1317,17 +1318,17 @@ class WorkflowPermissionTest(TestCase):
         with self.assertRaises(ValidationError):
             t.transition_to(Ticket.STATUS_AWAITING_CONTAINMENT, self.t2, 'denied')
 
-    # ESCALATED_T2 → T1_REVIEW  requires TIER2 ─────────────────────────────
+    # ESCALATED_T2 → PENDING_MGR_TRIAGE  requires TIER2 ─────────────────────
 
-    def test_t2_can_return_to_t1(self):
-        t = self._ticket_at(Ticket.STATUS_ESCALATED_T2)
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'ok')
-        self.assertEqual(t.status, Ticket.STATUS_T1_REVIEW)
+    def test_t2_can_route_incident_to_manager(self):
+        t = self._ticket_at(Ticket.STATUS_ESCALATED_T2, t1_route=Ticket.T1_ROUTE_OWNER)
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'ok')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
-    def test_t1_cannot_return_to_t1(self):
-        t = self._ticket_at(Ticket.STATUS_ESCALATED_T2)
+    def test_t1_cannot_route_escalated_incident_to_manager(self):
+        t = self._ticket_at(Ticket.STATUS_ESCALATED_T2, t1_route=Ticket.T1_ROUTE_OWNER)
         with self.assertRaises(ValidationError):
-            t.transition_to(Ticket.STATUS_T1_REVIEW, self.t1, 'denied')
+            t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'denied')
 
     # AWAITING_CONTAINMENT → CONTAINMENT_REPORTED  requires ASSIGNED_ADMIN ─
 
@@ -1545,10 +1546,11 @@ class Tier2EscalationTest(TestCase):
             escalated_to_t2_at=timezone.now(),
         )
 
-    def test_t2_confirms_incident_returns_to_t1(self):
+    def test_t2_confirms_incident_and_routes_to_manager(self):
         t = self._escalated()
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirmed incident')
-        self.assertEqual(t.status, Ticket.STATUS_T1_REVIEW)
+        t.t1_route = Ticket.T1_ROUTE_ADMIN   # admin already on the fixture
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'confirmed incident')
+        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
     def test_t2_reclassifies_event_and_closes(self):
         t = self._escalated()
@@ -1636,12 +1638,15 @@ class Tier2EscalationTest(TestCase):
         self.assertEqual(resp.status_code, 302)  # TEMP: redirect to the new ticket
         self.assertTrue(Ticket.objects.filter(device_name='TEST-ENDPOINT-01').exists())
 
-    def test_t1_review_then_route_to_mgr_triage(self):
+    def test_manager_return_sends_escalated_incident_back_to_t2(self):
+        mgr = _make_user('t2t_mgr', UserProfile.ROLE_SOC_MANAGER)
         t = self._escalated()
-        t.transition_to(Ticket.STATUS_T1_REVIEW, self.t2, 'confirm')
         t.t1_route = Ticket.T1_ROUTE_ADMIN
-        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t1, 'assign admin')
-        self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        t.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.t2, 'confirm')
+        self.assertEqual(t.manager_return_target(), Ticket.STATUS_ESCALATED_T2)
+        self.assertFalse(t.can_transition_to(Ticket.STATUS_NEW))
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, mgr, 'incomplete')
+        self.assertEqual(t.status, Ticket.STATUS_ESCALATED_T2)
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -2641,7 +2646,8 @@ class TriageWorkflowIntegrityTest(TestCase):
 
     def test_my_queue_shows_manual_reports_and_returned_tickets(self):
         """My Queue = the manual-intake queue plus the analyst's own-court
-        tickets — above all a case Tier 2 returned (T1_REVIEW)."""
+        tickets — above all a preparation the SOC Manager returned (NEW with
+        first_submitted_at set)."""
         TriageRecord.objects.create(
             source=TriageRecord.SOURCE_PHONE, analyst=self.t1,
             alert_description='Caller reported odd VPN logins.',
@@ -2649,14 +2655,14 @@ class TriageWorkflowIntegrityTest(TestCase):
         )
         returned = _make_ticket(
             created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
-            status=Ticket.STATUS_T1_REVIEW,
+            status=Ticket.STATUS_NEW, first_submitted_at=timezone.now(),
         )
-        # Another analyst's returned case must NOT appear — T1_REVIEW is
+        # Another analyst's returned case must NOT appear — preparation is
         # creator-gated, so it is not this analyst's work.
         _make_ticket(
             created_by=self.other_t1,
             classification=Ticket.CLASSIFICATION_INCIDENT,
-            status=Ticket.STATUS_T1_REVIEW,
+            status=Ticket.STATUS_NEW, first_submitted_at=timezone.now(),
         )
         # A ticket parked with Tier 2 is not own-court work either.
         _make_ticket(
@@ -2694,7 +2700,8 @@ class TriageWorkflowIntegrityTest(TestCase):
         """The tab badges and the returned-cases alert must not shrink to the
         size of page 1."""
         for _ in range(11):
-            _make_ticket(created_by=self.t1, status=Ticket.STATUS_T1_REVIEW,
+            _make_ticket(created_by=self.t1, status=Ticket.STATUS_NEW,
+                         first_submitted_at=timezone.now(),
                          classification=Ticket.CLASSIFICATION_INCIDENT)
         self.client.force_login(self.t1)
         response = self.client.get(reverse('my_queue'))
@@ -2784,7 +2791,8 @@ class TriageWorkflowIntegrityTest(TestCase):
             alert_description='Claimed by someone else.', notes='n',
             claimed_by=self.other_t1, claimed_at=timezone.now(),
         )
-        _make_ticket(created_by=self.t1, status=Ticket.STATUS_T1_REVIEW,
+        _make_ticket(created_by=self.t1, status=Ticket.STATUS_NEW,
+                     first_submitted_at=timezone.now(),
                      classification=Ticket.CLASSIFICATION_INCIDENT)
 
         self.client.force_login(self.t1)
@@ -3497,7 +3505,7 @@ class AttachmentWorkflowPermissionTest(TestCase):
         # letting a non-creator T1 put an attachment on a ticket that
         # _can_upload_ticket_attachment() would refuse them. The notes/status
         # update still goes through — only the file is rejected.
-        ticket = self._ticket(status=Ticket.STATUS_T1_REVIEW)
+        ticket = self._ticket(status=Ticket.STATUS_MONITORING)
         subtask = TicketSubtask.objects.create(
             ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
             title='Collect logs', assigned_to=self.creator,
@@ -3530,7 +3538,7 @@ class AttachmentWorkflowPermissionTest(TestCase):
 
     def test_soc_manager_can_attach_a_result(self):
         mgr = _make_user('attachment_sub_mgr', UserProfile.ROLE_SOC_MANAGER)
-        ticket = self._ticket(status=Ticket.STATUS_T1_REVIEW)
+        ticket = self._ticket(status=Ticket.STATUS_MONITORING)
         subtask = TicketSubtask.objects.create(
             ticket=ticket, subtask_type=TicketSubtask.TYPE_INVESTIGATION,
             title='Collect logs', assigned_to=self.creator,
@@ -5069,7 +5077,7 @@ class UserDropdownLabelTest(TestCase):
         fields = [
             TicketForm().fields['assigned_admin'],
             ProjectIncidentTargetForm().fields['assigned_admin'],
-            AdminAssignmentForm().fields['assigned_admin'],
+            HandlingLaneForm().fields['assigned_admin'],
             ResponseRequestForm().fields['assigned_to'],
         ]
 
@@ -5550,21 +5558,23 @@ class LoginRedirectsAuthenticatedUserTest(TestCase):
         self.assertContains(resp, 'name="username"')
 
 
-class T1RouteToggleCspTest(TestCase):
+class LanePickerToggleCspTest(TestCase):
     """
-    The Tier-1 route toggle is an inline <script>. script-src has no
-    'unsafe-inline', so without a nonce the browser drops it and the System
-    Admin picker stays visible and required even on the Direct-to-Owner route.
+    The handling-lane toggle on Tier 2's review card is an inline <script>.
+    script-src has no 'unsafe-inline', so without a nonce the browser drops it
+    and the System Admin picker stays visible even on the Direct-to-Owner lane.
     """
 
     def setUp(self):
-        self.t1 = _make_t1('t1_route_user')
+        self.t1 = _make_t1('lane_route_t1')
+        self.t2 = _make_t2('lane_route_t2')
         self.ticket = _make_ticket(
-            status=Ticket.STATUS_T1_REVIEW,
+            status=Ticket.STATUS_ESCALATED_T2,
             classification=Ticket.CLASSIFICATION_INCIDENT,
             created_by=self.t1,
+            escalated_to_t2_at=timezone.now(),
         )
-        self.client.force_login(self.t1)
+        self.client.force_login(self.t2)
 
     def test_route_toggle_script_nonce_matches_csp_header(self):
         resp = self.client.get(
@@ -5573,11 +5583,11 @@ class T1RouteToggleCspTest(TestCase):
         html = resp.content.decode()
 
         # The panel carrying the toggle must actually be on the page.
-        self.assertIn('id="t1-route-form"', html)
+        self.assertIn('class="lane-picker', html)
 
         script = re.search(
-            r'<script([^>]*)>\(function\(\)\{var f=document\.getElementById\('
-            r"'t1-route-form'\)", html)
+            r"<script([^>]*)>\(function\(\)\{document\.querySelectorAll\('\.lane-picker'\)",
+            html)
         self.assertIsNotNone(script, 'route-toggle script not found')
 
         nonce = re.search(r'nonce="([^"]+)"', script.group(1))
@@ -7100,7 +7110,8 @@ class TicketFieldHistoryTest(TestCase):
         self.client.force_login(self.t2)
         self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
             'action': 't2_review',
-            'status': Ticket.STATUS_T1_REVIEW,
+            'status': Ticket.STATUS_PENDING_MGR_TRIAGE,
+            't1_route': Ticket.T1_ROUTE_OWNER,
             'classification': Ticket.CLASSIFICATION_INCIDENT,
             'incident_name': '', 'severity': 'High',
             'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
@@ -7111,7 +7122,7 @@ class TicketFieldHistoryTest(TestCase):
             'device_name': 'CORRECTED-HOST',
             'issue_description': 'corrected description',
             'ip_address': '10.0.0.9',
-            'decision_note': 'returning to T1',
+            'decision_note': 'confirmed; owner lane',
         })
         changed = {c.field_name: c for c in ticket.field_changes.all()}
         self.assertIn('device_name', changed)
@@ -7918,6 +7929,7 @@ class MonitoringWorkflowTest(TestCase):
             'action': 'conclude_monitoring',
             'monitoring_outcome': 'incident',
             'decision_note': 'พบการเชื่อมต่อผิดปกติ',
+            't1_route': Ticket.T1_ROUTE_OWNER,
         })
         t.refresh_from_db()
         self.assertEqual(t.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
@@ -8165,15 +8177,16 @@ class ActingTierManagerCreateTest(TestCase):
         self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
 
     def test_manager_with_grant_counts_as_tier2(self):
-        # Drive a TIER2 edge: an escalated case returned to Tier 1.
+        # Drive a TIER2 edge: an escalated Incident routed to the manager.
         self._grant()
         ticket = _make_ticket(
             status=Ticket.STATUS_ESCALATED_T2, created_by=self.manager,
             classification=Ticket.CLASSIFICATION_INCIDENT,
+            t1_route=Ticket.T1_ROUTE_OWNER,
         )
-        ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, note='ส่งกลับ Tier 1')
+        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.manager, note='Incident')
         ticket.refresh_from_db()
-        self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
     def test_nav_shows_open_new_case_with_grant(self):
         self._grant()
@@ -8209,17 +8222,16 @@ class ActingTierManagerCreateTest(TestCase):
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, Ticket.STATUS_APPROVED)
 
-    def test_acting_manager_drives_escalate_then_return_to_t1(self):
-        """The T1→T2→back-to-T1 hats on a single actor: escalate (TIER1_CREATOR),
-        confirm/return (TIER2), then re-route as the creating T1 (TIER1_CREATOR)."""
+    def test_acting_manager_drives_escalate_then_route_to_manager(self):
+        """The T1→T2 hats on a single actor: escalate (TIER1_CREATOR), then
+        confirm the Incident and route it with a lane (TIER2)."""
         self._grant()
         ticket = _make_ticket(
             created_by=self.manager, classification=Ticket.CLASSIFICATION_INCIDENT,
         )
         ticket.transition_to(Ticket.STATUS_ESCALATED_T2, self.manager, 'escalate')
-        ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, 'confirm incident')
-        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
-        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.manager, 'route')
+        ticket.t1_route = Ticket.T1_ROUTE_OWNER
+        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.manager, 'confirm incident')
         self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
 
     def test_revoking_grant_mid_flow_blocks_the_next_tier_step(self):
@@ -8232,5 +8244,6 @@ class ActingTierManagerCreateTest(TestCase):
         ticket.transition_to(Ticket.STATUS_ESCALATED_T2, self.manager, 'escalate')
         # Revoke, then the T2 verification edge must be refused.
         self._grant(on=False)
+        ticket.t1_route = Ticket.T1_ROUTE_OWNER
         with self.assertRaises(ValidationError):
-            ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.manager, 'confirm')
+            ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, self.manager, 'confirm')

@@ -1080,7 +1080,7 @@ class AnalystHeatmapTest(TestCase):
             self._assign(blocked_heavy, Ticket.STATUS_PENDING_MANAGER)
         actually_busy = self._analyst('heat_busy')
         for _ in range(2):
-            self._assign(actually_busy, Ticket.STATUS_T1_REVIEW)
+            self._assign(actually_busy, Ticket.STATUS_NEW)
 
         rows = self.client.get(DASHBOARD_URL).context['assignee_heatmap']
         self.assertEqual(rows[0]['name'], 'Ada Lovelace')  # both share a name
@@ -1141,13 +1141,13 @@ class ExecutiveSummaryCourtTest(TestCase):
         self.assertEqual(ctx['overall_status'], 'WAITING')
         self.assertEqual(self._criteria()['COURT_EXTERNAL']['count'], 1)
 
-    def test_escalated_and_t1_review_are_counted(self):
-        """Regression: ESCALATED_T2 / T1_REVIEW used to be invisible too."""
+    def test_escalated_and_preparation_are_counted(self):
+        """Regression: ESCALATED_T2 used to be invisible too; preparation sits with SOC."""
         _make_ticket(status=Ticket.STATUS_ESCALATED_T2)
-        _make_ticket(status=Ticket.STATUS_T1_REVIEW)
+        _make_ticket(status=Ticket.STATUS_NEW)
         criteria = self._criteria()
         self.assertEqual(criteria['COURT_TIER2']['count'], 1)   # ESCALATED_T2
-        self.assertEqual(criteria['COURT_SOC']['count'], 1)     # T1_REVIEW
+        self.assertEqual(criteria['COURT_SOC']['count'], 1)     # NEW
 
     def test_manager_court_counts_both_manager_stages(self):
         _make_ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)

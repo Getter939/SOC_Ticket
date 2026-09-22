@@ -94,13 +94,13 @@ class Ticket(models.Model):
     # ------------------------------------------------------------------ #
     STATUS_NEW                  = 'NEW'
     STATUS_ESCALATED_T2         = 'ESCALATED_T2'
-    STATUS_T1_REVIEW            = 'T1_REVIEW'
     # ── SOC Manager pre-containment review (blocking) ────────────────── #
     # Every Incident passes through the SOC Manager before it reaches a
     # handling lane. The manager flags Emergency (yes/no) and forwards; they
-    # cannot divert the case — the lane is fixed by Tier 1's ``t1_route``
-    # (ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER). See the
-    # deterministic t1_route guard in can_transition_to / transition_to.
+    # cannot divert the case — the lane is fixed by whoever routed it (Tier 1
+    # at preparation, or Tier 2 when it confirms an escalated Incident) in
+    # ``t1_route`` (ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER). See
+    # the deterministic t1_route guard in can_transition_to / transition_to.
     STATUS_PENDING_MGR_TRIAGE   = 'PENDING_MGR_TRIAGE'
     STATUS_AWAITING_CONTAINMENT = 'AWAITING_CONTAINMENT'
     STATUS_CONTAINMENT_REPORTED = 'CONTAINMENT_REPORTED'
@@ -125,11 +125,11 @@ class Ticket(models.Model):
     # ticket cannot be quietly disposed of by reclassifying it. Confirming an
     # Event that Tier 1 already classified as one does NOT come through here.
     STATUS_PENDING_MGR_EVENT_REVIEW = 'PENDING_MGR_EVENT_REVIEW'
-    # Watch-and-wait: Tier 2 decided the case is not yet an Event or an Incident
-    # and parked it under Tier 1 for a fixed monitoring window (see
-    # MONITORING_DURATION_DAYS). If something happens Tier 1 issues it as an
-    # Incident; if the window closes quietly Tier 1 concludes it an Event. A case
-    # can be monitored at most once (has_been_monitored).
+    # Watch-and-wait: Tier 2 decided the case is an Event worth watching for a
+    # fixed window (see MONITORING_DURATION_DAYS). If something happens Tier 2
+    # issues it as an Incident (choosing the handling lane); if the window
+    # closes quietly Tier 2 closes the Event. A case can be monitored at most
+    # once (has_been_monitored).
     STATUS_MONITORING           = 'MONITORING'
     STATUS_APPROVED             = 'APPROVED'
     STATUS_CLOSED_EVENT         = 'CLOSED_EVENT'
@@ -143,7 +143,6 @@ class Ticket(models.Model):
         (STATUS_NEW,                  'กำลังจัดเตรียม (ยังไม่ส่ง)'),
         (STATUS_ESCALATED_T2,         'ส่งต่อให้ Tier 2'),
         (STATUS_MONITORING,           'กำลังเฝ้าระวัง (Monitoring)'),
-        (STATUS_T1_REVIEW,            'รอ Tier 1 ทบทวน'),
         (STATUS_PENDING_MGR_TRIAGE,   'รอผู้จัดการ SOC ตรวจ (ก่อนมอบหมาย)'),
         (STATUS_AWAITING_CONTAINMENT, 'รอการจัดการจากผู้ดูแลระบบ'),
         (STATUS_CONTAINMENT_REPORTED, 'รายงานการควบคุมแล้ว'),
@@ -156,6 +155,19 @@ class Ticket(models.Model):
         (STATUS_CLOSED_EVENT,         'ปิด (Event)'),
         (STATUS_CANCELLED,            'ยกเลิกแล้ว'),
     ]
+
+    # Retired status codes that can still appear on old audit rows
+    # (TicketLog.status_at_time). Never assignable to a ticket — display only.
+    # T1_REVIEW: Tier 2 used to hand a confirmed Incident back to Tier 1 to pick
+    # the handling lane; Tier 2 now picks it and routes to the SOC Manager.
+    LEGACY_STATUS_LABELS = {
+        'T1_REVIEW': 'ส่งกลับ Tier 1 (legacy)',
+    }
+
+    @classmethod
+    def status_label(cls, code):
+        """Display label for any status code, including retired ones."""
+        return dict(cls.STATUS_CHOICES).get(code) or cls.LEGACY_STATUS_LABELS.get(code, code)
 
     # States where no further action is possible
     RESOLVED_STATUSES = frozenset({STATUS_APPROVED, STATUS_CLOSED_EVENT})
@@ -183,7 +195,6 @@ class Ticket(models.Model):
         STATUS_NEW:                  ('#0d6efd', '#ffffff'),  # blue — open, awaiting triage
         STATUS_ESCALATED_T2:         ('#6f42c1', '#ffffff'),  # purple — up to Tier 2
         STATUS_MONITORING:           ('#4c6ef5', '#ffffff'),  # indigo — watch-and-wait under Tier 1
-        STATUS_T1_REVIEW:            ('#0dcaf0', '#212529'),  # cyan — back to Tier 1
         STATUS_PENDING_MGR_TRIAGE:   ('#d4a017', '#212529'),  # goldenrod — SOC Manager pre-containment review
         STATUS_AWAITING_CONTAINMENT: ('#fd7e14', '#ffffff'),  # orange — blocked on System Admin
         STATUS_CONTAINMENT_REPORTED: ('#20c997', '#212529'),  # teal — admin reported, verifying
@@ -247,11 +258,12 @@ class Ticket(models.Model):
     ]
 
     # ------------------------------------------------------------------ #
-    # Tier-1 handling route for an Incident — chosen by Tier 1, then      #
-    # remembered so the SOC Manager pre-containment review can forward    #
-    # the ticket to the predetermined lane without being able to change   #
-    # it. ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER.           #
-    # Blank until Tier 1 commits an Incident to PENDING_MGR_TRIAGE.        #
+    # Handling lane for an Incident — chosen by whoever routes it to the  #
+    # SOC Manager (Tier 1 at preparation, or Tier 2 when it confirms an   #
+    # escalated / monitored Incident), then remembered so the Manager     #
+    # Triage Review forwards to the predetermined lane without being able #
+    # to change it. ADMIN → AWAITING_CONTAINMENT, OWNER → AWAITING_OWNER. #
+    # The field keeps its historical name ``t1_route``.                   #
     # ------------------------------------------------------------------ #
     T1_ROUTE_ADMIN = 'ADMIN'
     T1_ROUTE_OWNER = 'OWNER'
@@ -270,7 +282,8 @@ class Ticket(models.Model):
             STATUS_ESCALATED_T2,           # Event or Incident → escalate to Tier 2
         ],
         STATUS_ESCALATED_T2: [
-            STATUS_T1_REVIEW,              # Incident → T2 returns to Tier 1
+            # Incident → Tier 2 picks the lane and routes to SOC Manager review.
+            STATUS_PENDING_MGR_TRIAGE,
             # Event that Tier 1 already classified → T2 confirms & closes.
             STATUS_CLOSED_EVENT,
             # Event that T2 downgraded from Incident → SOC Manager verifies.
@@ -288,12 +301,13 @@ class Ticket(models.Model):
             STATUS_CLOSED_EVENT,           # manager agrees it is benign → close
             STATUS_ESCALATED_T2,           # manager disagrees → back to Tier 2 as Incident
         ],
-        STATUS_T1_REVIEW: [
-            STATUS_PENDING_MGR_TRIAGE,     # T1 reviews → SOC Manager pre-containment review
-        ],
         # ── SOC Manager pre-containment review (blocking, Incident-only) ─ #
         STATUS_PENDING_MGR_TRIAGE: [
-            STATUS_T1_REVIEW,            # manager returns an incomplete case to its creator
+            # Manager returns an incomplete case to whoever routed it (see
+            # manager_return_target): Tier 2 if it was ever escalated, else the
+            # creating Tier 1's preparation.
+            STATUS_ESCALATED_T2,
+            STATUS_NEW,
             STATUS_AWAITING_CONTAINMENT,   # manager forwards → admin lane (t1_route=ADMIN)
             STATUS_AWAITING_OWNER,         # manager forwards → owner lane (t1_route=OWNER)
         ],
@@ -332,7 +346,7 @@ class Ticket(models.Model):
         ],
         STATUS_PENDING_MANAGER: [
             STATUS_APPROVED,               # manager verifies → close
-            # ↩ manager step-back to the lane Tier 1 fixed (see STEP_BACK_EDGES);
+            # ↩ manager step-back to the fixed lane (see STEP_BACK_EDGES);
             # the t1_route gate below allows exactly one of these per ticket.
             STATUS_CONTAINMENT_REPORTED,   # admin lane  (t1_route=ADMIN)
             STATUS_PENDING_T2_REVIEW,      # owner lane  (t1_route=OWNER)
@@ -353,7 +367,7 @@ class Ticket(models.Model):
     TRANSITION_PERMISSIONS = {
         (STATUS_NEW,                  STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
         (STATUS_NEW,                  STATUS_ESCALATED_T2):         'TIER1_CREATOR',
-        (STATUS_ESCALATED_T2,         STATUS_T1_REVIEW):           'TIER2',
+        (STATUS_ESCALATED_T2,         STATUS_PENDING_MGR_TRIAGE):   'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_CLOSED_EVENT):        'TIER2',
         (STATUS_ESCALATED_T2,         STATUS_PENDING_MGR_EVENT_REVIEW): 'TIER2',
         # Tier 2 decides an escalated case is an Event and chooses to watch it.
@@ -364,8 +378,8 @@ class Ticket(models.Model):
         (STATUS_MONITORING,           STATUS_CLOSED_EVENT):         'TIER2',
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_CLOSED_EVENT):    'MANAGER',
         (STATUS_PENDING_MGR_EVENT_REVIEW, STATUS_ESCALATED_T2):    'MANAGER',
-        (STATUS_T1_REVIEW,            STATUS_PENDING_MGR_TRIAGE):   'TIER1_CREATOR',
-        (STATUS_PENDING_MGR_TRIAGE,   STATUS_T1_REVIEW):            'MANAGER',
+        (STATUS_PENDING_MGR_TRIAGE,   STATUS_ESCALATED_T2):         'MANAGER',
+        (STATUS_PENDING_MGR_TRIAGE,   STATUS_NEW):                  'MANAGER',
         # SOC Manager pre-containment review forwards to the fixed lane.
         (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_CONTAINMENT): 'MANAGER',
         (STATUS_PENDING_MGR_TRIAGE,   STATUS_AWAITING_OWNER):       'MANAGER',
@@ -402,7 +416,7 @@ class Ticket(models.Model):
     # to remember them all a second time. They are NOT part of the forward flow:
     #   • the detail-page action builders skip them (step_back has its own UI);
     #   • can_transition_to/transition_to gate the PENDING_MANAGER pair on t1_route
-    #     so a ticket only steps back into the lane Tier 1 fixed;
+    #     so a ticket only steps back into its fixed lane;
     #   • the lifecycle-doc sync test excludes them from the forward table.
     # step_back_target() resolves which single edge applies to a given ticket.
     STEP_BACK_EDGES = frozenset({
@@ -428,7 +442,6 @@ class Ticket(models.Model):
     # ticket's original creator (same analyst who opened it). Used both by
     # transition_to and the same-status note guard.
     CREATOR_REVIEW_STATUSES = frozenset({
-        STATUS_T1_REVIEW,
         # A monitored Event stays in the opening analyst's court for visibility
         # during the watch (Tier 2 concludes it via its own TIER2-gated edges).
         STATUS_MONITORING,
@@ -440,12 +453,12 @@ class Ticket(models.Model):
     })
 
     # Statuses where the ball is in the OPENING ANALYST's court — the Tier 1
-    # "My Queue". T1_REVIEW is the big one: Tier 2 returned the case and only
-    # the creator may act (CREATOR_REVIEW_STATUSES), so it must surface
-    # somewhere the creator actually looks. The dashboard's analyst heatmap
-    # derives its own-court columns from this same tuple.
+    # "My Queue". NEW includes a case the SOC Manager returned to preparation
+    # (first_submitted_at set), which must surface somewhere the creator
+    # actually looks. The dashboard's analyst heatmap derives its own-court
+    # columns from this same tuple.
     TIER1_QUEUE_STATUSES = (
-        STATUS_NEW, STATUS_T1_REVIEW, STATUS_MONITORING,
+        STATUS_NEW, STATUS_MONITORING,
         STATUS_AWAITING_OWNER, STATUS_OWNER_REMEDIATED,
     )
 
@@ -484,13 +497,33 @@ class Ticket(models.Model):
     # classification to Tier 2, which then decides Event-close or Incident.)
     INCIDENT_TRANSITIONS = frozenset({
         (STATUS_NEW,          STATUS_PENDING_MGR_TRIAGE),
-        (STATUS_ESCALATED_T2, STATUS_T1_REVIEW),
+        # Tier 2 confirms an escalated Incident and routes it to the manager.
+        (STATUS_ESCALATED_T2, STATUS_PENDING_MGR_TRIAGE),
         # Monitoring turned up something → Tier 2 commits it as an Incident.
         (STATUS_MONITORING,   STATUS_PENDING_MGR_TRIAGE),
     })
 
+    # Edges that hand an Incident to the SOC Manager pre-containment review.
+    # Each must carry a handling lane (t1_route, plus an assigned admin for the
+    # Admin lane) — the manager can only forward to the lane already fixed, so
+    # a lane-less arrival would strand the ticket at PENDING_MGR_TRIAGE.
+    LANE_ROUTING_EDGES = frozenset({
+        (STATUS_NEW,          STATUS_PENDING_MGR_TRIAGE),   # Tier 1, from preparation
+        (STATUS_ESCALATED_T2, STATUS_PENDING_MGR_TRIAGE),   # Tier 2 confirms Incident
+        (STATUS_MONITORING,   STATUS_PENDING_MGR_TRIAGE),   # Tier 2 concludes a watch
+    })
+
+    # The SOC Manager's "return for completion" edges out of the pre-containment
+    # review. Exactly one applies per ticket (manager_return_target): back to
+    # Tier 2 if the ticket was ever escalated, else back to the creating Tier 1's
+    # preparation. Driven by their own control, not the generic action list.
+    MANAGER_RETURN_EDGES = frozenset({
+        (STATUS_PENDING_MGR_TRIAGE, STATUS_ESCALATED_T2),
+        (STATUS_PENDING_MGR_TRIAGE, STATUS_NEW),
+    })
+
     # ------------------------------------------------------------------ #
-    # Other choice sets                                                   #
+    # Other choice sets                                                 #
     # ------------------------------------------------------------------ #
     SEVERITY_CHOICES = [
         ('Critical', 'Critical'),
@@ -905,13 +938,14 @@ class Ticket(models.Model):
         max_length=20, choices=CLASSIFICATION_CHOICES, blank=True, default='',
         verbose_name='การจัดประเภท (Event/Incident)',
     )
-    # The handling lane Tier 1 chose for an Incident (ADMIN / OWNER). Set when
-    # Tier 1 routes a ticket into PENDING_MGR_TRIAGE; read by the SOC Manager
-    # forward step to send the ticket to its fixed lane. Blank for Events and
-    # for tickets still awaiting a route decision.
+    # The handling lane chosen for an Incident (ADMIN / OWNER). Set when Tier 1
+    # (at preparation) or Tier 2 (confirming an escalated or monitored Incident)
+    # routes a ticket into PENDING_MGR_TRIAGE; read by the SOC Manager forward
+    # step to send the ticket to its fixed lane. Blank for Events and for
+    # tickets still awaiting a route decision. Historical name — not Tier-1-only.
     t1_route = models.CharField(
         max_length=10, choices=T1_ROUTE_CHOICES, blank=True, default='',
-        verbose_name='เส้นทางที่ Tier 1 เลือก (Admin/Owner)',
+        verbose_name='เส้นทางการจัดการ (Admin/Owner)',
     )
     containment_report = models.TextField(
         blank=True, default='',
@@ -923,6 +957,26 @@ class Ticket(models.Model):
     # point", used to gate the Tier 1 emergency-flag permission.
     escalated_to_t2_at = models.DateTimeField(
         null=True, blank=True, verbose_name='เวลาที่ส่งต่อ Tier 2 ครั้งแรก',
+    )
+    # Write-once: the first time the ticket left preparation (NEW). A ticket the
+    # SOC Manager returned to preparation is NEW with this set — which is how
+    # the resubmit knows not to re-send the "ticket created" owner email, and
+    # why the creator can no longer cancel it directly.
+    first_submitted_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='เวลาที่ส่ง Ticket ครั้งแรก',
+    )
+
+    # ── Passive "changed by Tier 2" marker for the creating Tier 1 ──────── #
+    # t2_changed_at is stamped whenever a Tier 2 analyst (other than the
+    # creator) records a content change (see history.record_changes); the
+    # creator's own visit to the ticket stamps creator_seen_at. The ticket is
+    # "unseen" while t2_changed_at is newer. Informational only — never gates
+    # a transition or counts toward a "needs action" badge.
+    t2_changed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='Tier 2 แก้ไขข้อมูลล่าสุด',
+    )
+    creator_seen_at = models.DateTimeField(
+        null=True, blank=True, verbose_name='ผู้เปิด Ticket เปิดดูล่าสุด',
     )
 
     # ── Monitoring (watch-and-wait) ─────────────────────────────────────── #
@@ -1481,6 +1535,33 @@ class Ticket(models.Model):
             and self.classification_at_escalation == self.CLASSIFICATION_INCIDENT
         )
 
+    @property
+    def has_unseen_t2_changes(self):
+        """True while a Tier 2 content change is newer than the creator's last
+        look at the ticket. Passive — never gates anything."""
+        if self.t2_changed_at is None:
+            return False
+        return self.creator_seen_at is None or self.t2_changed_at > self.creator_seen_at
+
+    @property
+    def has_handling_lane(self):
+        """True when a complete handling lane is recorded: Owner, or Admin with
+        an assigned System Admin. Required by every LANE_ROUTING_EDGES move."""
+        if self.t1_route == self.T1_ROUTE_OWNER:
+            return True
+        return self.t1_route == self.T1_ROUTE_ADMIN and self.assigned_admin_id is not None
+
+    def manager_return_target(self):
+        """Where the SOC Manager's "return for completion" sends this ticket.
+
+        Back to whoever routed it to the manager: Tier 2 if the ticket was ever
+        escalated (escalated_to_t2_at is write-once), otherwise the creating
+        Tier 1's preparation (NEW), since Tier 1 routed it there directly.
+        """
+        if self.escalated_to_t2_at is not None:
+            return self.STATUS_ESCALATED_T2
+        return self.STATUS_NEW
+
     def can_transition_to(self, new_status):
         """Return True if new_status is a legal next state for this ticket,
         honoring the Event/Incident classification gate and the manager-routing
@@ -1488,6 +1569,10 @@ class Ticket(models.Model):
         """
         edge = (self.status, new_status)
         if new_status not in self.ALLOWED_TRANSITIONS.get(self.status, []):
+            return False
+        if edge in self.LANE_ROUTING_EDGES and not self.has_handling_lane:
+            return False
+        if edge in self.MANAGER_RETURN_EDGES and new_status != self.manager_return_target():
             return False
         # Response-team gate: any path into APPROVED is blocked while a response
         # request is still open. CLOSED_EVENT is intentionally exempt.
@@ -1512,7 +1597,7 @@ class Ticket(models.Model):
         ):
             return False
         # SOC Manager forward at the pre-containment review: the manager can only
-        # send the ticket to the lane Tier 1 already chose (t1_route), never the
+        # send the ticket to the lane already chosen (t1_route), never the
         # other one. This keeps the case "on the way either way" — the manager
         # flags Emergency but cannot divert it.
         if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_CONTAINMENT)
@@ -1522,7 +1607,7 @@ class Ticket(models.Model):
                 and self.t1_route != self.T1_ROUTE_OWNER):
             return False
         # Manager step-back from PENDING_MANAGER returns the ticket to the lane
-        # Tier 1 fixed (mirrors the forward PENDING_MGR_TRIAGE gate): the admin
+        # fixed at routing (mirrors the forward PENDING_MGR_TRIAGE gate): the admin
         # lane steps back to CONTAINMENT_REPORTED, the owner lane to
         # PENDING_T2_REVIEW — never across lanes.
         if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_CONTAINMENT_REPORTED)
@@ -1586,8 +1671,9 @@ class Ticket(models.Model):
         """Return whether ``user`` is this ticket's Tier 1/Tier 2 creator.
 
         Tier 2 is temporarily allowed to open cases and therefore must receive
-        the same creator rights as Tier 1 on preparation, returned-review,
-        monitoring, editing, and evidence surfaces.
+        the same creator rights as Tier 1 on preparation (including a
+        manager-returned preparation), monitoring, editing, and evidence
+        surfaces.
         """
         from ..actor_access import is_creator_analyst
         return is_creator_analyst(self, user)
@@ -1610,7 +1696,7 @@ class Ticket(models.Model):
         if self.status in self.TERMINAL_STATUSES:
             return None
         if self.status in (
-            self.STATUS_NEW, self.STATUS_T1_REVIEW, self.STATUS_OWNER_REMEDIATED,
+            self.STATUS_NEW, self.STATUS_OWNER_REMEDIATED,
             self.STATUS_MONITORING,
         ):
             who = self._person_label(self.created_by)
@@ -1718,7 +1804,21 @@ class Ticket(models.Model):
                 'Member Ticket ของ Project Incident ต้องผ่าน Project Review ก่อนส่งต่อ'
             )
 
-        # 5a. SOC Manager forward honors Tier 1's fixed lane (t1_route): the
+        # 5·. Every hand-off into the manager review must carry a complete
+        # handling lane, or the manager could never forward it.
+        if edge in self.LANE_ROUTING_EDGES and not self.has_handling_lane:
+            raise ValidationError(
+                'ต้องเลือกเส้นทางการจัดการ (ผู้ดูแลระบบพร้อมระบุผู้รับผิดชอบ หรือเจ้าของระบบ) '
+                'ก่อนส่งให้ผู้จัดการ SOC'
+            )
+        # 5·′. The manager's return goes back to whoever routed the ticket.
+        if edge in self.MANAGER_RETURN_EDGES and new_status != self.manager_return_target():
+            raise ValidationError(
+                'Ticket นี้ต้องส่งกลับไปยังผู้ที่ส่งมาให้ผู้จัดการ SOC '
+                f'({dict(self.STATUS_CHOICES)[self.manager_return_target()]})'
+            )
+
+        # 5a. SOC Manager forward honors the fixed lane (t1_route): the
         # manager reviews and forwards, but cannot swap Admin ↔ Owner.
         if (edge == (self.STATUS_PENDING_MGR_TRIAGE, self.STATUS_AWAITING_CONTAINMENT)
                 and self.t1_route != self.T1_ROUTE_ADMIN):
@@ -1731,7 +1831,7 @@ class Ticket(models.Model):
                 'Ticket นี้ถูกกำหนดเส้นทางเป็น "ผู้ดูแลระบบ" — ส่งให้เจ้าของระบบไม่ได้'
             )
         # 5a′. Manager step-back honours the same fixed lane in reverse: a
-        # PENDING_MANAGER ticket steps back only into the lane Tier 1 chose.
+        # PENDING_MANAGER ticket steps back only into the lane chosen at routing.
         if (edge == (self.STATUS_PENDING_MANAGER, self.STATUS_CONTAINMENT_REPORTED)
                 and self.t1_route != self.T1_ROUTE_ADMIN):
             raise ValidationError(
@@ -1840,8 +1940,19 @@ class Ticket(models.Model):
         self.t2_claimed_by = None
         self.t2_claimed_at = None
 
+        # First time the ticket leaves preparation (write-once). A manager
+        # return to NEW keeps it, marking the ticket as a resubmission.
+        if prev_status == self.STATUS_NEW and self.first_submitted_at is None:
+            self.first_submitted_at = now
+
         # Stamp the first-ever escalation to Tier 2 (never cleared afterwards).
-        if new_status == self.STATUS_ESCALATED_T2 and self.escalated_to_t2_at is None:
+        # Also backfilled when a ticket LEAVES Tier 2's desk without the stamp
+        # (one loaded straight into ESCALATED_T2 / MONITORING by an import or
+        # seed) — manager_return_target relies on it to know Tier 2 routed it.
+        if self.escalated_to_t2_at is None and (
+            new_status == self.STATUS_ESCALATED_T2
+            or prev_status in (self.STATUS_ESCALATED_T2, self.STATUS_MONITORING)
+        ):
             self.escalated_to_t2_at = now
 
         # Record what Tier 2 was handed, so a later Event-close can tell a
@@ -2017,7 +2128,7 @@ class Ticket(models.Model):
     def step_back_target(self):
         """Where a manager step-back would send this ticket, or None.
 
-        PENDING_MANAGER is resolved from the lane Tier 1 chose, because the
+        PENDING_MANAGER is resolved from the lane chosen at routing, because the
         ticket arrives there from either the admin lane (CONTAINMENT_REPORTED)
         or the owner lane (PENDING_T2_REVIEW) and the two must not be confused.
         """

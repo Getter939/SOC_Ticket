@@ -61,8 +61,9 @@ def _valid_soc_status_choices(ticket, user):
 
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
         edge = (ticket.status, next_status)
-        if edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES:
-            continue  # step-back / monitoring have their own controls, not this dropdown
+        if (edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES
+                or edge in Ticket.MANAGER_RETURN_EDGES):
+            continue  # step-back / monitoring / manager return have their own controls
         if not ticket.can_transition_to(next_status):
             continue  # blocked by classification or manager-routing gate
         perm = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))
@@ -123,8 +124,11 @@ def _transition_actions(ticket, user):
             else 'Mark as Event -> Close'
         ),
         Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'Mark as Event -> SOC Manager verification',
-        Ticket.STATUS_T1_REVIEW: 'Mark as Incident -> Return to Tier 1',
-        Ticket.STATUS_PENDING_MGR_TRIAGE: 'Route to SOC Manager review',
+        Ticket.STATUS_PENDING_MGR_TRIAGE: (
+            'Mark as Incident -> SOC Manager review'
+            if ticket.status == Ticket.STATUS_ESCALATED_T2
+            else 'Route to SOC Manager review'
+        ),
         # Records what the owner reported; it does not assert the fix is good.
         # "Confirm" was what invited Tier 1 to adjudicate a call that belongs
         # to Tier 2.
@@ -142,24 +146,28 @@ def _transition_actions(ticket, user):
     actions = []
     for next_status in Ticket.ALLOWED_TRANSITIONS.get(ticket.status, []):
         edge = (ticket.status, next_status)
-        if edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES:
-            continue  # step-back / monitoring are separate controls, not forward actions
+        if (edge in Ticket.STEP_BACK_EDGES or edge in Ticket.MONITORING_EDGES
+                or edge in Ticket.MANAGER_RETURN_EDGES):
+            continue  # step-back / monitoring / manager return have their own controls
         can_transition = ticket.can_transition_to(next_status)
-        # Tier 2's two decision buttons also set the classification. Ask the
-        # model whether each edge is valid with that proposed classification.
+        # Tier 2's decision buttons also set the classification (and, for the
+        # Incident decision, the lane — chosen on the same form, so assume one).
+        # Ask the model whether each edge is valid with that proposal.
         if ticket.status == Ticket.STATUS_ESCALATED_T2:
             proposed = {
                 Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
                 # Same Event decision, but for a ticket Tier 2 is downgrading
                 # from Incident the model routes it via the manager instead.
                 Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: Ticket.CLASSIFICATION_EVENT,
-                Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
+                Ticket.STATUS_PENDING_MGR_TRIAGE: Ticket.CLASSIFICATION_INCIDENT,
             }.get(next_status)
             if proposed:
-                original = ticket.classification
+                original = ticket.classification, ticket.t1_route
                 ticket.classification = proposed
+                if next_status == Ticket.STATUS_PENDING_MGR_TRIAGE:
+                    ticket.t1_route = Ticket.T1_ROUTE_OWNER  # lane comes from the form
                 can_transition = ticket.can_transition_to(next_status)
-                ticket.classification = original
+                ticket.classification, ticket.t1_route = original
         if not can_transition:
             continue
         permission = Ticket.TRANSITION_PERMISSIONS.get((ticket.status, next_status))

@@ -315,19 +315,17 @@ class Command(BaseCommand):
         ticket.assigned_admin = admin
         ticket.save()
 
-        # Walk the longest legal path: escalation to Tier 2, return to Tier 1,
-        # manager triage, containment, one rejection loop, then approval.
+        # Walk the longest legal path: escalation to Tier 2, Tier 2 routes the
+        # Incident (Admin lane) to manager triage, containment, one rejection
+        # loop, then approval.
         steps = [
             (Ticket.STATUS_ESCALATED_T2, t1,
              'บัญชีสิทธิ์สูงเข้าระบบจาก IP ต่างประเทศนอกเวลาทำการ '
              'ไม่แน่ใจว่าเป็นการใช้งานจริงของเจ้าของบัญชีหรือไม่ ขอส่ง Tier 2 ตรวจสอบ'),
-            (Ticket.STATUS_T1_REVIEW, t2,
+            (Ticket.STATUS_PENDING_MGR_TRIAGE, t2,
              'ตรวจสอบแล้วยืนยันเป็น Incident จริง — พบการใช้ช่องโหว่ CVE-2026-21893 '
-             'ข้ามการยืนยันตัวตน และพบการรวบรวมไฟล์เตรียมส่งออก ส่งกลับ Tier 1 '
-             'เพื่อดำเนินการตามกระบวนการ'),
-            (Ticket.STATUS_PENDING_MGR_TRIAGE, t1,
-             'รับกลับจาก Tier 2 ยืนยันเป็น Incident ระดับ Critical และติดธง Emergency '
-             'เนื่องจากเกี่ยวข้องกับข้อมูลส่วนบุคคล ขอส่งผู้จัดการมอบหมายผู้ดูแลระบบ'),
+             'ข้ามการยืนยันตัวตน และพบการรวบรวมไฟล์เตรียมส่งออก เลือกเส้นทางมอบหมาย'
+             'ผู้ดูแลระบบ และส่งผู้จัดการ SOC ตรวจสอบ (เกี่ยวข้องกับข้อมูลส่วนบุคคล)'),
             (Ticket.STATUS_AWAITING_CONTAINMENT, manager,
              f'รับทราบ — มอบหมายให้ {admin.get_full_name() or admin.username} '
              f'ดำเนินการเพิกถอน session, บล็อก IOC และแยกเครื่องทันที '

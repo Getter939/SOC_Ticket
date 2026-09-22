@@ -1213,7 +1213,6 @@ def _log_source_with_reference(ticket):
 # dashboard phases by ContainmentStatusPhaseParityTest.
 _CONTAINMENT_STATUS_BY_STATUS = {
     Ticket.STATUS_NEW:                     'รอรับเรื่อง (ยังไม่เริ่มดำเนินการ)',
-    Ticket.STATUS_T1_REVIEW:               'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
     Ticket.STATUS_ESCALATED_T2:            'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
     Ticket.STATUS_PENDING_MGR_TRIAGE:      'อยู่ระหว่างวิเคราะห์และตรวจสอบ',
     Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'อยู่ระหว่างวิเคราะห์และตรวจสอบ',

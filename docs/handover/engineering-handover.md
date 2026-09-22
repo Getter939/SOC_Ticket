@@ -106,18 +106,20 @@ NEW
  │                                            │                       ├─(mgr confirms)──► CLOSED_EVENT
  │                                            │                       └─(mgr rejects; back to INCIDENT)
  │                                            │                            └──► ESCALATED_T2
- │                                            ├─(T2: not yet Event or Incident)
+ │                                            ├─(T2: EVENT, watch it first)
  │                                            │   ──► MONITORING  [30-day watch, once per case]
- │                                            │        ├─(something happens)──► PENDING_MGR_TRIAGE
- │                                            │        └─(window closes quietly; T2 confirms
- │                                            │            the close)──────────► ESCALATED_T2
- │                                            └─(T2: INCIDENT)───► T1_REVIEW
- │                                                                    │
- └─(T1 commits an INCIDENT, picking t1_route)◄───────────────────────┘
-    │
+ │                                            │        ├─(T2: something happened; picks
+ │                                            │        │   the lane)──────────► PENDING_MGR_TRIAGE
+ │                                            │        └─(T2: window closed quietly)──► CLOSED_EVENT
+ │                                            └─(T2: INCIDENT, picks t1_route)──┐
+ │                                                                              │
+ └─(T1 commits an INCIDENT, picking t1_route)──────────────────────────────────┤
+    ┌───────────────────────────────────────────────────────────────────────────┘
     ▼
  PENDING_MGR_TRIAGE          ← SOC Manager: rule Emergency, forward to the
-    │                          lane Tier 1 already chose (cannot change it)
+    │                          lane already chosen (cannot change it);
+    │                          "return for completion" goes back to whoever
+    │                          routed it (ESCALATED_T2 if ever escalated, else NEW)
     ├─(t1_route = ADMIN)──► AWAITING_CONTAINMENT ──► CONTAINMENT_REPORTED
     │                             ▲   (admin submits report)   │
     │                             └───(T2: not contained)──────┤
@@ -179,9 +181,12 @@ Rules that are easy to get wrong:
   analyst's claim blocks; unclaimed tickets stay actionable because Tier 2 also
   works from ticket detail, which has no claim button. The claim is cleared on
   every transition — the queue spans three stages.
-- **On escalations T2 can only return tickets to T1 (`T1_REVIEW`), close a
-  confirmed event, or send a downgrade to the manager** — T2 never assigns
-  admins and never creates tickets. T2 *does*
+- **On escalations T2 decides and routes:** an Incident goes straight to the
+  manager with the lane T2 picks (Admin + assigned admin, or Owner — the lane is
+  required on every edge into `PENDING_MGR_TRIAGE`); an Event is closed,
+  monitored, or (if T2 downgraded it) sent to the manager's event review.
+  `T1_REVIEW` was retired on 2026-09-22; the creator only gets a passive
+  "Tier 2 แก้ไข" marker in My Queue. T2 *does*
   verify: `CONTAINMENT_REPORTED` and `PENDING_T2_REVIEW` are both Tier 2
   queues (`TIER2_QUEUE_STATUSES`), and the owner lane's T2 verification is
   mandatory, not optional.

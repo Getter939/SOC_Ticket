@@ -6,7 +6,7 @@
 {% if returned_count %}
 <div class="alert alert-info d-flex align-items-center mb-3 py-2" role="alert">
   <i class="bi bi-arrow-return-left me-2 fs-5"></i>
-  <strong>{{ returned_count }} เคส</strong>&nbsp;ถูกส่งกลับจาก Tier 2 — รอคุณเลือกเส้นทางการจัดการ
+  <strong>{{ returned_count }} เคส</strong>&nbsp;ถูกผู้จัดการ SOC ส่งกลับมาที่ขั้นจัดเตรียม — แก้ไขให้ครบถ้วนแล้วส่งใหม่
 </div>
 {% endif %}
 
@@ -40,6 +40,14 @@ stays above the tabs so the most urgent signal shows on every tab.
             aria-controls="tab-monitoring" aria-selected="{% if active_tab == 'monitoring' %}true{% else %}false{% endif %}">
       กำลังเฝ้าระวัง
       {% if monitoring_overdue_count %}<span class="badge rounded-pill bg-danger ms-1">{{ monitoring_count }}</span>{% elif monitoring_count %}<span class="badge rounded-pill" style="background:#4c6ef5;">{{ monitoring_count }}</span>{% endif %}
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link {% if active_tab == 't2changes' %}active{% endif %}" id="tab-btn-t2changes"
+            data-bs-toggle="tab" data-bs-target="#tab-t2changes" type="button" role="tab"
+            aria-controls="tab-t2changes" aria-selected="{% if active_tab == 't2changes' %}true{% else %}false{% endif %}">
+      Tier 2 แก้ไข
+      {% if t2_changed_count %}<span class="badge rounded-pill bg-info text-dark ms-1">{{ t2_changed_count }}</span>{% endif %}
     </button>
   </li>
   <li class="nav-item" role="presentation">
@@ -111,6 +119,26 @@ stays above the tabs so the most urgent signal shows on every tab.
       <td class="cell-secondary text-nowrap" title="{{ ticket.monitor_until|date:'d/m/Y H:i' }}">{{ ticket.monitor_until|date:"d/m/Y" }}</td>
       <td class="cell-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'ticket_detail' ticket.pk %}">เปิด Ticket</a></td>
     </tr>{% empty %}<tr><td colspan="6">{% include 'includes/_empty_state.html' with icon='bi-binoculars' title='ไม่มีเคสที่กำลังเฝ้าระวัง' description='เคสที่ Tier 2 ส่งมาให้เฝ้าระวังจะปรากฏที่นี่พร้อมนับถอยหลัง' %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+</div>
+
+{# ── Tab: Tier 2 แก้ไข — passive "changed by Tier 2" list ──────────────── #}
+{# Tickets you opened whose content a Tier 2 analyst edited since you last  #}
+{# looked. Informational: nothing here waits on you, so it is not counted in #}
+{# the sidebar My Queue badge. Opening the ticket clears it from this list.  #}
+<div class="tab-pane fade {% if active_tab == 't2changes' %}show active{% endif %}" id="tab-t2changes" role="tabpanel" aria-labelledby="tab-btn-t2changes">
+<div class="card ops-card mb-4 rounded-top-0">
+  <div class="table-responsive"><table class="table table-hover align-middle operational-table">
+    <thead class="table-light"><tr><th>เคส</th><th>สถานะ</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>Tier 2 แก้ไขเมื่อ</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
+    <tbody>{% for ticket in t2_changed_tickets %}<tr class="clickable-row" data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
+      <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
+      <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
+      <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+      <td><div class="cell-primary">{{ ticket.device_name|default:"-" }}</div><div class="cell-secondary">{{ ticket.issue_description|truncatechars:70 }}</div></td>
+      <td class="cell-secondary text-nowrap" title="{{ ticket.t2_changed_at|date:'d/m/Y H:i' }}">{{ ticket.t2_changed_at|timesince }} ที่แล้ว</td>
+      <td class="cell-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'ticket_detail' ticket.pk %}">ดูการแก้ไข</a></td>
+    </tr>{% empty %}<tr><td colspan="6">{% include 'includes/_empty_state.html' with icon='bi-pencil-square' title='ไม่มีการแก้ไขใหม่จาก Tier 2' description='เมื่อ Tier 2 แก้ไขข้อมูลใน Ticket ที่คุณเปิด รายการจะปรากฏที่นี่จนกว่าคุณจะเปิดดู' %}</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>
 </div>

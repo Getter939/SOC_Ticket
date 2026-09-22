@@ -26,11 +26,13 @@ logger = logging.getLogger('apps.incidents.views')
 def triage_list(request):
     """Tier 1's single work queue ("My Queue" / คิวงานของฉัน).
 
-    Three sections on one page, in render order:
+    Sections on one page, in render order:
       1. The analyst's own-court tickets (TIER1_QUEUE_STATUSES, created by
-         them) — above all T1_REVIEW, where Tier 2 returned the case and only
-         the creator may act. Before this page there was no surface telling
-         the creator a case had come back.
+         them) — including a preparation the SOC Manager returned (NEW with
+         first_submitted_at set), where only the creator may act.
+         Alongside it, a passive "changed by Tier 2" list: tickets the analyst
+         opened whose content a Tier 2 analyst has edited since they last
+         looked. Informational only — not part of the needs-action counts.
       2. Manual-intake reports awaiting triage (TriageRecord) — the former
          Manual Triage page, with the same claim / convert / release /
          dismiss actions.
@@ -51,7 +53,7 @@ def triage_list(request):
     # ?tab=manual so a claim/release/dismiss doesn't bounce the analyst out of
     # the queue they were working in.
     active_tab = request.GET.get('tab', 'tickets')
-    if active_tab not in ('tickets', 'monitoring', 'manual', 'history'):
+    if active_tab not in ('tickets', 'monitoring', 't2changes', 'manual', 'history'):
         active_tab = 'tickets'
 
     queue = TriageRecord.objects.filter(decision='', ticket__isnull=True).select_related(
@@ -85,7 +87,18 @@ def triage_list(request):
     # Counted before paging — these drive the tab badges and the alerts, which
     # describe the whole queue, not the page being viewed.
     my_tickets_total = my_tickets.count()
-    returned_count = my_tickets.filter(status=Ticket.STATUS_T1_REVIEW).count()
+    returned_count = my_tickets.filter(
+        status=Ticket.STATUS_NEW, first_submitted_at__isnull=False,
+    ).count()
+    # Passive "changed by Tier 2" marker (Ticket.has_unseen_t2_changes), across
+    # every ticket this analyst opened, whatever its current stage. Opening the
+    # ticket clears it (ticket_detail stamps creator_seen_at).
+    t2_changed_tickets = (
+        Ticket.objects.filter(created_by=request.user, t2_changed_at__isnull=False)
+        .filter(Q(creator_seen_at__isnull=True) | Q(t2_changed_at__gt=F('creator_seen_at')))
+        .order_by('-t2_changed_at')
+    )
+    t2_changed_count = t2_changed_tickets.count()
     monitoring_count = monitoring_tickets.count()
     monitoring_overdue_count = monitoring_tickets.filter(
         monitor_until__lte=timezone.now(),
@@ -114,6 +127,8 @@ def triage_list(request):
         ).count(),
         'manual_history_count': len(history),
         'returned_count': returned_count,
+        't2_changed_tickets': t2_changed_tickets[:50],
+        't2_changed_count': t2_changed_count,
         'active_tab': active_tab,
     })
 

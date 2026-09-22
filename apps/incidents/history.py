@@ -133,7 +133,26 @@ def record_changes(ticket, before, user, source='', fields=None):
         ))
     if rows:
         TicketFieldChange.objects.bulk_create(rows)
+        mark_t2_change(ticket, user)
     return rows
+
+
+def mark_t2_change(ticket, user):
+    """Flag a Tier 2 content change for the creating analyst's passive
+    "changed by Tier 2" marker (Ticket.has_unseen_t2_changes).
+
+    Only a Tier 2 analyst who is not the ticket's own creator counts — the
+    creator does not need telling about their own edit. Written with a direct
+    UPDATE so it never re-saves (or races) whatever the caller is saving.
+    """
+    from django.utils import timezone
+    from .models import Ticket
+
+    profile = getattr(user, 'profile', None)
+    if profile is None or not profile.is_tier2 or ticket.created_by_id == user.pk:
+        return
+    ticket.t2_changed_at = timezone.now()
+    Ticket.objects.filter(pk=ticket.pk).update(t2_changed_at=ticket.t2_changed_at)
 
 
 def record_subtask_change(subtask, old_notes, new_notes, user, source='subtask'):
@@ -214,6 +233,7 @@ def record_ioc_change(ticket, before, after, user, source=''):
     """Record one audit row if the structured IOC set changed. Returns it or None."""
     if before == after:
         return None
+    mark_t2_change(ticket, user)
     return TicketFieldChange.objects.create(
         ticket=ticket,
         field_name='iocs',

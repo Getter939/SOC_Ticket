@@ -155,8 +155,8 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 
 | Manual | SHOT ids |
 | --- | --- |
-| Tier 1 | `T1-login`, `T1-sidebar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-monitoring-conclude`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
-| Tier 2 | `T2-login`, `T2-queue`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
+| Tier 1 | `T1-login`, `T1-sidebar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
+| Tier 2 | `T2-login`, `T2-queue`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-monitoring-conclude`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
 | SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-open` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |

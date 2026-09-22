@@ -11,9 +11,9 @@ from django.utils import timezone
 from apps.incidents import history
 from apps.wazuh_ingest.models import WazuhAlert
 from ..forms import (
-    AdminAssignmentForm, AttachmentForm, ResponseRequestForm,
+    AttachmentForm, HandlingLaneForm, ResponseRequestForm,
     SubtaskUpdateForm, TicketEditForm, TicketForm, TicketPreparationEditForm,
-    TicketReviewForm,
+    TicketT2DecisionForm,
 )
 from ..models import (
     Ticket,
@@ -41,7 +41,6 @@ from ..case_creation import (
 )
 from ..ticket_updates import save_ticket_edit
 from ..ticket_workflow import (
-    assign_admin_or_owner_route,
     claim_tier2_ticket,
     complete_t2_review,
     conclude_monitoring,
@@ -261,6 +260,13 @@ def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     profile = getattr(request.user, 'profile', None)
     is_terminal = ticket.status in Ticket.TERMINAL_STATUSES
+    # Passive "changed by Tier 2" marker: shown to the creator on this visit,
+    # and the visit itself marks the changes seen (clears My Queue's list).
+    t2_changes_unseen = False
+    if request.method == 'GET' and ticket.created_by_id == request.user.pk:
+        t2_changes_unseen = ticket.has_unseen_t2_changes
+        ticket.creator_seen_at = timezone.now()
+        Ticket.objects.filter(pk=ticket.pk).update(creator_seen_at=ticket.creator_seen_at)
     can_upload_attachment = _can_upload_ticket_attachment(ticket, request.user)
     can_submit_preparation = (
         ticket.status == Ticket.STATUS_NEW
@@ -282,19 +288,17 @@ def ticket_detail(request, pk):
     checklist_items, checklist_trailing = ticket.containment_checklist_display()
     transition_actions = _transition_actions(ticket, request.user)
     transition_codes = {item['status'] for item in transition_actions}
-    # The Event decision leads to one of two targets — a straight close when
-    # Tier 1 had already called it an Event, or SOC Manager verification when
-    # Tier 2 is downgrading an Incident. Exactly one is ever offered.
+    # Tier 2's decision on an escalated case: Incident → pick the lane and route
+    # to the SOC Manager, or Event → close / monitor. The Event decision leads to
+    # one of two targets — a straight close when Tier 1 had already called it an
+    # Event, or SOC Manager verification when Tier 2 is downgrading an Incident.
+    # Exactly one is ever offered.
     can_t2_review = (
         ticket.status == Ticket.STATUS_ESCALATED_T2
-        and Ticket.STATUS_T1_REVIEW in transition_codes
+        and Ticket.STATUS_PENDING_MGR_TRIAGE in transition_codes
         and bool(transition_codes & {
             Ticket.STATUS_CLOSED_EVENT, Ticket.STATUS_PENDING_MGR_EVENT_REVIEW,
         })
-    )
-    can_assign_admin = (
-        ticket.status == Ticket.STATUS_T1_REVIEW
-        and Ticket.STATUS_PENDING_MGR_TRIAGE in transition_codes
     )
     # SOC Manager pre-containment review: flag Emergency + forward to the lane
     # Tier 1 already chose (t1_route). The manager cannot change the lane.
@@ -313,8 +317,12 @@ def ticket_detail(request, pk):
         )
         and (request.user.is_superuser or (profile is not None and profile.is_soc_manager))
     )
+    # The manager's return goes back to whoever routed the ticket here: Tier 2
+    # if it was ever escalated, else the creator's preparation.
+    return_target = ticket.manager_return_target()
     can_return_for_completion = (
         ticket.status == Ticket.STATUS_PENDING_MGR_TRIAGE
+        and ticket.can_transition_to(return_target)
         and (
             request.user.is_superuser
             or (profile is not None and profile.is_soc_manager)
@@ -413,12 +421,16 @@ def ticket_detail(request, pk):
                 messages.error(request, 'คุณไม่มีสิทธิ์ส่ง Ticket นี้กลับให้ผู้เปิดดำเนินการ')
             else:
                 try:
-                    return_for_completion(
+                    result = return_for_completion(
                         ticket=ticket,
                         actor=request.user,
                         reason=request.POST.get('return_reason', ''),
                     )
-                    messages.success(request, 'ส่ง Ticket กลับให้ผู้เปิดดำเนินการให้ครบถ้วนแล้ว')
+                    who = (
+                        'Tier 2' if result.target_status == Ticket.STATUS_ESCALATED_T2
+                        else 'ผู้เปิด Ticket'
+                    )
+                    messages.success(request, f'ส่ง Ticket กลับให้{who}ดำเนินการให้ครบถ้วนแล้ว')
                 except ValidationError as e:
                     messages.error(request, e.message)
 
@@ -471,11 +483,11 @@ def ticket_detail(request, pk):
                         messages.error(request, e.message)
                 return redirect('ticket_detail', pk=pk)
 
-            review_form = TicketReviewForm(request.POST, instance=ticket)
+            review_form = TicketT2DecisionForm(request.POST, instance=ticket)
             expected_classification = {
                 Ticket.STATUS_CLOSED_EVENT: Ticket.CLASSIFICATION_EVENT,
                 Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: Ticket.CLASSIFICATION_EVENT,
-                Ticket.STATUS_T1_REVIEW: Ticket.CLASSIFICATION_INCIDENT,
+                Ticket.STATUS_PENDING_MGR_TRIAGE: Ticket.CLASSIFICATION_INCIDENT,
             }.get(next_status)
             if not can_t2_review or next_status not in transition_codes:
                 messages.error(request, 'ไม่อนุญาตให้ดำเนินการ Tier 2 นี้กับเคสนี้')
@@ -498,46 +510,22 @@ def ticket_detail(request, pk):
                 except ValidationError as e:
                     messages.error(request, e.message)
             else:
-                messages.error(request, 'กรุณาแก้ไขข้อมูลการตรวจสอบของ Tier 2 ให้ถูกต้อง')
-
-        elif action == 'assign_admin':
-            # T1 reviews a returned Incident and picks a handling lane (Admin or
-            # Owner); either way it goes to the SOC Manager pre-containment
-            # review. Only the Admin lane needs an assigned admin.
-            route = request.POST.get('t1_route', Ticket.T1_ROUTE_ADMIN)
-            note = request.POST.get('decision_note', '').strip()
-            assignment_form = AdminAssignmentForm(request.POST, instance=ticket)
-            if not can_assign_admin:
-                messages.error(request, 'ผู้ใช้ปัจจุบันไม่สามารถมอบหมายเคสนี้ได้')
-            elif not note:
-                messages.error(request, 'กรุณาระบุหมายเหตุการตรวจสอบ')
-            elif route == Ticket.T1_ROUTE_OWNER:
-                try:
-                    assign_admin_or_owner_route(
-                        ticket=ticket,
-                        actor=request.user,
-                        route=route,
-                        note=note,
-                    )
-                except ValidationError as e:
-                    messages.error(request, e.message)
-            elif assignment_form.is_valid():
-                try:
-                    assign_admin_or_owner_route(
-                        ticket=ticket,
-                        actor=request.user,
-                        route=route,
-                        note=note,
-                        assignment_form=assignment_form,
-                    )
-                except ValidationError as e:
-                    messages.error(request, e.message)
-            else:
-                messages.error(request, 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+                # Surface a missing lane specifically — it is the one error the
+                # Incident decision adds on top of the content corrections.
+                lane_errors = [
+                    str(err)
+                    for name in ('t1_route', 'assigned_admin')
+                    for err in review_form.errors.get(name, [])
+                ]
+                messages.error(
+                    request,
+                    lane_errors[0] if lane_errors
+                    else 'กรุณาแก้ไขข้อมูลการตรวจสอบของ Tier 2 ให้ถูกต้อง',
+                )
 
         elif action == 'mgr_forward':
             # SOC Manager review: make the REQUIRED Normal/Emergency assessment,
-            # then forward to the lane Tier 1 fixed (the manager cannot divert
+            # then forward to the lane fixed at routing (the manager cannot divert
             # the lane). The assessment is an explicit two-option choice, not a
             # checkbox — "Normal" is a positive decision, recorded as such.
             note = request.POST.get('decision_note', '').strip()
@@ -582,18 +570,27 @@ def ticket_detail(request, pk):
         elif action == 'conclude_monitoring':
             # Tier 2 ends the watch: Incident (something happened) or close the
             # Event (window closed quietly).
+            # An Incident outcome also carries the handling lane Tier 2 chose.
             outcome = request.POST.get('monitoring_outcome', '')
             note = request.POST.get('decision_note', '').strip()
+            lane_form = HandlingLaneForm(request.POST, ticket=ticket)
             if not can_conclude_monitoring:
                 messages.error(request, 'คุณไม่มีสิทธิ์ดำเนินการนี้')
             elif outcome not in ('incident', 'event'):
                 messages.error(request, 'กรุณาเลือกผลการเฝ้าระวัง (Incident หรือ Event)')
             elif not note:
                 messages.error(request, 'กรุณากรอกบันทึกการตัดสินใจ')
+            elif outcome == 'incident' and not lane_form.is_valid():
+                messages.error(request, next(iter(lane_form.errors.values()))[0])
             else:
+                route = admin = None
+                if outcome == 'incident':
+                    route = lane_form.cleaned_data['t1_route']
+                    admin = lane_form.cleaned_data['assigned_admin']
                 try:
                     result = conclude_monitoring(
                         ticket=ticket, actor=request.user, outcome=outcome, note=note,
+                        route=route, assigned_admin=admin,
                     )
                     for warning in result.warnings:
                         messages.warning(request, warning)
@@ -744,6 +741,8 @@ def ticket_detail(request, pk):
         'can_upload_attachment': can_upload_attachment,
         'can_submit_preparation': can_submit_preparation,
         'can_return_for_completion': can_return_for_completion,
+        'return_to_tier2': return_target == Ticket.STATUS_ESCALATED_T2,
+        't2_changes_unseen': t2_changes_unseen,
         'can_submit_containment': can_submit_containment,
         'checklist_items': checklist_items,
         'checklist_trailing': checklist_trailing,
@@ -753,10 +752,9 @@ def ticket_detail(request, pk):
         'can_t2_review': can_t2_review,
         't2_claim_visible': t2_claim_visible,
         't2_claim_state': t2_claim_state,   # None | 'unclaimed' | 'mine' | 'other'
-        't2_review_form': TicketReviewForm(instance=ticket),
+        't2_review_form': TicketT2DecisionForm(instance=ticket),
+        'lane_form': HandlingLaneForm(ticket=ticket),
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
-        'can_assign_admin': can_assign_admin,
-        'assignment_form': AdminAssignmentForm(instance=ticket),
         'can_mgr_forward': can_mgr_forward,
         'mgr_forward_target': mgr_forward_target,
         'can_t2_reclassify': can_t2_reclassify,

@@ -1,6 +1,6 @@
 # Workflow Change Log
 
-> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-09-11
+> **Audience:** developers changing the state machine · **Status:** Current · **Last updated:** 2026-09-22
 > **Current-state reference:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md)
 
 A dated record of every workflow redesign and amendment, newest first, with the
@@ -10,6 +10,97 @@ current shape; read `ticket-lifecycle-states.md` for *what* that shape is today.
 Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
 (SIEM alert triage + escalation queue), `apps/accounts` (roles/tiers),
 `apps/dashboard` (aggregates).
+
+---
+
+## 2026-09-22 — `T1_REVIEW` retired: Tier 2 routes Incidents straight to the SOC Manager
+
+A confirmed Incident used to go `ESCALATED_T2 → T1_REVIEW`, where the creating
+Tier 1 picked the handling lane before the SOC Manager ever saw it. Cases stalled
+there waiting on Tier 1, and the step added no judgement Tier 2 had not already
+made. The state is gone.
+
+**What changed:**
+- **Tier 2's decision tree:** *Event* → close (or manager event-review for a
+  downgrade) / monitor 30 days; *Incident* → choose the lane (Admin + responsible
+  System Admin, or Owner) → `PENDING_MGR_TRIAGE`. New edge
+  `ESCALATED_T2 → PENDING_MGR_TRIAGE` [`TIER2`, Incident-only]; the lane is set on
+  the same form (`TicketT2DecisionForm`, `ticket_workflow.complete_t2_review`).
+- **Lane required on every hand-off to the manager** (`LANE_ROUTING_EDGES`:
+  `NEW`, `ESCALATED_T2`, `MONITORING` → `PENDING_MGR_TRIAGE`; `has_handling_lane`).
+  This also closes the old gap where a case could reach the manager with no lane
+  and could only be returned.
+- **Manager return goes to whoever routed it** (`MANAGER_RETURN_EDGES`,
+  `manager_return_target`): `PENDING_MGR_TRIAGE → ESCALATED_T2` if the ticket was
+  ever escalated (`escalated_to_t2_at`, now also stamped when a ticket leaves
+  Tier 2's desk without it), else `PENDING_MGR_TRIAGE → NEW` (the creator's
+  preparation). Returning to Tier 2 re-stamps `classification_at_escalation =
+  INCIDENT`, so a later Event call is still a downgrade needing the manager.
+- **Resubmitted preparation:** new write-once `first_submitted_at`. A returned
+  `NEW` ticket resubmits through the normal *Submit preparation* action without
+  re-sending the owner "ticket created" email, and the creator can no longer
+  cancel it directly (it has been reviewed).
+- **Tier 1 visibility (passive):** `t2_changed_at` (stamped by
+  `history.record_changes` / `record_ioc_change` when a Tier 2 analyst other than
+  the creator changes content) vs `creator_seen_at` (stamped when the creator
+  opens the ticket). Unseen tickets are listed in My Queue's **Tier 2 แก้ไข** tab
+  and flagged on the ticket; never counted in the sidebar needs-action badge.
+- **Removed:** `STATUS_T1_REVIEW`, `ESCALATED_T2 → T1_REVIEW`,
+  `T1_REVIEW → PENDING_MGR_TRIAGE`, `PENDING_MGR_TRIAGE → T1_REVIEW`, the Tier 1
+  route card (`assign_admin` action, `assign_admin_or_owner_route`,
+  `AdminAssignmentForm`).
+- **Migration `incidents 0083`:** adds the three fields, backfills
+  `first_submitted_at`, and moves any ticket still in `T1_REVIEW` to
+  `ESCALATED_T2` (Tier 2 re-decides, lane included) with a system log note.
+  Old `TicketLog.status_at_time = 'T1_REVIEW'` rows are kept;
+  `Ticket.LEGACY_STATUS_LABELS` renders them. One-way (no reverse).
+
+The historical entries below still describe `T1_REVIEW` as it was at the time.
+
+---
+
+## 2026-09-22 — Monitoring re-anchored to the Event (Tier 2–owned)
+
+Monitoring was a *classification-deferring* park: Tier 2 entered it from
+`ESCALATED_T2` **before** deciding Event/Incident, entry blanked `classification`,
+and the **opening analyst (often Tier 1) concluded** it — quiet windows bounced
+back through `ESCALATED_T2` to close, incidents went to the manager. The business
+rule changed: monitoring is something you do **to an Event**. So it is now a watch
+phase of an Event, and Tier 2 owns it end to end.
+
+**What changed:**
+- **Entry stamps Event.** `ESCALATED_T2 → MONITORING` (still `TIER2`) now sets
+  `classification = EVENT` on entry instead of blanking it (`_transition_to`).
+  Because monitoring is reachable only through Tier 2's Event verdict, **an
+  Incident can never be monitored and any Event can** — no separate guard needed.
+- **Tier 2 concludes** (was `TIER1_CREATOR`). A quiet window closes the Event
+  **directly**; something found raises it to an Incident with the handling lane
+  picked on the conclude form.
+- **Removed Tier 1's advisory `monitoring_proposed`** field + `propose_monitoring`
+  UI/plumbing entirely (create form, submit-preparation, both view call sites).
+- **Queue placement unchanged:** the monitored Event stays in the opening
+  analyst's court (`TIER1_QUEUE_STATUSES` / `CREATOR_REVIEW_STATUSES` /
+  `holds_ticket_court`) for visibility; only the conclude edges are Tier-2-gated.
+  The creator-gate on those statuses only guards *same-status note-only* updates,
+  so a non-creator Tier 2 concluding is not blocked by it.
+- Fixed 30-day window, `has_been_monitored` once-only latch, and on-read expiry
+  are unchanged.
+
+**FSM delta:**
+- **New edge** `MONITORING → CLOSED_EVENT` `[TIER2]` (added to
+  `EVENT_CLOSE_TRANSITIONS`).
+- **Removed edge** `MONITORING → ESCALATED_T2` (the old "Tier 2 confirms the
+  close" bounce).
+- **Re-gated** `MONITORING → PENDING_MGR_TRIAGE` from `TIER1_CREATOR` to `TIER2`
+  (stays in `INCIDENT_TRANSITIONS`).
+- `MONITORING_EDGES` updated to match. Migration `incidents/0082` (RemoveField
+  `monitoring_proposed`).
+
+**Supersedes** the 2026-09-18 Event-downgrade-via-Monitoring gate (recorded in
+[soc-end-to-end-workflow.md](soc-end-to-end-workflow.md) §4/§Known gaps): a
+monitored case is now always an Event and closes directly, so there is no
+Incident-classification to carry across a watch window and no downgrade bypass to
+guard against on that path.
 
 ---
 

@@ -56,7 +56,7 @@ The page number alone is insufficient: it says where to read, but not why the pr
 | H01 | P2 → P3 | Open a ticket form from eligible claimed source(s); an Alert Bundle still produces one ticket. Opening a form does not consume its source. |
 | H02 | P2 → P8 | Open Project Incident creation from one eligible source, or create without a source; member rules stay on P8. |
 | H03 | P3/P8 → P4 | Submitted Event/escalation; enters ESCALATED_T2. Project members use the Event route and cannot enter monitoring. |
-| H04 | P3/P4 → P5 | Submitted Incident with Admin/Owner lane chosen; enters PENDING_MGR_TRIAGE. P4 includes T1_REVIEW completion and Monitoring → Incident. |
+| H04 | P3/P4 → P5 | Submitted Incident with Admin/Owner lane chosen; enters PENDING_MGR_TRIAGE. P4 includes Tier 2's Incident decision (lane chosen on the review card) and Monitoring → Incident. |
 | H05 | P5/P8 → P6 | ADMIN forwarding enters AWAITING_CONTAINMENT. P8 performs project review or inherits an existing project verdict where allowed. |
 | H06 | P5/P8 → P7 | OWNER forwarding enters AWAITING_OWNER, with the same distinction between individual and project review. |
 | H07 | P4 → outcome | CLOSED_EVENT after Tier 2 confirmation and manager downgrade approval where required; documented on P12. |

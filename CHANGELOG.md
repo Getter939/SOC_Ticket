@@ -6,6 +6,56 @@ deployed to the Windows production VM — see
 Format loosely follows [Keep a Changelog](https://keepachangelog.com); dates are
 release (tag) dates.
 
+## [Unreleased]
+
+### Changed
+- **Tier 2 now routes a confirmed Incident straight to the SOC Manager — the
+  "รอ Tier 1 ทบทวน" (`T1_REVIEW`) step is gone.** Tier 2's review is a single
+  decision: *Event* → close or monitor; *Incident* → choose the handling lane
+  (System Admin + who, or Owner) → SOC Manager review. Cases no longer wait on
+  Tier 1 after escalation. The lane is now required on every hand-off to the
+  manager, so a case can never arrive with nothing to forward to (the conclude-
+  monitoring → Incident form carries the same lane picker).
+- **SOC Manager "return for completion" goes back to whoever routed the case** —
+  Tier 2 if it was ever escalated, otherwise the creator's preparation (they fix it
+  and press *Submit* again; no repeat owner email, and direct self-cancel is no
+  longer offered on a reviewed ticket). The button says which.
+
+### Added
+- **"Tier 2 แก้ไข" tab in My Queue** — a passive list of the tickets you opened
+  whose content a Tier 2 analyst has changed since you last looked (the lane
+  choice included), plus a banner on the ticket. Opening the ticket clears it; it
+  is not counted in the sidebar badge.
+
+- **Monitoring re-anchored to the Event classification, fully Tier‑2‑owned.**
+  Monitoring is no longer a *"decide later"* state entered before Event/Incident is
+  chosen — it is now a **watch phase of an Event**. Tier 2 starts it only as an
+  Event decision (the classification stays **Event**, no longer blanked on entry),
+  so an **Incident can never be monitored and any Event can**. **Only Tier 2**
+  concludes the watch: close the Event directly (→ `CLOSED_EVENT`) or, if the watch
+  turned up something, pick the handling lane and raise it to an Incident
+  (→ `PENDING_MGR_TRIAGE`). The case still sits in the opening analyst's My Queue
+  for visibility during the 30 days; the fixed 30‑day window, the once‑per‑case
+  latch (`has_been_monitored`), and on‑read expiry are unchanged. The old
+  `MONITORING → ESCALATED_T2` "confirm the close" bounce is removed — Tier 2 closes
+  in one step. This supersedes the 2026‑09‑18 Event‑downgrade‑via‑Monitoring gate
+  (a monitored case is now always an Event, so that bypass no longer applies).
+
+### Removed
+- **Tier 1's "recommend monitoring" control.** The advisory `propose_monitoring`
+  checkbox (create form and submit‑preparation card) and its backing
+  `Ticket.monitoring_proposed` field are gone — deciding to monitor is entirely
+  Tier 2's, so the recommendation no longer exists.
+
+> Migration `incidents/0083` adds `first_submitted_at` / `t2_changed_at` /
+> `creator_seen_at` and moves any ticket still in `T1_REVIEW` back to Tier 2
+> (`ESCALATED_T2`) with a log note — one-way; old log rows keep the code and
+> render as "ส่งกลับ Tier 1 (legacy)".
+>
+> Migration `incidents/0082` drops `monitoring_proposed` (reversible; the field was
+> advisory‑only and carried no operational data). Rollback follows the deploy
+> runbook's §4a (previous‑tag checkout).
+
 ## [v1.7.0] — 2026-09-17
 
 ### Added

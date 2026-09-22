@@ -1,0 +1,21 @@
+{% comment %}
+Incident handling-lane picker (Admin + responsible System Admin / Owner), filled
+by Tier 2 when it routes an Incident to the SOC Manager — on the Tier 2 review
+card and the conclude-monitoring card. `form` carries the `t1_route` and
+`assigned_admin` fields (TicketT2DecisionForm / HandlingLaneForm). The
+Incident-only requirement is enforced server-side; the script only hides the
+admin select on the Owner lane.
+{% endcomment %}
+<div class="lane-picker mb-3" data-admin-value="{{ T1_ROUTE_ADMIN }}">
+  <div class="form-label fw-bold mb-1">เส้นทางการจัดการ <span class="text-danger">*</span></div>
+  {% for choice in form.t1_route %}
+  <div class="form-check">{{ choice.tag }}<label class="form-check-label" for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label></div>
+  {% endfor %}
+  {% if form.t1_route.errors %}<div class="text-danger small">{{ form.t1_route.errors }}</div>{% endif %}
+  <div class="lane-admin-block mt-2">
+    <label class="form-label fw-bold" for="{{ form.assigned_admin.id_for_label }}">ผู้ดูแลระบบที่รับผิดชอบ <span class="text-danger">*</span></label>
+    {{ form.assigned_admin }}
+    {% if form.assigned_admin.errors %}<div class="text-danger small">{{ form.assigned_admin.errors }}</div>{% endif %}
+  </div>
+</div>
+<script nonce="{{ request.csp_nonce }}">(function(){document.querySelectorAll('.lane-picker').forEach(function(p){if(p.dataset.bound)return;p.dataset.bound='1';var block=p.querySelector('.lane-admin-block');var admin=p.dataset.adminValue;function sync(){var c=p.querySelector('input[name=t1_route]:checked');block.style.display=(!c||c.value===admin)?'':'none';}p.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();});})();</script>

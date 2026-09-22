@@ -49,8 +49,7 @@ RECIPES = [
     # status,                     classification,  route,          admin, owner, t2_signed, mgr_approved, emergency
     (S.STATUS_NEW,                "",              "",             False, False, False, False, False),
     (S.STATUS_ESCALATED_T2,      "",              "",             False, False, False, False, False),
-    (S.STATUS_T1_REVIEW,         S.CLASSIFICATION_INCIDENT, "",   False, False, False, False, False),
-    (S.STATUS_PENDING_MGR_TRIAGE, S.CLASSIFICATION_INCIDENT, S.T1_ROUTE_ADMIN, False, False, False, False, False),
+    (S.STATUS_PENDING_MGR_TRIAGE, S.CLASSIFICATION_INCIDENT, S.T1_ROUTE_ADMIN, True, False, False, False, False),
     (S.STATUS_AWAITING_CONTAINMENT, S.CLASSIFICATION_INCIDENT, S.T1_ROUTE_ADMIN, True, False, False, False, False),
     (S.STATUS_CONTAINMENT_REPORTED, S.CLASSIFICATION_INCIDENT, S.T1_ROUTE_ADMIN, True, False, False, False, False),
     (S.STATUS_AWAITING_OWNER,    S.CLASSIFICATION_INCIDENT, S.T1_ROUTE_OWNER, False, True, False, False, False),

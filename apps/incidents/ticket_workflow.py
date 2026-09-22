@@ -64,11 +64,17 @@ def submit_preparation(*, ticket, actor):
         target = Ticket.STATUS_ESCALATED_T2
         note = 'ส่ง Ticket ที่จัดเตรียมแล้วให้ Tier 2 ตรวจสอบ'
 
+    # A ticket the SOC Manager returned to preparation has been submitted
+    # before; the owner already got the "ticket created" email that time.
+    resubmission = ticket.first_submitted_at is not None
+    if resubmission:
+        note = f'{note} (ส่งใหม่หลังผู้จัดการ SOC ส่งกลับ)'
+
     with transaction.atomic():
         ticket.transition_to(target, actor, note)
 
     warnings = []
-    if ticket.system_owner and ticket.system_owner.email:
+    if not resubmission and ticket.system_owner and ticket.system_owner.email:
         if not notify_system_owner_created(ticket):
             warnings.append('Ticket ถูกส่งแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ')
     if target == Ticket.STATUS_PENDING_MGR_TRIAGE:
@@ -79,23 +85,51 @@ def submit_preparation(*, ticket, actor):
 
 
 def return_for_completion(*, ticket, actor, reason):
-    """Return initial manager review to the creator with an audited reason."""
+    """Return the manager's pre-containment review to whoever routed it.
+
+    Tier 2 if the ticket was ever escalated, otherwise the creating Tier 1's
+    preparation (see Ticket.manager_return_target). The reason is audited.
+    """
     reason = (reason or '').strip()
     if not reason:
         raise ValidationError('กรุณาระบุสิ่งที่ต้องแก้ไขหรือหลักฐานที่ต้องเพิ่มเติม')
-    note = f'ส่งกลับให้ผู้เปิด Ticket ดำเนินการให้ครบถ้วน — เหตุผล: {reason}'
-    ticket.transition_to(Ticket.STATUS_T1_REVIEW, actor, note)
-    return TicketWorkflowResult(
-        ticket=ticket, target_status=Ticket.STATUS_T1_REVIEW,
-    )
+    target = ticket.manager_return_target()
+    who = 'Tier 2' if target == Ticket.STATUS_ESCALATED_T2 else 'ผู้เปิด Ticket'
+    note = f'ส่งกลับให้{who}ดำเนินการให้ครบถ้วน — เหตุผล: {reason}'
+    ticket.transition_to(target, actor, note)
+    return TicketWorkflowResult(ticket=ticket, target_status=target)
+
+
+def _apply_lane(ticket, route, assigned_admin):
+    """Record the handling lane on ``ticket`` (not saved — the transition saves)."""
+    if route == Ticket.T1_ROUTE_OWNER:
+        ticket.t1_route = Ticket.T1_ROUTE_OWNER
+    elif route == Ticket.T1_ROUTE_ADMIN:
+        ticket.t1_route = Ticket.T1_ROUTE_ADMIN
+        ticket.assigned_admin = assigned_admin
+    else:
+        raise ValidationError('กรุณาเลือกเส้นทางการจัดการ')
 
 
 def complete_t2_review(*, ticket, actor, review_form, next_status, decision_note, fallback_label):
-    """Save Tier 2 corrections, record field history, and transition the ticket."""
+    """Save Tier 2 corrections, record field history, and transition the ticket.
+
+    Routing an Incident to the SOC Manager (PENDING_MGR_TRIAGE) also records the
+    handling lane Tier 2 chose on the same form (``t1_route`` / ``assigned_admin``).
+    """
+    to_manager = next_status == Ticket.STATUS_PENDING_MGR_TRIAGE
     with transaction.atomic():
         before = history.snapshot_saved(ticket)
         before_iocs = history.ioc_snapshot(ticket)
-        ticket = review_form.save()
+        ticket = review_form.save(commit=False)
+        if to_manager:
+            _apply_lane(
+                ticket,
+                review_form.cleaned_data.get('t1_route'),
+                review_form.cleaned_data.get('assigned_admin'),
+            )
+        ticket.save()
+        review_form.save_m2m()
         if hasattr(review_form, 'save_iocs'):
             review_form.save_iocs(ticket)
         history.record_changes(ticket, before, actor, source='t2_review')
@@ -103,25 +137,10 @@ def complete_t2_review(*, ticket, actor, review_form, next_status, decision_note
             ticket, before_iocs, history.ioc_snapshot(ticket), actor, source='t2_review')
         ticket.transition_to(next_status, actor, decision_note or fallback_label)
 
+    if to_manager:
+        notify_manager_triage_pending(ticket)
     warnings = _owner_closed_warnings(ticket) if next_status == Ticket.STATUS_CLOSED_EVENT else ()
     return TicketWorkflowResult(ticket=ticket, target_status=next_status, warnings=warnings)
-
-
-def assign_admin_or_owner_route(*, ticket, actor, route, note, assignment_form=None):
-    """Set Tier 1's handling lane and forward the ticket for manager review."""
-    with transaction.atomic():
-        if route == Ticket.T1_ROUTE_OWNER:
-            ticket.t1_route = Ticket.T1_ROUTE_OWNER
-        else:
-            ticket = assignment_form.save(commit=False)
-            ticket.t1_route = Ticket.T1_ROUTE_ADMIN
-        ticket.transition_to(Ticket.STATUS_PENDING_MGR_TRIAGE, actor, note)
-
-    notify_manager_triage_pending(ticket)
-    return TicketWorkflowResult(
-        ticket=ticket,
-        target_status=Ticket.STATUS_PENDING_MGR_TRIAGE,
-    )
 
 
 def manager_forward(*, ticket, actor, want_emergency, target_status, note):
@@ -160,11 +179,12 @@ def start_monitoring(*, ticket, actor, note):
     )
 
 
-def conclude_monitoring(*, ticket, actor, outcome, note):
+def conclude_monitoring(*, ticket, actor, outcome, note, route=None, assigned_admin=None):
     """Tier 2 ends a monitoring window.
 
     ``outcome='incident'`` — something happened during the watch: classify
-    Incident and hand to the SOC Manager pre-containment triage.
+    Incident, record the handling lane Tier 2 chose (``route`` /
+    ``assigned_admin``) and hand to the SOC Manager pre-containment triage.
     ``outcome='event'`` — the window closed quietly: the case is confirmed a
     benign Event and Tier 2 closes it directly. Both set the classification the
     exit edge's gate requires.
@@ -172,6 +192,7 @@ def conclude_monitoring(*, ticket, actor, outcome, note):
     with transaction.atomic():
         if outcome == 'incident':
             ticket.classification = Ticket.CLASSIFICATION_INCIDENT
+            _apply_lane(ticket, route, assigned_admin)
             target = Ticket.STATUS_PENDING_MGR_TRIAGE
         else:
             ticket.classification = Ticket.CLASSIFICATION_EVENT

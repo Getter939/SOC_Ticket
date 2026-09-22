@@ -23,8 +23,9 @@ class TicketLog(models.Model):
 
     @property
     def status_display(self):
-        """Human label for the status code recorded at log time."""
-        return dict(Ticket.STATUS_CHOICES).get(self.status_at_time, self.status_at_time)
+        """Human label for the status code recorded at log time — including a
+        retired code on an old row (Ticket.LEGACY_STATUS_LABELS)."""
+        return Ticket.status_label(self.status_at_time)
 
     @property
     def was_edited(self):
@@ -35,7 +36,7 @@ class TicketLog(models.Model):
 class TicketFieldChange(models.Model):
     """One field's before/after, recorded whenever ticket content is rewritten.
 
-    TicketLog stores prose — "sent for review", "returned to Tier 1" — which is
+    TicketLog stores prose — "sent for review", "returned to Tier 2" — which is
     enough to follow the workflow but not to answer "who changed the IP address,
     and what was it before?". Several surfaces overwrite content in place (Tier 2
     review rewrites ~25 fields, the admin's containment report is replaced when

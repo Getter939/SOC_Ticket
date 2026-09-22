@@ -109,7 +109,7 @@ class DashboardMockupSeedTest(TestCase):
         for status in [
             Ticket.STATUS_ESCALATED_T2,
             Ticket.STATUS_MONITORING,
-            Ticket.STATUS_T1_REVIEW,
+            Ticket.STATUS_PENDING_MGR_TRIAGE,
             Ticket.STATUS_AWAITING_CONTAINMENT,
             Ticket.STATUS_CONTAINMENT_REPORTED,
             Ticket.STATUS_PENDING_MANAGER,

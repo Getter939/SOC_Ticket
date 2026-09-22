@@ -1,5 +1,6 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import UserProfile
 from apps.accounts.testing import MFATestCase as TestCase
@@ -92,7 +93,8 @@ class TicketPreparationWorkflowTest(TestCase):
 
         self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
         ticket.refresh_from_db()
-        self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
+        # Routed straight from preparation (never escalated) → back to it.
+        self.assertEqual(ticket.status, Ticket.STATUS_NEW)
         log = TicketLog.objects.filter(ticket=ticket).latest('pk')
         self.assertEqual(log.author, self.manager)
         self.assertIn('Attach the firewall export.', log.note)
@@ -117,21 +119,17 @@ class TicketPreparationWorkflowTest(TestCase):
     def test_tier2_creator_can_resubmit_manager_return(self):
         ticket = _make_ticket(
             created_by=self.t2,
-            status=Ticket.STATUS_T1_REVIEW,
+            status=Ticket.STATUS_NEW,
             classification=Ticket.CLASSIFICATION_INCIDENT,
             t1_route=Ticket.T1_ROUTE_ADMIN,
             assigned_admin=self.admin,
+            first_submitted_at=timezone.now(),
         )
         self.client.force_login(self.t2)
 
         response = self.client.post(
             reverse('ticket_detail', args=[ticket.pk]),
-            {
-                'action': 'assign_admin',
-                't1_route': Ticket.T1_ROUTE_ADMIN,
-                'assigned_admin': self.admin.pk,
-                'decision_note': 'Added the requested evidence.',
-            },
+            {'action': 'submit_preparation'},
         )
 
         self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))

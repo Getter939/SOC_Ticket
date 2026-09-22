@@ -29,7 +29,7 @@ from apps.incidents.models import Ticket, TicketLog
 MARKER = "[SEED-DATA]"
 
 STATUS_POOL = [
-    "NEW", "ESCALATED_T2", "T1_REVIEW", "AWAITING_CONTAINMENT",
+    "NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT",
     "CONTAINMENT_REPORTED", "PENDING_MANAGER", "APPROVED", "CLOSED_EVENT",
 ]
 STATUS_WEIGHTS = [20, 10, 10, 10, 10, 10, 15, 15]
@@ -40,26 +40,27 @@ PAST_T2_SIGNOFF = {"PENDING_MANAGER", "APPROVED"}
 MANAGER_APPROVED = {"APPROVED"}
 # Statuses that are part of the incident-handling flow (classification=INCIDENT).
 INCIDENT_FLOW = {
-    "T1_REVIEW", "AWAITING_CONTAINMENT", "CONTAINMENT_REPORTED",
+    "PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT", "CONTAINMENT_REPORTED",
     "PENDING_MANAGER", "APPROVED",
 }
 # Statuses where an admin is actively assigned for containment.
-ADMIN_ASSIGNED = {"AWAITING_CONTAINMENT", "CONTAINMENT_REPORTED"}
+# PENDING_MGR_TRIAGE carries the Admin lane Tier 2 chose, so it has one too.
+ADMIN_ASSIGNED = {"PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT", "CONTAINMENT_REPORTED"}
 
 # Approximate lifecycle path to reach each status — used to generate TicketLog
 # audit entries. CLOSED_EVENT is the Event fast-path (skips containment).
 LIFECYCLE_PATHS = {
     "NEW":                  ["NEW"],
     "ESCALATED_T2":         ["NEW", "ESCALATED_T2"],
-    "T1_REVIEW":            ["NEW", "ESCALATED_T2", "T1_REVIEW"],
-    "AWAITING_CONTAINMENT": ["NEW", "ESCALATED_T2", "T1_REVIEW", "AWAITING_CONTAINMENT"],
-    "CONTAINMENT_REPORTED": ["NEW", "ESCALATED_T2", "T1_REVIEW",
+    "PENDING_MGR_TRIAGE":   ["NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE"],
+    "AWAITING_CONTAINMENT": ["NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT"],
+    "CONTAINMENT_REPORTED": ["NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE",
                              "AWAITING_CONTAINMENT", "CONTAINMENT_REPORTED"],
-    "PENDING_MANAGER":      ["NEW", "ESCALATED_T2", "T1_REVIEW", "AWAITING_CONTAINMENT",
+    "PENDING_MANAGER":      ["NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT",
                              "CONTAINMENT_REPORTED", "PENDING_MANAGER"],
-    "APPROVED":             ["NEW", "ESCALATED_T2", "T1_REVIEW", "AWAITING_CONTAINMENT",
+    "APPROVED":             ["NEW", "ESCALATED_T2", "PENDING_MGR_TRIAGE", "AWAITING_CONTAINMENT",
                              "CONTAINMENT_REPORTED", "PENDING_MANAGER", "APPROVED"],
-    "CLOSED_EVENT":         ["NEW", "ESCALATED_T2", "T1_REVIEW", "CLOSED_EVENT"],
+    "CLOSED_EVENT":         ["NEW", "ESCALATED_T2", "CLOSED_EVENT"],
 }
 
 # ── Valid choice strings read from apps/incidents/models.py ───────────────────
@@ -226,6 +227,7 @@ class Command(BaseCommand):
             created_by         = opener,
             assigned_to        = random.choice([t1, t2, None, None]),
             assigned_admin     = admin if status in ADMIN_ASSIGNED else None,
+            t1_route           = Ticket.T1_ROUTE_ADMIN if status in INCIDENT_FLOW else "",
             system_owner       = owner if random.random() < 0.5 else None,
             verified_by        = verified_by,
             verified_at        = verified_at,

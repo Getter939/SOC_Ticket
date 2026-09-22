@@ -279,7 +279,8 @@ def notify_manager_triage_pending(ticket):
     """
     Email SOC Managers that an Incident is waiting in the pre-containment
     review (PENDING_MGR_TRIAGE) — they must flag Emergency and forward it to
-    the lane Tier 1 chose. No fallback: if no manager has an email, skip.
+    the lane already chosen (by Tier 1 or Tier 2). No fallback: if no manager
+    has an email, skip.
     """
     from apps.accounts.models import UserProfile
 
@@ -307,7 +308,7 @@ def notify_manager_triage_pending(ticket):
 
     default_subject = '[{ticket_id}] Incident awaiting SOC Manager review'
     default_body = (
-        'Tier 1 has classified ticket {ticket_id} as an Incident and routed it '
+        'Ticket {ticket_id} has been confirmed as an Incident and routed '
         'for your pre-containment review.\n'
         '\n'
         '  Ticket ID : {ticket_id}\n'

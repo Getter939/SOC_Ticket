@@ -59,24 +59,38 @@
         </div>
       </div>
       {% elif can_t2_review %}
-      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดย Tier 2</h5><small>ตรวจสอบข้อมูลและยืนยันการจัดประเภท</small></div><div class="card-body"><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_review"><div class="review-fields">{% for field in t2_review_form %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endfor %}</div><div class="mb-3"><label class="form-label fw-bold">Indicators of Compromise (IOC)</label>{% include 'incidents/_structured_ioc_fields.html' with form=t2_review_form %}</div><label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea><div class="d-grid gap-2">{% for item in transition_actions %}<button class="btn {% if item.status == 'CLOSED_EVENT' %}btn-secondary{% else %}btn-danger{% endif %}" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endfor %}{% if can_monitor %}<button class="btn btn-outline-primary" type="submit" name="status" value="MONITORING" style="border-color:#4c6ef5;color:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>Event → เฝ้าระวัง {{ monitoring_duration_days }} วัน</button>{% endif %}</div></form></div></div>
+      {% comment %}
+      Tier 2's decision tree: Incident → choose the handling lane → SOC Manager
+      review; Event → close (or Manager verification for a downgrade) or put on
+      the watch. The Event/Incident radio IS the classification field, so the
+      decision and the classification can never disagree; the script only shows
+      the matching branch (without it both branches show and the server still
+      rejects a mismatch).
+      {% endcomment %}
+      <div class="card shadow-sm border-warning workflow-primary"><div class="card-header bg-warning text-dark"><h5 class="mb-0">การตรวจสอบโดย Tier 2</h5><small>ตรวจสอบข้อมูล แล้วตัดสินใจ Incident หรือ Event</small></div><div class="card-body"><form method="post" class="js-submit-loading" id="t2-decision-form">{% csrf_token %}<input type="hidden" name="action" value="t2_review">
+        <div class="review-fields">{% for field in t2_review_form %}{% if field.name != 'classification' and field.name != 't1_route' and field.name != 'assigned_admin' %}<div><label class="form-label fw-bold">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}</div>{% endif %}{% endfor %}</div>
+        <div class="mb-3"><label class="form-label fw-bold">Indicators of Compromise (IOC)</label>{% include 'incidents/_structured_ioc_fields.html' with form=t2_review_form %}</div>
+        <fieldset class="border rounded p-3 mb-3">
+          <legend class="form-label fw-bold fs-6 float-none w-auto px-1 mb-1">การตัดสินใจ <span class="text-danger">*</span></legend>
+          <div class="t2-decision-choice mb-2">{{ t2_review_form.classification }}</div>
+          {% if t2_review_form.classification.errors %}<div class="text-danger small">{{ t2_review_form.classification.errors }}</div>{% endif %}
+          <div data-decision-panel="INCIDENT">
+            <p class="small text-muted mb-2">Incident — เลือกเส้นทางการจัดการ แล้วส่งให้ผู้จัดการ SOC ตรวจสอบและประเมินสถานะฉุกเฉิน</p>
+            {% include 'incidents/_lane_picker.html' with form=t2_review_form %}
+          </div>
+          <div data-decision-panel="EVENT">
+            <p class="small text-muted mb-0">Event — ปิดเคส หรือเฝ้าระวังต่อ{% if can_monitor %} {{ monitoring_duration_days }} วัน{% endif %} ก่อนตัดสินใจ</p>
+          </div>
+        </fieldset>
+        <label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
+        <div class="d-grid gap-2" data-decision-panel="INCIDENT">{% for item in transition_actions %}{% if item.status == 'PENDING_MGR_TRIAGE' %}<button class="btn btn-danger" type="submit" name="status" value="{{ item.status }}"><i class="bi bi-send me-1"></i>{{ item.label }}</button>{% endif %}{% endfor %}</div>
+        <div class="d-grid gap-2" data-decision-panel="EVENT">{% for item in transition_actions %}{% if item.status != 'PENDING_MGR_TRIAGE' %}<button class="btn btn-secondary" type="submit" name="status" value="{{ item.status }}">{{ item.label }}</button>{% endif %}{% endfor %}{% if can_monitor %}<button class="btn btn-outline-primary" type="submit" name="status" value="MONITORING" style="border-color:#4c6ef5;color:#4c6ef5;"><i class="bi bi-binoculars-fill me-1"></i>Event → เฝ้าระวัง {{ monitoring_duration_days }} วัน</button>{% endif %}</div>
+      </form></div></div>
+      <script nonce="{{ request.csp_nonce }}">(function(){var f=document.getElementById('t2-decision-form');if(!f)return;function sync(){var c=f.querySelector('input[name=classification]:checked');f.querySelectorAll('[data-decision-panel]').forEach(function(p){p.style.display=(c&&p.dataset.decisionPanel===c.value)?'':'none';});}f.querySelectorAll('input[name=classification]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
       {% include 'incidents/_detailed_issue_cascade.html' %}
-      {% elif can_assign_admin %}
-      <div class="card shadow-sm border-primary workflow-primary"><div class="card-header bg-primary text-white"><h5 class="mb-0">การเลือกเส้นทางโดย Tier 1</h5><small>Tier 2 ยืนยันว่าเป็น Incident — เลือกเส้นทางการจัดการ</small></div><div class="card-body">
-        <form method="post" id="t1-route-form">{% csrf_token %}<input type="hidden" name="action" value="assign_admin">
-          <label class="form-label fw-bold">เส้นทางการจัดการ <span class="text-danger">*</span></label>
-          <div class="form-check"><input class="form-check-input" type="radio" name="t1_route" value="{{ T1_ROUTE_ADMIN }}" id="route-admin" checked><label class="form-check-label" for="route-admin">มอบหมายผู้ดูแลระบบ (System Admin)</label></div>
-          <div class="form-check mb-2"><input class="form-check-input" type="radio" name="t1_route" value="{{ T1_ROUTE_OWNER }}" id="route-owner"><label class="form-check-label" for="route-owner">ให้เจ้าของระบบแก้ไขเอง (Direct-to-Owner)</label></div>
-          <div id="t1-admin-block"><label class="form-label fw-bold">ผู้ดูแลระบบ <span class="text-danger">*</span></label>{{ assignment_form.assigned_admin }}</div>
-          <label class="form-label fw-bold mt-3">บันทึกการทบทวน <span class="text-danger">*</span></label>
-          <textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
-          <button class="btn btn-primary w-100" type="submit" title="ส่งให้ผู้จัดการ SOC ตรวจสอบ">ส่งให้ผู้จัดการ SOC ตรวจสอบ</button>
-        </form>
-      </div></div>
-      <script nonce="{{ request.csp_nonce }}">(function(){var f=document.getElementById('t1-route-form');if(!f)return;var b=document.getElementById('t1-admin-block');var s=b.querySelector('select');function sync(){var admin=f.querySelector('input[name=t1_route]:checked').value==='{{ T1_ROUTE_ADMIN }}';b.style.display=admin?'':'none';if(s)s.required=admin;}f.querySelectorAll('input[name=t1_route]').forEach(function(r){r.addEventListener('change',sync);});sync();})();</script>
       {% elif can_mgr_forward %}
       <div class="card shadow-sm border-warning workflow-primary"><div class="card-header text-dark" style="background:#d4a017;"><h5 class="mb-0">การตรวจสอบโดยผู้จัดการ SOC</h5><small>ตรวจสอบเส้นทาง ประเมินสถานะฉุกเฉิน แล้วส่งต่อ</small></div><div class="card-body">
-        <dl class="row small mb-3"><dt class="col-5">เส้นทาง (Tier 1 เลือก)</dt><dd class="col-7">{% if ticket.t1_route == T1_ROUTE_OWNER %}เจ้าของระบบแก้ไขเอง{% else %}ผู้ดูแลระบบ{% if ticket.assigned_admin %} — {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% endif %}{% endif %}</dd></dl>
+        <dl class="row small mb-3"><dt class="col-5">เส้นทางการจัดการ</dt><dd class="col-7">{% if ticket.t1_route == T1_ROUTE_OWNER %}เจ้าของระบบแก้ไขเอง{% else %}ผู้ดูแลระบบ{% if ticket.assigned_admin %} — {{ ticket.assigned_admin.get_full_name|default:ticket.assigned_admin.username }}{% endif %}{% endif %}</dd></dl>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="mgr_forward">
           <fieldset><legend class="form-label fw-bold fs-6 mb-1">ประเมินสถานะฉุกเฉิน <span class="text-danger">*</span></legend>
           <div class="small text-muted mb-2">เลือกสถานะก่อนส่งต่อ หากเป็นเหตุฉุกเฉิน ผู้จัดการ SOC ต้องอนุมัติปิดเคสหลัง Tier 2 ตรวจสอบ</div>
@@ -93,9 +107,10 @@
         {% if can_return_for_completion %}
         <hr>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="return_for_completion">
-          <label for="return-completion-reason" class="form-label fw-bold">ส่งกลับให้ผู้เปิดดำเนินการให้ครบถ้วน</label>
+          <label for="return-completion-reason" class="form-label fw-bold">{% if return_to_tier2 %}ส่งกลับให้ Tier 2 ดำเนินการให้ครบถ้วน{% else %}ส่งกลับให้ผู้เปิด Ticket จัดเตรียมใหม่{% endif %}</label>
+          <div class="small text-muted mb-2">{% if return_to_tier2 %}Tier 2 เป็นผู้ส่ง Ticket นี้มา — จะกลับไปที่คิว Tier 2 เพื่อตัดสินใจใหม่{% else %}Tier 1 ส่ง Ticket นี้มาโดยตรงจากขั้นจัดเตรียม — จะกลับไปที่ขั้นจัดเตรียมของผู้เปิด{% endif %}</div>
           <textarea id="return-completion-reason" name="return_reason" class="form-control mb-2" rows="3" required placeholder="ระบุข้อมูลหรือหลักฐานที่ยังขาด"></textarea>
-          <button class="btn btn-outline-secondary w-100" type="submit"><i class="bi bi-arrow-return-left me-1"></i>ส่งกลับเพื่อดำเนินการให้ครบถ้วน</button>
+          <button class="btn btn-outline-secondary w-100" type="submit"><i class="bi bi-arrow-return-left me-1"></i>{% if return_to_tier2 %}ส่งกลับ Tier 2{% else %}ส่งกลับผู้เปิด (จัดเตรียมใหม่){% endif %}</button>
         </form>
         {% endif %}
       </div></div>
@@ -122,6 +137,10 @@
         <div class="mb-2">{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</div>
         <p class="small text-muted mb-2">ถ้ามีเหตุการณ์เกิดขึ้นระหว่างเฝ้าระวัง ให้ออกเป็น <strong>Incident</strong> (ส่งผู้จัดการ SOC) · ถ้าครบกำหนดแล้วไม่มีเหตุ ให้ปิดเป็น <strong>Event</strong> ได้ทันที</p>
         <form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="conclude_monitoring">
+          <details class="action-checklist mb-3"{% if lane_form.t1_route.value %} open{% endif %}>
+            <summary><span><span class="fw-semibold">เส้นทางการจัดการ (หากออกเป็น Incident)</span><span class="small text-muted d-block">ต้องระบุเมื่อเลือก “ออกเป็น Incident”</span></span><i class="bi bi-chevron-down action-chevron" aria-hidden="true"></i></summary>
+            <div class="action-checklist-body">{% include 'incidents/_lane_picker.html' with form=lane_form %}</div>
+          </details>
           <label class="form-label fw-bold">บันทึกการตัดสินใจ <span class="text-danger">*</span></label>
           <textarea name="decision_note" class="form-control mb-3" rows="3" required></textarea>
           <div class="d-grid gap-2">

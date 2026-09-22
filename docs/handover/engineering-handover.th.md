@@ -105,13 +105,15 @@ NEW
  │                                            │                       ├─(mgr เห็นด้วย)──► CLOSED_EVENT
  │                                            │                       └─(mgr ไม่เห็นด้วย → กลับเป็น INCIDENT)
  │                                            │                            └──► ESCALATED_T2
- │                                            └─(T2: INCIDENT)───► T1_REVIEW
- │                                                                    │
- └─(T1 ยืนยันเป็น INCIDENT พร้อมเลือก t1_route)◄─────────────────────┘
-    │
+ │                                            ├─(T2: EVENT → เฝ้าระวัง 30 วัน)──► MONITORING
+ │                                            └─(T2: INCIDENT พร้อมเลือก t1_route)──┐
+ │                                                                                  │
+ └─(T1 ยืนยันเป็น INCIDENT พร้อมเลือก t1_route)──────────────────────────────────────┤
+    ┌───────────────────────────────────────────────────────────────────────────────┘
     ▼
  PENDING_MGR_TRIAGE          ← SOC Manager: ตัดสิน Emergency แล้วส่งต่อไปยัง
-    │                          lane ที่ Tier 1 เลือกไว้ (เปลี่ยน lane ไม่ได้)
+    │                          lane ที่เลือกไว้ (เปลี่ยน lane ไม่ได้); "ส่งกลับ"
+    │                          จะกลับไปยังผู้ที่ส่งมา (ESCALATED_T2 หรือ NEW)
     ├─(t1_route = ADMIN)──► AWAITING_CONTAINMENT ──► CONTAINMENT_REPORTED
     │                             ▲   (admin ส่งรายงาน)         │
     │                             └───(T2: ยังไม่ contain)──────┤
@@ -138,8 +140,11 @@ NEW
 - **จุดตรวจของ manager เป็นแบบ blocking และใช้กับ Incident เท่านั้น** Incident
   ทุกใบต้องผ่าน `PENDING_MGR_TRIAGE` ก่อนงาน containment จะเริ่ม ส่วน Event
   ไม่เคยผ่านจุดนี้ — manager ไม่เกี่ยวข้องกับ Event เลย
-- **สำหรับตั๋ว escalation T2 ทำได้เพียงส่งกลับให้ T1 (`T1_REVIEW`) หรือปิดเป็น event**
-  T2 ไม่มีสิทธิ์มอบหมาย admin และไม่มีสิทธิ์สร้างตั๋ว แต่ T2 เป็นผู้ตรวจรับ:
+- **สำหรับตั๋ว escalation T2 เป็นผู้ตัดสินและส่งต่อ:** ถ้าเป็น Incident T2 เลือกเส้นทาง
+  (Admin + ผู้รับผิดชอบ หรือ Owner) แล้วส่งผู้จัดการ SOC ทันที; ถ้าเป็น Event ปิดเคส
+  เฝ้าระวัง หรือส่งผู้จัดการตรวจ (กรณีปรับลดจาก Incident) — สถานะ `T1_REVIEW`
+  ถูกยกเลิกเมื่อ 2026-09-22 ผู้เปิดตั๋วเห็นการแก้ไขของ T2 ผ่านแท็บ "Tier 2 แก้ไข" ใน
+  คิวงานของฉัน (ไม่บังคับดำเนินการ) และ T2 เป็นผู้ตรวจรับ:
   `CONTAINMENT_REPORTED` และ `PENDING_T2_REVIEW` เป็นคิวของ Tier 2
   (`TIER2_QUEUE_STATUSES`) และการตรวจรับของ lane เจ้าของระบบเป็นขั้นบังคับ ข้ามไม่ได้
 - **วงจรการตีกลับ (rejection loop) มี 2 จุด**: `CONTAINMENT_REPORTED →

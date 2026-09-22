@@ -312,7 +312,6 @@ def dashboard(request):
     assignee_heatmap_statuses = [(s, status_map[s]) for s in _ANALYST_OWN_STATUSES]
     workload_labels = {
         Ticket.STATUS_NEW: 'แจ้งใหม่',
-        Ticket.STATUS_T1_REVIEW: 'ทบทวน',
         Ticket.STATUS_MONITORING: 'เฝ้าระวัง',
         Ticket.STATUS_AWAITING_OWNER: 'ติดตามเจ้าของ',
         Ticket.STATUS_OWNER_REMEDIATED: 'ตรวจผลแก้ไข',
@@ -485,7 +484,6 @@ def _incident_count(qs):
 _EXEC_COURT_GROUPS = {
     'COURT_SOC': [
         Ticket.STATUS_NEW,
-        Ticket.STATUS_T1_REVIEW,
         Ticket.STATUS_OWNER_REMEDIATED,
         # A monitored Event sits in its opening Tier 1's court for visibility
         # during the watch (Tier 2 concludes it).
@@ -518,7 +516,6 @@ _EXEC_COURT_GROUPS = {
 _IR_PHASES = [
     ('PREPARATION',    'Preparation',             [Ticket.STATUS_NEW]),
     ('IDENTIFICATION', 'Identification',          [Ticket.STATUS_ESCALATED_T2,
-                                                   Ticket.STATUS_T1_REVIEW,
                                                    Ticket.STATUS_PENDING_MGR_TRIAGE,
                                                    # SOC Manager verifying a Tier 2 Event
                                                    # downgrade — a disposition decision, not

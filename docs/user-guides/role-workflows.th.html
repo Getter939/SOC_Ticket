@@ -341,7 +341,6 @@
 flowchart TD
   NEW["<b>NEW</b><br/>แจ้งเหตุใหม่"]:::newstate
   ESC["<b>ESCALATED_T2</b><br/>ส่งต่อให้ Tier 2"]:::t2
-  T1R["<b>T1_REVIEW</b><br/>รอ Tier 1 ทบทวน"]:::t1review
   MGREV["<b>PENDING_MGR_EVENT_REVIEW</b><br/>ตรวจการปิดแบบ Event"]:::mgrevent
   MGR["<b>PENDING_MGR_TRIAGE</b><br/>รอผู้จัดการ SOC ตรวจ"]:::mgrtri
   AWC["<b>AWAITING_CONTAINMENT</b><br/>รอผู้ดูแลระบบ"]:::awaitcontain
@@ -354,12 +353,11 @@ flowchart TD
 
   NEW -->|"ส่งต่อ Tier 2"| ESC
   NEW -->|"มอบผู้ดูแล / ให้เจ้าของแก้"| MGR
-  ESC -->|"เป็น Incident → Tier 1"| T1R
+  ESC -->|"เป็น Incident + เลือกเส้นทาง"| MGR
   ESC -->|"เป็น Event → ปิด"| CLE
   ESC -->|"ลด Incident เป็น Event"| MGREV
   MGREV -->|"ยืนยัน Event"| CLE
   MGREV -->|"ไม่เห็นด้วย → Tier 2"| ESC
-  T1R -->|"ส่งผู้จัดการตรวจ"| MGR
   MGR -->|"ส่งต่อ · ช่องผู้ดูแล"| AWC
   MGR -->|"ส่งต่อ · ช่องเจ้าของ"| AWO
   AWC -->|"ส่งรายงานการควบคุม"| CR
@@ -376,7 +374,6 @@ flowchart TD
 
   classDef newstate fill:#0d6efd,color:#fff,stroke:#0a58ca,stroke-width:1.5px;
   classDef t2 fill:#6f42c1,color:#fff,stroke:#5a34a0,stroke-width:1.5px;
-  classDef t1review fill:#0dcaf0,color:#08343d,stroke:#0aa6c4,stroke-width:1.5px;
   classDef mgrtri fill:#d4a017,color:#2a2205,stroke:#a97f12,stroke-width:1.5px;
   classDef awaitcontain fill:#fd7e14,color:#fff,stroke:#cf6510,stroke-width:1.5px;
   classDef containreported fill:#20c997,color:#093b2c,stroke:#17a67c,stroke-width:1.5px;
@@ -415,8 +412,6 @@ flowchart TD
   CLS -->|"Incident · ส่งต่อ Tier 2"| ESC
   CLS -->|"Incident · มอบผู้ดูแล"| MGR
   CLS -->|"Incident · ให้เจ้าของแก้"| MGR
-  T1R["<b>T1_REVIEW</b><br/>รอ Tier 1 ทบทวน"]:::t1review
-  T1R -->|"ส่งผู้จัดการ SOC ตรวจ"| MGR
   AWO["<b>AWAITING_OWNER</b><br/>รอเจ้าของระบบ"]:::awaitowner
   AWO -->|"เจ้าของแจ้งแก้แล้ว → ส่ง Tier 2"| PT2
   ESC["<b>ESCALATED_T2</b><br/>ส่งต่อให้ Tier 2"]:::t2
@@ -425,7 +420,6 @@ flowchart TD
 
   classDef actor fill:#eef2f9,stroke:#8391a8,color:#16202e,stroke-dasharray:4 3,stroke-width:1.3px;
   classDef t2 fill:#6f42c1,color:#fff,stroke:#5a34a0,stroke-width:1.5px;
-  classDef t1review fill:#0dcaf0,color:#08343d,stroke:#0aa6c4,stroke-width:1.5px;
   classDef mgrtri fill:#d4a017,color:#2a2205,stroke:#a97f12,stroke-width:1.5px;
   classDef awaitowner fill:#d63384,color:#fff,stroke:#ad286a,stroke-width:1.5px;
   classDef pendt2 fill:#3d5a80,color:#fff,stroke:#2c4460,stroke-width:1.5px;
@@ -470,7 +464,7 @@ flowchart TD
 flowchart TD
   %% คิวที่ 1 — เคสที่ Tier 1 ส่งต่อขึ้นมา
   ESC["<b>ESCALATED_T2</b><br/>ส่งต่อให้ Tier 2"]:::t2
-  ESC -->|"เป็น Incident → Tier 1"| T1R["<b>T1_REVIEW</b>"]:::t1review
+  ESC -->|"เป็น Incident + เลือกเส้นทาง"| MGR2["<b>PENDING_MGR_TRIAGE</b><br/>รอผู้จัดการ SOC"]:::mgrtri
   ESC -->|"เป็น Event → ปิด"| CLE1["<b>CLOSED_EVENT</b><br/>ปิด (Event)"]:::closedevent
   ESC -->|"ลด Incident เป็น Event"| MGREV["<b>PENDING_MGR_EVENT_REVIEW</b>"]:::mgrevent
 
@@ -493,7 +487,7 @@ flowchart TD
   AWC ~~~ PT2
 
   classDef t2 fill:#6f42c1,color:#fff,stroke:#5a34a0,stroke-width:1.5px;
-  classDef t1review fill:#0dcaf0,color:#08343d,stroke:#0aa6c4,stroke-width:1.5px;
+  classDef mgrtri fill:#d4a017,color:#2a2205,stroke:#a97f12,stroke-width:1.5px;
   classDef awaitcontain fill:#fd7e14,color:#fff,stroke:#cf6510,stroke-width:1.5px;
   classDef containreported fill:#20c997,color:#093b2c,stroke:#17a67c,stroke-width:1.5px;
   classDef awaitowner fill:#d63384,color:#fff,stroke:#ad286a,stroke-width:1.5px;
@@ -750,7 +744,6 @@ flowchart LR
         <div class="legend-grid">
           <div class="chip"><span class="pill" style="background:#0d6efd;color:#fff;">NEW</span><span class="cn">แจ้งเหตุใหม่</span></div>
           <div class="chip"><span class="pill" style="background:#6f42c1;color:#fff;">ESCALATED_T2</span><span class="cn">ส่งต่อให้ Tier 2</span></div>
-          <div class="chip"><span class="pill" style="background:#0dcaf0;color:#08343d;">T1_REVIEW</span><span class="cn">รอ Tier 1 ทบทวน</span></div>
           <div class="chip"><span class="pill" style="background:#d4a017;color:#2a2205;">PENDING_MGR_TRIAGE</span><span class="cn">รอผู้จัดการ SOC ตรวจ</span></div>
           <div class="chip"><span class="pill" style="background:#fd7e14;color:#fff;">AWAITING_CONTAINMENT</span><span class="cn">รอผู้ดูแลระบบ</span></div>
           <div class="chip"><span class="pill" style="background:#20c997;color:#093b2c;">CONTAINMENT_REPORTED</span><span class="cn">รายงานการควบคุมแล้ว</span></div>

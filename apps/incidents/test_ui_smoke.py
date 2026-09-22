@@ -231,7 +231,7 @@ class WorkflowUiContractTest(TestCase):
             status=status,
             created_by=self.t1,
             assigned_admin=self.admin,
-            classification=Ticket.CLASSIFICATION_INCIDENT,
+            classification=kwargs.pop('classification', Ticket.CLASSIFICATION_INCIDENT),
             severity=kwargs.pop('severity', 'High'),
             **kwargs,
         )
@@ -243,18 +243,77 @@ class WorkflowUiContractTest(TestCase):
         self.client.force_login(self.t2)
         response = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
         self.assertContains(response, 'Mark as Event -&gt; Close')
-        self.assertContains(response, 'Mark as Incident -&gt; Return to Tier 1')
+        self.assertContains(response, 'Mark as Incident -&gt; SOC Manager review')
+        # The Incident decision carries the lane picker on the same form.
+        self.assertContains(response, 'name="t1_route"')
         self.assertNotContains(response, 'Send to System Admin')
         self.assertNotContains(response, 'Create Ticket')
 
-    def test_tier2_can_edit_and_return_incident_to_tier1(self):
+    def _t2_incident_post(self, ticket, **lane):
+        return self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
+            'action': 't2_review',
+            'status': Ticket.STATUS_PENDING_MGR_TRIAGE,
+            'classification': Ticket.CLASSIFICATION_INCIDENT,
+            'severity': 'High',
+            'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
+            'log_source': 'Wazuh',
+            'issue_type': 'SIEM',
+            'detailed_issue': 'Investigating',
+            'detailed_issue2': 'Investigating Other',
+            'device_name': 'EDITED-BY-T2',
+            'issue_description': 'Tier 2 confirmed the incident.',
+            'ip_address': '192.0.2.20',
+            'decision_note': 'Confirmed incident.',
+            **lane,
+        })
+
+    def test_tier2_incident_without_lane_stays_with_tier2(self):
+        ticket = self.make_ticket(
+            Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
+        )
+        self.client.force_login(self.t2)
+        self._t2_incident_post(ticket, t1_route=Ticket.T1_ROUTE_ADMIN)  # no admin
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_ESCALATED_T2)
+        self.assertNotEqual(ticket.device_name, 'EDITED-BY-T2')
+
+    def test_tier2_owner_lane_routes_to_manager_and_marks_creator(self):
+        ticket = self.make_ticket(
+            Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
+        )
+        self.client.force_login(self.t2)
+        self._t2_incident_post(ticket, t1_route=Ticket.T1_ROUTE_OWNER)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(ticket.t1_route, Ticket.T1_ROUTE_OWNER)
+        self.assertTrue(ticket.has_unseen_t2_changes)
+
+        # The creator sees it in My Queue's passive list — not in the sidebar
+        # needs-action count — and opening the ticket clears it.
+        self.client.force_login(self.t1)
+        queue = self.client.get(reverse('triage_list'))
+        self.assertEqual(queue.context['t2_changed_count'], 1)
+        before_badge = queue.context['my_queue_count']
+        detail = self.client.get(reverse('ticket_detail', args=[ticket.pk]))
+        self.assertContains(detail, 'Tier 2 แก้ไขข้อมูลใน Ticket นี้')
+        queue = self.client.get(reverse('triage_list'))
+        self.assertEqual(queue.context['t2_changed_count'], 0)
+        self.assertEqual(queue.context['my_queue_count'], before_badge)
+        self.assertNotContains(
+            self.client.get(reverse('ticket_detail', args=[ticket.pk])),
+            'Tier 2 แก้ไขข้อมูลใน Ticket นี้',
+        )
+
+    def test_tier2_can_edit_and_route_incident_to_manager(self):
         ticket = self.make_ticket(
             Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
         )
         self.client.force_login(self.t2)
         response = self.client.post(reverse('ticket_detail', args=[ticket.pk]), {
             'action': 't2_review',
-            'status': Ticket.STATUS_T1_REVIEW,
+            't1_route': Ticket.T1_ROUTE_ADMIN,
+            'assigned_admin': self.admin.pk,
+            'status': Ticket.STATUS_PENDING_MGR_TRIAGE,
             'classification': Ticket.CLASSIFICATION_INCIDENT,
             'severity': 'High',
             'ncsa_severity': Ticket.NCSA_SEVERITY_SEVERE,
@@ -269,14 +328,18 @@ class WorkflowUiContractTest(TestCase):
         })
         self.assertRedirects(response, reverse('ticket_detail', args=[ticket.pk]))
         ticket.refresh_from_db()
-        self.assertEqual(ticket.status, Ticket.STATUS_T1_REVIEW)
+        self.assertEqual(ticket.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(ticket.t1_route, Ticket.T1_ROUTE_ADMIN)
+        self.assertEqual(ticket.assigned_admin, self.admin)
         self.assertEqual(ticket.device_name, 'EDITED-BY-T2')
+        # The manager can forward it immediately — no Tier 1 step in between.
+        self.assertTrue(ticket.can_transition_to(Ticket.STATUS_AWAITING_CONTAINMENT))
 
     def test_reassess_emergency_control_is_manager_only(self):
         """Only the SOC Manager sees the Reassess Emergency control at an active
         post-review stage; Tier 1 / Tier 2 see the read-only status only."""
         ticket = self.make_ticket(
-            Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now(),
+            Ticket.STATUS_ESCALATED_T2, escalated_to_t2_at=timezone.now(),
         )
         control = 'value="reassess_emergency"'
         self.client.force_login(self.t1)
@@ -316,18 +379,11 @@ class WorkflowUiContractTest(TestCase):
         self.assertContains(detail, 'name="emergency_assessment"')
 
     def test_t2_verification_actions_match_routing(self):
-        review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())
         normal = self.make_ticket(Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done')
         emergency = self.make_ticket(
             Ticket.STATUS_CONTAINMENT_REPORTED, containment_report='done', is_emergency=True,
         )
         self.client.force_login(self.t1)
-        # T1_REVIEW now routes to the SOC Manager pre-containment review, not
-        # straight to the admin.
-        self.assertContains(
-            self.client.get(reverse('ticket_detail', args=[review.pk])),
-            'ส่งให้ผู้จัดการ SOC ตรวจสอบ',
-        )
         # Containment verification belongs to Tier 2 now — Tier 1 gets no actions.
         t1_response = self.client.get(reverse('ticket_detail', args=[normal.pk]))
         self.assertNotContains(t1_response, 'Return to System Admin (not contained)')
@@ -443,17 +499,46 @@ class WorkflowUiContractTest(TestCase):
         self.assertEqual(contained.status, Ticket.STATUS_CLOSED_EVENT)
         self.assertEqual(contained.classification, Ticket.CLASSIFICATION_EVENT)
 
-    def test_t1_review_owner_route_goes_to_mgr_triage(self):
-        review = self.make_ticket(Ticket.STATUS_T1_REVIEW, escalated_to_t2_at=timezone.now())
-        self.client.force_login(self.t1)
-        resp = self.client.post(reverse('ticket_detail', args=[review.pk]), {
-            'action': 'assign_admin', 't1_route': Ticket.T1_ROUTE_OWNER,
-            'decision_note': 'Owner will fix directly.',
+    def test_manager_return_label_names_the_target(self):
+        escalated = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+            escalated_to_t2_at=timezone.now(),
+        )
+        direct = self.make_ticket(
+            Ticket.STATUS_PENDING_MGR_TRIAGE, t1_route=Ticket.T1_ROUTE_ADMIN,
+        )
+        self.client.force_login(self.manager)
+        self.assertContains(
+            self.client.get(reverse('ticket_detail', args=[escalated.pk])), 'ส่งกลับ Tier 2',
+        )
+        self.assertContains(
+            self.client.get(reverse('ticket_detail', args=[direct.pk])),
+            'ส่งกลับผู้เปิด (จัดเตรียมใหม่)',
+        )
+        self.client.post(reverse('ticket_detail', args=[escalated.pk]), {
+            'action': 'return_for_completion', 'return_reason': 'Recheck scope.',
         })
-        self.assertRedirects(resp, reverse('ticket_detail', args=[review.pk]))
-        review.refresh_from_db()
-        self.assertEqual(review.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
-        self.assertEqual(review.t1_route, Ticket.T1_ROUTE_OWNER)
+        escalated.refresh_from_db()
+        self.assertEqual(escalated.status, Ticket.STATUS_ESCALATED_T2)
+
+    def test_conclude_monitoring_as_incident_requires_a_lane(self):
+        watched = self.make_ticket(
+            Ticket.STATUS_MONITORING, escalated_to_t2_at=timezone.now(),
+            classification=Ticket.CLASSIFICATION_EVENT, has_been_monitored=True,
+            monitor_until=timezone.now(),
+        )
+        self.client.force_login(self.t2)
+        post = {'action': 'conclude_monitoring', 'monitoring_outcome': 'incident',
+                'decision_note': 'Beacon observed.'}
+        self.client.post(reverse('ticket_detail', args=[watched.pk]), post)
+        watched.refresh_from_db()
+        self.assertEqual(watched.status, Ticket.STATUS_MONITORING)
+
+        self.client.post(reverse('ticket_detail', args=[watched.pk]),
+                         {**post, 't1_route': Ticket.T1_ROUTE_OWNER})
+        watched.refresh_from_db()
+        self.assertEqual(watched.status, Ticket.STATUS_PENDING_MGR_TRIAGE)
+        self.assertEqual(watched.t1_route, Ticket.T1_ROUTE_OWNER)
 
     def test_ticket_list_exposes_emergency_filter_and_sort(self):
         self.make_ticket(Ticket.STATUS_AWAITING_CONTAINMENT, is_emergency=True)

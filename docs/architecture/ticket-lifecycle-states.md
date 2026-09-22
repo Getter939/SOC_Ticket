@@ -1,10 +1,10 @@
 # Ticket Lifecycle States
 
-> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-17
+> **Audience:** developers and SOC leads · **Status:** Current (authoritative current-workflow reference) · **Last updated:** 2026-09-22
 > **Source of truth:** `apps/incidents/models/ticket.py` → `Ticket.ALLOWED_TRANSITIONS` and `Ticket.cancellation_action` (rules in `apps/incidents/cancellation.py`)
 
 The complete ticket lifecycle as a diagram plus a transition reference, organised
-by which role may perform each move. **`STATUS_CHOICES` defines 15 statuses: 14
+by which role may perform each move. **`STATUS_CHOICES` defines 14 statuses: 13
 are reachable through the workflow or cancellation process, plus 1 legacy compatibility state
 (`OWNER_REMEDIATED`) that nothing transitions *into* any more** — it is retained
 only so tickets already sitting in it can finish. When the state machine changes
@@ -18,7 +18,9 @@ docs (handover, user guides) and the diagrams should match it, not restate it.
 **Role colors** — 🔵 Tier 1 · 🟣 Tier 2 · 🟠 System Admin · 🔴 SOC Manager · 🟢 Closed
 
 Key rules (redesigned 2026-07-14):
-- **Every Incident passes the SOC Manager pre-containment review** (`PENDING_MGR_TRIAGE`) before it reaches a handling lane. The manager flags Emergency (yes/no) and forwards to the lane Tier 1 already chose (`t1_route`) — they **cannot** divert the lane.
+- **Every Incident passes the SOC Manager pre-containment review** (`PENDING_MGR_TRIAGE`) before it reaches a handling lane. The manager flags Emergency (yes/no) and forwards to the lane already chosen (`t1_route`) — they **cannot** divert the lane.
+- **Whoever routes an Incident to the manager picks its lane** (changed 2026-09-22 — `T1_REVIEW` retired). Tier 1 picks it at preparation (`NEW → PENDING_MGR_TRIAGE`); for an escalated case **Tier 2 decides and picks it**: *Incident* → choose Admin (+ the responsible System Admin) or Owner → `PENDING_MGR_TRIAGE`; *Event* → close, or watch 30 days. A concluded watch that turned up something is routed the same way. Every edge into `PENDING_MGR_TRIAGE` requires a complete lane (`Ticket.LANE_ROUTING_EDGES` / `has_handling_lane`), so a case can no longer arrive at the manager with nothing to forward to. Tier 1 no longer has a step after escalation; they see Tier 2's edits through a passive **"Tier 2 แก้ไข"** list in My Queue (`t2_changed_at` vs `creator_seen_at`, cleared when they open the ticket).
+- **The manager's "return for completion" goes back to whoever routed the case** (`Ticket.manager_return_target`, `MANAGER_RETURN_EDGES`). If the ticket was ever on Tier 2's desk (`escalated_to_t2_at` set) it returns to `ESCALATED_T2` as an Incident (so a later Event call is still a downgrade needing the manager). If Tier 1 routed it straight from preparation it returns to `NEW`, where the creator fixes it and resubmits (`first_submitted_at` stays set: no repeat owner email, and the creator can no longer cancel it directly).
 - **Response-team requests run in parallel.** At any active stage the SOC Manager may spawn a Response Request (a specialised `TicketSubtask`): VA / Pentest and Infrastructure Security route to the **Red Team Manager**; Forensics / RCA routes to the **Forensic Analyst**. Each is auto-assigned to the sole holder of the target role (picker when several exist). **While any Response Request is not `DONE`, no path may move the Incident to `APPROVED`** — the closing action is withheld until the response work finishes. Event-close (`CLOSED_EVENT`) is exempt: a reclassified false alarm still closes and any open request simply outlives it.
 - **Only the SOC Manager may set or clear the Emergency flag** (superuser bypass). It is decided as an **explicit, required Normal/Emergency assessment** at the pre-containment review (`assess_emergency_initial`, stamping `emergency_decided_by/at` write-once even for Normal). The manager may **reassess** it later (`reassess_emergency`) — an auditable action requiring a written reason — at any active stage past the review, but **not at `PENDING_MGR_TRIAGE`** and **not after closure** (`APPROVED`/`CLOSED_EVENT`). No other role can touch it. (2026-07-23)
 - **Tier 1 can no longer close an Event directly.** A Tier 1 "Event" verdict escalates to Tier 2 (`ESCALATED_T2`); Tier 2 **confirms** it and closes (`CLOSED_EVENT`) with no SOC Manager involvement.
@@ -49,14 +51,13 @@ flowchart TD
     D2 -->|Event ที่ Tier 1 จัดไว้แล้ว — ยืนยันและปิด| CLOSED_EVENT
     D2 -->|Event ที่ Tier 2 ปรับจาก Incident| PENDING_MGR_EVENT_REVIEW
     D2 -->|Event → เฝ้าระวัง 30 วัน| MONITORING
-    D2 -->|Incident| T1_REVIEW[ส่งกลับ Tier 1 เลือกเส้นทาง<br/>T1_REVIEW]
-    T1_REVIEW -->|เลือก Admin / Owner| PENDING_MGR_TRIAGE
+    D2 -->|Incident — Tier 2 เลือกเส้นทาง Admin / Owner| PENDING_MGR_TRIAGE
 
     %% ── Watch-and-wait: a watched Event, Tier 2 owns it ────
     %% Fixed 30-day window, once per case (has_been_monitored),
     %% expiry computed on read — there is no scheduler.
     MONITORING[กำลังเฝ้าระวัง 30 วัน — Event ที่กำลังเฝ้าดู<br/>MONITORING] --> D8{ครบกำหนด หรือ มีเหตุเกิดขึ้น?<br/>ตัดสินโดย Tier 2}
-    D8 -->|มีเหตุเกิดขึ้น → ออกเป็น Incident| PENDING_MGR_TRIAGE
+    D8 -->|มีเหตุเกิดขึ้น → Incident + เลือกเส้นทาง| PENDING_MGR_TRIAGE
     D8 -->|ครบกำหนดโดยเงียบ → ปิดเป็น Event| CLOSED_EVENT
 
     %% ── Manager verifies a Tier 2 Event downgrade ───────────
@@ -65,8 +66,9 @@ flowchart TD
     D7 -->|ไม่ใช่ — กลับเป็น Incident| ESCALATED_T2
 
     %% ── SOC Manager pre-containment review (blocking) ───────
-    PENDING_MGR_TRIAGE[ผู้จัดการ SOC ตรวจก่อนมอบหมาย<br/>flag Emergency + ส่งต่อ<br/>PENDING_MGR_TRIAGE] --> D_ROUTE{เส้นทางที่ Tier 1 เลือก?<br/>t1_route}
-    PENDING_MGR_TRIAGE -->|ส่งกลับพร้อมเหตุผล<br/>ข้อมูล/หลักฐานยังไม่ครบ| T1_REVIEW
+    PENDING_MGR_TRIAGE[ผู้จัดการ SOC ตรวจก่อนมอบหมาย<br/>flag Emergency + ส่งต่อ<br/>PENDING_MGR_TRIAGE] --> D_ROUTE{เส้นทางที่เลือกไว้?<br/>t1_route}
+    PENDING_MGR_TRIAGE -->|ส่งกลับพร้อมเหตุผล — เคยผ่าน Tier 2| ESCALATED_T2
+    PENDING_MGR_TRIAGE -->|ส่งกลับพร้อมเหตุผล — Tier 1 ส่งมาโดยตรง| NEW
     D_ROUTE -->|Admin| AWAITING_CONTAINMENT
     D_ROUTE -->|Owner| AWAITING_OWNER
 
@@ -120,7 +122,7 @@ flowchart TD
     classDef cancelled fill:#fdecec,stroke:#dc3545,color:#7f1d1d;
     classDef meta fill:#f8f9fa,stroke:#6c757d,color:#343a40,stroke-dasharray:4 3;
 
-    class START,NEW,T1_REVIEW,AWAITING_OWNER,MONITORING t1;
+    class START,NEW,AWAITING_OWNER,MONITORING t1;
     class ESCALATED_T2,CONTAINMENT_REPORTED,PENDING_T2_REVIEW t2;
     class AWAITING_CONTAINMENT admin;
     class PENDING_MGR_TRIAGE,PENDING_MANAGER,PENDING_MGR_EVENT_REVIEW mgr;
@@ -136,11 +138,10 @@ flowchart TD
 | From | To | Actor |
 |------|----|-------|
 | NEW | PENDING_MGR_TRIAGE (Incident) / ESCALATED_T2 (Event or Incident-escalate) | Tier 1 (creator) |
-| ESCALATED_T2 | T1_REVIEW (Incident) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) / MONITORING (Event → watch 30 days) | Tier 2 (must hold the claim) |
-| MONITORING | PENDING_MGR_TRIAGE (something happened → Incident) / CLOSED_EVENT (window closed quietly → Tier 2 closes the Event) | **Tier 2** — sets the 30-day window and concludes it; the case stays in the Tier 1 creator's court for visibility; monitored at most once |
+| ESCALATED_T2 | PENDING_MGR_TRIAGE (Incident — Tier 2 picks the lane) / CLOSED_EVENT (Event Tier 1 already classified) / PENDING_MGR_EVENT_REVIEW (Event **downgraded** by Tier 2) / MONITORING (Event → watch 30 days) | Tier 2 (must hold the claim) |
+| MONITORING | PENDING_MGR_TRIAGE (something happened → Incident, Tier 2 picks the lane) / CLOSED_EVENT (window closed quietly → Tier 2 closes the Event) | **Tier 2** — sets the 30-day window and concludes it; the case stays in the Tier 1 creator's court for visibility; monitored at most once |
 | PENDING_MGR_EVENT_REVIEW | CLOSED_EVENT (confirm) / ESCALATED_T2 (reject → classification back to Incident) | **SOC Manager** |
-| T1_REVIEW | PENDING_MGR_TRIAGE | Tier 1 (creator) |
-| PENDING_MGR_TRIAGE | T1_REVIEW (return for completion) / AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) | **SOC Manager** — return requires a written reason |
+| PENDING_MGR_TRIAGE | AWAITING_CONTAINMENT (t1_route=ADMIN) / AWAITING_OWNER (t1_route=OWNER) / ESCALATED_T2 or NEW (return for completion — to whoever routed it) | **SOC Manager** — return requires a written reason |
 | AWAITING_CONTAINMENT | CONTAINMENT_REPORTED | Assigned Admin |
 | CONTAINMENT_REPORTED | AWAITING_CONTAINMENT (ไม่สำเร็จ) / CLOSED_EVENT (จัดเป็น Event) / APPROVED (ไม่ฉุกเฉิน) / PENDING_MANAGER (ฉุกเฉิน) | **Tier 2** |
 | AWAITING_OWNER | PENDING_T2_REVIEW (record owner's fix + attach, hand to Tier 2 — one action) | Tier 1 (creator) |
@@ -163,8 +164,9 @@ or Emergency. It applies to an individual Member Ticket, retaining group members
 shared evidence and linked Alerts. It does not return Alerts to triage.
 
 - The Tier 1 creator may cancel directly only at NEW — i.e. while the ticket is still a
-  saved draft (*save preparation*). A ticket sent on save leaves NEW immediately, so
-  cancelling it requires manager approval.
+  saved draft (*save preparation*) that has never been submitted. A ticket sent on save
+  leaves NEW immediately, and one the manager returned to NEW has already been reviewed
+  (`first_submitted_at` set), so cancelling either requires manager approval.
 - The creator or current workflow actor may request cancellation. Tier 2 claims
   still block another Tier 2 analyst. Response-team assignment alone does not allow it.
 - The SOC Manager approves/rejects pending requests or cancels an active ticket
@@ -193,7 +195,7 @@ is retained only so tickets already in it can finish; **do not wire a new edge
 into it.** (Retired in the workflow change log; see
 [workflow-change-log.md](workflow-change-log.md).)
 
-**`t1_route` routing:** Tier 1 records the chosen lane (`ADMIN` / `OWNER`) when it sends an Incident to `PENDING_MGR_TRIAGE`. The SOC Manager forward is deterministically guarded so it can only reach the lane matching `t1_route` — the manager reviews and flags Emergency but cannot swap Admin ↔ Owner.
+**`t1_route` routing:** whoever sends an Incident to `PENDING_MGR_TRIAGE` records the chosen lane (`ADMIN` + `assigned_admin` / `OWNER`) — Tier 1 from preparation, Tier 2 from `ESCALATED_T2` or `MONITORING`. The field keeps its historical name. The SOC Manager forward is deterministically guarded so it can only reach the lane matching `t1_route` — the manager reviews and flags Emergency but cannot swap Admin ↔ Owner.
 
 **Manager routing at the closing gate:** `requires_manager_verification` = `is_emergency` only. Severity (even Critical) never routes to the manager by itself.
 
@@ -218,7 +220,9 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 
 **Tier 2 Queue** (`/wazuh/escalation_queue/`) shows all three Tier 2 stages: ESCALATED_T2, CONTAINMENT_REPORTED, PENDING_T2_REVIEW — each row claimable, with an OLA countdown column.
 
-**Tier 1 My Queue** (`/incidents/my-queue/`) is the Tier 1 counterpart: their own-court tickets (NEW, T1_REVIEW, MONITORING, AWAITING_OWNER, OWNER_REMEDIATED — `Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue. The page has tabs for tickets, monitoring (cases with their 30-day countdown), manual intake and recent history. It exists because T1_REVIEW is creator-gated: when Tier 2 returns a case, only its opener may act, and before this page nothing told them.
+**Tier 1 My Queue** (`/incidents/my-queue/`) is the Tier 1 counterpart: their own-court tickets (NEW, MONITORING, AWAITING_OWNER, OWNER_REMEDIATED — `Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue. The page has tabs for tickets, monitoring (cases with their 30-day countdown), **Tier 2 แก้ไข** (the passive changed-by-Tier-2 list — not counted in the sidebar badge), manual intake and recent history. A preparation the SOC Manager returned is flagged at the top, since only its opener may act on it.
+
+**Retired status:** `T1_REVIEW` (“รอ Tier 1 ทบทวน”) was removed on 2026-09-22 — Tier 2 used to hand a confirmed Incident back to Tier 1 just to pick the lane, which stalled cases. Migration `incidents 0083` moved any ticket still in it back to `ESCALATED_T2`. Old `TicketLog` rows keep the code; `Ticket.LEGACY_STATUS_LABELS` renders it as “ส่งกลับ Tier 1 (legacy)”.
 
 **OLA countdown:** every queue shows the shared `_ola_badge.html` pill, built from `apps/incidents/ola.py`. Tickets use the live **contain** deadline; Wazuh alerts use their flat 4-hour triage OLA. The badge is hidden when there is no deadline (Medium/Low are notification-only) or the work is finished.
 
@@ -231,5 +235,5 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 - [../adr/0003-manager-verification-gate-in-model.md](../adr/0003-manager-verification-gate-in-model.md) — why the manager gate lives in the model
 - [../adr/0005-ticket-cancellation.md](../adr/0005-ticket-cancellation.md) — the cancellation process (separate from resolution)
 - [soc-end-to-end-workflow.md](soc-end-to-end-workflow.md) — end-to-end workflow from Wazuh alert / manual intake to closure, with every side-flow and a numbered scenario catalogue
-- [soc-end-to-end-workflow-v1.7.0.drawio](soc-end-to-end-workflow-v1.7.0.drawio) — editable 12-page draw.io version of the same (role swimlanes), for diagramming in diagrams.net
-- [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — *superseded* by the v1.7.0 file above (predates intake, draft mode, manager return and the notified-date gate)
+- [soc-end-to-end-workflow-v1.7.1.drawio](soc-end-to-end-workflow-v1.7.1.drawio) — editable draw.io version of the same (role swimlanes), for diagramming in diagrams.net
+- [soc-end-to-end-workflow-v1.7.0.drawio](soc-end-to-end-workflow-v1.7.0.drawio) / [ticket-workflow-v1.5.0.drawio](ticket-workflow-v1.5.0.drawio) — *superseded* historical versions (still show `T1_REVIEW`)

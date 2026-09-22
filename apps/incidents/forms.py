@@ -830,21 +830,80 @@ class TicketPreparationEditForm(TicketReviewForm):
         return cleaned
 
 
-class AdminAssignmentForm(forms.ModelForm):
-    assigned_admin = UserChoiceField(queryset=User.objects.none())
+def _system_admin_queryset():
+    return User.objects.filter(
+        profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
+        is_active=True,
+    ).order_by('first_name', 'username')
 
-    class Meta:
-        model = Ticket
-        fields = ['assigned_admin']
+
+class _HandlingLaneFields(forms.Form):
+    """The Incident handling-lane picker Tier 2 fills when it routes a case to
+    the SOC Manager: Admin (with the responsible System Admin) or Owner.
+
+    Deliberately NOT model fields on the host form: they are applied to the
+    ticket only on the Incident decision (ticket_workflow._apply_lane), so an
+    Event decision or a monitor never touches a lane already on record.
+    """
+
+    t1_route = forms.ChoiceField(
+        choices=Ticket.T1_ROUTE_CHOICES,
+        required=False,
+        label='เส้นทางการจัดการ',
+        widget=forms.RadioSelect(attrs={'class': 'form-check-input'}),
+    )
+    assigned_admin = UserChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label='ผู้ดูแลระบบที่รับผิดชอบ',
+        empty_label='-- เลือกผู้ดูแลระบบ --',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+
+    def _init_lane(self, ticket=None):
+        self.fields['assigned_admin'].queryset = _system_admin_queryset()
+        # Prefill a lane already on record (e.g. a case the manager returned).
+        if ticket is not None and not self.is_bound:
+            self.initial.setdefault('t1_route', ticket.t1_route or Ticket.T1_ROUTE_ADMIN)
+            self.initial.setdefault('assigned_admin', ticket.assigned_admin_id)
+
+    def clean_lane(self, cleaned):
+        """Require a complete lane (Owner, or Admin + admin). Call only when the
+        decision is Incident."""
+        route = cleaned.get('t1_route')
+        if route not in (Ticket.T1_ROUTE_ADMIN, Ticket.T1_ROUTE_OWNER):
+            self.add_error('t1_route', 'กรุณาเลือกเส้นทางการจัดการสำหรับ Incident')
+        elif route == Ticket.T1_ROUTE_ADMIN and not cleaned.get('assigned_admin'):
+            self.add_error('assigned_admin', 'กรุณาเลือกผู้ดูแลระบบที่รับผิดชอบ')
+
+
+class TicketT2DecisionForm(_HandlingLaneFields, TicketReviewForm):
+    """Tier 2's review of an escalated case: correct the content, classify it,
+    and — for an Incident — choose the handling lane before it goes to the SOC
+    Manager. The lane is validated only when the classification is Incident."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['assigned_admin'].queryset = User.objects.filter(
-            profile__role=UserProfile.ROLE_SYSTEM_ADMIN,
-            is_active=True,
-        ).order_by('first_name', 'username')
-        self.fields['assigned_admin'].required = True
-        self.fields['assigned_admin'].widget.attrs['class'] = 'form-select'
+        self._init_lane(self.instance)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('classification') == Ticket.CLASSIFICATION_INCIDENT:
+            self.clean_lane(cleaned)
+        return cleaned
+
+
+class HandlingLaneForm(_HandlingLaneFields):
+    """Stand-alone lane picker — Tier 2 concluding a watch as an Incident."""
+
+    def __init__(self, *args, ticket=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._init_lane(ticket)
+
+    def clean(self):
+        cleaned = super().clean()
+        self.clean_lane(cleaned)
+        return cleaned
 
 
 class TriageForm(forms.ModelForm):

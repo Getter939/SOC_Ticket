@@ -798,22 +798,22 @@ class EscalationQueueTest(TestCase):
     def test_another_analysts_claim_blocks_the_transition(self):
         self._claim_for(self.t2_analyst)
         with self.assertRaises(ValidationError):
-            self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst2)
+            self.ticket.transition_to(Ticket.STATUS_MONITORING, self.t2_analyst2)
 
     def test_unclaimed_ticket_stays_actionable(self):
         # Tier 2 also works straight from ticket detail, which has no claim
         # button — an unclaimed ticket must not be locked out.
-        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
-        self.assertEqual(self.ticket.status, Ticket.STATUS_T1_REVIEW)
+        self.ticket.transition_to(Ticket.STATUS_MONITORING, self.t2_analyst)
+        self.assertEqual(self.ticket.status, Ticket.STATUS_MONITORING)
 
     def test_claim_holder_may_transition(self):
         self._claim_for(self.t2_analyst)
-        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
-        self.assertEqual(self.ticket.status, Ticket.STATUS_T1_REVIEW)
+        self.ticket.transition_to(Ticket.STATUS_MONITORING, self.t2_analyst)
+        self.assertEqual(self.ticket.status, Ticket.STATUS_MONITORING)
 
     def test_claim_is_cleared_when_the_ticket_moves_stage(self):
         self._claim_for(self.t2_analyst)
-        self.ticket.transition_to(Ticket.STATUS_T1_REVIEW, self.t2_analyst)
+        self.ticket.transition_to(Ticket.STATUS_MONITORING, self.t2_analyst)
 
         self.ticket.refresh_from_db()
         self.assertIsNone(self.ticket.t2_claimed_by)

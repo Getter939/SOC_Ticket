@@ -1,8 +1,8 @@
 # SOC End-to-End Workflow (v1.7.0, as implemented)
 
-> **Audience:** SOC leads, analysts, developers · **Status:** Current · **Last updated:** 2026-09-18 (navigation model updated; workflow audited against the code)
+> **Audience:** SOC leads, analysts, developers · **Status:** Current · **Last updated:** 2026-09-22 (`T1_REVIEW` retired — Tier 2 picks the lane; manager return goes to whoever routed the case)
 > **Scope:** the whole path from a Wazuh alert or a manual report to a closed case, including every side-flow.
-> **Editable diagram:** [soc-end-to-end-workflow-v1.7.0.drawio](soc-end-to-end-workflow-v1.7.0.drawio) (12 pages, role swimlanes; open in diagrams.net)
+> **Editable diagram:** [soc-end-to-end-workflow-v1.7.1.drawio](soc-end-to-end-workflow-v1.7.1.drawio) (12 pages, role swimlanes; open in diagrams.net)
 > **Status-machine authority:** [ticket-lifecycle-states.md](ticket-lifecycle-states.md) and `apps/incidents/models/ticket.py` → `Ticket.ALLOWED_TRANSITIONS`. If this page and the code disagree, the code wins.
 
 **Role colors** — 🔵 Tier 1 · 🟣 Tier 2 · 🔴 SOC Manager · 🟠 System Admin · 🩷 System Owner · 🩵 Response Team · 🟢 Closed · ⚫ System
@@ -114,10 +114,10 @@ Only Tier 1 can use the triage queue, claim, release, convert and log manual int
 flowchart LR
     F([Ticket form]) --> C{classification}
     C -->|Incident| R{route}
-    C -->|Event| E[route blank<br/>☐ propose monitoring]
+    C -->|Event| E[route blank]
     R -->|assign_admin| RA[pick System Admin]
     R -->|direct_owner| RO[owner fixes it]
-    R -->|escalate_t2| RT[☐ propose monitoring]
+    R -->|escalate_t2| RT[escalate to Tier 2]
     RA & RO & RT & E --> SN{send now or save draft?}
     SN -->|save draft| NEW[NEW — in preparation<br/>not routed · lane remembered]
     NEW -->|creator: submit preparation| DST
@@ -137,32 +137,34 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    IN([NEW Event / escalate<br/>MONITORING → Event<br/>manager rejects downgrade]) --> ESC[ESCALATED_T2<br/>classification_at_escalation stamped on first entry,<br/>kept across a Monitoring round]
+    IN([NEW Event / escalate<br/>manager rejects downgrade]) --> ESC[ESCALATED_T2<br/>classification_at_escalation stamped on first entry]
     ESC --> D{Tier 2 verdict}
     D -->|Event — stamped Event on entry| EV([CLOSED_EVENT])
     D -->|Event — downgraded from Incident| MER[PENDING_MGR_EVENT_REVIEW]
     MER -->|benign — confirm, note| EV
     MER -->|not benign — back as Incident| ESC
-    D -->|Incident| T1R[T1_REVIEW<br/>creator picks lane + admin, note]
-    T1R --> MT[PENDING_MGR_TRIAGE → page 5]
-    D -->|not yet decidable<br/>never monitored, not a project member| MON[MONITORING<br/>classification reset · 30-day window]
-    MON -->|Incident — creator picks lane + admin, note| MT
-    MON -->|quiet → Event, any time| ESC
+    D -->|Incident — Tier 2 picks lane + admin, note| MT[PENDING_MGR_TRIAGE → page 5]
+    D -->|Event — watch it first<br/>never monitored, not a project member| MON[MONITORING<br/>classification stays Event · 30-day window]
+    MON -->|Tier 2: something found — picks lane + admin, note| MT
+    MON -->|Tier 2: quiet → close the Event| EV
 ```
 
 - **Tier 2 claim:** optional. Tier 2 acts on unclaimed tickets or ones it holds; a claim held by another Tier 2 analyst blocks them. Only the claimer can release (reason required); nobody can force-release.
-- The creator may conclude Monitoring at any time; it is not tied to the 30-day expiry. No email on start.
-- **Monitoring → Incident:** the creator picks the lane (Admin + assigned admin, or Owner) in the conclude form, same as T1_REVIEW; the edge is refused without one, so the case reaches the manager forwardable.
-- **Monitoring → Event keeps the downgrade gate:** MONITORING blanks the live classification, but `classification_at_escalation` is *not* re-stamped on the MONITORING → ESCALATED_T2 re-entry (`transition_to`), so it still records how the case first reached Tier 2. A case escalated as an Incident therefore stays a downgrade after a quiet window and must go through PENDING_MGR_EVENT_REVIEW; only a case escalated as an Event closes directly.
+- **Monitoring is an Event decision, owned by Tier 2.** Tier 2 picks it only when the verdict is Event; entry stamps `classification = EVENT` and starts a fixed 30-day window (once per case, `has_been_monitored`; never a project member). An **Incident is never monitored**. The case sits in the opening analyst's My Queue for visibility during the watch, but **only Tier 2 concludes it** — at any time, not tied to the 30-day expiry. No email on start.
+- **Incident decision = lane decision.** Tier 2's review card is a decision tree: *Incident* → pick the lane (Admin + assigned admin, or Owner) → `PENDING_MGR_TRIAGE`; *Event* → close (or manager event-review for a downgrade) or monitor. The creating Tier 1 no longer has a step here; Tier 2's edits (lane included) show up in their My Queue **Tier 2 แก้ไข** list until they open the ticket — passive, never blocking.
+- **Monitoring → Incident:** Tier 2 picks the lane the same way in the conclude form; every edge into `PENDING_MGR_TRIAGE` is refused without a complete lane, so the case always reaches the manager forwardable.
+- **Monitoring → Event closes directly:** a quiet window is closed by Tier 2 straight to `CLOSED_EVENT` — no re-confirmation and no SOC Manager event-review, because the case was already Tier 2's Event verdict when the watch began. (This replaces the older *classification-deferring* Monitoring, where a quiet window bounced back through `ESCALATED_T2` and a case escalated as an Incident stayed a downgrade — that path no longer exists.)
 
 ## 5 · SOC Manager pre-containment review
 
 ```mermaid
 flowchart LR
-    IN([NEW submit · T1_REVIEW · MONITORING → Incident ·<br/>Project member · step-back]) --> MT[PENDING_MGR_TRIAGE]
+    IN([NEW submit · ESCALATED_T2 → Incident · MONITORING → Incident ·<br/>Project member · step-back]) --> MT[PENDING_MGR_TRIAGE]
     MT --> OK{case complete?}
-    OK -->|no — written reason| T1R[T1_REVIEW<br/>creator may change lane / admin]
-    T1R -->|creator resubmits| MT
+    OK -->|no — written reason, ever escalated| ESC[ESCALATED_T2<br/>Tier 2 decides again, may change lane / admin]
+    OK -->|no — written reason, Tier 1 routed directly| NEW[NEW preparation<br/>creator fixes + resubmits]
+    ESC -->|Incident + lane| MT
+    NEW -->|submit| MT
     OK -->|yes| AS[forward: note + explicit Normal / Emergency<br/>decided_by/at stamped once<br/>value re-set on re-forward]
     AS --> RT{t1_route<br/>manager cannot change}
     RT -->|ADMIN| AC[AWAITING_CONTAINMENT → page 6]
@@ -171,6 +173,8 @@ flowchart LR
 ```
 
 Project Incident members cannot be forwarded or returned individually until Project Review (page 8).
+
+**Return for completion goes back to whoever routed the case** (`Ticket.manager_return_target`): `ESCALATED_T2` if the ticket was ever escalated (`escalated_to_t2_at`), otherwise the creator's `NEW` preparation. A returned preparation keeps `first_submitted_at`, so resubmitting does not re-send the owner "ticket created" email and the creator can no longer cancel it directly.
 
 ## 6 · Admin lane
 
@@ -193,7 +197,7 @@ flowchart LR
 ```
 
 - The notified date is required only for approve / to-manager; it may not be in the future or earlier than detection / occurrence.
-- **Wrong admin:** the manager cannot pick a new admin. Step back to PENDING_MGR_TRIAGE, then Return for completion → T1_REVIEW, where the Tier 1 creator assigns the new admin.
+- **Wrong admin:** the manager cannot pick a new admin. Step back to PENDING_MGR_TRIAGE, then Return for completion — to Tier 2 (or the creator's preparation, if Tier 1 routed it directly), who assigns the new admin.
 - ⚠ The System Owner "case closed" email is dormant.
 
 ## 7 · Owner lane
@@ -217,7 +221,7 @@ flowchart LR
     PM -.->|↩ manager step-back, reason| PR
 ```
 
-To change the lane, the manager steps back and then Returns for completion → T1_REVIEW; the Tier 1 creator chooses again.
+To change the lane, the manager steps back and then Returns for completion → whoever routed it (Tier 2 / the creator's preparation) chooses again.
 
 ## 8 · Project Incident
 
@@ -293,7 +297,7 @@ flowchart LR
 flowchart LR
     AC[AWAITING_CONTAINMENT] -.->|↩| MT[PENDING_MGR_TRIAGE]
     AO[AWAITING_OWNER] -.->|↩| MT
-    MT -->|to change admin / lane: return, reason| T1R[T1_REVIEW — Tier 1 creator changes it]
+    MT -->|to change admin / lane: return, reason| RET[ESCALATED_T2 or NEW — whoever routed it changes it]
     OR[OWNER_REMEDIATED legacy] -.->|↩| AO2[AWAITING_OWNER]
     PM[PENDING_MANAGER] -.->|↩ t1_route ADMIN| CR[CONTAINMENT_REPORTED]
     PM -.->|↩ t1_route OWNER| PR[PENDING_T2_REVIEW]
@@ -324,7 +328,7 @@ Step-back needs a reason, runs through `transition_to` (audit log, Tier 2 claim 
 | SOC Managers | cancellation requested |
 | Managers, requester, creator, assigned admin, system owner, subtask assignees | direct cancel / approve / reject / withdraw |
 | ⚠ System Owner (dormant) | ticket submitted; → APPROVED / CLOSED_EVENT — `system_owner` is not set by any form |
-| — no email — | ESCALATED_T2, T1_REVIEW, AWAITING_OWNER forward (single ticket), owner reject, → PENDING_T2_REVIEW, → PENDING_MANAGER, → PENDING_MGR_EVENT_REVIEW, Monitoring start / conclude Event, step-back, emergency reassess, SUPERSEDED |
+| — no email — | ESCALATED_T2, manager return, AWAITING_OWNER forward (single ticket), owner reject, → PENDING_T2_REVIEW, → PENDING_MANAGER, → PENDING_MGR_EVENT_REVIEW, Monitoring start / conclude Event, step-back, emergency reassess, SUPERSEDED |
 
 **OLA:** DETECTION alerts have a 4-hour triage OLA from the alert timestamp until triaged. Tickets carry a containment deadline for Critical (4 h), High (24 h) and Unknown (4 h); Medium / Low have none, so no badge. Triage deadlines exist for every severity. Deadlines are set once at creation and hidden on terminal tickets.
 
@@ -352,19 +356,18 @@ Each line is the ordered status path. `→` is a forward move, `↩` a manager s
 |---|---|---|
 | S1 | Draft first | NEW (in preparation; source already consumed) → creator submits → ESCALATED_T2 or PENDING_MGR_TRIAGE |
 | S2 | Tier 1 says Event, Tier 2 agrees | NEW → ESCALATED_T2 → CLOSED_EVENT |
-| S3 | Escalated Incident confirmed | NEW → ESCALATED_T2 → T1_REVIEW → PENDING_MGR_TRIAGE → lane |
+| S3 | Escalated Incident confirmed | NEW → ESCALATED_T2 → Tier 2 picks lane → PENDING_MGR_TRIAGE → lane |
 | S4 | Tier 2 downgrades, manager agrees | NEW (Incident) → ESCALATED_T2 → PENDING_MGR_EVENT_REVIEW → CLOSED_EVENT |
-| S5 | Tier 2 downgrades, manager disagrees | … → PENDING_MGR_EVENT_REVIEW → ESCALATED_T2 (Incident) → T1_REVIEW / MONITORING (if never monitored) / downgrade again |
-| S6 | Monitoring turns into an Incident | ESCALATED_T2 → MONITORING → (creator picks lane + admin) PENDING_MGR_TRIAGE → lane |
-| S7 | Monitoring stays quiet (escalated as Event) | ESCALATED_T2 (Event) → MONITORING → (creator, any time) ESCALATED_T2 as Event → CLOSED_EVENT — not a downgrade, closes directly |
-| S8 | Second escalation after Monitoring | Monitor option is not offered again; Tier 2 must choose Event or Incident |
+| S5 | Tier 2 downgrades, manager disagrees | … → PENDING_MGR_EVENT_REVIEW → ESCALATED_T2 (Incident) → Tier 2 routes with a lane → PENDING_MGR_TRIAGE / downgrade again (an Incident is not monitorable) |
+| S6 | Monitored Event turns into an Incident | ESCALATED_T2 → MONITORING (Event) → Tier 2 concludes: picks lane + admin → PENDING_MGR_TRIAGE → lane |
+| S7 | Monitored Event stays quiet | ESCALATED_T2 (Event) → MONITORING → Tier 2 concludes (any time) → CLOSED_EVENT — closes directly, no manager |
+| S8 | Monitor is once per case | `has_been_monitored` blocks a second watch; the Monitor option never reappears |
 | S9 | Tier 2 claim conflict | a claim held by another Tier 2 analyst blocks the move; only the claimer can release (reason) |
-| S10 | Monitoring stays quiet (escalated as Incident) | ESCALATED_T2 (Incident) → MONITORING (classification blanked, stamp kept) → creator concludes Event → ESCALATED_T2 → PENDING_MGR_EVENT_REVIEW → CLOSED_EVENT — still a downgrade, routes through the manager |
 
 ### SOC Manager review
 | # | Scenario | Path |
 |---|---|---|
-| M1 | Incomplete case returned | PENDING_MGR_TRIAGE → T1_REVIEW (reason) → PENDING_MGR_TRIAGE |
+| M1 | Incomplete case returned | PENDING_MGR_TRIAGE → ESCALATED_T2 (if ever escalated) or NEW (Tier 1 routed directly), reason → PENDING_MGR_TRIAGE |
 | M2 | Normal Incident forwarded | PENDING_MGR_TRIAGE (note, Normal) → AWAITING_CONTAINMENT / AWAITING_OWNER |
 | M3 | Emergency Incident forwarded | PENDING_MGR_TRIAGE (note, Emergency) → lane; the closing gate later goes through PENDING_MANAGER |
 
@@ -375,7 +378,7 @@ Each line is the ordered status path. `→` is a forward move, `↩` a manager s
 | A2 | Containment rejected, then OK | AWAITING_CONTAINMENT → CONTAINMENT_REPORTED → AWAITING_CONTAINMENT (× n) → CONTAINMENT_REPORTED → APPROVED |
 | A3 | Emergency | … CONTAINMENT_REPORTED → PENDING_MANAGER → APPROVED |
 | A4 | Found benign mid-containment | CONTAINMENT_REPORTED → CLOSED_EVENT (no manager, even if Emergency) |
-| A5 | Wrong admin assigned | AWAITING_CONTAINMENT ↩ PENDING_MGR_TRIAGE → return → T1_REVIEW (creator assigns new admin) → PENDING_MGR_TRIAGE → AWAITING_CONTAINMENT |
+| A5 | Wrong admin assigned | AWAITING_CONTAINMENT ↩ PENDING_MGR_TRIAGE → return → ESCALATED_T2 / NEW (whoever routed it assigns the new admin) → PENDING_MGR_TRIAGE → AWAITING_CONTAINMENT |
 | A6 | Manager wants more work | PENDING_MANAGER ↩ CONTAINMENT_REPORTED → (Tier 2 decides again) |
 | A7 | Notified date missing | Tier 2 approve / to-manager refused until the date is entered |
 
@@ -386,7 +389,7 @@ Each line is the ordered status path. `→` is a forward move, `↩` a manager s
 | O2 | Fix rejected, then OK | AWAITING_OWNER → PENDING_T2_REVIEW → AWAITING_OWNER (× n) → PENDING_T2_REVIEW → APPROVED |
 | O3 | Emergency | … PENDING_T2_REVIEW → PENDING_MANAGER → APPROVED |
 | O4 | Found benign | PENDING_T2_REVIEW → CLOSED_EVENT (no manager) |
-| O5 | Wrong lane / owner | AWAITING_OWNER ↩ PENDING_MGR_TRIAGE → return → T1_REVIEW (creator changes lane) → PENDING_MGR_TRIAGE → lane |
+| O5 | Wrong lane / owner | AWAITING_OWNER ↩ PENDING_MGR_TRIAGE → return → ESCALATED_T2 / NEW (whoever routed it changes the lane) → PENDING_MGR_TRIAGE → lane |
 | O6 | Manager wants more work | PENDING_MANAGER ↩ PENDING_T2_REVIEW |
 | O7 | Legacy ticket | OWNER_REMEDIATED → PENDING_T2_REVIEW → … (or ↩ AWAITING_OWNER) |
 
@@ -427,7 +430,7 @@ Places where the code differs from the intended workflow. They are drawn as impl
 2. **System Owner emails are dormant** — no form sets `Ticket.system_owner`.
 3. **Mid-lane Event reclassification skips the manager**, even for Emergency tickets (a deliberate 2026-07-23 scope decision; see ticket-lifecycle-states.md).
 
-*Closed 2026-09-18 — Event-downgrade gate bypass through Monitoring: `classification_at_escalation` is no longer re-stamped on the MONITORING → ESCALATED_T2 re-entry, so a case escalated as an Incident stays a downgrade after a quiet window and is routed through PENDING_MGR_EVENT_REVIEW (see §4, S10).*
+*Closed 2026-09-18 — Event-downgrade gate bypass through Monitoring. **Superseded 2026-09-22** by the Event-anchored Monitoring redesign: Monitoring is now only ever an Event (Tier 2's verdict, classification stays Event) and a quiet window closes directly to CLOSED_EVENT, so there is no Incident classification to carry across a watch and no downgrade to bypass. The old `MONITORING → ESCALATED_T2` re-entry no longer exists — see §4 and the [workflow change log](workflow-change-log.md).*
 
 ## Related documents
 - [ticket-lifecycle-states.md](ticket-lifecycle-states.md) — authoritative status machine and transition table
