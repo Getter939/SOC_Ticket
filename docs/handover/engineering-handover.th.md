@@ -300,8 +300,13 @@ UI สอดคล้องกัน: การ์ด Emergency ในหน้�
 - โหมด `--fixture` โหลด alert ตัวอย่างที่แนบมากับ repo โดยไม่ต้องต่อเครือข่าย
   (ดู README) — ใช้สำหรับ demo/ทดสอบโดยไม่ต้องเข้าถึง cluster
 - การ triage (claim / สร้างตั๋ว / release) เป็นสิทธิ์ของ **Tier 1 เท่านั้น**
-  การ release alert **ต้องระบุเหตุผล** (`release_reason`) ส่วน `escalation_queue`
-  ระดับ alert เป็นของตกค้าง — ปัจจุบันการ escalate ทำที่ระดับตั๋วแล้ว
+  การ release alert **ต้องระบุเหตุผล** (`release_reason`)
+- **คิวงาน Tier 2 ไม่ได้อยู่ใน app นี้แล้ว** — `escalation_queue`
+  (พร้อม `claim_escalation` / `release_escalation`) ย้ายไปที่
+  `apps/incidents/views/tier2_queue.py` และ `/incidents/tier2-queue/`
+  เมื่อ 2026-09-23 ชื่อ URL ไม่เปลี่ยน และ `/wazuh/escalation_queue/`
+  ยัง 301 ไปยัง path ใหม่ ส่วนการ escalate ระดับ alert เลิกใช้แล้ว —
+  ปัจจุบันการ escalate ทำที่ระดับตั๋ว
 - **ไม่มี scheduler ใน repo** สำหรับการ ingest — ถ้า production มีการ ingest
   เป็นรอบ ๆ แสดงว่าเป็น cron/scheduled task ภายนอกบนเครื่อง host
   ต้องยืนยันกับผู้ดูแลระบบ
@@ -480,8 +485,9 @@ Production: `docker compose -f docker-compose.prod.yml up -d --build`
    `ticket_history.html` (onchange) — เป็นขั้นตอน hardening ถัดไปที่วางแผนไว้
 3. **ยังไม่มีการตรวจชนิดไฟล์/magic byte ของไฟล์อัปโหลด** (ความสำคัญต่ำ —
    ลดความเสี่ยงแล้วด้วยการบังคับดาวน์โหลด ดู §8)
-4. **`escalation_queue` ระดับ alert เป็นของตกค้าง**หลังการออกแบบใหม่
-   ปัจจุบันการ escalate ทำที่ระดับตั๋ว
+4. ~~**`escalation_queue` ระดับ alert เป็นของตกค้าง**~~ — แก้แล้วเมื่อ 2026-07-23
+   view นี้คือคิวงาน Tier 2 ระดับตั๋วที่ใช้งานจริง และย้ายไป `apps/incidents`
+   เมื่อ 2026-09-23
 5. **ไฟล์ `runserver-8099.*.log` ใน root ของ repo** เป็น log dev ที่หลงเหลือ —
    ลบทิ้งได้
 6. **ความหมายของการ breach OLA ไม่สมมาตรกัน** (triage เป็นข้อเท็จจริงตายตัว

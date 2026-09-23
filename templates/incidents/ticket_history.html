@@ -9,28 +9,6 @@
     border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
   }
   .level-pill.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-
-  /* Emergency is a quiet left accent stripe, not a full-row flood. */
-  .ticket-table tr.is-emergency > td:first-child { box-shadow: inset 4px 0 0 0 #dc3545; }
-
-  /* Emergency flag — distinct from the solid Critical severity badge:
-     tinted, outlined, lightning-led, and anchored at the row start rather
-     than sharing the สถานะ column. */
-  .emg-flag {
-    display: inline-flex; align-items: center; gap: 3px;
-    font-size: 0.68rem; font-weight: 700; letter-spacing: .02em;
-    color: #dc3545; background: #dc35451a; border: 1px solid #dc354566;
-    padding: 1px 6px; border-radius: 4px; white-space: nowrap;
-  }
-
-  /* Soft status pill — a lighter material than the solid severity badge so
-     the two columns never look like the same thing. Colors from the model. */
-  .status-soft {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: 0.72rem; font-weight: 600; padding: 2px 9px;
-    border-radius: 12px; white-space: nowrap; line-height: 1.5;
-  }
-  .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>
 <div class="page-header">
     <div>
@@ -118,11 +96,11 @@
 
 <div class="card ops-card">
         <div class="table-responsive">
-            <table class="table table-hover align-middle operational-table ticket-table">
+            <table class="table table-hover align-middle operational-table">
                 <thead>
                     <tr>
                         <th>เลข Ticket</th>
-                        <th>ระบบ / บริการ</th>
+                        <th>ชื่อเรื่อง</th>
                         <th>รายละเอียดเหตุการณ์</th>
                         <th>ความรุนแรง</th>
                         <th>ประเภท</th>
@@ -138,14 +116,15 @@
                     <tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}" data-row-href="{% url 'ticket_detail' ticket.id %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
                         <td>
                             <strong class="cell-technical">#{{ ticket.ticket_id }}</strong>
-                            {% if ticket.project_incident_id %}
-                            <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
-                            {% endif %}
+                            {% include 'incidents/_project_pill.html' with ticket=ticket %}
                             {% if ticket.is_emergency %}
                             <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
                             {% endif %}
                         </td>
-                        <td class="cell-primary">{{ ticket.device_name }}</td>
+                        <td>
+                            <div class="cell-primary">{{ ticket.display_name|truncatechars:50 }}</div>
+                            <div class="cell-secondary">{{ ticket.device_name|default:"-" }}</div>
+                        </td>
                         {% comment %}
                         text-truncate needs a block box — on a <td> under auto
                         table layout max-width is ignored and the full text
@@ -156,22 +135,14 @@
                                  title="{{ ticket.issue_description }}">{{ ticket.issue_description }}</div>
                         </td>
                         <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
-                        <td>
-                            {% if ticket.classification == 'EVENT' %}
-                            <span class="badge bg-secondary">Event</span>
-                            {% elif ticket.classification == 'INCIDENT' %}
-                            <span class="badge bg-danger">Incident</span>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
+                        <td>{% include 'incidents/_classification_badge.html' with classification=ticket.classification %}</td>
                         <td>
                             {% with last_log=ticket.logs.first %}
                             <div class="text-truncate" style="max-width: 150px;"
                                  {% if last_log %}title="{{ last_log.note }}"{% endif %}>{% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}</div>
                             {% endwith %}
                         </td>
-                        <td class="cell-secondary text-nowrap">{{ ticket.created_at|date:"d/m/Y" }}</td>
+                        <td class="cell-secondary text-nowrap" title="{{ ticket.created_at|date:'d/m/Y H:i' }}">{{ ticket.created_at|date:"d/m/Y" }}</td>
                         <td class="cell-actions">
                             {# Soft status pill (color from the model's status map). Emergency #}
                             {# is shown as its own flag by the Ticket ID, not here. #}

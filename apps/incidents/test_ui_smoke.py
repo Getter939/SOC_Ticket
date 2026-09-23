@@ -15,7 +15,7 @@ from django.core import mail
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 from apps.incidents.tests import (
-    _make_user, _make_ticket, _make_forensic, _make_redteam_manager,
+    _make_user, _make_ticket, _make_forensic, _make_redteam_manager, _make_t2,
 )
 
 
@@ -724,3 +724,98 @@ class ResponseTeamUiTest(TestCase):
         self.client.force_login(self.forensic)
         resp = self.client.get(reverse('response_request_queue'))
         self.assertContains(resp, 'data-label="คำขอตอบสนองเหตุการณ์"')
+
+
+class TicketTableConsistencyTest(TestCase):
+    """The four ticket tables — Active, Manager Queue, Tier 2 Queue, History —
+    are one family. These guard the properties they are supposed to share."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1      = _make_user('tbl_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        cls.t2      = _make_t2('tbl_t2')
+        cls.manager = _make_user('tbl_manager', UserProfile.ROLE_SOC_MANAGER)
+
+        cls.active = _make_ticket(
+            ticket_id='TBL-ACTIVE', created_by=cls.t1,
+            incident_name='ชื่อเคสที่กำลังดำเนินการ',
+        )
+        cls.queued = _make_ticket(
+            ticket_id='TBL-T2', created_by=cls.t1,
+            incident_name='ชื่อเคสของ Tier 2',
+            status=Ticket.STATUS_ESCALATED_T2,
+        )
+        cls.closed = _make_ticket(
+            ticket_id='TBL-CLOSED', created_by=cls.t1,
+            incident_name='ชื่อเคสที่ปิดแล้ว',
+            status=Ticket.STATUS_APPROVED,
+        )
+        cls.for_manager = _make_ticket(
+            ticket_id='TBL-MGR', created_by=cls.t1,
+            incident_name='ชื่อเคสที่รอผู้จัดการ',
+            status=Ticket.STATUS_PENDING_MGR_TRIAGE,
+        )
+
+    def test_every_ticket_table_leads_with_the_case_name(self):
+        pages = (
+            (self.manager, 'ticket_list',    self.active),
+            (self.manager, 'manager_queue',  self.for_manager),
+            (self.manager, 'ticket_history', self.closed),
+            (self.t2,      'escalation_queue', self.queued),
+        )
+        for user, url_name, ticket in pages:
+            with self.subTest(page=url_name):
+                self.client.force_login(user)
+                resp = self.client.get(reverse(url_name))
+                self.assertEqual(resp.status_code, 200)
+                self.assertContains(resp, '>ชื่อเรื่อง<')
+                self.assertContains(resp, ticket.incident_name)
+
+    def test_case_name_falls_back_to_the_subcategory_when_unnamed(self):
+        """incident_name is optional, so the column must never be blank."""
+        unnamed = _make_ticket(
+            ticket_id='TBL-UNNAMED', created_by=self.t1,
+            detailed_issue='Reconnaissance', detailed_issue2='Port Scanning',
+        )
+        self.assertEqual(unnamed.incident_name, '')
+        self.assertEqual(unnamed.display_name, unnamed.get_detailed_issue2_display())
+
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('ticket_list'))
+        self.assertContains(resp, 'Port scanning')
+
+    def test_manager_queue_clear_filters_stays_on_the_manager_queue(self):
+        """It used to hardcode ticket_list, navigating the manager off their queue."""
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('manager_queue'), {'severity': 'Critical'})
+        self.assertContains(resp, 'href="%s"' % reverse('manager_queue'))
+
+    def test_active_list_sorts_by_severity_rank_not_alphabetically(self):
+        """Ordering on the raw CharField would rank Low above Medium."""
+        low = _make_ticket(ticket_id='TBL-LOW', created_by=self.t1, severity='Low')
+        medium = _make_ticket(ticket_id='TBL-MED', created_by=self.t1, severity='Medium')
+        critical = _make_ticket(ticket_id='TBL-CRIT', created_by=self.t1, severity='Critical')
+
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('ticket_list'), {'sort': 'severity'})
+        ordered = [t.pk for t in resp.context['tickets']]
+
+        self.assertLess(ordered.index(critical.pk), ordered.index(medium.pk))
+        self.assertLess(ordered.index(medium.pk), ordered.index(low.pk))
+
+    def test_active_list_is_searchable_by_case_name(self):
+        self.client.force_login(self.manager)
+        resp = self.client.get(reverse('ticket_list'), {'q': 'ชื่อเคสที่กำลังดำเนินการ'})
+        self.assertContains(resp, self.active.ticket_id)
+        self.assertNotContains(resp, self.for_manager.ticket_id)
+
+    def test_tier2_queue_uses_the_shared_emergency_styling(self):
+        """Not the full-row table-danger flood it used to paint."""
+        self.queued.is_emergency = True
+        self.queued.save(update_fields=['is_emergency'])
+        self.client.force_login(self.t2)
+        resp = self.client.get(reverse('escalation_queue'))
+        self.assertContains(resp, 'is-emergency')
+        self.assertContains(resp, 'emg-flag')
+        self.assertNotContains(resp, 'table-danger')
+

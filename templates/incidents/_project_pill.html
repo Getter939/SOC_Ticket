@@ -1,0 +1,17 @@
+{% comment %}
+Project Incident pill — shown on a ticket row that belongs to a multi-system
+case bundle, so members of one incident do not read as unrelated rows.
+
+Kept in one place because the Tier 2 Queue had drifted to a bare reference
+without the "Project ·" lead-in, which made the same pill look like a different
+kind of tag on that page.
+
+Usage: {% include 'incidents/_project_pill.html' with ticket=ticket %}
+{% endcomment %}
+{% if ticket.project_incident_id %}
+<div class="mt-1">
+  <a href="{% url 'project_incident_detail' ticket.project_incident_id %}"
+     class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none"
+     title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a>
+</div>
+{% endif %}

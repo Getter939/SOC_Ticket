@@ -692,10 +692,11 @@ def ticket_detail(request, pk):
                     messages.error(request, e.message)
 
         elif action == 'claim_t2':
-            # Mirrors claim_escalation (apps/wazuh_ingest/views.py): one
-            # conditional UPDATE so two analysts pressing Claim at the same
-            # moment can't both win. Redirects back to this ticket instead of
-            # the queue, since the button lives on the detail page now.
+            # Same claim service as the Tier 2 queue's claim_escalation
+            # (views/tier2_queue.py): one conditional UPDATE so two analysts
+            # pressing Claim at the same moment can't both win. Redirects back
+            # to this ticket instead of the queue, since the button lives on
+            # the detail page now.
             if not is_t2_viewer:
                 messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถรับ Ticket ได้')
             else:

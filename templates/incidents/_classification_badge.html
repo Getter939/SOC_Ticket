@@ -1,0 +1,14 @@
+{% comment %}
+Event / Incident badge — one look across every queue (My Queue, Tier 2 Queue,
+Active Tickets, Manager Review, Ticket History). It was hand-rolled identically
+in all five, so a colour or wording change meant five edits and, in practice,
+drift.
+
+`-` covers a ticket Tier 1 has not classified yet; that is a real state, not a
+missing value, so it renders as muted text rather than an empty cell.
+
+Usage: {% include 'incidents/_classification_badge.html' with classification=ticket.classification %}
+{% endcomment %}
+{% if classification == 'EVENT' %}<span class="badge bg-secondary">Event</span>
+{% elif classification == 'INCIDENT' %}<span class="badge bg-danger">Incident</span>
+{% else %}<span class="text-muted">-</span>{% endif %}

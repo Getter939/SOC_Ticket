@@ -5546,7 +5546,7 @@ class TemplateMarkupRegressionTest(TestCase):
         templates = [
             'incidents/ticket_detail.html', 'incidents/my_queue.html',
             'incidents/triage_form.html', 'wazuh_ingest/triage_queue.html',
-            'wazuh_ingest/escalation_queue.html', 'dashboard/dashboard.html',
+            'incidents/tier2_queue.html', 'dashboard/dashboard.html',
         ]
         for name in templates:
             with self.subTest(template=name):

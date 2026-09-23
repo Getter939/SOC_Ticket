@@ -101,7 +101,7 @@
         </div>
 
         <div class="col-12">
-          <label class="form-label fw-semibold" for="{{ form.incident_name.id_for_label }}">ชื่อเหตุการณ์ <small class="text-muted">(Incident/Event Name)</small></label>
+          <label class="form-label fw-semibold" for="{{ form.incident_name.id_for_label }}">ชื่อเรื่อง <small class="text-muted">(Incident/Event Name)</small></label>
           {{ form.incident_name }}
           <div class="field-hint">
             ชื่อสั้น ๆ ของเหตุการณ์สำหรับใช้ในรายงานและรายการ —
@@ -186,7 +186,7 @@
           {% if form.detailed_issue.errors %}<div class="text-danger small">{{ form.detailed_issue.errors }}</div>{% endif %}
         </div>
         <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.detailed_issue2.id_for_label }}">เรื่องที่แจ้ง</label>
+          <label class="form-label fw-semibold" for="{{ form.detailed_issue2.id_for_label }}">หมวดหมู่ย่อย</label>
           {{ form.detailed_issue2 }}
           {% if form.detailed_issue2.errors %}<div class="text-danger small">{{ form.detailed_issue2.errors }}</div>{% endif %}
         </div>

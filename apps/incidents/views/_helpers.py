@@ -264,6 +264,9 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     if search:
         tickets_qs = tickets_qs.filter(
             Q(ticket_id__icontains=search)
+            # The list leads with the case NAME, so it has to be searchable by
+            # it — otherwise the one string on screen is the one you cannot type.
+            | Q(incident_name__icontains=search)
             | Q(device_name__icontains=search)
             | Q(ip_address__icontains=search)
             | Q(issue_description__icontains=search)
@@ -314,6 +317,10 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'emergency': ('-is_emergency', 'ola_contain_deadline'),
         'newest':    ('-created_at',),
         'oldest':    ('created_at',),
+        # -sev_rank, NOT 'severity': the raw CharField sorts alphabetically,
+        # which ranks Low above Medium. See TicketQuerySet.with_severity_rank,
+        # which the Tier 2 queue already uses for the same reason.
+        'severity':  ('-sev_rank', 'ola_contain_deadline'),
     }
     if is_system_admin_viewer:
         # The OLA deadline remains the primary work-ordering rule. Within the
@@ -324,6 +331,8 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         )
     if sort not in sort_map:
         sort = 'ola'
+    if sort == 'severity':
+        tickets_qs = tickets_qs.with_severity_rank()
     tickets_qs = tickets_qs.order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)

@@ -372,11 +372,18 @@ tickets — one per affected system — grouped by a `ProjectIncident` with a
   landed (`--dry-run` / `--batch-size`; never deletes a ticket-linked or bundled
   alert). Triage-queue UX also gained an Agent IP column, click-to-sort headers,
   and a 25/50/100 rows-per-page selector.
-- `escalation_queue` is the **ticket-level Tier 2 queue** and is fully live. Its
-  `claim_escalation` / `release_escalation` views were dead stubs until
-  2026-07-23 and are now the real claim/release implementation (URL names
-  unchanged). The alert-level escalation *concept* is what became vestigial —
-  escalation happens at ticket level.
+- **The Tier 2 queue is no longer in this app.** `escalation_queue` (+
+  `claim_escalation` / `release_escalation`) moved to
+  `apps/incidents/views/tier2_queue.py` and `/incidents/tier2-queue/` on
+  2026-09-23; the template is `templates/incidents/tier2_queue.html`. It was
+  written here in June 2026 when escalation was an alert-level concept, and
+  had queried nothing but `Ticket` since 2026-07-23. URL names are unchanged,
+  and `/wazuh/escalation_queue/` still 301s to the new path for bookmarks.
+  The alert-level escalation *concept* is what became vestigial — escalation
+  happens at ticket level. Note the sidebar **badge** counts (`my_queue_count`,
+  `escalation_queue_count`, `manager_queue_count`) deliberately stayed in
+  `wazuh_ingest/context_processors.py`: one processor computes every nav count
+  in a single pass, and splitting one branch out would buy nothing.
 - There is **no scheduler in the repo** for ingestion — if production ingests
   periodically, that's an external cron/scheduled task on the host. Verify
   with the operator.
@@ -484,6 +491,15 @@ available from every active stage (incl. MONITORING and legacy OWNER_REMEDIATED)
   by Tier 2 while verifying (ADR-0006), stored per ticket in canonical order so
   re-saves are byte-identical. New field `event_occurred_at` (เวลาที่เกิดเหตุ),
   distinct from detection time.
+- **Importance row (`ระดับความสำคัญ`, Incident 1.7 / Event 1.6) is now
+  analyst-chosen** via `Ticket.importance` (`general`/`important`/`critical`,
+  migration `incidents 0084`). The report and the RCA prefill read the single
+  `Ticket.report_importance` property, which resolves: `is_emergency` → `critical`
+  (always wins) → the stored pick → a legacy fallback (Event → `general`, else
+  `important`) for tickets created before the field existed, so old reports tick
+  exactly as before and are never blank. The model field is `blank=True`; the
+  create / edit / Tier 2 review / Project Incident forms enforce "required". The
+  `chk_imp_*` template keys and DOCX templates are unchanged.
 
 ### 3.14 Two-factor authentication (v1.2.2)
 

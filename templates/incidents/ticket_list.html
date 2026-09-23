@@ -3,32 +3,6 @@
 {% block title %}{{ page_title|default:"Ticket ที่กำลังดำเนินการ" }} — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
-<style>
-    /* Priority is signalled by a quiet left accent stripe, not a full-row
-       red flood — the stripe cues urgency without hijacking the whole row. */
-    .ticket-table tr.is-emergency > td:first-child { box-shadow: inset 4px 0 0 0 #dc3545; }
-    .ticket-table tr.is-breach > td:first-child   { box-shadow: inset 4px 0 0 0 #fd7e14; }
-
-    /* Emergency flag — deliberately different from the solid Critical
-       severity badge: tinted, outlined, lightning-led, and anchored at the
-       row start rather than sharing the สถานะ column. */
-    .emg-flag {
-        display: inline-flex; align-items: center; gap: 3px;
-        font-size: 0.68rem; font-weight: 700; letter-spacing: .02em;
-        color: #dc3545; background: #dc35451a; border: 1px solid #dc354566;
-        padding: 1px 6px; border-radius: 4px; white-space: nowrap;
-    }
-
-    /* Soft status pill — a lighter material than the solid severity badge so
-       the two columns never look like the same thing (e.g. High vs
-       รอการจัดการฯ, which share the orange hue). Colors come from the model. */
-    .status-soft {
-        display: inline-flex; align-items: center; gap: 5px;
-        font-size: 0.72rem; font-weight: 600; padding: 2px 9px;
-        border-radius: 12px; white-space: nowrap; line-height: 1.5;
-    }
-    .status-soft .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-</style>
 <div class="page-header">
     <div>
         <h1 class="page-header__title"><i class="bi bi-ticket-perforated me-2"></i>{{ heading|default:"Ticket ที่กำลังดำเนินการ" }}</h1>
@@ -119,6 +93,7 @@
                 <select name="sort" class="form-select form-select-sm">
                     <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
                     <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
+                    <option value="severity" {% if sort == 'severity' %}selected{% endif %}>ความรุนแรง</option>
                     <option value="newest" {% if sort == 'newest' %}selected{% endif %}>ใหม่สุดก่อน</option>
                     <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>เก่าสุดก่อน</option>
                 </select>
@@ -128,7 +103,7 @@
             </div>
             {% if search or status_filter or severity_filter or classification_filter or emergency_filter or ola_filter %}
             <div class="col-12">
-                <a href="{% url 'ticket_list' %}" class="small text-decoration-none">
+                <a href="{{ request.path }}" class="small text-decoration-none">
                     <i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด
                 </a>
             </div>
@@ -139,11 +114,11 @@
 
 <div class="card ops-card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle operational-table ticket-table">
+        <table class="table table-hover align-middle operational-table">
             <thead>
                 <tr>
                     <th class="ps-4">เลขที่เคส</th>
-                    <th>เรื่องที่แจ้ง</th>
+                    <th>ชื่อเรื่อง</th>
                     <th>ความรุนแรง</th>
                     <th>ประเภท</th>
                     <th>OLA</th>
@@ -169,9 +144,7 @@
                     aria-label="เปิด Ticket {{ ticket.ticket_id }}">
                     <td class="ps-4">
                         <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
-                        {% if ticket.project_incident_id %}
-                        <div class="mt-1"><a href="{% url 'project_incident_detail' ticket.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ ticket.bundle_ref }}</a></div>
-                        {% endif %}
+                        {% include 'incidents/_project_pill.html' with ticket=ticket %}
                         {% if ticket.is_emergency %}
                         <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
                         {% endif %}
@@ -180,19 +153,11 @@
                         {% endif %}
                     </td>
                     <td>
-                        <div class="cell-primary">{{ ticket.get_detailed_issue2_display|truncatechars:50 }}</div>
+                        <div class="cell-primary">{{ ticket.display_name|truncatechars:50 }}</div>
                         <div class="cell-secondary">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → <span class="cell-technical">{{ ticket.ip_address }}</span>{% endif %}</div>
                     </td>
                     <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
-                    <td>
-                        {% if ticket.classification == 'EVENT' %}
-                        <span class="badge bg-secondary">Event</span>
-                        {% elif ticket.classification == 'INCIDENT' %}
-                        <span class="badge bg-danger">Incident</span>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
+                    <td>{% include 'incidents/_classification_badge.html' with classification=ticket.classification %}</td>
                     <td>{% include 'incidents/_ola_badge.html' with ola=ticket.ola_badge %}</td>
                     <td>
                         <span class="badge bg-secondary">{{ ticket.issue_type }}</span>
@@ -230,8 +195,10 @@
                 <tr>
                     <td colspan="11">
                         {% if search or status_filter or severity_filter or classification_filter or emergency_filter or ola_filter %}
-                            {% url 'ticket_list' as empty_action_url %}
-                            {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบรายการที่ตรงกับตัวกรอง' description='ลองปรับเงื่อนไขการค้นหา หรือล้างตัวกรองเพื่อดูเคสทั้งหมดที่คุณเข้าถึงได้' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
+                            {% comment %}request.path, not a hardcoded url: this template also
+                            serves the Manager Queue, where "clear filters" used to
+                            navigate the manager off their own queue.{% endcomment %}
+                            {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบรายการที่ตรงกับตัวกรอง' description='ลองปรับเงื่อนไขการค้นหา หรือล้างตัวกรองเพื่อดูเคสทั้งหมดที่คุณเข้าถึงได้' action_url=request.path action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
                         {% else %}
                             {% include 'includes/_empty_state.html' with icon='bi-check-circle' title='ไม่มีรายการแจ้งเหตุที่รอดำเนินการ' description='คิวนี้ไม่มีเคสเปิดที่ตรงกับขอบเขตสิทธิ์ของคุณในขณะนี้' %}
                         {% endif %}

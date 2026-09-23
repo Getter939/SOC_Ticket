@@ -363,7 +363,31 @@
             white-space: nowrap;
         }
         .operational-table .cell-actions { white-space: nowrap; text-align: right; }
+        /* Urgency is a quiet left accent stripe, never a full-row flood: the
+           row stays readable and the status/severity columns keep their own
+           colours. Emergency outranks an OLA breach on the same row. */
         .operational-table tr.is-emergency > td:first-child { box-shadow: inset 3px 0 0 #c82f41; }
+        .operational-table tr.is-breach > td:first-child { box-shadow: inset 3px 0 0 #fd7e14; }
+        /* Emergency flag — deliberately different material from the solid
+           Critical severity badge: tinted, outlined, and anchored at the row
+           start rather than sharing the สถานะ column. */
+        .operational-table .emg-flag {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: .68rem; font-weight: 700; letter-spacing: .02em;
+            color: #dc3545; background: #dc35451a; border: 1px solid #dc354566;
+            padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+        }
+        /* Soft status pill — lighter than the solid severity badge so the two
+           columns never look like the same thing (e.g. High vs รอการจัดการฯ,
+           which share the orange hue). Colours come from the model. */
+        .operational-table .status-soft {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: .72rem; font-weight: 600; padding: 2px 9px;
+            border-radius: 12px; white-space: nowrap; line-height: 1.5;
+        }
+        .operational-table .status-soft .dot {
+            width: 7px; height: 7px; border-radius: 50%; flex: none;
+        }
         .clickable-row { cursor: pointer; }
         .clickable-row:hover > td { background-color: var(--ui-surface-hover); }
         .clickable-row:focus { outline: 2px solid var(--ui-primary); outline-offset: -2px; }

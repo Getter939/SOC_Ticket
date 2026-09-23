@@ -9,6 +9,13 @@ release (tag) dates.
 ## [Unreleased]
 
 ### Changed
+- **The Tier 2 queue (คิวงาน Tier 2) moved from `/wazuh/escalation_queue/` to
+  `/incidents/tier2-queue/`.** It had lived in `apps/wazuh_ingest` since June 2026,
+  when escalation was still an alert-level concept; the page has queried nothing but
+  tickets since 2026-07-23. Views are now `apps/incidents/views/tier2_queue.py` and the
+  template `templates/incidents/tier2_queue.html`. Nothing changes for analysts: the
+  page, its filters and the sidebar link are identical, and the old URL redirects
+  permanently (query string preserved) so existing bookmarks still work.
 - **Tier 2 now routes a confirmed Incident straight to the SOC Manager — the
   "รอ Tier 1 ทบทวน" (`T1_REVIEW`) step is gone.** Tier 2's review is a single
   decision: *Event* → close or monitor; *Incident* → choose the handling lane
@@ -22,6 +29,24 @@ release (tag) dates.
   longer offered on a reviewed ticket). The button says which.
 
 ### Added
+- **Analyst-chosen importance (ระดับความสำคัญ) on the ticket.** A new mandatory
+  three-way pill field (**ปกติทั่วไป / สำคัญ / สำคัญมาก**) in the *Asset & Evidence*
+  section of the create form, next to ประเภทของทรัพย์สิน, and required on the
+  ticket-edit and Tier 2 review/decision cards and on the Project Incident (bundle)
+  form (the pick is shared by every member ticket). It replaces the old **derived**
+  importance row on the report — previously Event → ปกติทั่วไป, Incident → สำคัญ,
+  computed from the classification. The analyst now sets it directly.
+  - The report's importance row (Incident **1.7** / Event **1.6**) prints
+    `Ticket.report_importance`: the manager's **emergency flag still forces
+    สำคัญมาก** (it overrides the pick); otherwise the analyst's choice; and a
+    ticket with **no stored value falls back to the old derived rule**, so every
+    report created before this change ticks exactly the same box as before — it is
+    never left blank. A legacy ticket only takes on an explicit value once it is
+    edited or reviewed, when the field becomes mandatory.
+  - Shown on the ticket detail page and the RCA case panel, tracked in
+    field-change history (*ระดับความสำคัญ*), and used to prefill the RCA report's
+    importance (removing the duplicated derivation there).
+
 - **"Tier 2 แก้ไข" tab in My Queue** — a passive list of the tickets you opened
   whose content a Tier 2 analyst has changed since you last looked (the lane
   choice included), plus a banner on the ticket. Opening the ticket clears it; it
@@ -47,6 +72,11 @@ release (tag) dates.
   `Ticket.monitoring_proposed` field are gone — deciding to monitor is entirely
   Tier 2's, so the recommendation no longer exists.
 
+> Migration `incidents/0084` adds `Ticket.importance` (nullable/blank; the field
+> is optional at the DB level so existing rows stay valid and read through the
+> `report_importance` fallback — the forms are what make it mandatory). AddField
+> only; reversible.
+>
 > Migration `incidents/0083` adds `first_submitted_at` / `t2_changed_at` /
 > `creator_seen_at` and moves any ticket still in `T1_REVIEW` back to Tier 2
 > (`ESCALATED_T2`) with a log note — one-way; old log rows keep the code and

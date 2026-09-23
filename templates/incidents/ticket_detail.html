@@ -136,7 +136,8 @@
   {% if t2_changes_unseen %}
   <div class="alert alert-info small py-2 mb-2" role="status"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Tier 2 แก้ไขข้อมูลใน Ticket นี้หลังจากที่คุณเปิดดูครั้งล่าสุด — ดูรายละเอียดได้ที่ <a href="#timeline">ประวัติการแก้ไขข้อมูล</a></div>
   {% endif %}
-  <div class="hero-subject mb-2">{{ ticket.device_name }}{% if ticket.incident_name %} <span class="text-muted">·</span> {{ ticket.incident_name }}{% endif %}</div>
+  {# Name first, host second — the same order every queue and list now uses. #}
+  <div class="hero-subject mb-2">{{ ticket.display_name }} <span class="text-muted">·</span> {{ ticket.device_name }}</div>
   <div class="hero-summary">{{ ticket.issue_description|truncatechars:180 }}</div>
   <div class="hero-operational">
     <div>
@@ -274,7 +275,7 @@ onto its own wrapped row, which space-between then left-aligned.
               <dt>แหล่งที่มา (Source)</dt><dd>{{ ticket.get_issue_type_display }}</dd>
               <dt>แหล่งข้อมูล (Log Source)</dt><dd>{{ ticket.log_source|default:"-" }}</dd>
               <dt>ประเภทภัยคุกคาม</dt><dd>{{ ticket.get_detailed_issue_display }}</dd>
-              <dt>เรื่องที่แจ้ง</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
+              <dt>หมวดหมู่ย่อย</dt><dd>{{ ticket.get_detailed_issue2_display }}</dd>
               <dt>ประเภททรัพย์สิน</dt><dd>{{ ticket.get_asset_type_display|default:"-" }}</dd>
               <dt>ระดับความสำคัญ</dt><dd>{{ ticket.get_importance_display|default:"-" }}</dd>
               <dt>ระบบปฏิบัติการ</dt><dd>{{ ticket.operating_system|default:"-" }}</dd>

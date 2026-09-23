@@ -724,7 +724,7 @@ class Ticket(models.Model):
     # this is a one-line handle for lists, exports and the report header.
     incident_name = models.CharField(
         max_length=255, blank=True, default='',
-        verbose_name='ชื่อเหตุการณ์ (Incident/Event Name)',
+        verbose_name='ชื่อเรื่อง (Incident/Event Name)',
     )
     severity = models.CharField(
         max_length=10, choices=SEVERITY_CHOICES, default='High',
@@ -1173,7 +1173,7 @@ class Ticket(models.Model):
     )
     detailed_issue2 = models.CharField(
         max_length=255, choices=DETAILED_ISSUE_CHOICES2, default='Investigating Other',
-        verbose_name='เรื่องที่แจ้ง',
+        verbose_name='หมวดหมู่ย่อย',
     )
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -1287,6 +1287,17 @@ class Ticket(models.Model):
     def display_id(self):
         """The stable public Ticket Reference, regardless of bundle membership."""
         return self.ticket_id
+
+    @property
+    def display_name(self):
+        """What the case is CALLED, for every list, queue and header.
+
+        incident_name is the analyst's own one-line handle but is optional, so
+        a raw render of it leaves most rows blank. The sub-category label is the
+        next best sentence-shaped description of the case, which is why it is
+        the fallback rather than device_name (a host, not a name).
+        """
+        return self.incident_name.strip() or self.get_detailed_issue2_display()
 
     @property
     def requires_manager_verification(self):

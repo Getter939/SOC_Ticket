@@ -10,6 +10,7 @@ from .attachments import *  # noqa: F401,F403
 from .reports import *  # noqa: F401,F403
 from .history import *  # noqa: F401,F403
 from .triage import *  # noqa: F401,F403
+from .tier2_queue import *  # noqa: F401,F403
 from .search import *  # noqa: F401,F403
 from .response import *  # noqa: F401,F403
 from .dashboard import *  # noqa: F401,F403

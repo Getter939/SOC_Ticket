@@ -7,9 +7,10 @@ A dated record of every workflow redesign and amendment, newest first, with the
 reasoning behind each. Read this to understand *why* the state machine has its
 current shape; read `ticket-lifecycle-states.md` for *what* that shape is today.
 
-Apps involved: `apps/incidents` (tickets + manual triage), `apps/wazuh_ingest`
-(SIEM alert triage + escalation queue), `apps/accounts` (roles/tiers),
-`apps/dashboard` (aggregates).
+Apps involved: `apps/incidents` (tickets, manual triage, Tier 2 queue),
+`apps/wazuh_ingest` (SIEM alert triage), `apps/accounts` (roles/tiers),
+`apps/dashboard` (aggregates). The Tier 2 queue lived in `apps/wazuh_ingest`
+until 2026-09-23 — historical sections below still name it there.
 
 ---
 

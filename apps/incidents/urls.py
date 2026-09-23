@@ -93,6 +93,12 @@ urlpatterns = [
     path('triage/<int:triage_id>/claim/', views.claim_manual_triage, name='claim_manual_triage'),
     path('triage/<int:triage_id>/release/', views.release_manual_triage, name='release_manual_triage'),
     path('triage/<int:triage_id>/dismiss/', views.dismiss_manual_triage, name='dismiss_manual_triage'),
+    # Tier 2 queue — moved here from apps/wazuh_ingest on 2026-09-23 (it had
+    # nothing to do with Wazuh; see views/tier2_queue.py). The URL names are
+    # the historical ones, so every reverse() and {% url %} is unchanged.
+    path('tier2-queue/', views.escalation_queue, name='escalation_queue'),
+    path('tier2-queue/claim/', views.claim_escalation, name='claim_escalation'),
+    path('tier2-queue/release/', views.release_escalation, name='release_escalation'),
     # System Owner
     path('my-tickets/', views.system_owner_dashboard, name='system_owner_dashboard'),
 ]

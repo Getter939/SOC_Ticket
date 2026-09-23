@@ -218,7 +218,7 @@ The two ⚠️ rows are a deliberate scope decision from 2026-07-23, not an over
 
 **SOC Manager Queue** (ticket list, manager-scoped) shows all three manager stages: PENDING_MGR_TRIAGE (pre-containment review), PENDING_MANAGER (emergency approval) and PENDING_MGR_EVENT_REVIEW (Event-downgrade verification).
 
-**Tier 2 Queue** (`/wazuh/escalation_queue/`) shows all three Tier 2 stages: ESCALATED_T2, CONTAINMENT_REPORTED, PENDING_T2_REVIEW — each row claimable, with an OLA countdown column.
+**Tier 2 Queue** (`/incidents/tier2-queue/`) shows all three Tier 2 stages: ESCALATED_T2, CONTAINMENT_REPORTED, PENDING_T2_REVIEW — each row claimable, with an OLA countdown column.
 
 **Tier 1 My Queue** (`/incidents/my-queue/`) is the Tier 1 counterpart: their own-court tickets (NEW, MONITORING, AWAITING_OWNER, OWNER_REMEDIATED — `Ticket.TIER1_QUEUE_STATUSES`) plus the manual-intake queue. The page has tabs for tickets, monitoring (cases with their 30-day countdown), **Tier 2 แก้ไข** (the passive changed-by-Tier-2 list — not counted in the sidebar badge), manual intake and recent history. A preparation the SOC Manager returned is flagged at the top, since only its opener may act on it.
 
