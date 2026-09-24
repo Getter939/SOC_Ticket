@@ -55,6 +55,15 @@ release (tag) dates.
 - **Five dashboard tests updated** for the server-side sorted/paginated case
   table shipped in v1.7.6 — CI was red on `main`.
 
+### Changed
+- **Response-request deliverables stay with their request.** The System Owner's
+  closure email now attaches only the ticket's own evidence, and the report's
+  Section 5 embeds only that evidence (plus the Project Incident's shared
+  evidence) — the same split the ticket page already shows. A VA/PT or InfraSec
+  result file describes weaknesses in the owner's system and is its own report
+  with its own number; it is no longer mailed out automatically or folded into
+  the incident report.
+
 ### Security
 - **Password-reset per-IP throttle uses the rightmost `X-Forwarded-For` hop.** It
   took the leftmost, which the client controls behind IIS ARR, so the limit could

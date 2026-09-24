@@ -220,7 +220,7 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label fw-semibold" for="{{ form.ip_address.id_for_label }}">ที่อยู่ IP <span class="required-star">*</span></label>
+          <label class="form-label fw-semibold" for="{{ form.ip_address.id_for_label }}">ที่อยู่ IP</label>
           {{ form.ip_address }}
           <div class="field-hint">{{ form.ip_address.help_text }}</div>
           {% if form.ip_address.errors %}<div class="text-danger small">{{ form.ip_address.errors }}</div>{% endif %}

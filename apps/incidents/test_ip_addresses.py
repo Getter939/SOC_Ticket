@@ -39,6 +39,7 @@ class IPAddressValidationTest(SimpleTestCase):
 
     def test_model_validates_each_address(self):
         field = Ticket._meta.get_field('ip_address')
+        self.assertTrue(field.blank)
         field.clean('192.0.2.10, 2001:db8::1', None)
         with self.assertRaises(ValidationError):
             field.clean('192.0.2.10, invalid', None)
@@ -61,6 +62,19 @@ class TicketMultipleIPTest(MFATestCase):
         self.assertContains(self.client.get(reverse('ticket_detail', args=[ticket.pk])), expected)
         self.assertEqual(build_ticket_report_context(ticket)['ip_address'], expected)
         self.assertTrue(Ticket.objects.filter(ip_address__icontains='192.0.2.11').exists())
+
+    def test_ticket_creation_accepts_an_empty_ip_address(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('create_ticket'), _ticket_post_data(ip_address=''),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(Ticket.objects.get().ip_address)
+
+    def test_ticket_forms_make_ip_address_optional(self):
+        for form_class in (TicketForm, TicketEditForm, TicketReviewForm, ProjectIncidentTargetForm):
+            with self.subTest(form=form_class.__name__):
+                self.assertFalse(form_class().fields['ip_address'].required)
 
     def test_forms_reject_an_invalid_address(self):
         for form_class in (TicketForm, TicketEditForm, TicketReviewForm, ProjectIncidentTargetForm):
@@ -91,7 +105,7 @@ class TicketMultipleIPTest(MFATestCase):
         self.assertEqual(ticket.ip_address, expected)
         self.assertEqual(TicketEditForm(instance=ticket)['ip_address'].value(), expected)
 
-    def test_project_target_supports_multiple_addresses_and_requires_one(self):
+    def test_project_target_supports_multiple_addresses_and_allows_none(self):
         data = {'device_name': 'service', 't1_route': Ticket.T1_ROUTE_OWNER}
         form = ProjectIncidentTargetForm(data={**data, 'ip_address': '192.0.2.1\n2001:db8::1'})
         self.assertTrue(form.is_valid(), form.errors)
@@ -100,8 +114,8 @@ class TicketMultipleIPTest(MFATestCase):
         self.assertEqual(ticket.ip_address, '192.0.2.1, 2001:db8::1')
 
         blank = ProjectIncidentTargetForm(data={**data, 'ip_address': ''})
-        self.assertFalse(blank.is_valid())
-        self.assertIn('ip_address', blank.errors)
+        self.assertTrue(blank.is_valid(), blank.errors)
+        self.assertIsNone(blank.save().ip_address)
 
 
 class TicketIPMigrationTest(TransactionTestCase):

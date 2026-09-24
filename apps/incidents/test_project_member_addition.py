@@ -123,15 +123,15 @@ class ProjectMemberAdditionTest(TestCase):
         data.update(overrides)
         return data
 
-    def test_ip_address_is_required(self):
+    def test_ip_address_is_optional(self):
         data = {
             'device_name': 'Newly reported host',
             'assigned_admin': str(self.admin.pk),
             't1_route': Ticket.T1_ROUTE_ADMIN,
         }
         form = ProjectIncidentTargetForm(data=data)
-        self.assertFalse(form.is_valid())
-        self.assertIn('ip_address', form.errors)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.cleaned_data['ip_address'])
 
     def test_permission_is_limited_to_creator_and_manager_while_active(self):
         project, lead = self._project()

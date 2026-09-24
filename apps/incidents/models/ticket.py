@@ -809,10 +809,9 @@ class Ticket(models.Model):
     )
 
     # ── Section 4: Scope / Affected Asset ───────────────────────────── #
-    # null=True with blank=False: forms still require an IP, but tickets
-    # imported from the pre-system TrendMicro tracker have none to give.
+    # Some affected assets have no known IP address when the ticket is opened.
     ip_address = models.TextField(
-        null=True, verbose_name='IP Addresses ของทรัพย์สิน',
+        null=True, blank=True, verbose_name='IP Addresses ของทรัพย์สิน',
         validators=[validate_ip_addresses], help_text=IP_ADDRESSES_HELP,
     )
     mac_address = models.CharField(

@@ -230,19 +230,19 @@
           {% endfor %}
         </div>
       {% elif section.rows.0.type == 'containment_checklist' %}
-        <div class="textbox">
+        {% spaceless %}<div class="textbox">
           {% for item in section.rows.0.items %}
             <div class="check-item"><span class="cb">{% if item.done %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ item.text }}</div>
           {% endfor %}
           {% if section.rows.0.trailing %}<div style="margin-top:6px; white-space:pre-wrap;">{{ section.rows.0.trailing }}</div>{% endif %}
-        </div>
+        </div>{% endspaceless %}
       {% elif section.rows.0.type == 'remediation_checklist' %}
-        <div class="textbox">
+        {% spaceless %}<div class="textbox">
           {% for item in section.rows.0.items %}
             <div class="check-item"><span class="cb">{% if item.checked %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;{{ item.label }}</div>
           {% endfor %}
           <div class="check-item"><span class="cb">{% if section.rows.0.other %}&#9745;{% else %}&#9744;{% endif %}</span>&#160;อื่นๆ ระบุ{% if section.rows.0.other %} — {{ section.rows.0.other }}{% endif %}</div>
-        </div>
+        </div>{% endspaceless %}
         {% with tail=section.rows|slice:"1:" %}
           {% if tail %}
           <table>

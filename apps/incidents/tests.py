@@ -480,6 +480,32 @@ class TicketReportExportTest(TestCase):
             is_emergency=False,
         )
 
+    def test_reporter_row_excludes_phone_in_incident_and_event_reports(self):
+        phone = '089-111-2345'
+        self.t1.profile.phone = phone
+        self.t1.profile.save(update_fields=['phone'])
+        self.client.force_login(self.t1)
+
+        for ticket in (self.ticket, self.event_ticket):
+            with self.subTest(classification=ticket.classification):
+                report = build_ticket_report_context(ticket)
+                sections = build_ticket_report_sections(report, ticket, hide_empty=False)
+                reporter_row = next(
+                    row for row in sections[0]['rows']
+                    if row['label'].endswith('ผู้รายงาน')
+                )
+                self.assertEqual(reporter_row['value'], self.t1.username)
+
+                preview = self.client.get(
+                    reverse('ticket_report_preview', args=[ticket.pk]),
+                )
+                self.assertContains(preview, self.t1.username)
+                self.assertNotContains(preview, phone)
+
+                docx_text = _docx_text(generate_ticket_report(ticket.pk).content)
+                self.assertIn(self.t1.username, docx_text)
+                self.assertNotIn(phone, docx_text)
+
     def test_generate_ticket_report_renders_docx_and_updates_metadata(self):
         snapshot_updated_at = self.ticket.updated_at
 
@@ -4558,14 +4584,14 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertFalse(ProjectIncident.objects.exists())
         self.assertFalse(Ticket.objects.exists())
 
-    def test_target_without_ip_address_is_rejected(self):
+    def test_target_without_ip_address_is_created(self):
         self.client.login(username='pi_t1', password='testpass123')
         data = _pi_post_data(self.admin_a, self.admin_b)
         data['target-1-ip_address'] = ''
         resp = self.client.post(reverse('create_project_incident'), data)
-        self.assertEqual(resp.status_code, 200)  # re-rendered with errors
-        self.assertIn('ip_address', resp.context['target_formset'].forms[1].errors)
-        self.assertFalse(ProjectIncident.objects.exists())
+        self.assertEqual(resp.status_code, 302)
+        project = ProjectIncident.objects.get()
+        self.assertIsNone(project.members.get(bundle_suffix='B').ip_address)
 
     def test_non_tier1_cannot_open_fanout_page(self):
         # TEMP: Tier 2 is temporarily allowed to open Project Incidents (revert

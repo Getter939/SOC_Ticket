@@ -357,7 +357,10 @@ def _containment_warnings(ticket, *, reason):
 
 def _owner_closed_warnings(ticket):
     if ticket.system_owner and ticket.system_owner.email:
-        attachments = list(ticket.attachments.all())
+        # Ticket-level evidence only. A response-request deliverable (a VA/PT
+        # or InfraSec result file) documents weaknesses in the owner's system
+        # and goes out through the SOC, not as an automatic email attachment.
+        attachments = list(ticket.attachments.filter(subtask__isnull=True))
         if not notify_system_owner_closed(ticket, attachments=attachments):
             return ('Ticket ปิดแล้ว แต่ส่งอีเมลแจ้ง System Owner ไม่สำเร็จ',)
     return ()

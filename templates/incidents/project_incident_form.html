@@ -263,7 +263,7 @@
               {% if tform.system_detail.errors %}<div class="text-danger small">{{ tform.system_detail.errors }}</div>{% endif %}
             </div>
             <div class="col-md-3">
-              <label class="form-label small fw-semibold mb-1">ที่อยู่ IP <span class="required-star">*</span></label>
+              <label class="form-label small fw-semibold mb-1">ที่อยู่ IP</label>
               {{ tform.ip_address }}
               <div class="field-hint">{{ tform.ip_address.help_text }}</div>
               {% if tform.ip_address.errors %}<div class="text-danger small">{{ tform.ip_address.errors }}</div>{% endif %}
@@ -336,7 +336,7 @@
         {{ target_formset.empty_form.system_detail }}
       </div>
       <div class="col-md-3">
-        <label class="form-label small fw-semibold mb-1">ที่อยู่ IP <span class="required-star">*</span></label>
+        <label class="form-label small fw-semibold mb-1">ที่อยู่ IP</label>
         {{ target_formset.empty_form.ip_address }}
         <div class="field-hint">{{ target_formset.empty_form.ip_address.help_text }}</div>
       </div>

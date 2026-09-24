@@ -279,7 +279,7 @@ def build_ticket_report_context(ticket, generated_at=None):
         'affected_notified_at': _format_dt_thai(ticket.affected_notified_at),
         'incident_name': _value(ticket.incident_name),
         'category': _value(ticket.get_detailed_issue_display()),
-        'reporter': _user_label(ticket.created_by, include_phone=True),
+        'reporter': _user_label(ticket.created_by),
         'log_source': _log_source_with_reference(ticket),
         'status': _containment_status(ticket),
         'actions_taken_summary': _value(ticket.actions_taken_summary),
@@ -1071,15 +1071,10 @@ def _value(value):
     return text or '-'
 
 
-def _user_label(user, include_phone=False):
+def _user_label(user):
     if not user:
         return '-'
-    label = user.get_full_name() or user.username
-    if include_phone:
-        phone = getattr(getattr(user, 'profile', None), 'phone', '')
-        if phone:
-            label = f'{label}, {phone}'
-    return label
+    return user.get_full_name() or user.username
 
 
 # Caption label that marks an image as case-wide evidence carried down from the
@@ -1098,6 +1093,12 @@ def _iter_report_evidence_attachments(ticket):
     ``_report_evidence_images``.
     """
     for attachment in ticket.attachments.all():
+        # Section 5 is the incident's own evidence. A response-request
+        # deliverable (VA/PT / InfraSec result file) is a separate report with
+        # its own number and stays with its request, as on the ticket page.
+        # Filtered in Python so the prefetch in _load_ticket is still used.
+        if attachment.subtask_id is not None:
+            continue
         yield attachment, ''
     project = ticket.project_incident
     if project is not None:

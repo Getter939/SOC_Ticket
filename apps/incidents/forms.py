@@ -303,7 +303,7 @@ class _ReportFields:
 
 
 class TicketForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.ModelForm):
-    ip_address = IPAddressListField()
+    ip_address = IPAddressListField(required=False)
 
     # ── Tier 1 disposition (set at creation) ─────────────────────────────── #
     # The Event/Incident decision IS the disposition. Required — every ticket
@@ -622,11 +622,10 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     """One affected system within a bundle — only the per-target fields.
 
     Each valid row becomes a member Ticket; the shared incident facts are
-    copied in by the view. ``ip_address`` is mandatory, as on single-ticket
-    creation.
+    copied in by the view.
     """
 
-    ip_address = IPAddressListField()
+    ip_address = IPAddressListField(required=False)
 
     assigned_admin = UserChoiceField(
         queryset=User.objects.filter(
@@ -691,7 +690,7 @@ ProjectIncidentTargetFormSet = forms.formset_factory(
 class TicketReviewForm(_TicketIOCForm, _DetailedIssueCascade, _ReportFields, forms.ModelForm):
     """General ticket information Tier 2 may correct while reviewing."""
 
-    ip_address = IPAddressListField()
+    ip_address = IPAddressListField(required=False)
     ncsa_severity = _ncsa_severity_field()
     importance = _importance_field()
     mitre_tactics = _mitre_tactic_field()

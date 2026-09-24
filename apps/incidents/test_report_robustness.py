@@ -2,19 +2,24 @@
 it renders on keeps its script working under the CSP."""
 
 import re
+import tempfile
 
+from django.test import override_settings
 from django.urls import reverse
 from docx import Document
 
 from apps.accounts.models import UserProfile
 from apps.accounts.testing import MFATestCase as TestCase
-from apps.incidents.models import Ticket
+from apps.incidents.models import Ticket, TicketAttachment, TicketSubtask
 from apps.incidents.reports import (
     _replace_placeholders,
+    build_ticket_report_render_context,
     _resolve_pdf_resource,
     generate_ticket_report,
 )
-from apps.incidents.tests import _docx_text, _make_t1, _make_ticket, _make_user
+from apps.incidents.tests import (
+    _docx_text, _make_redteam_manager, _make_t1, _make_ticket, _make_user, _png_upload,
+)
 
 
 class DocxPlaceholderTest(TestCase):
@@ -101,3 +106,32 @@ class ReportPreviewCspTest(TestCase):
             'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js',
             script_src,
         )
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_report_media_'))
+class ReportEvidenceScopeTest(TestCase):
+    """Section 5 embeds the incident's own evidence. A response-request
+    deliverable is a separate report and stays with its request."""
+
+    def test_deliverable_images_are_not_embedded(self):
+        redteam = _make_redteam_manager('scope_report_redteam')
+        ticket = _make_ticket(classification=Ticket.CLASSIFICATION_INCIDENT)
+        request = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='VA/PT', assigned_to=redteam,
+        )
+        TicketAttachment.objects.create(
+            ticket=ticket, file=_png_upload('own.png'), original_name='own.png',
+            description='analyst screenshot',
+        )
+        TicketAttachment.objects.create(
+            ticket=ticket, subtask=request, file=_png_upload('scan.png'),
+            original_name='scan.png', description='vapt finding',
+        )
+
+        context = build_ticket_report_render_context(Ticket.objects.get(pk=ticket.pk))
+        evidence = next(
+            row for section in context['sections'] for row in section['rows']
+            if row['type'] == 'evidence'
+        )
+        self.assertEqual([image.caption for image in evidence['images']], ['analyst screenshot'])

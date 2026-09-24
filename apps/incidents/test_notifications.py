@@ -2,6 +2,7 @@
 that cannot break a workflow action, local-time closure stamps, the content of
 the containment alert, and the per-email attachment budget."""
 
+import tempfile
 from datetime import datetime, timezone as dt_timezone
 from unittest.mock import patch
 
@@ -14,8 +15,13 @@ from django.utils import timezone
 from apps.accounts.models import UserProfile
 from apps.accounts.testing import MFATestCase as TestCase
 from apps.incidents import notifications
-from apps.incidents.models import NotificationTemplate, Ticket, TicketAttachment
-from apps.incidents.tests import _make_t1, _make_ticket, _make_user
+from apps.incidents.models import (
+    NotificationTemplate, Ticket, TicketAttachment, TicketSubtask,
+)
+from apps.incidents.tests import (
+    _make_redteam_manager, _make_t1, _make_ticket, _make_user,
+)
+from apps.incidents.ticket_workflow import _owner_closed_warnings
 
 LOCMEM = 'django.core.mail.backends.locmem.EmailBackend'
 
@@ -166,3 +172,36 @@ class SystemOwnerClosedTest(TestCase):
         message = mail.outbox[0]
         self.assertEqual([name for name, _content, _type in message.attachments], ['small.txt'])
         self.assertIn('big.log', message.body)
+
+
+@override_settings(
+    EMAIL_BACKEND=LOCMEM,
+    MEDIA_ROOT=tempfile.mkdtemp(prefix='soc_notif_media_'),
+)
+class ClosureEmailEvidenceScopeTest(TestCase):
+    """The owner's closure email carries ticket-level evidence only — never a
+    response-request deliverable (e.g. a VA/PT result about their system)."""
+
+    def test_deliverables_are_not_attached(self):
+        owner = _with_email(
+            _make_user('scope_owner', UserProfile.ROLE_SYSTEM_OWNER), 'owner@example.test',
+        )
+        redteam = _make_redteam_manager('scope_redteam')
+        ticket = _make_ticket(system_owner=owner, status=Ticket.STATUS_CLOSED_EVENT)
+        request = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='VA/PT', assigned_to=redteam,
+        )
+        TicketAttachment.objects.create(
+            ticket=ticket, original_name='evidence.log',
+            file=ContentFile(b'ticket evidence', name='evidence.log'),
+        )
+        TicketAttachment.objects.create(
+            ticket=ticket, subtask=request, original_name='vapt-result.pdf',
+            file=ContentFile(b'%PDF-1.4 scan', name='vapt-result.pdf'),
+        )
+
+        self.assertEqual(_owner_closed_warnings(ticket), ())
+
+        names = [name for name, _content, _type in mail.outbox[0].attachments]
+        self.assertEqual(names, ['evidence.log'])
