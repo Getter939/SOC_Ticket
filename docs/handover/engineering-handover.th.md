@@ -369,7 +369,6 @@ apps/
       seed_data.py               ตั๋วสังเคราะห์สำหรับ dev (ผู้ใช้ 7 role)
       seed_dashboard_mockup.py   ชุดข้อมูล demo/ภาพหน้าจอ
       seed_ola_demo_buckets.py   ชุดข้อมูล demo กราฟ OLA
-      seed_response_demo.py      ชุดข้อมูล demo ทีมตอบสนอง
       seed_uat_states.py         ตั๋วหนึ่งใบต่อหนึ่งสถานะ สำหรับ UAT
       seed_ceo_demo.py           ชุดข้อมูล demo dashboard ผู้บริหาร
       import_trendmicro.py       นำเข้า CSV จาก Trend Micro
@@ -433,8 +432,6 @@ python manage.py runserver 0.0.0.0:8088
   ครบทั้ง 12** ทำให้ทดสอบทุกหน้าจอและทุกปุ่มได้โดยไม่ต้องเดิน workflow ทั้งเส้น
   ใช้ prefix `uat_` (ไม่ใช่ `seed_`) การ `--flush` จึงลบเฉพาะแถวของตัวเอง
   ไม่กระทบข้อมูลที่ผู้ทดสอบสร้างระหว่างเซสชัน
-- `python manage.py seed_response_demo` — ตั๋วที่มีคำขอทีมตอบสนองทั้งที่ค้างและ
-  ที่เสร็จแล้ว สำหรับทดสอบคิวทีมตอบสนองและเงื่อนไขการปิดงาน
 - `python manage.py ingest_wazuh_alerts --fixture [--fresh]` — alert ตัวอย่าง
   แบบ offline สำหรับทดสอบ flow การ triage ของ Wazuh
 - `test_accounts.txt` — บัญชีล็อกอินสำหรับ dev หนึ่งบัญชีต่อ role

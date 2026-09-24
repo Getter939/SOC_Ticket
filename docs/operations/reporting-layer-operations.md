@@ -92,17 +92,20 @@ unmapped scores fall back to `Unknown`.
 ### C. Schedule the nightly refresh — this is when history starts accruing
 Production is **Windows** → use **Windows Task Scheduler** (task prefix `SOC-*`,
 matching the runbook), not cron. The OS timezone is `SE Asia Standard Time`
-(runbook Stage 1.3), so tasks fire on Bangkok local time. Run
-`ingest_wazuh_alerts` **first**, then `refresh_reporting`, at a consistent early
-time. Register once (as the app service account):
+(runbook Stage 1.3), so tasks fire on Bangkok local time. `ingest_wazuh_alerts`
+runs **continuously** (per-minute) so the queue stays live; `refresh_reporting`
+runs **nightly**, after midnight, once the day's alerts are already ingested.
+Register once (as the app service account):
 ```powershell
 $py  = 'C:\SOCTicket\app\venv\Scripts\python.exe'
 $app = 'C:\SOCTicket\app'
-schtasks /create /tn "SOC-Ingest-Wazuh"      /sc daily /st 00:15 /ru "NT_DOMAIN\svc_socticket" `
+schtasks /create /tn "SOC-Ingest-Wazuh"      /sc minute /mo 1 /ru "NT_DOMAIN\svc_socticket" `
   /tr "cmd /c cd /d $app && `"$py`" manage.py ingest_wazuh_alerts >> C:\SOCTicket\logs\ingest.log 2>&1"
 schtasks /create /tn "SOC-Refresh-Reporting" /sc daily /st 00:20 /ru "NT_DOMAIN\svc_socticket" `
   /tr "cmd /c cd /d $app && `"$py`" manage.py refresh_reporting   >> C:\SOCTicket\logs\reporting.log 2>&1"
 ```
+(The as-built note above records `SOC-Ingest-Wazuh` running as SYSTEM with the
+`IgnoreNew` multiple-instances policy so a slow run never overlaps its successor.)
 **Start this at go-live, not before** — in UAT the snapshot only captures seed
 data, and its history is unrecoverable, so day one of real operations is the day
 to begin. (Fits the runbook's handoff to handbook Phase 5, alongside the Wazuh

@@ -18,6 +18,7 @@ from ..models import (
 )
 from ..policies import (
     can_accept_subtask as _can_accept_subtask,
+    can_change_subtask_status as _can_change_subtask_status,
     can_upload_subtask_result as _can_upload_subtask_result,
     can_update_subtask as _can_update_subtask,
     response_request_updates_frozen as _response_request_updates_frozen,
@@ -105,6 +106,20 @@ def update_subtask(request, subtask_id):
         # replaced silently. Capture what was there first.
         previous_notes = subtask.result_notes
         previous_report_number = subtask.report_number
+        # Status and report number are gated more tightly than notes: see
+        # can_change_subtask_status. Refuse the whole POST (notes and file
+        # included) rather than silently saving part of it with those dropped.
+        posted_number = request.POST.get('report_number')
+        if not _can_change_subtask_status(subtask, request.user) and (
+            request.POST.get('status', subtask.status) != subtask.status
+            or (posted_number is not None and posted_number.strip() != subtask.report_number)
+        ):
+            messages.error(
+                request,
+                'เปลี่ยนสถานะหรือเลขที่รายงานของคำขอนี้ได้เฉพาะผู้รับผิดชอบคำขอ '
+                'หรือผู้จัดการ SOC เท่านั้น — ไม่มีการบันทึกข้อมูล',
+            )
+            return redirect('ticket_detail', pk=ticket.pk)
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
             # Optional deliverable file (e.g. VA/PT scan output), linked to both

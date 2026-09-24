@@ -61,9 +61,12 @@ class WazuhAlert(models.Model):
     # make, the 4-hour triage OLA (OLA_HOURS) is meaningless against them, and
     # rule_level 13 would open every one as a Critical ticket.
     #
-    # They are still ingested and kept — vulnerability state is SOC business —
-    # but they are routed out of the Tier 1 triage queue. Only KIND_DETECTION
-    # rows are triage work.
+    # They are never stored: Wazuh owns vulnerability state and has its own
+    # dashboard for it, so vulnerability-detector alerts are excluded in the
+    # OpenSearch query and dropped again in store_alert_hits (see ingest.py),
+    # and purge_vulnerability_alerts removes any legacy rows. Only
+    # KIND_DETECTION rows are ingested; they are the triage work. The kind
+    # classifier is still needed for that filtering (and for purging).
     KIND_DETECTION = 'DETECTION'
     KIND_VULNERABILITY = 'VULNERABILITY'
     KIND_CHOICES = [
@@ -220,10 +223,14 @@ class WazuhAlert(models.Model):
 
 
 class IngestWatermark(models.Model):
-    """Single-row table tracking the last successfully ingested alert timestamp."""
+    """Single-row cursor and health record for the Wazuh alert ingest job."""
 
     last_timestamp = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+    last_successful_poll_at = models.DateTimeField(
+        null=True, blank=True,
+        verbose_name='เวลาที่ดึงข้อมูล Wazuh สำเร็จล่าสุด',
+    )
 
     def __str__(self):
         return f'Watermark: {self.last_timestamp}'

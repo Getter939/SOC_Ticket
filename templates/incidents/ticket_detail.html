@@ -526,13 +526,20 @@ onto its own wrapped row, which space-between then left-aligned.
         {% if subtask.can_update and not subtask.is_mine %}
         <div class="collapse" id="update-subtask-{{ subtask.pk }}">
           <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
+            {% if subtask.can_change_status %}
             <div class="col-md-2">{{ subtask_update_form.status.label_tag }}
               <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             {% if subtask.requires_report_number %}
             {# Every response request records the number of the report delivered. #}
             <div class="col-md-3"><label class="form-label small mb-1" for="report-number-{{ subtask.pk }}">เลขที่รายงาน <span class="text-danger">*</span></label><input type="text" id="report-number-{{ subtask.pk }}" name="report_number" class="form-control form-control-sm" maxlength="40" value="{{ subtask.report_number_prefill }}" placeholder="{{ subtask.expected_report_number }}"><div class="form-text">ต้องระบุเมื่อปิดงานเป็น "เสร็จสิ้น"</div></div>
             {% endif %}
-            {% if subtask.accepts_result_file %}
+            {% else %}
+            {# Status and report number belong to the assignee / SOC Manager (can_change_subtask_status); others add notes only. #}
+            <input type="hidden" name="status" value="{{ subtask.status }}">
+            <div class="col-md-11"><label class="form-label small mb-1">ผลการดำเนินการ / หมายเหตุ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea><div class="form-text">เปลี่ยนสถานะหรือเลขที่รายงานได้เฉพาะผู้รับผิดชอบคำขอหรือผู้จัดการ SOC — คุณเพิ่มหมายเหตุได้</div></div>
+            {% endif %}
+            {% if not subtask.can_change_status %}
+            {% elif subtask.accepts_result_file %}
             {# Forensics / RCA takes no file: that report is a physical document the SOC Manager collects. #}
             <div class="col-md-4"><label class="form-label small mb-1">ผลการดำเนินการ (ถ้ามี)</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
             <div class="col-md-4"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>

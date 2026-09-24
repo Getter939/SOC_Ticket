@@ -473,10 +473,30 @@ class DashboardManagementViewTest(TestCase):
         for earlier, later in zip(dates, dates[1:]):
             self.assertEqual((later - earlier).days, 1)
 
-    def test_daily_trend_week_filter_is_seven_days(self):
-        """date_range=week → 7 daily buckets."""
+    def test_daily_trend_week_filter_is_monday_to_today(self):
+        """date_range=week → one daily bucket per day of the current calendar
+        week (Monday through today), the same cohort the week filter selects —
+        so 1 bucket on a Monday and 7 on a Sunday, not a rolling 7 days."""
+        today = timezone.localdate()
+        monday = today - timedelta(days=today.weekday())
         trend = self._get(date_range='week').context['daily_trend_filtered']
-        self.assertEqual(len(trend), 7)
+        self.assertEqual(len(trend), today.weekday() + 1)
+        self.assertEqual(trend[0]['date'], monday.isoformat())
+        self.assertEqual(trend[-1]['date'], today.isoformat())
+
+    def test_week_filter_excludes_cases_opened_before_monday(self):
+        """A case opened just before this week's Monday 00:00 (local time) is
+        outside both the week filter and its volume chart."""
+        today = timezone.localdate()
+        monday = today - timedelta(days=today.weekday())
+        from datetime import datetime
+        monday_start = timezone.make_aware(datetime.combine(monday, datetime.min.time()))
+        before = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=before.pk).update(
+            created_at=monday_start - timedelta(minutes=1))
+        _make_ticket(status=Ticket.STATUS_NEW)  # opened now → inside the week
+        trend = self._get(date_range='week').context['daily_trend_filtered']
+        self.assertEqual(sum(day['count'] for day in trend), 1)
 
     def test_daily_trend_today_filter_is_hourly(self):
         """date_range=today → hourly buckets labelled 'YYYY-MM-DD HH:00'."""
@@ -585,7 +605,7 @@ class DashboardManagementViewTest(TestCase):
     def test_volume_title_and_window_match_buckets(self):
         for date_range, title in (
             ('today', 'Hourly Case Volume (วันนี้)'),
-            ('week', 'Daily Case Volume (7 วัน)'),
+            ('week', 'Daily Case Volume (สัปดาห์นี้)'),
             ('month', 'Daily Case Volume (30 วัน)'),
             ('all', 'Daily Case Volume (30 วัน)'),
         ):

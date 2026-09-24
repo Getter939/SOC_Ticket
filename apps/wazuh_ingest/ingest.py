@@ -267,4 +267,12 @@ def fetch_and_store_alerts(min_level=10, batch_size=500, max_pages=20):
             max_pages, batch_size,
         )
 
+    # This timestamp records completed successful polls, including quiet polls
+    # with no new alerts. The event-time watermark above cannot serve as a
+    # freshness heartbeat because it only advances when newer alerts arrive.
+    if not totals['errors']:
+        watermark = _get_watermark()
+        watermark.last_successful_poll_at = timezone.now()
+        watermark.save(update_fields=['last_successful_poll_at'])
+
     return totals

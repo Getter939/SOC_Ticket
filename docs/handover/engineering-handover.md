@@ -529,7 +529,6 @@ apps/
       seed_data.py               synthetic tickets for dev (7 role users)
       seed_dashboard_mockup.py   demo/screenshot dataset
       seed_ola_demo_buckets.py   OLA-chart demo dataset
-      seed_response_demo.py      response-team demo data
       seed_uat_states.py         one ticket per lifecycle state, for UAT
       seed_ceo_demo.py           executive-dashboard demo dataset
       import_trendmicro.py       Trend Micro CSV import
@@ -593,8 +592,6 @@ at `http://127.0.0.1:8088/`, admin at `/admin/`.
   **each lifecycle state**, so every screen and button can be exercised
   without walking the whole workflow. Tagged with a `uat_` prefix (not `seed_`)
   so its `--flush` removes exactly its own rows and nothing a live tester made.
-- `python manage.py seed_response_demo` — tickets with open/closed Response
-  Requests, for the response-team queues and the approval gate.
 - `python manage.py ingest_wazuh_alerts --fixture [--fresh]` — offline demo
   alerts for the Wazuh triage flow.
 - `test_accounts.txt` — dev logins, one per role. **Dev only; never create

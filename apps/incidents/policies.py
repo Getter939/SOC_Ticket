@@ -308,6 +308,23 @@ def can_update_subtask(subtask, user):
     return bool(profile and profile.is_soc)
 
 
+def can_change_subtask_status(subtask, user):
+    """Whether ``user`` may move a Subtask's status or set its report number.
+
+    Narrower than can_update_subtask for response requests. Marking a request
+    เสร็จสิ้น (with the delivered report's number) is what unblocks the parent
+    Incident's approval, so only the people who own that outcome may do it: the
+    assignee who did the work, the SOC Manager who owns the request, or a
+    superuser. Other SOC members keep can_update_subtask's right to add notes.
+    Retired legacy types keep their old, broader rule.
+    """
+    if not subtask.is_response_request:
+        return can_update_subtask(subtask, user)
+    if response_request_updates_frozen(subtask):
+        return False
+    return can_upload_subtask_result(subtask, user)
+
+
 def can_accept_subtask(subtask, user):
     """Whether ``user`` may accept (รับงาน) a response request: OPEN → IN_PROGRESS.
 

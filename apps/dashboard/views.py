@@ -4,13 +4,16 @@ from statistics import mean as _mean, median as _median
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.core.exceptions import PermissionDenied
-from django.db.models import Count, F, OuterRef, Q, Subquery
-from django.db.models.functions import Coalesce, TruncDate, TruncHour
+from django.db.models import Case, CharField, Count, F, OuterRef, Q, Subquery, Value, When
+from django.db.models.functions import (
+    Coalesce, Concat, Lower, NullIf, Trim, TruncDate, TruncHour,
+)
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
+from apps.wazuh_ingest.models import IngestWatermark
 
 # ====================================================================== #
 # Data-model facts this view relies on (verified against                 #
@@ -138,8 +141,9 @@ def dashboard(request):
     #
     # The redirects above are ROUTING, not authorization. Each is written
     # `and profile and ...`, so a user with NO UserProfile matches none of them
-    # and used to fall straight through to the query below — which renders the
-    # ENTIRE active queue (see recent_tickets) for the whole organisation.
+    # and used to fall straight through to the query below — which exposed the
+    # org-wide queue and aggregates without a role profile. The detail table is
+    # server-paginated now, but its aggregate scope remains org-wide.
     #
     # That state is routine, not hypothetical: nothing auto-creates a
     # UserProfile, and Django's BaseUserAdmin hides the UserProfileInline on the
@@ -162,6 +166,24 @@ def dashboard(request):
 
     today = timezone.now()
     now   = today
+    local_now = timezone.localtime(now)
+    ingest_watermark = IngestWatermark.objects.only(
+        'last_timestamp', 'last_successful_poll_at',
+    ).first()
+    wazuh_ingest_freshness = None
+    if ingest_watermark:
+        wazuh_ingest_freshness = {
+            'poll_at': ingest_watermark.last_successful_poll_at,
+            'event_at': ingest_watermark.last_timestamp,
+            'poll_age': (
+                humanize_minutes(max(0, int((now - ingest_watermark.last_successful_poll_at).total_seconds() // 60)))
+                if ingest_watermark.last_successful_poll_at else None
+            ),
+            'event_age': (
+                humanize_minutes(max(0, int((now - ingest_watermark.last_timestamp).total_seconds() // 60)))
+                if ingest_watermark.last_timestamp else None
+            ),
+        }
     terminal = list(Ticket.TERMINAL_STATUSES)
 
     # ── GET filters: date range / status / severity ──────────────────────── #
@@ -194,13 +216,13 @@ def dashboard(request):
         if date_to:
             all_tickets = all_tickets.filter(created_at__date__lte=date_to)
     elif date_range == 'today':
-        all_tickets = all_tickets.filter(created_at__date=now.date())
+        all_tickets = all_tickets.filter(created_at__date=local_now.date())
     elif date_range == 'week':
-        week_start = (now - timedelta(days=now.weekday())).replace(
+        week_start = (local_now - timedelta(days=local_now.weekday())).replace(
             hour=0, minute=0, second=0, microsecond=0)
         all_tickets = all_tickets.filter(created_at__gte=week_start)
     elif date_range == 'month':
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         all_tickets = all_tickets.filter(created_at__gte=month_start)
 
     if severity_filter:
@@ -264,27 +286,125 @@ def dashboard(request):
         for sev in severity_order
     ]
 
-    # ── Recent active cases — full active queue for the detail table ──────── #
-    # The ENTIRE active queue is sent to the template (not a 15-row slice) so
-    # the client-side script can sort + paginate the whole dataset without a
-    # page reload (see the recent-cases <script> in dashboard.html). Default
-    # server-side order — severity DESC (Critical first), then created_at DESC —
-    # is also the table's initial order and the no-JS fallback.
-    #
-    # severity is a CharField, so ordering on it alphabetically would be wrong
-    # (Critical < High < Low …). with_severity_rank() annotates the SEVERITY_RANK
-    # weight (shared with the Tier 2 queue's severity sort); the weight is also
-    # emitted as a data-attribute for the JS.
-    recent_tickets = list(
-        active_qs.select_related('created_by')
-        .with_severity_rank()
-        .order_by('-sev_rank', '-created_at')
+    # ── Active-case detail table — sort and paginate in the database ──────── #
+    sort_fields = {
+        'ticket': 'ticket_id',
+        'sev': 'sev_rank',
+        'created': 'created_at',
+        'age': 'created_at',
+        'statusAge': 'status_age_anchor',
+        'caseName': 'case_name_sort',
+        'openedBy': 'opened_by_sort',
+        'status': 'status_label_sort',
+        'sc': 'status_changed_at',
+    }
+    sort_key = request.GET.get('sort', 'sev')
+    if sort_key not in sort_fields:
+        sort_key = 'sev'
+    sort_direction = request.GET.get('dir', 'desc')
+    if sort_direction not in {'asc', 'desc'}:
+        sort_direction = 'desc'
+
+    case_name_fallback = Case(
+        *[
+            When(detailed_issue2=code, then=Value(label))
+            for code, label in Ticket.DETAILED_ISSUE_CHOICES2
+        ],
+        default=F('detailed_issue2'),
+        output_field=CharField(),
     )
+    status_label = Case(
+        *[
+            When(status=code, then=Value(label))
+            for code, label in Ticket.STATUS_CHOICES
+        ],
+        default=F('status'),
+        output_field=CharField(),
+    )
+    table_qs = active_qs.select_related('created_by').with_severity_rank()
+    if sort_key == 'caseName':
+        table_qs = table_qs.annotate(
+            case_name_sort=Lower(Coalesce(
+                NullIf(Trim(F('incident_name')), Value('')),
+                case_name_fallback,
+                output_field=CharField(),
+            ))
+        )
+    elif sort_key == 'openedBy':
+        opened_by_name = Trim(Concat(
+            F('created_by__first_name'), Value(' '), F('created_by__last_name'),
+        ))
+        table_qs = table_qs.annotate(
+            opened_by_sort=Lower(Coalesce(
+                NullIf(opened_by_name, Value('')),
+                F('created_by__username'),
+                output_field=CharField(),
+            ))
+        )
+    elif sort_key == 'status':
+        table_qs = table_qs.annotate(status_label_sort=Lower(status_label))
+    elif sort_key == 'statusAge':
+        table_qs = table_qs.annotate(
+            status_age_anchor=Coalesce('status_changed_at', 'created_at')
+        )
+
+    # Age sorts reverse their timestamp direction: older cases have earlier
+    # created/status timestamps. Keep null timestamps last for other columns.
+    ascending_order = sort_direction == 'asc'
+    if sort_key in {'age', 'statusAge'}:
+        ascending_order = not ascending_order
+    primary_order = F(sort_fields[sort_key])
+    primary_order = (
+        primary_order.asc(nulls_last=True) if ascending_order
+        else primary_order.desc(nulls_last=True)
+    )
+    ordered_tickets = table_qs.order_by(primary_order, '-created_at', '-pk')
+
+    case_paginator = Paginator(ordered_tickets, 25)
+    recent_page = case_paginator.get_page(request.GET.get('page'))
+    recent_tickets = list(recent_page.object_list)
+    for ticket in recent_tickets:
+        ticket.age_minutes = max(
+            0, int((now - ticket.created_at).total_seconds() // 60))
+        ticket.age_label = humanize_minutes(ticket.age_minutes)
+        status_started_at = ticket.status_changed_at or ticket.created_at
+        ticket.status_age_minutes = max(
+            0, int((now - status_started_at).total_seconds() // 60))
+        ticket.status_age_label = humanize_minutes(ticket.status_age_minutes)
+
+    sort_params = request.GET.copy()
+    for param in ('page', 'sort', 'dir'):
+        sort_params.pop(param, None)
+    sort_links = {}
+    for key in sort_fields:
+        params = sort_params.copy()
+        next_direction = (
+            ('asc' if sort_direction == 'desc' else 'desc')
+            if key == sort_key else 'asc'
+        )
+        params['sort'] = key
+        params['dir'] = next_direction
+        sort_links[key] = '?' + params.urlencode()
+
+    def case_page_url(number):
+        params = request.GET.copy()
+        params['page'] = number
+        return '?' + params.urlencode()
+
+    recent_page_links = []
+    for number in case_paginator.get_elided_page_range(
+            recent_page.number, on_each_side=2, on_ends=1):
+        if number == case_paginator.ELLIPSIS:
+            recent_page_links.append({'ellipsis': True})
+        else:
+            recent_page_links.append({
+                'number': number,
+                'url': case_page_url(number),
+                'current': number == recent_page.number,
+            })
 
     # ====================================================================== #
-    # Management dashboard KPIs (Session 3) — additive.                       #
-    # Audience: management. Everything respects the active GET filters        #
-    # (date_range / status / severity).                                       #
+    # Live SOC dashboard KPIs — scoped by opened date, status, and severity.   #
     # ====================================================================== #
     MONTH_ABBR = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -311,7 +431,7 @@ def dashboard(request):
         critical_soonest_deadline = None
 
     # Closed this / last calendar month — terminal-entry time from the log.
-    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    this_month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     last_month_start = (this_month_start - timedelta(days=1)).replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
     closed_this_month = resolved_qs.filter(resolved_at__gte=this_month_start).count()
@@ -342,7 +462,26 @@ def dashboard(request):
         'slug': _ANALYST_CLAIMED_KEY,
         'label': 'รับเรื่อง Tier 2',
         'description': 'เคสในคิว Tier 2 ที่นักวิเคราะห์รับเรื่องแล้ว',
+        'kind': 'claimed',
     })
+    waiting_labels = {
+        Ticket.STATUS_ESCALATED_T2: 'ส่งต่อ Tier 2',
+        Ticket.STATUS_PENDING_MGR_TRIAGE: 'รอผู้จัดการ SOC',
+        Ticket.STATUS_AWAITING_CONTAINMENT: 'รอผู้ดูแลระบบ',
+        Ticket.STATUS_CONTAINMENT_REPORTED: 'รายงานควบคุมแล้ว',
+        Ticket.STATUS_PENDING_T2_REVIEW: 'รอ Tier 2 ตรวจ',
+        Ticket.STATUS_PENDING_MANAGER: 'รอผู้จัดการ',
+        Ticket.STATUS_PENDING_MGR_EVENT_REVIEW: 'รอตรวจปิด Event',
+    }
+    workload_columns.extend(
+        {
+            'slug': slug,
+            'label': waiting_labels.get(slug, status_map[slug]),
+            'description': status_map[slug],
+            'kind': 'waiting',
+        }
+        for slug in _ANALYST_BLOCKED_STATUSES
+    )
     heatmap_slugs = [s for s, _ in assignee_heatmap_statuses]
     heat = {}
 
@@ -351,7 +490,7 @@ def dashboard(request):
             name = f'{first_name} {last_name}'.strip() or username
             heat[uid] = {
                 'name': name, 'counts': {}, 'load': 0, 'blocked': 0,
-                'total': 0, 'finished': 0,
+                'total': 0, 'finished': 0, 'claimed': 0,
             }
         return heat[uid]
 
@@ -390,6 +529,7 @@ def dashboard(request):
             r['assigned_to__last_name'], r['assigned_to__username'],
         )
         row['counts'][_ANALYST_CLAIMED_KEY] = r['c']
+        row['claimed'] = r['c']
 
     # Attribute a resolved case to its Tier 2 verifier when available (the
     # manager may perform the final approval), otherwise use the actor who
@@ -450,20 +590,20 @@ def dashboard(request):
     assignee_heatmap = sorted(
         heat.values(), key=lambda x: (x['load'], x['total']), reverse=True)
     # Template can't index a dict by a loop variable — pre-build status-ordered
-    # cell lists aligned to assignee_heatmap_statuses, a label+count 'breakdown'
-    # for the expandable detail row, and a 0-100 'load_pct' for the mini load
-    # bar (scaled to the busiest actionable queue, so the widest bar is full).
+    # cells for the actionable columns and a complete status breakdown for the
+    # expandable detail row. The claimed signal is an overlapping subset of
+    # blocked tickets, so it is shown in detail without increasing workload.
     max_load = max((a['load'] for a in assignee_heatmap), default=0)
     for a in assignee_heatmap:
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
         a['breakdown'] = [
-            {'label': col['label'], 'count': cell}
-            for col, cell in zip(workload_columns[:-1], a['cells'])
+            {
+                'label': col['label'],
+                'count': a['counts'].get(col['slug'], 0),
+                'kind': col.get('kind', 'own'),
+            }
+            for col in workload_columns
         ]
-        a['breakdown'].append({
-            'label': workload_columns[-1]['label'],
-            'count': a['counts'].get(_ANALYST_CLAIMED_KEY, 0),
-        })
         a['load_pct'] = round(a['load'] / max_load * 100) if max_load else 0
 
     unassigned_active = active_qs.filter(assigned_to__isnull=True).count()
@@ -471,7 +611,7 @@ def dashboard(request):
     # Daily volume trend scoped to the active GET filters. Zero-filled so the
     # line has no gaps. Window depends on date_range:
     #   today → hourly buckets (00:00 … current hour, local time)
-    #   week  → last 7 days
+    #   week  → current calendar week (same Monday-to-date cohort as the filter)
     #   else  → last 30 days
     # All bucketing uses the active timezone (TruncDate/TruncHour + localdate).
     today_local = timezone.localdate()
@@ -501,8 +641,11 @@ def dashboard(request):
             if start_date > end_date:
                 end_date = start_date
         else:
-            ndays = 7 if date_range == 'week' else 30
-            start_date = today_local - timedelta(days=ndays - 1)
+            start_date = (
+                today_local - timedelta(days=today_local.weekday())
+                if date_range == 'week'
+                else today_local - timedelta(days=29)
+            )
             end_date = today_local
         rows = (
             all_tickets.filter(
@@ -524,7 +667,7 @@ def dashboard(request):
     if date_range == 'today':
         volume_title = 'Hourly Case Volume (วันนี้) — ปริมาณคดีรายชั่วโมง'
     elif date_range == 'week':
-        volume_title = 'Daily Case Volume (7 วัน) — ปริมาณคดีรายวัน'
+        volume_title = 'Daily Case Volume (สัปดาห์นี้) — ปริมาณคดีรายวัน'
     elif date_range == 'custom':
         volume_title = 'Daily Case Volume (ช่วงวันที่เลือก) — ปริมาณคดีรายวัน'
     else:
@@ -534,9 +677,30 @@ def dashboard(request):
     return render(request, 'dashboard/dashboard.html', {
         'stats':               stats,
         'now':                 now,
+        'wazuh_ingest_freshness': wazuh_ingest_freshness,
         'pipeline_by_severity': pipeline_by_severity,
         'pipeline_rows':        pipeline_rows,
         'recent_tickets':      recent_tickets,
+        'recent_page':          recent_page,
+        'recent_page_links':    recent_page_links,
+        'recent_prev_url': (
+            case_page_url(recent_page.previous_page_number())
+            if recent_page.has_previous() else None
+        ),
+        'recent_next_url': (
+            case_page_url(recent_page.next_page_number())
+            if recent_page.has_next() else None
+        ),
+        'recent_start': (
+            recent_page.start_index() if case_paginator.count else 0
+        ),
+        'recent_end': (
+            recent_page.end_index() if case_paginator.count else 0
+        ),
+        'recent_total': case_paginator.count,
+        'recent_sort': sort_key,
+        'recent_sort_direction': sort_direction,
+        'recent_sort_links': sort_links,
         # ── Management KPIs (Session 3) ────────────────────────────────── #
         'active_total':              active_total,
         'active_critical':           active_critical,

@@ -8,27 +8,6 @@ release (tag) dates.
 
 ## [Unreleased]
 
-### Changed
-- **Forensic Analyst's work is simpler: the RCA report is no longer written in the
-  system.** The RCA workspace (Section 1 prefill, assets, timeline + CSV import, root
-  causes, IOC pull/push, recommendations, DOCX draft) is retired. The analyst now
-  finds the request in *งานตอบสนอง*, clicks **รับงาน**, writes the report outside
-  the system, and marks the request **เสร็จสิ้น** from the ticket's request panel.
-  This is the same panel VA/PT and InfraSec requests already use.
-  - Marking **any** response request **เสร็จสิ้น** now **requires the number of
-    the report delivered**: Forensics / RCA and the Red Team's VA/PT and InfraSec.
-    The field is prefilled with the case's number for that report kind
-    (`SOC-RCA-…`, `SOC-VAPT-…`, `SOC-HARD-…` YYYYMM-NNNN) and can be edited. Notes
-    are optional. An RCA request accepts no file, because that report is the
-    physical document the SOC Manager collects. VA/PT and InfraSec keep their
-    optional result file. The number is audited in the history, shown on the request
-    and in the queue, and included in the completion email to SOC Managers (new
-    `{report_number}` placeholder).
-  - Old `/incidents/rca/<id>/` links from emails already sent open the request on
-    its ticket.
-  - The RCA tables and any data already in them are **kept** (no migration drops
-    them). Only the screens are gone.
-
 ### Added
 - **"งานของคุณ" card for the response-team assignee.** A Forensic Analyst or Red
   Team Manager used to open a ticket, find *ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ*
@@ -44,14 +23,93 @@ release (tag) dates.
   now open this card (`#my-request`). The SOC Managers' completion email still opens
   the request list. In the request list, the assignee's own row is highlighted and
   links to the card instead of repeating the form.
-- **Ticket page sections are visually distinct.** Every section card has its own
-  accent rule, an icon badge and a tinted header band, so the long page no longer
-  reads as one continuous white column.
 - **รับงาน (accept) button** for every response request (Forensics / RCA, VA/PT,
   InfraSec). It appears on the request panel and in the *งานตอบสนอง* queue. One
   click by the assignee moves the request from เปิด to กำลังดำเนินการ, so the SOC
-  Manager can see it has been picked up. Migration `incidents 0087` adds
-  `TicketSubtask.report_number`.
+  Manager can see it has been picked up.
+- **Ticket page sections are visually distinct.** Every section card has its own
+  accent rule, an icon badge and a tinted header band, so the long page no longer
+  reads as one continuous white column.
+- **Wazuh data freshness on the SOC dashboard.** The header now shows when the
+  Wazuh ingest last completed a successful poll and how old the newest Wazuh event
+  is, next to the dashboard's own refresh time. The ingest watermark only moves when
+  newer alerts arrive, so it couldn't tell a quiet period from a stalled job. The new
+  `IngestWatermark.last_successful_poll_at` is stamped on every error-free poll,
+  including polls that find nothing. Until the migration has run and one poll has
+  succeeded, the header says *ไม่มีประวัติการดึงสำเร็จ*.
+- **New dashboard columns and card.**
+  - A **Unassigned Active / ยังไม่มอบหมาย** stat card.
+  - The active-case table has new **อายุเคส** (case age), **อยู่สถานะนี้** (time in
+    current status), **OLA ควบคุม** and **ชื่อเคส** columns, replacing **ประเภท**.
+  - The analyst workload rows show a **T2 claimed** badge.
+  - Each workload row's breakdown lists the waiting statuses (รอผู้จัดการ SOC,
+    รอผู้ดูแลระบบ, …) separately from the analyst's own work.
+
+### Changed
+- **Forensic Analyst's work is simpler: the RCA report is no longer written in the
+  system.** The RCA workspace (Section 1 prefill, assets, timeline + CSV import, root
+  causes, IOC pull/push, recommendations, DOCX draft) is retired. The analyst now
+  finds the request in *งานตอบสนอง*, clicks **รับงาน**, writes the report outside
+  the system, and hands it in with the report number on the "งานของคุณ" card.
+  - Marking **any** response request **เสร็จสิ้น** now **requires the number of
+    the report delivered**: Forensics / RCA and the Red Team's VA/PT and InfraSec.
+    The field is prefilled with the case's number for that report kind
+    (`SOC-RCA-…`, `SOC-VAPT-…`, `SOC-HARD-…` YYYYMM-NNNN) and can be edited. Notes
+    are optional. An RCA request accepts no file, because that report is the
+    physical document the SOC Manager collects. VA/PT and InfraSec keep their
+    optional result file. The number is audited in the history, shown on the request
+    and in the queue, and included in the completion email to SOC Managers (new
+    `{report_number}` placeholder; add it to any completion template customised in
+    admin).
+  - Old `/incidents/rca/<id>/` links from emails already sent open the request on
+    its ticket.
+  - The RCA tables and any data already in them are **kept** (no migration drops
+    them). Only the screens are gone.
+- **Only the assignee or a SOC Manager can close a response request.** Before,
+  any SOC member could set a request to เสร็จสิ้น from the ticket's request list.
+  Closing a request unblocks the parent Incident's approval, so changing a request's
+  status or report number is now limited to the assignee, a SOC Manager, or a
+  superuser (`policies.can_change_subtask_status`). Other SOC members get a
+  notes-only form. A crafted POST that tries to change the status or number is
+  refused in full, with nothing saved. The retired Investigation / Countermeasure
+  notes keep their old rule.
+- **The dashboard's "สัปดาห์นี้" range is the current calendar week.** The week
+  filter already selected cases opened since Monday, but the volume chart plotted a
+  rolling 7 days, so the two disagreed. The chart now runs Monday to today (1–7 daily
+  buckets) and is titled *Daily Case Volume (สัปดาห์นี้)*. The today, week and month
+  cut-offs now use Bangkok local time instead of UTC, so early-morning cases no
+  longer land in the wrong day.
+- **The dashboard's active-case table sorts and pages on the server.** It used to
+  send every active case to the browser and sort it there. It now sends 25 per page,
+  numbered page links, and sortable headers that keep the sort and page in the URL.
+  So an auto-refresh or a shared link keeps the same view, and the page stays light
+  as the queue grows.
+- **Role manuals updated.** The Forensic Analyst and Red Team Manager manuals are
+  rewritten around the "งานของคุณ" card and the mandatory report number. The SOC
+  Manager, Tier 1 and Tier 2 manuals now say that only the assignee or the SOC
+  Manager can close a response request. All affected `.docx` files are rebuilt.
+- **Docs:** the Wazuh ingest code comments and the reporting-layer runbook now match
+  the actual schedule and data. Vulnerability alerts are never stored, the default
+  minimum level is 10, and the ingest runs every minute while `refresh_reporting` runs
+  nightly.
+
+### Removed
+- **`seed_response_demo` management command** (and its tests). Its demo data had
+  finished RCA requests with an attached file and no report number, which the
+  system no longer allows. For UAT, the SOC Manager now sends real requests.
+  `seed_all` no longer runs it, but still clears leftover `[RESPONSE-DEMO]`
+  tickets with `--purge-only`.
+
+### Fixed
+- **The งานตอบสนอง menu badge counted cancelled requests.** For a Forensic
+  Analyst or Red Team Manager, it left out only finished (เสร็จสิ้น) requests, so
+  a request the SOC Manager had cancelled stayed in the count indefinitely and
+  disagreed with the queue page. It now counts only เปิด and กำลังดำเนินการ.
+
+> Migrations: `incidents/0087` adds `TicketSubtask.report_number` (empty default,
+> additive). `wazuh_ingest/0009` adds `IngestWatermark.last_successful_poll_at` and
+> backfills it from the watermark's last update, so the dashboard has a starting
+> value. Both are safe on live data; the backfill is not reversed on rollback.
 
 ## [v1.7.5] — 2026-09-23
 

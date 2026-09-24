@@ -18,6 +18,7 @@ from .models import (
 )
 from .policies import (
     can_accept_subtask,
+    can_change_subtask_status,
     can_delete_ticket_attachment,
     can_restore_ticket_attachment,
     can_update_subtask,
@@ -117,6 +118,7 @@ def get_ticket_detail_read_model(
     for subtask in subtasks:
         subtask.can_update = can_update_subtask(subtask, user)
         subtask.can_accept = can_accept_subtask(subtask, user)
+        subtask.can_change_status = can_change_subtask_status(subtask, user)
         # The viewer's own response request is worked from the "งานของคุณ" card
         # at the top of the action column, not from the list further down.
         subtask.is_mine = subtask.is_response_request and subtask.assigned_to_id == user.pk

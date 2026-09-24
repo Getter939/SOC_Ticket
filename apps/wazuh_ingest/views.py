@@ -154,9 +154,10 @@ def triage_queue(request):
         return redirect('ticket_list')
 
     # kind=DETECTION scopes the whole page, facet counts included. Vulnerability
-    # alerts are ingested and kept but are not triage work — see
-    # WazuhAlert.KIND_VULNERABILITY. Without this the queue is ~90% kernel CVEs
-    # and every OLA facet reads as breached.
+    # alerts are never stored (they are excluded at ingest — see
+    # WazuhAlert.KIND_VULNERABILITY and ingest.py), so this filter mainly guards
+    # against any legacy rows: without it the queue would be ~90% kernel CVEs
+    # and every OLA facet would read as breached.
     queue = WazuhAlert.objects.filter(
         kind=WazuhAlert.KIND_DETECTION,
         triage_status__in=[WazuhAlert.TRIAGE_PENDING, WazuhAlert.TRIAGE_TRIAGING],
@@ -332,7 +333,9 @@ def triage_queue(request):
          'active': rule_level_filter == '12'},
     ]
     # Keep lower ingested alerts accounted for without making the secondary
-    # bucket permanent when the ingestion policy only admits level 12+.
+    # bucket permanent. The default ingestion policy admits level 10+
+    # (ingest_wazuh_alerts --min-level, default 10), so a level 10–11 bucket
+    # only appears when such alerts are actually present.
     if level_tally['under12'] or rule_level_filter == 'under12':
         level_facets.append({
             'key': 'under12', 'label': 'ต่ำกว่า 12', 'count': level_tally['under12'],

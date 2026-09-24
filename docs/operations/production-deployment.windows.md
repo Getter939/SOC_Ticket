@@ -507,7 +507,7 @@ server and no way to log in.
 > ### Never run a seeder on production
 >
 > `seed_all`, `seed_data`, `seed_uat_states`, `seed_dashboard_mockup`,
-> `seed_ceo_demo`, `seed_response_demo`, `seed_ola_demo_buckets`.
+> `seed_ceo_demo`, `seed_ola_demo_buckets`.
 >
 > `seed_all` **purges user accounts** matching legacy prefixes. On production
 > that is data loss, not test setup. The production database stays empty until

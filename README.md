@@ -195,7 +195,6 @@ always be identified or removed cleanly without affecting real data.
 | Command | What it builds |
 |---------|----------------|
 | `seed_uat_states` | One ticket parked in **each of the 12** lifecycle states — the fastest way to see every screen without walking the whole workflow. Deterministic, tagged with a `uat_` prefix so `--flush` removes exactly its own rows. `--per-state N` for more per state |
-| `seed_response_demo` | Tickets with open and completed Response Requests, for the response-team queues and the approval gate |
 | `seed_dashboard_mockup` | Demo/screenshot dataset for the main dashboard |
 | `seed_ola_demo_buckets` | Dataset shaped to fill every OLA-pressure bucket |
 | `seed_ceo_demo` | Executive-dashboard demo dataset |

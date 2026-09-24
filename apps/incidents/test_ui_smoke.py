@@ -926,6 +926,83 @@ class ResponseTeamUiTest(TestCase):
         resp = self.client.get(reverse('legacy_rca_workspace', args=[st.pk]))
         self.assertEqual(resp.status_code, 404)
 
+    def test_nav_badge_counts_only_requests_still_to_be_worked(self):
+        t = self._ticket()
+        self._rca(t)  # open — counts
+        self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)  # counts
+        self._rca(t, status=TicketSubtask.STATUS_DONE, report_number='SOC-RCA-1')
+        cancelled = self._rca(t)
+        # Only the manager's cancellation flow may cancel; set it directly here.
+        TicketSubtask.objects.filter(pk=cancelled.pk).update(status=TicketSubtask.STATUS_CANCELLED)
+        self.client.force_login(self.forensic)
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertEqual(resp.context['response_request_queue_count'], 2)
+        self.assertEqual(resp.context['open_count'], 2)
+
+    # ── Who may change a request's status / report number ─────────────── #
+
+    def _va_pt(self, t, **kwargs):
+        return TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='Pentest',
+            assigned_to=self.redteam, created_by=self.manager,
+            status=TicketSubtask.STATUS_IN_PROGRESS, **kwargs,
+        )
+
+    def test_plain_soc_member_cannot_mark_a_request_done(self):
+        t = self._ticket()
+        st = self._va_pt(t)
+        self.client.force_login(self.t1)
+        resp = self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE, 'result_notes': 'closing it',
+            'report_number': 'SOC-VAPT-X',
+        }, follow=True)
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+        # The whole POST is refused, notes included.
+        self.assertEqual(st.result_notes, '')
+        self.assertEqual(st.report_number, '')
+        self.assertContains(resp, 'ได้เฉพาะผู้รับผิดชอบคำขอ')
+
+    def test_plain_soc_member_cannot_change_only_the_report_number(self):
+        t = self._ticket()
+        st = self._va_pt(t, report_number='SOC-VAPT-1')
+        self.client.force_login(self.t1)
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': st.status, 'report_number': 'SOC-VAPT-2',
+        })
+        st.refresh_from_db()
+        self.assertEqual(st.report_number, 'SOC-VAPT-1')
+
+    def test_plain_soc_member_can_still_add_notes(self):
+        t = self._ticket()
+        st = self._va_pt(t)
+        self.client.force_login(self.t1)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        # Notes-only form: status is fixed, no report number, no file.
+        self.assertContains(detail, f'id="update-subtask-{st.pk}"')
+        self.assertContains(detail, f'<input type="hidden" name="status" value="{st.status}">')
+        self.assertNotContains(detail, f'id="report-number-{st.pk}"')
+        self.assertNotContains(detail, 'name="result_file"')
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': st.status, 'result_notes': 'Scope confirmed with owner',
+        })
+        st.refresh_from_db()
+        self.assertEqual(st.result_notes, 'Scope confirmed with owner')
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+
+    def test_soc_manager_can_still_mark_a_request_done(self):
+        t = self._ticket()
+        st = self._va_pt(t)
+        self.client.force_login(self.manager)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(detail, f'id="report-number-{st.pk}"')
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE, 'report_number': 'SOC-VAPT-9',
+        })
+        st.refresh_from_db()
+        self.assertTrue(st.is_done)
+        self.assertEqual(st.report_number, 'SOC-VAPT-9')
+
     # ── My Requests queue ─────────────────────────────────────────────── #
 
     def test_queue_shows_only_own_requests_for_forensic(self):

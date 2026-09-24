@@ -36,7 +36,9 @@ LEGACY_USER_NAMES = (
 )
 
 # Content markers / reference prefixes owned by the seeders, used to remove
-# their rows before the authors disappear.
+# their rows before the authors disappear. [RESPONSE-DEMO] belongs to the
+# retired seed_response_demo command; it stays listed so --purge-only still
+# clears the rows it left in existing databases.
 LEGACY_TICKET_MARKERS = ('[UAT-STATE]', '[SEED-DATA]', '[RESPONSE-DEMO]')
 LEGACY_REFERENCE_PREFIXES = ('MOCK-SOC-', 'DEMO-CEO-')
 
@@ -45,7 +47,6 @@ LEGACY_REFERENCE_PREFIXES = ('MOCK-SOC-', 'DEMO-CEO-')
 SEED_STEPS = [
     ('Volume dataset (30 days)', 'seed_data', {'tickets': 60, 'days': 30, 'flush': True}),
     ('One ticket per lifecycle state', 'seed_uat_states', {'per_state': 2, 'flush': True}),
-    ('Response-team requests', 'seed_response_demo', {'flush': True}),
     ('CEO demo tickets', 'seed_ceo_demo', {}),
 ]
 

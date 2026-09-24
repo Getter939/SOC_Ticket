@@ -14,13 +14,15 @@ def pending_triage_count(request):
     profile = getattr(user, 'profile', None)
 
     # Response-team members are not SOC — surface their own "My Requests" badge
-    # before the SOC-only gate below and return.
+    # before the SOC-only gate below and return. Counts only requests still to be
+    # worked: a CANCELLED request is as finished as a DONE one (matches the
+    # queue page's own open count).
     if profile is not None and profile.is_response_team:
         return {
             'response_request_queue_count': TicketSubtask.objects.filter(
                 subtask_type__in=TicketSubtask.RESPONSE_TYPES,
                 assigned_to=user,
-            ).exclude(status=TicketSubtask.STATUS_DONE).count(),
+            ).exclude(status__in=TicketSubtask.TERMINAL_STATUSES).count(),
         }
 
     if not user.is_superuser and (profile is None or not profile.is_soc):
