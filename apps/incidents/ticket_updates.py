@@ -87,6 +87,7 @@ def save_subtask_update(
     previous_status,
     previous_notes,
     was_done,
+    previous_report_number='',
     result_upload=None,
     result_description='',
 ):
@@ -103,6 +104,12 @@ def save_subtask_update(
             subtask,
             previous_notes,
             subtask.result_notes,
+            actor,
+        )
+        history.record_subtask_report_number_change(
+            subtask,
+            previous_report_number,
+            subtask.report_number,
             actor,
         )
         attachments = ()

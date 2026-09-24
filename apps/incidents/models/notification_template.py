@@ -59,7 +59,7 @@ class NotificationTemplate(models.Model):
         ],
         KEY_RESPONSE_REQUEST_COMPLETED: [
             'ticket_id', 'ticket_url', 'request_url', 'request_type', 'title',
-            'result_notes', 'completed_by',
+            'result_notes', 'report_number', 'completed_by',
         ],
     }
 

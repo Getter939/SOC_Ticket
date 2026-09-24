@@ -176,6 +176,27 @@ def record_subtask_change(subtask, old_notes, new_notes, user, source='subtask')
     )
 
 
+def record_subtask_report_number_change(subtask, old_number, new_number, user, source='subtask'):
+    """Record a change to the number of the report a responder delivered.
+
+    For a Forensics / RCA request this number is the only in-system record of
+    the report (the document itself lives outside), so it is audited like the
+    result notes.
+    """
+    if (old_number or '') == (new_number or ''):
+        return None
+    return TicketFieldChange.objects.create(
+        ticket_id=subtask.ticket_id,
+        subtask=subtask,
+        field_name='report_number',
+        field_label=f'เลขที่รายงาน — {subtask.title}'[:120],
+        old_value=old_number or '',
+        new_value=new_number or '',
+        changed_by=user,
+        source=source,
+    )
+
+
 def record_subtask_status_change(
     subtask, old_status, new_status, user, source='subtask',
 ):

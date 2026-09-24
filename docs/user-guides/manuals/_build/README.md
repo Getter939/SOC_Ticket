@@ -20,8 +20,22 @@ Each manual is a Word `.docx` built with [docx-js](https://docx.js.org/).
 - `readsAllTickets` — the Forensic Analyst reads every ticket (read-only, v1.3.1) and
   owns the IOC Database section; the Red Team Manager sees only tickets carrying a
   request assigned to them.
-- `hasRcaWorkspace` — the Forensic Analyst gets the RCA Workspace section (v1.6.0); the
-  Red Team Manager instead gets the note that the legacy intra-SOC subtask form is gone.
+- `ownsRcaRequests` — the Forensic Analyst hands in Forensics / RCA requests with a
+  report number (prefilled `SOC-RCA-YYYYMM-NNNN`, editable), an optional **หมายเหตุ**
+  and **no file**, because the RCA report is written outside the system. The Red
+  Team Manager instead hands in with a report number (`SOC-VAPT-` / `SOC-HARD-`),
+  notes and an optional file, and gets the note that the legacy intra-SOC subtask
+  form is gone. The report number is **mandatory for every response type**. This flag
+  was `hasRcaWorkspace` until the RCA workspace was retired (CHANGELOG [Unreleased]);
+  the workspace section and its glossary rows are gone.
+
+Both personas share the **การทำงานกับคำขอ** intro and the **รับงาน** subsection. Both are
+written around the **"งานของคุณ" card** (`templates/incidents/_my_response_request.html`),
+which sits at the top of the ticket page's action column. The card carries a
+รับงาน → ดำเนินการ → ส่งงาน tracker, the รับงาน button and an always-open completion
+form with **ส่งงาน · เสร็จสิ้น** and **บันทึกไว้ก่อน**. The assignee's own row in the
+request list only links up to the card. **Do not send responders to อัปเดตงาน**: only
+the SOC Manager still uses that inline form, so it belongs in the manager manual alone.
 
 These were a single flag until the v1.7.1 pass. Keep them separate: "reads all tickets"
 and "owns RCA" are different facts that could diverge again.
@@ -89,7 +103,8 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
 - **Feature coverage, v1.6.0 – v1.7.1** (which script owns what):
   | Feature | Script(s) |
   | --- | --- |
-  | RCA workspace (v1.6.0) | `build-response-teams.js` (Forensic only, via `hasRcaWorkspace`); manager §5.12 |
+  | RCA workspace retired → รับงาน + mandatory report number (Unreleased) | `build-response-teams.js` (รับงาน shared; RCA vs VAPT/HARD wording via `ownsRcaRequests`); manager §5.2 tip + §5.12 |
+  | "งานของคุณ" card for the responder (Unreleased) | `build-response-teams.js` การทำงานกับคำขอ / รับงาน / ส่งงาน, state table, FAQ; manager §5.2 tip + §5.12 |
   | Notified-date gate `affected_notified_at` (v1.7.0) | `build-tier2.js` §5.5; owner note; manager FAQ |
   | Ticket draft mode / *บันทึกไว้จัดเตรียม* (v1.7.0) | `build-tier1.js` §5.3.2; owner email table |
   | Ticket editor (v1.7.0) | tier1 §5.9, tier2 §5.9, manager §5.8 |
@@ -107,9 +122,10 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
      `templates/dashboard/dashboard.html` (the **SOC** dashboard, which Executives never
      see). `executive.html` only got Thai labels in v1.7.1. The redesign is therefore
      documented in the **manager** manual, not the executive one.
-  2. The RCA workspace has **no report upload**. The final section is result-notes only;
-     the finished report is handed to the SOC Manager as a physical document and the
-     system keeps no copy.
+  2. The RCA report has **no upload** anywhere. The workspace is retired; a Forensics /
+     RCA request's update form takes a report number and an optional note, no file. The
+     finished report is handed to the SOC Manager as a physical document and the system
+     keeps no copy.
 - **Ticket cancellation (v1.5.0)** is covered — the SOC Manager decision flow in
   `build-manager.js`, and the request path in `build-tier1.js` / `build-tier2.js` /
   `build-admin.js` / `build-owner.js`. Also covered in v1.5.0: in-browser attachment
@@ -157,14 +173,36 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 | --- | --- |
 | Tier 1 | `T1-login`, `T1-sidebar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
 | Tier 2 | `T2-login`, `T2-queue`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-monitoring-conclude`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
-| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-open` |
+| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |
 | Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-situation-panel`, `EXE-kpi-cards`, `EXE-pipeline-chart`, `EXE-ticket-table` |
-| Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-update`, `FOR-rca-start`, `FOR-rca-stepper`, `FOR-rca-timeline-import`, `FOR-rca-ioc-promote`, `FOR-rca-draft`, `FOR-rca-handover`, `FOR-keepalive-modal`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
-| Red Team Manager | `RED-login`, `RED-queue`, `RED-update` |
+| Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
+| Red Team Manager | `RED-login`, `RED-queue`, `RED-my-request`, `RED-my-request-submit` |
+
+**New and pending after the "งานของคุณ" card:**
+
+- `FOR-my-request` / `RED-my-request`: the card on a request that is still **เปิด**. It
+  shows the tracker at step 1, the brief, the requester, the dates and the green รับงาน
+  button.
+- `FOR-my-request-submit` / `RED-my-request-submit`: the card on a request that is
+  **กำลังดำเนินการ**, with its open form. Capture the Forensic one on a Forensics / RCA
+  request, which shows the report number and หมายเหตุ fields and no file input. Capture
+  the Red Team one on a VA/PT request, which shows the report number, ผลการดำเนินการ and
+  file fields.
+- Take both on a desktop viewport so the card sits in the right rail beside the case.
+
+These replace `FOR-accept`, `RED-accept`, `FOR-update` and `RED-update`. Those four were
+never captured, and the list-row อัปเดตงาน form they showed is no longer the
+responder's path.
+
+`MGR-rca-report-number` is also still pending, from the RCA-workspace retirement.
+Dropped ids, which need no capture: `FOR-rca-start`, `FOR-rca-stepper`,
+`FOR-rca-timeline-import`, `FOR-rca-ioc-promote`, `FOR-rca-draft`, `FOR-rca-handover`,
+`FOR-keepalive-modal` and `MGR-rca-open`. `FOR-queue` and `RED-queue` gained the
+เลขที่รายงาน column and the รับงาน button.
 
 **Re-capture these even though their ids did not change** — the v1.7.1 Thai Patch changed
 what is on screen: `T1-sidebar`, `T1-wazuh-triage`, `T1-create-form`, `T2-queue`,
 `MGR-sidebar`, `MGR-response-request`, `ADM-active-tickets`, `OWN-my-tickets`,
-`EXE-dashboard`, `FOR-queue`, `RED-queue`, `FOR-update`, `RED-update`.
+`EXE-dashboard`, `FOR-queue`, `RED-queue`.

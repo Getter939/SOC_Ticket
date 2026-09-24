@@ -25,7 +25,7 @@
     .dash-filterbar .btn-group .btn { font-size: 13px; }
     .dash-filterbar .filter-form {
         display: flex;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         align-items: center;
         gap: 0.75rem;
         margin-bottom: 0;
@@ -39,18 +39,14 @@
         white-space: nowrap;
     }
     .dash-filterbar select.form-select-sm { font-size: 13px; min-width: 120px; }
+    .dash-filterbar input[type="date"] { font-size: 13px; min-width: 135px; }
     .mini-label { font-size: 13px; }
-    /* Keep the time buttons and both filter controls on one row when the
-       desktop content area has room for them. */
-    @media (min-width: 992px) {
-        .dash-filterbar .filter-layout { flex-wrap: nowrap; }
-    }
-    /* On phones, Status and Severity still share one line and their selects
-       shrink evenly instead of pushing one control to the next line. */
+    /* On phones, filters wrap into compact rows without horizontal scroll. */
     @media (max-width: 575.98px) {
         .dash-filterbar .filter-form { width: 100%; gap: 0.5rem; }
-        .dash-filterbar .filter-field { flex: 1 1 0; }
+        .dash-filterbar .filter-field { flex: 1 1 calc(50% - 0.5rem); }
         .dash-filterbar select.form-select-sm { min-width: 0; width: 100%; }
+        .dash-filterbar input[type="date"] { min-width: 0; width: 100%; }
     }
 
     /* ── Flat bordered stat cards (border-only, top accent, no shadow) ── */
@@ -104,10 +100,11 @@
     .workload-table { table-layout: fixed; }
     .workload-table th, .workload-table td { vertical-align: middle; padding: 6px 8px; }
     .workload-table th { white-space: normal; overflow-wrap: break-word; }
-    .workload-table col.wl-c-name    { width: 30%; }
-    .workload-table col.wl-c-actionable { width: 15%; }
-    .workload-table col.wl-c-waiting { width: 15%; }
-    .workload-table col.wl-c-load    { width: 40%; }
+    .workload-table col.wl-c-name    { width: 27%; }
+    .workload-table col.wl-c-actionable { width: 12%; }
+    .workload-table col.wl-c-waiting { width: 12%; }
+    .workload-table col.wl-c-finished { width: 15%; }
+    .workload-table col.wl-c-load    { width: 34%; }
     .workload-table td.name { white-space: normal; overflow-wrap: anywhere; }
     .workload-table .heat-actionable { font-weight: 700; }
     .workload-table .heat-light  { background: rgba(255,193,7,.18); }
@@ -135,6 +132,8 @@
     .workload-table thead th { position: sticky; top: 0; z-index: 1; }
     .workload-note { color: var(--ui-muted); font-size: 12px; }
     .pipeline-chart { position: relative; height: 460px; }
+    .pipeline-panel .panel-title,
+    .pipeline-panel .chart-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     @media (max-width: 575.98px) {
         .workload-table { min-width: 420px; }
         .pipeline-chart { height: 620px; }
@@ -168,6 +167,16 @@
         <form method="get" class="filter-form">
             <input type="hidden" name="date_range" value="{{ filters.date_range }}">
             <div class="filter-field">
+                <label class="mini-label text-muted mb-0" for="dash-filter-date-from">ตั้งแต่</label>
+                <input type="date" name="date_from" id="dash-filter-date-from"
+                       class="form-control form-control-sm" value="{{ filters.date_from }}">
+            </div>
+            <div class="filter-field">
+                <label class="mini-label text-muted mb-0" for="dash-filter-date-to">ถึง</label>
+                <input type="date" name="date_to" id="dash-filter-date-to"
+                       class="form-control form-control-sm" value="{{ filters.date_to }}">
+            </div>
+            <div class="filter-field">
                 <label class="mini-label text-muted mb-0" for="dash-filter-status">สถานะ</label>
                 <select name="status" id="dash-filter-status" class="form-select form-select-sm js-autosubmit">
                     <option value="">ทั้งหมด</option>
@@ -185,7 +194,7 @@
                     {% endfor %}
                 </select>
             </div>
-            <noscript><button type="submit" class="btn btn-sm btn-primary">Filter</button></noscript>
+            <button type="submit" class="btn btn-sm btn-primary">ใช้ตัวกรอง</button>
         </form>
     </div>
 </div>
@@ -245,18 +254,18 @@
     </div>
 </div>
 
-<!-- ══ ROW 2: Analyst workload + Pipeline (equal width) ═══════ -->
+<!-- ══ ROW 2: Analyst workload + expanded Pipeline ═══════════ -->
 <div class="row g-3 mb-3">
 
     <!-- 2L — Analyst workload heatmap -->
-    <div class="col-xl-6">
-        <div class="panel p-3">
+    <div class="col-xl-5">
+        <div class="panel p-3 h-100">
             <div class="panel-title mb-2">
                 <i class="bi bi-people me-1"></i>Analyst Workload — งานที่ต้องดำเนินการเอง
             </div>
             <p class="chart-hint mb-2">
                 <i class="bi bi-info-circle me-1"></i>เรียงตามงานที่ต้องลงมือเอง (Actionable) —
-                เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 นับเป็น “Waiting”. คลิกแถวเพื่อดูรายละเอียดสถานะ
+                เคสที่รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 นับเป็น “Waiting”; สถานะรับเรื่อง Tier 2 แสดงในแถวเจ้าของ Ticket. คลิกแถวเพื่อดูสถานะ
             </p>
             <div class="table-responsive workload-scroll">
                 <table class="heat-table workload-table">
@@ -264,6 +273,7 @@
                         <col class="wl-c-name">
                         <col class="wl-c-actionable">
                         <col class="wl-c-waiting">
+                        <col class="wl-c-finished">
                         <col class="wl-c-load">
                     </colgroup>
                     <thead>
@@ -271,6 +281,7 @@
                             <th class="text-start">Analyst</th>
                             <th class="heat-actionable" title="งานที่นักวิเคราะห์ต้องดำเนินการเอง">ต้องทำ<br><span class="fw-normal">ต้องทำ</span></th>
                             <th class="heat-blocked-col" title="รอผู้จัดการ / ผู้ดูแลระบบ / Tier 2 — ไม่ใช่คิวของนักวิเคราะห์">รอดำเนินการ<br><span class="fw-normal">รอคนอื่น</span></th>
+                            <th title="จำนวนเคสที่ Tier 1 หรือ Tier 2 ปิดหรือยืนยันเสร็จแล้ว">เสร็จแล้ว<br><span class="fw-normal">Tier 1 + 2</span></th>
                             <th class="text-start">ภาระงาน</th>
                         </tr>
                     </thead>
@@ -286,6 +297,7 @@
                             <td class="heat-blocked-col">
                                 {% if row.blocked %}{{ row.blocked|intcomma }}{% else %}<span class="heat-zero">—</span>{% endif %}
                             </td>
+                            <td>{{ row.finished|intcomma }}</td>
                             <td>
                                 <div class="wl-bar" title="{{ row.load|intcomma }} ต้องทำ">
                                     <div class="wl-bar-fill {% if row.load <= 2 %}heat-light{% elif row.load <= 5 %}heat-medium{% else %}heat-heavy{% endif %}"
@@ -294,7 +306,7 @@
                             </td>
                         </tr>
                         <tr class="wl-detail" id="wl-detail-{{ forloop.counter }}" hidden>
-                            <td colspan="4">
+                            <td colspan="5">
                                 <div class="wl-detail-inner">
                                     {% for item in row.breakdown %}
                                     <span class="wl-chip {% if item.count == 0 %}wl-chip-zero{% endif %}">{{ item.label }} <strong>{{ item.count|intcomma }}</strong></span>
@@ -304,7 +316,7 @@
                         </tr>
                         {% empty %}
                         <tr>
-                            <td class="name text-muted" colspan="4">
+                            <td class="name text-muted" colspan="5">
                                 ไม่มีงานที่มอบหมาย (No assigned active cases)
                             </td>
                         </tr>
@@ -314,6 +326,7 @@
                             <td class="name"><i class="bi bi-person-dash me-1"></i>Unassigned · ยังไม่มอบหมาย</td>
                             <td class="heat-actionable">{{ unassigned_active|intcomma }}</td>
                             <td class="heat-blocked-col"><span class="heat-zero">—</span></td>
+                            <td>0</td>
                             <td></td>
                         </tr>
                         {% endif %}
@@ -321,15 +334,15 @@
                 </table>
             </div>
             <p class="workload-note mt-2 mb-0">
-                Unassigned = เคสที่ยังไม่มอบหมาย ต้องหาผู้รับผิดชอบ · นับรวมใน Pipeline
+                Finished = เคสที่ Tier 1 หรือ Tier 2 ปิด/ยืนยันแล้ว · Unassigned นับรวมใน Pipeline
             </p>
         </div>
     </div>
 
     <!-- 2R — Pipeline by status × severity (horizontal stacked bars) -->
-    <div class="col-xl-6">
-        <div class="panel p-3 h-100">
-            <h6 class="panel-title mb-2">
+    <div class="col-xl-7">
+        <div class="panel p-3 h-100 pipeline-panel">
+            <h6 class="panel-title mb-2" title="Pipeline — สถานะที่กำลังดำเนินการ">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะที่กำลังดำเนินการ
             </h6>
             <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>คลิกที่ส่วนของกราฟเพื่อกรองแดชบอร์ด</p>
@@ -755,30 +768,8 @@ function applyDashboardFilters(filters) {
                     grid: { display: false },
                     ticks: {
                         font: { size: 13 }, autoSkip: false,
-                        // Keep workflow names readable without rotating or truncating them.
-                        callback: function (value) {
-                            const label = this.getLabelForValue(value);
-                            const words = typeof Intl.Segmenter === 'function'
-                                ? Array.from(new Intl.Segmenter('th', { granularity: 'word' })
-                                    .segment(label), part => part.segment)
-                                : label.split(/(?<=\s)/);
-                            const limit = Math.min(200, this.chart.width * .35);
-                            const ctx = this.chart.ctx;
-                            ctx.save();
-                            ctx.font = '13px ' + Chart.defaults.font.family;
-                            const lines = [];
-                            let line = '';
-                            words.forEach(word => {
-                                if (line && ctx.measureText(line + word).width > limit) {
-                                    lines.push(line.trim());
-                                    line = '';
-                                }
-                                line += word;
-                            });
-                            if (line.trim()) lines.push(line.trim());
-                            ctx.restore();
-                            return lines;
-                        },
+                        minRotation: 0, maxRotation: 0,
+                        callback: function (value) { return this.getLabelForValue(value); },
                     },
                 },
             },

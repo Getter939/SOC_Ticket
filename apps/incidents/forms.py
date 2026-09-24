@@ -4,8 +4,7 @@ from django.contrib.auth.models import User
 from apps.accounts.models import UserProfile
 from apps.wazuh_ingest.models import WazuhAlert
 from .models import (
-    RCAAsset, RCAIndicator, RCARecommendation, RCAReport, RCARootCause,
-    RCATimelineEntry, Ticket, TicketAttachment, TicketSubtask, TriageRecord,
+    Ticket, TicketAttachment, TicketSubtask, TriageRecord,
     validate_attachment, validate_attachment_batch,
 )
 from django.core.exceptions import ValidationError
@@ -623,12 +622,11 @@ class ProjectIncidentTargetForm(forms.ModelForm):
     """One affected system within a bundle — only the per-target fields.
 
     Each valid row becomes a member Ticket; the shared incident facts are
-    copied in by the view. ``ip_address`` is optional here (a service/system
-    target may have no single IP) even though single-ticket creation requires
-    one.
+    copied in by the view. ``ip_address`` is mandatory, as on single-ticket
+    creation.
     """
 
-    ip_address = IPAddressListField(required=False)
+    ip_address = IPAddressListField()
 
     assigned_admin = UserChoiceField(
         queryset=User.objects.filter(
@@ -668,12 +666,6 @@ class ProjectIncidentTargetForm(forms.ModelForm):
             'asset_owner_name': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น นายสมชาย ใจดี'}),
             'operating_system': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'เช่น Windows Server 2019'}),
         }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # A single-ticket create requires an IP; a bundle target may be a
-        # service with none, so relax it here (model already allows null).
-        self.fields['ip_address'].required = False
 
     def clean(self):
         cleaned = super().clean()
@@ -1025,194 +1017,43 @@ class SubtaskUpdateForm(forms.ModelForm):
             choice for choice in TicketSubtask.STATUS_CHOICES
             if choice[0] != TicketSubtask.STATUS_CANCELLED
         ]
+        # Only a response request records a report number; for the retired
+        # legacy types the field is dropped so a crafted POST cannot set it.
+        if not self.instance.requires_report_number:
+            del self.fields['report_number']
+
+    def clean_report_number(self):
+        return (self.cleaned_data.get('report_number') or '').strip()
+
+    def clean(self):
+        cleaned = super().clean()
+        # The report itself lives outside the system, so its number is the only
+        # record of what was delivered — no number, no DONE. Notes stay
+        # optional.
+        if (
+            'report_number' in self.fields
+            and cleaned.get('status') == TicketSubtask.STATUS_DONE
+            and not cleaned.get('report_number')
+        ):
+            self.add_error(
+                'report_number',
+                'กรุณาระบุเลขที่รายงานที่ส่งแล้ว ก่อนปิดงานเป็น "เสร็จสิ้น"',
+            )
+        return cleaned
 
     class Meta:
         model = TicketSubtask
-        fields = ['status', 'result_notes']
+        fields = ['status', 'result_notes', 'report_number']
         widgets = {
             'status': forms.Select(attrs={'class': 'form-select'}),
             'result_notes': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 3,
                 'placeholder': 'บันทึกผลการดำเนินการ...',
             }),
+            'report_number': forms.TextInput(attrs={
+                'class': 'form-control', 'placeholder': 'SOC-RCA-YYYYMM-NNNN',
+            }),
         }
-
-
-class _RCAFormMixin:
-    """Apply the project form styling consistently across the RCA workspace."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            widget = field.widget
-            if isinstance(widget, (forms.CheckboxInput, forms.CheckboxSelectMultiple)):
-                continue
-            css_class = 'form-select' if isinstance(widget, forms.Select) else 'form-control'
-            widget.attrs['class'] = f'{widget.attrs.get("class", "")} {css_class}'.strip()
-
-
-class RCASection1Form(_RCAFormMixin, forms.ModelForm):
-    forensic_types = forms.MultipleChoiceField(
-        choices=RCAReport.FORENSIC_TYPE_CHOICES,
-        required=False,
-        label='ประเภทการตรวจพิสูจน์',
-        widget=forms.CheckboxSelectMultiple,
-    )
-
-    _DATETIME_FIELDS = ('first_occurrence', 'detected_at', 'scope_start', 'scope_end')
-
-    class Meta:
-        model = RCAReport
-        fields = [
-            'incident_name', 'first_occurrence', 'first_occurrence_note', 'detected_at',
-            'scope_start', 'scope_end',
-            'forensic_types', 'importance', 'siem_severity', 'ncsa_severity',
-            'threat_category', 'assets_examined', 'asset_type', 'affected_systems',
-            'asset_owner', 'examiner', 'related_refs',
-        ]
-        widgets = {
-            'first_occurrence': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'detected_at': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'scope_start': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'scope_end': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'first_occurrence_note': forms.TextInput(),
-            'assets_examined': forms.Textarea(attrs={'rows': 2}),
-            'affected_systems': forms.Textarea(attrs={'rows': 2}),
-            'asset_owner': forms.Textarea(attrs={'rows': 2}),
-            'related_refs': forms.Textarea(attrs={'rows': 2}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for name in self._DATETIME_FIELDS:
-            self.fields[name].input_formats = ['%Y-%m-%dT%H:%M']
-
-
-class RCAAssetForm(_RCAFormMixin, forms.ModelForm):
-    class Meta:
-        model = RCAAsset
-        fields = ['host', 'ip', 'detail']
-        widgets = {'detail': forms.Textarea(attrs={'rows': 2})}
-
-
-class RCATimelineEntryForm(_RCAFormMixin, forms.ModelForm):
-    class Meta:
-        model = RCATimelineEntry
-        fields = [
-            'occurred_at', 'occurred_until', 'host', 'event',
-            'evidence_file', 'evidence_line', 'excerpt',
-        ]
-        widgets = {
-            'occurred_at': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'occurred_until': forms.DateTimeInput(
-                format='%Y-%m-%dT%H:%M', attrs={'type': 'datetime-local'},
-            ),
-            'event': forms.Textarea(attrs={'rows': 2}),
-            'excerpt': forms.Textarea(attrs={'rows': 2}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields['occurred_at'].input_formats = ['%Y-%m-%dT%H:%M']
-        self.fields['occurred_until'].input_formats = ['%Y-%m-%dT%H:%M']
-
-
-class RCARootCauseForm(_RCAFormMixin, forms.ModelForm):
-    class Meta:
-        model = RCARootCause
-        fields = ['category', 'cause', 'evidence_ref', 'excerpt']
-        widgets = {
-            'cause': forms.Textarea(attrs={'rows': 2}),
-            'evidence_ref': forms.Textarea(attrs={'rows': 2}),
-            'excerpt': forms.Textarea(attrs={'rows': 2}),
-        }
-
-
-class RCARecommendationForm(_RCAFormMixin, forms.ModelForm):
-    class Meta:
-        model = RCARecommendation
-        fields = ['action', 'root_causes']
-        widgets = {
-            'action': forms.Textarea(attrs={'rows': 3}),
-            'root_causes': forms.CheckboxSelectMultiple,
-        }
-
-    def __init__(self, *args, rca=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        if rca is not None:
-            self.fields['root_causes'].queryset = rca.root_causes.all()
-
-
-class RCAIndicatorForm(_RCAFormMixin, forms.ModelForm):
-    class Meta:
-        model = RCAIndicator
-        fields = ['category', 'value', 'host', 'label', 'note', 'excluded']
-        widgets = {
-            'category': forms.HiddenInput(),
-            'label': forms.Textarea(attrs={'rows': 2}),
-            'note': forms.Textarea(attrs={'rows': 2}),
-        }
-
-    def __init__(self, *args, category=None, **kwargs):
-        self.rca_category = category
-        super().__init__(*args, **kwargs)
-        if category:
-            self.fields['category'].initial = category
-
-    def clean_category(self):
-        return self.rca_category or self.cleaned_data['category']
-
-    def clean_value(self):
-        # Normalise to the canonical form (raising on a malformed value) so the
-        # inline formset's unique check compares canonical values and rejects a
-        # within-category duplicate before the DB constraint 500s on save.
-        category = self.rca_category or self.data.get(self.add_prefix('category'))
-        return RCAIndicator.normalize_value(category, self.cleaned_data.get('value', ''))
-
-
-RCAAssetFormSet = forms.inlineformset_factory(
-    RCAReport, RCAAsset, form=RCAAssetForm, extra=0, can_delete=True,
-)
-RCATimelineFormSet = forms.inlineformset_factory(
-    RCAReport, RCATimelineEntry, form=RCATimelineEntryForm, extra=0, can_delete=True,
-)
-RCARootCauseFormSet = forms.inlineformset_factory(
-    RCAReport, RCARootCause, form=RCARootCauseForm, extra=0, can_delete=True,
-)
-RCARecommendationFormSet = forms.inlineformset_factory(
-    RCAReport, RCARecommendation, form=RCARecommendationForm, extra=0, can_delete=True,
-)
-RCAIndicatorFormSet = forms.inlineformset_factory(
-    RCAReport, RCAIndicator, form=RCAIndicatorForm, extra=0, can_delete=True,
-)
-
-
-class RCATimelineImportForm(forms.Form):
-    timeline_file = forms.FileField(
-        label='ไฟล์ Timeline (CSV/TSV)',
-        widget=forms.FileInput(attrs={'class': 'form-control', 'accept': '.csv,.tsv,text/csv'}),
-    )
-
-
-class RCAFinalSubmissionForm(forms.Form):
-    # No file upload: the finished report is the physical official document the
-    # SOC Manager collects, so the system keeps only the result notes and the
-    # request's completion, not a duplicate copy on disk.
-    result_notes = forms.CharField(
-        required=False,
-        label='สรุปผลการดำเนินการ',
-        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 4}),
-    )
 
 
 class MultipleFileInput(forms.ClearableFileInput):

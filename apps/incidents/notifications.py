@@ -14,7 +14,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage, send_mail
 from django.template.loader import render_to_string
-from django.urls import NoReverseMatch, reverse
+from django.urls import reverse
 
 from .models import NotificationTemplate
 
@@ -65,22 +65,11 @@ def _ticket_url(ticket):
     return f'{site_url}{path}'
 
 
-def _request_url(subtask):
-    """Where a response-request email should send the responder.
-
-    A Forensics / RCA request opens its dedicated workspace; every other request
-    type still lands on the ticket. Falls back to the ticket URL if the RCA route
-    is unavailable for any reason, so an email never carries a broken link.
-    """
-    from .models import TicketSubtask
-
-    if subtask.subtask_type == TicketSubtask.TYPE_FORENSIC_RCA:
-        site_url = getattr(settings, 'SITE_URL', 'http://localhost:8088').rstrip('/')
-        try:
-            return f'{site_url}{reverse("rca_workspace", kwargs={"subtask_id": subtask.pk})}'
-        except NoReverseMatch:
-            pass
-    return _ticket_url(subtask.ticket)
+def _request_url(subtask, anchor='tasks'):
+    """A link to a response request on its ticket. The responder's email opens
+    their "งานของคุณ" card (anchor ``my-request``); the managers' email opens the
+    request list (``tasks``)."""
+    return f'{_ticket_url(subtask.ticket)}#{anchor}'
 
 
 def _render(key, context, default_subject, default_body):
@@ -362,7 +351,7 @@ def notify_response_request_created(subtask):
 
     ticket = subtask.ticket
     ticket_url = _ticket_url(ticket)
-    request_url = _request_url(subtask)
+    request_url = _request_url(subtask, anchor='my-request')
     summary = ticket.issue_description[:100]
     if len(ticket.issue_description) > 100:
         summary += '…'
@@ -445,6 +434,7 @@ def notify_response_request_completed(subtask):
         '  ประเภทคำขอ : {request_type}\n'
         '  หัวข้อ      : {title}\n'
         '  ผู้ดำเนินการ: {completed_by}\n'
+        '  เลขที่รายงาน: {report_number}\n'
         '\n'
         'ผลการดำเนินการ:\n'
         '{result_notes}\n'
@@ -462,6 +452,7 @@ def notify_response_request_completed(subtask):
         'request_type': subtask.get_subtask_type_display(),
         'title': subtask.title,
         'result_notes': subtask.result_notes or '-',
+        'report_number': subtask.report_number or '-',
         'completed_by': completed_by,
     }
 

@@ -35,9 +35,46 @@
   .quick-nav .nav-count { opacity:.8; font-variant-numeric:tabular-nums; }
   .section-card { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); box-shadow:none; overflow:hidden; }
   .section-card[id] { scroll-margin-top:calc(var(--header-height) + 4.75rem); }
-  .section-card .card-header { background:#fff; border-bottom:1px solid #edf0f4; padding:.9rem 1.1rem; }
+  /* Each section carries its own accent (top rule + icon) on a tinted header
+     band, so the long page reads as distinct blocks rather than one white wall. */
+  .section-card { --section-accent:#6b7b90; border-top:3px solid var(--section-accent) !important; }
+  .section-accent-slate  { --section-accent:#6b7b90; }
+  .section-accent-blue   { --section-accent:#2f6fb2; }
+  .section-accent-amber  { --section-accent:#c98a0c; }
+  .section-accent-green  { --section-accent:#24865b; }
+  .section-accent-indigo { --section-accent:#5b5bd6; }
+  .section-accent-teal   { --section-accent:#1b8a8f; }
+  .section-card .card-header { background:color-mix(in srgb,var(--section-accent) 6%,var(--ui-surface)); border-bottom:1px solid var(--ui-border); padding:.9rem 1.1rem; }
   .section-card .card-body { padding:1.1rem; }
-  .section-title { font-size:.92rem; font-weight:800; margin:0; color:#2e3a49; }
+  .section-title { display:flex; align-items:center; gap:.5rem; font-size:.98rem; font-weight:800; margin:0; color:var(--ui-text-strong); }
+  .section-icon { display:inline-flex; align-items:center; justify-content:center; width:1.8rem; height:1.8rem; flex:none; border-radius:.45rem; font-size:.95rem; color:var(--section-accent); background:color-mix(in srgb,var(--section-accent) 13%,transparent); }
+  .section-card .card-header .section-hint { margin-left:2.3rem; }
+  .subtask-row.is-mine { margin:0 -.6rem; padding-left:.6rem; padding-right:.6rem; border-left:3px solid var(--ui-primary); background:color-mix(in srgb,var(--ui-primary) 5%,transparent); border-radius:.25rem; }
+  /* "งานของคุณ" — the responder's own request, first thing in the action column. */
+  .my-request-card { border-left:4px solid #5b5bd6 !important; scroll-margin-top:calc(var(--header-height) + 4.75rem); }
+  .my-request-card.is-done { border-left-color:#24865b !important; }
+  .action-stack .my-request-header { background:color-mix(in srgb,#5b5bd6 8%,var(--ui-surface)) !important; }
+  .action-stack .my-request-card.is-done .my-request-header { background:color-mix(in srgb,#24865b 8%,var(--ui-surface)) !important; }
+  .my-request-eyebrow { color:#4a4ac0; font-size:.72rem; font-weight:800; letter-spacing:.04em; }
+  .my-request-card.is-done .my-request-eyebrow { color:#1d6f4b; }
+  .my-request-title { font-size:1.05rem; font-weight:800; color:var(--ui-text-strong); }
+  .my-request-steps { display:flex; gap:.25rem; list-style:none; margin:.8rem 0 0; padding:0; }
+  /* Labels never wrap; the connector rules between steps take the slack. */
+  .my-request-steps li { flex:0 0 auto; display:flex; align-items:center; gap:.35rem; font-size:.74rem; font-weight:650; color:var(--ui-muted); white-space:nowrap; }
+  .my-request-steps li + li { flex:1 1 auto; }
+  .my-request-steps li + li::before { content:""; flex:1 1 .5rem; min-width:.5rem; height:2px; background:var(--ui-border); margin-right:.15rem; }
+  .my-request-steps .step-dot { display:inline-flex; align-items:center; justify-content:center; width:1.35rem; height:1.35rem; flex:none; border-radius:50%; font-size:.7rem; border:1.5px solid var(--ui-border); background:var(--ui-surface); }
+  .my-request-steps li.is-current { color:var(--ui-text-strong); }
+  .my-request-steps li.is-current .step-dot { border-color:#5b5bd6; background:#5b5bd6; color:#fff; }
+  .my-request-steps li.is-done { color:#1d6f4b; }
+  .my-request-steps li.is-done .step-dot { border-color:#24865b; background:#24865b; color:#fff; }
+  .my-request-brief { font-size:.84rem; line-height:1.6; color:var(--ui-text); background:var(--ui-surface-subtle); border:1px solid var(--ui-border); border-radius:.4rem; padding:.6rem .75rem; }
+  .my-request-meta { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.78rem; }
+  .my-request-meta dt { color:var(--ui-muted); font-weight:600; margin:0; }
+  .my-request-meta dd { margin:0; color:var(--ui-text); }
+  .my-request-result { background:color-mix(in srgb,#24865b 7%,var(--ui-surface)); border:1px solid color-mix(in srgb,#24865b 30%,transparent); border-radius:.4rem; padding:.75rem; }
+  .my-request-history { color:var(--ui-muted); text-decoration:none; }
+  .my-request-history:hover { color:var(--ui-primary); }
   .section-hint { color:#7a8595; font-size:.72rem; margin-top:.15rem; }
   .summary-copy { font-size:.94rem; line-height:1.75; color:#303846; }
   .summary-copy p:last-child { margin-bottom:0; }
@@ -250,8 +287,8 @@ onto its own wrapped row, which space-between then left-aligned.
   </div>
 
   <div class="ticket-content col-12 {% if can_t2_review or can_submit_containment or can_t2_record_remediation %}col-xl-12 order-xl-2{% else %}col-xl-8 order-xl-1{% endif %}">
-    <section id="overview" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title">สรุปเหตุการณ์</h2><div class="section-hint">สิ่งที่เกิดขึ้นและผลกระทบที่ประเมินได้</div></div>
+    <section id="overview" class="card section-card section-accent-slate mb-4">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-journal-text section-icon" aria-hidden="true"></i>สรุปเหตุการณ์</h2><div class="section-hint">สิ่งที่เกิดขึ้นและผลกระทบที่ประเมินได้</div></div>
       <div class="card-body summary-copy">{{ ticket.issue_description|linebreaks }}</div>
       {% if ticket.system_detail %}
       <div class="card-body summary-copy border-top">
@@ -261,8 +298,8 @@ onto its own wrapped row, which space-between then left-aligned.
       {% endif %}
     </section>
 
-    <section id="technical" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title">ขอบเขตและข้อมูลทางเทคนิค</h2><div class="section-hint">ทรัพย์สิน แหล่งที่มา การจัดประเภท และตัวบ่งชี้ภัยคุกคาม</div></div>
+    <section id="technical" class="card section-card section-accent-blue mb-4">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-hdd-network section-icon" aria-hidden="true"></i>ขอบเขตและข้อมูลทางเทคนิค</h2><div class="section-hint">ทรัพย์สิน แหล่งที่มา การจัดประเภท และตัวบ่งชี้ภัยคุกคาม</div></div>
       <div class="card-body">
         <div class="row g-4">
           <div class="col-md-6">
@@ -309,8 +346,8 @@ onto its own wrapped row, which space-between then left-aligned.
     </section>
 
     {% if ticket.action_required or ticket.action_precautions or ticket.actions_taken_summary or ticket.next_steps_summary %}
-    <section id="response" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title">แนวทางตอบสนอง</h2><div class="section-hint">สิ่งที่ต้องทำและข้อควรระวังก่อนเปลี่ยนแปลงระบบ</div></div>
+    <section id="response" class="card section-card section-accent-amber mb-4">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-signpost-split section-icon" aria-hidden="true"></i>แนวทางตอบสนอง</h2><div class="section-hint">สิ่งที่ต้องทำและข้อควรระวังก่อนเปลี่ยนแปลงระบบ</div></div>
       <div class="card-body"><div class="row g-3">
         {% if ticket.action_required %}<div class="col-md-7"><div class="response-panel info"><div class="panel-title text-primary">สิ่งที่ต้องดำเนินการ</div><div class="panel-copy">
           {% if has_saved_checklist and checklist_items %}
@@ -330,8 +367,8 @@ onto its own wrapped row, which space-between then left-aligned.
     {% endif %}
 
     {% if ticket.remediation_summary or ticket.containment_report %}
-    <section class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title">ผลการตรวจสอบและการควบคุม</h2><div class="section-hint">แยกข้อค้นพบออกจากมาตรการแก้ไขเพื่ออ่านและตรวจสอบได้เร็ว</div></div>
+    <section class="card section-card section-accent-green mb-4">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-shield-check section-icon" aria-hidden="true"></i>ผลการตรวจสอบและการควบคุม</h2><div class="section-hint">แยกข้อค้นพบออกจากมาตรการแก้ไขเพื่ออ่านและตรวจสอบได้เร็ว</div></div>
       <div class="card-body"><div class="row g-3">
         {% if ticket.remediation_summary %}<div class="col-lg-6"><div class="response-panel info"><div class="panel-title text-primary">ผลการตรวจสอบ</div><div class="panel-copy">{{ ticket.remediation_summary|linebreaks }}</div></div></div>{% endif %}
         {% if ticket.containment_report %}<div class="col-lg-6"><div class="response-panel success"><div class="panel-title text-success">มาตรการควบคุม</div><div class="panel-copy">{{ ticket.containment_report|linebreaks }}</div></div></div>{% endif %}
@@ -339,11 +376,11 @@ onto its own wrapped row, which space-between then left-aligned.
     </section>
     {% endif %}
 
-    <section id="tasks" class="card section-card mb-4">
+    <section id="tasks" class="card section-card section-accent-indigo mb-4">
       <div class="card-header">
         <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
           <div>
-            <h2 class="section-title">คำขอทีมตอบสนอง{% if response_subtasks %} <span class="signal-badge signal-neutral align-middle">{{ response_subtasks|length }}</span>{% endif %}</h2>
+            <h2 class="section-title"><i class="bi bi-shield-shaded section-icon" aria-hidden="true"></i>คำขอทีมตอบสนอง{% if response_subtasks %} <span class="signal-badge signal-neutral align-middle">{{ response_subtasks|length }}</span>{% endif %}</h2>
             <div class="section-hint">มอบหมายงานเฉพาะทางให้ทีมตอบสนอง — VA / Pentest และความปลอดภัยโครงสร้างพื้นฐานส่งให้ผู้จัดการทีม Red Team ส่วนงานนิติวิทยาศาสตร์ / RCA ส่งให้นักวิเคราะห์ Forensics ทุกคำขอที่ยังไม่เสร็จจะกันไม่ให้อนุมัติปิดเคส</div>
           </div>
           {# Manager-only create trigger. The form opens at the top of the section #}
@@ -417,31 +454,11 @@ onto its own wrapped row, which space-between then left-aligned.
         {% endif %}
         {% for subtask in response_subtasks %}
         {% with is_resp=subtask.is_response_request %}
-        <div class="subtask-row">
+        <div class="subtask-row{% if subtask.is_mine %} is-mine{% endif %}">
           <div>
-            <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}</div>
+            <div class="fw-bold small mb-1">{% if is_resp %}<i class="bi bi-shield-shaded text-primary me-1"></i>{% endif %}{{ subtask.title }}{% if subtask.is_mine %} <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-1">งานของคุณ</span>{% endif %}</div>
             <div class="small text-muted mb-1">{{ subtask.description }}</div>
-            {% if subtask.is_rca_request %}
-            <div class="small border-start border-warning border-3 ps-2 py-1 my-2">
-              {% if subtask.rca_report %}
-              <strong>{{ subtask.rca_case_number }}</strong>
-              · Asset {{ subtask.rca_asset_count }}
-              · Timeline {{ subtask.rca_timeline_count }}
-              · Root Cause {{ subtask.rca_root_cause_count }}
-              · IOC {{ subtask.rca_indicator_count }}
-              · คำแนะนำ {{ subtask.rca_recommendation_count }}
-              {% if subtask.rca_report.draft_generated_at %}
-              <div class="text-muted mt-1">
-                Draft ล่าสุด {{ subtask.rca_report.draft_generated_at|date:"d/m/Y H:i" }}
-                {% if subtask.rca_report.draft_generated_by %}
-                โดย {{ subtask.rca_report.draft_generated_by.get_full_name|default:subtask.rca_report.draft_generated_by.username }}
-                {% endif %}
-                {% if subtask.rca_report.has_stale_draft %}<span class="badge bg-warning text-dark ms-1">ข้อมูลใหม่กว่า Draft</span>{% endif %}
-              </div>
-              {% else %}<span class="text-muted">ยังไม่ได้สร้าง Draft</span>{% endif %}
-              {% else %}<span class="text-muted">ยังไม่ได้เริ่มจัดทำข้อมูล RCA</span>{% endif %}
-            </div>
-            {% endif %}
+            {% if subtask.report_number %}<div class="small mb-1"><i class="bi bi-file-earmark-text me-1"></i>เลขที่รายงาน: <strong>{{ subtask.report_number }}</strong></div>{% endif %}
             <div class="small text-muted mb-1"><i class="bi bi-calendar-plus me-1"></i>สร้างเมื่อ {{ subtask.created_at|date:"d/m/Y H:i" }}</div>
             {% if subtask.result_notes %}<div class="small text-success"><i class="bi bi-check-circle me-1"></i>{{ subtask.result_notes }}</div>{% endif %}
             <details class="subtask-status-history">
@@ -498,22 +515,31 @@ onto its own wrapped row, which space-between then left-aligned.
             <span class="badge {% if subtask.is_done %}bg-success{% else %}bg-light text-dark border{% endif %} d-block mb-1">{{ subtask.get_status_display }}</span>
             <div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-clock-history me-1"></i>สถานะตั้งแต่ {{ subtask.status_changed_at|date:"d/m/Y H:i" }}</div>
             {% if subtask.assigned_to %}<div class="text-muted mb-2" style="font-size:.72rem;"><i class="bi bi-person me-1"></i>{{ subtask.assigned_to.get_full_name|default:subtask.assigned_to.username }}</div>{% endif %}
-            {% if subtask.is_rca_request %}
-            {# RCA requests are worked entirely in the workspace — no inline status/upload form here. #}
-            <a class="btn btn-sm btn-warning mb-1 d-block" href="{% url 'rca_workspace' subtask.pk %}"><i class="bi bi-file-earmark-medical me-1"></i>{% if subtask.rca_can_start %}เริ่มจัดทำ RCA{% else %}เปิด RCA Workspace{% endif %}</a>
+            {% if subtask.is_mine %}
+            {# The assignee works this request from the "งานของคุณ" card at the top. #}
+            <a class="btn btn-sm btn-outline-primary" href="#my-request{% if subtask.pk != my_response_requests.0.pk %}-{{ subtask.pk }}{% endif %}"><i class="bi bi-arrow-up-circle me-1" aria-hidden="true"></i>ไปที่งานของคุณ</a>
             {% elif subtask.can_update %}
             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#update-subtask-{{ subtask.pk }}" aria-expanded="false" aria-controls="update-subtask-{{ subtask.pk }}"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>อัปเดตงาน</button>
             {% endif %}
           </div>
         </div>
-        {% if subtask.can_update and not subtask.is_rca_request %}
+        {% if subtask.can_update and not subtask.is_mine %}
         <div class="collapse" id="update-subtask-{{ subtask.pk }}">
           <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
             <div class="col-md-2">{{ subtask_update_form.status.label_tag }}
               <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-            <div class="col-md-4"><label class="form-label small mb-1">ผลการดำเนินการ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
-            <div class="col-md-3"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
-            <div class="col-md-2"><label class="form-label small mb-1">คำอธิบายไฟล์</label><input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="เช่น รายงาน RCA ฉบับสมบูรณ์"></div>
+            {% if subtask.requires_report_number %}
+            {# Every response request records the number of the report delivered. #}
+            <div class="col-md-3"><label class="form-label small mb-1" for="report-number-{{ subtask.pk }}">เลขที่รายงาน <span class="text-danger">*</span></label><input type="text" id="report-number-{{ subtask.pk }}" name="report_number" class="form-control form-control-sm" maxlength="40" value="{{ subtask.report_number_prefill }}" placeholder="{{ subtask.expected_report_number }}"><div class="form-text">ต้องระบุเมื่อปิดงานเป็น "เสร็จสิ้น"</div></div>
+            {% endif %}
+            {% if subtask.accepts_result_file %}
+            {# Forensics / RCA takes no file: that report is a physical document the SOC Manager collects. #}
+            <div class="col-md-4"><label class="form-label small mb-1">ผลการดำเนินการ (ถ้ามี)</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
+            <div class="col-md-4"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
+            <div class="col-md-3"><label class="form-label small mb-1">คำอธิบายไฟล์</label><input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="เช่น รายงานผลการทดสอบ"></div>
+            {% else %}
+            <div class="col-md-6"><label class="form-label small mb-1">ผลการดำเนินการ (ถ้ามี)</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
+            {% endif %}
             <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-primary w-100" type="submit"><i class="bi bi-save me-1" aria-hidden="true"></i><span class="d-md-none">บันทึก</span><span class="visually-hidden d-none d-md-inline">บันทึกการอัปเดตงาน</span></button></div>
           </form>
         </div>
@@ -558,8 +584,8 @@ onto its own wrapped row, which space-between then left-aligned.
       </div>
     </section>
 
-    <section id="timeline" class="card section-card mb-4">
-      <div class="card-header"><h2 class="section-title">ประวัติการดำเนินการ</h2><div class="section-hint">เปิดรายการเพื่ออ่านรายละเอียด โดยรายการล่าสุดเปิดไว้ให้แล้ว</div></div>
+    <section id="timeline" class="card section-card section-accent-slate mb-4">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-clock-history section-icon" aria-hidden="true"></i>ประวัติการดำเนินการ</h2><div class="section-hint">เปิดรายการเพื่ออ่านรายละเอียด โดยรายการล่าสุดเปิดไว้ให้แล้ว</div></div>
       <div class="card-body">
         <div class="timeline">
           {% for log in logs %}
@@ -615,8 +641,8 @@ onto its own wrapped row, which space-between then left-aligned.
       </div>
     </section>
 
-    <section id="evidence" class="card section-card">
-      <div class="card-header"><h2 class="section-title">หลักฐานและไฟล์แนบ{% if evidence_count %} <span class="signal-badge signal-neutral align-middle">{{ evidence_count }}</span>{% endif %}</h2><div class="section-hint">ไฟล์หลักฐานที่แนบกับ Ticket และ Alert ที่เชื่อมโยง</div></div>
+    <section id="evidence" class="card section-card section-accent-teal">
+      <div class="card-header"><h2 class="section-title"><i class="bi bi-paperclip section-icon" aria-hidden="true"></i>หลักฐานและไฟล์แนบ{% if evidence_count %} <span class="signal-badge signal-neutral align-middle">{{ evidence_count }}</span>{% endif %}</h2><div class="section-hint">ไฟล์หลักฐานที่แนบกับ Ticket และ Alert ที่เชื่อมโยง</div></div>
       {% if alert_links %}
       <details class="border-bottom" {% if alert_links|length == 1 %}open{% endif %}>
         <summary class="d-flex align-items-center gap-2 px-3 py-3">

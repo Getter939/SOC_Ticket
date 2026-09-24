@@ -1,0 +1,95 @@
+{% comment %}
+"งานของคุณ" — the response-team assignee's own request(s) on this ticket, pinned
+to the top of the action column so the Forensic Analyst / Red Team Manager never
+has to scroll to the request list to accept or hand in their work.
+Context: my_response_requests (selectors.get_ticket_detail_read_model).
+{% endcomment %}
+{% for req in my_response_requests %}
+<div class="card my-request-card workflow-primary{% if req.is_done %} is-done{% endif %}" id="{% if forloop.first %}my-request{% else %}my-request-{{ req.pk }}{% endif %}">
+  <div class="card-header my-request-header">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <div class="min-w-0">
+        <div class="my-request-eyebrow"><i class="bi bi-person-check-fill me-1" aria-hidden="true"></i>งานของคุณ</div>
+        <h3 class="my-request-title mb-0">{{ req.get_subtask_type_display }}</h3>
+      </div>
+      <span class="badge {% if req.is_done %}bg-success{% elif req.status == 'IN_PROGRESS' %}bg-primary{% else %}bg-warning text-dark{% endif %} flex-shrink-0">{{ req.get_status_display }}</span>
+    </div>
+    <ol class="my-request-steps" aria-label="ขั้นตอนของงาน">
+      <li class="{% if req.status == 'OPEN' %}is-current{% else %}is-done{% endif %}"><span class="step-dot" aria-hidden="true">{% if req.status == 'OPEN' %}1{% else %}<i class="bi bi-check-lg"></i>{% endif %}</span>รับงาน</li>
+      <li class="{% if req.status == 'IN_PROGRESS' %}is-current{% elif req.is_done %}is-done{% endif %}"><span class="step-dot" aria-hidden="true">{% if req.is_done %}<i class="bi bi-check-lg"></i>{% else %}2{% endif %}</span>ดำเนินการ</li>
+      <li class="{% if req.is_done %}is-done{% endif %}"><span class="step-dot" aria-hidden="true">{% if req.is_done %}<i class="bi bi-check-lg"></i>{% else %}3{% endif %}</span>ส่งงาน</li>
+    </ol>
+  </div>
+  <div class="card-body">
+    <div class="fw-semibold mb-1">{{ req.title }}</div>
+    {% if req.description %}<div class="my-request-brief mb-2">{{ req.description|linebreaksbr }}</div>{% endif %}
+    <dl class="my-request-meta mb-3">
+      <dt>ผู้ร้องขอ</dt><dd>{% if req.created_by %}{{ req.created_by.get_full_name|default:req.created_by.username }}{% else %}-{% endif %}</dd>
+      <dt>ส่งคำขอเมื่อ</dt><dd>{{ req.created_at|date:"d M Y H:i" }}</dd>
+      <dt>สถานะตั้งแต่</dt><dd>{{ req.status_changed_at|date:"d M Y H:i"|default:"-" }}</dd>
+    </dl>
+
+    {% if req.can_accept %}
+    <p class="small text-muted mb-2">กดรับงานเพื่อแจ้งผู้จัดการ SOC ว่าคุณเห็นคำขอแล้วและเริ่มดำเนินการ</p>
+    <form method="post" action="{% url 'accept_subtask' req.pk %}" class="js-submit-loading">{% csrf_token %}
+      <button class="btn btn-success w-100" type="submit"><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>รับงาน</button>
+    </form>
+
+    {% elif req.is_done %}
+    <div class="my-request-result">
+      <div class="fw-semibold text-success mb-2"><i class="bi bi-check-circle-fill me-1" aria-hidden="true"></i>ส่งงานแล้ว — ผู้จัดการ SOC ได้รับแจ้งทางอีเมล</div>
+      {% if req.report_number %}<div class="small mb-1">เลขที่รายงาน: <strong class="font-monospace">{{ req.report_number }}</strong></div>{% endif %}
+      {% if req.result_notes %}<div class="small text-muted">{{ req.result_notes|linebreaksbr }}</div>{% endif %}
+    </div>
+
+    {% elif req.can_update %}
+    <form method="post" action="{% url 'update_subtask' req.pk %}" enctype="multipart/form-data" class="my-request-form">{% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label" for="my-report-number-{{ req.pk }}">เลขที่รายงานที่ส่ง <span class="text-danger">*</span></label>
+        <input type="text" id="my-report-number-{{ req.pk }}" name="report_number" class="form-control font-monospace" maxlength="40" value="{{ req.report_number_prefill }}" placeholder="{{ req.expected_report_number|default:'SOC-XXX-YYYYMM-NNNN' }}" required aria-describedby="my-report-number-help-{{ req.pk }}">
+        <div class="form-text" id="my-report-number-help-{{ req.pk }}">ระบบเติมเลขของเคสนี้ไว้ให้ — แก้ไขได้หากเลขบนรายงานต่างออกไป ต้องระบุก่อนส่งงาน</div>
+      </div>
+      {% if not req.accepts_result_file %}
+      <div class="mb-3">
+        <label class="form-label" for="my-notes-{{ req.pk }}">หมายเหตุ <span class="text-muted fw-normal">(ถ้ามี)</span></label>
+        <textarea id="my-notes-{{ req.pk }}" name="result_notes" class="form-control" rows="3" placeholder="เช่น ส่งรายงานฉบับจริงให้ผู้จัดการ SOC แล้ว">{{ req.result_notes }}</textarea>
+      </div>
+      {% else %}
+      <div class="mb-3">
+        <label class="form-label" for="my-notes-{{ req.pk }}">ผลการดำเนินการ <span class="text-muted fw-normal">(ถ้ามี)</span></label>
+        <textarea id="my-notes-{{ req.pk }}" name="result_notes" class="form-control" rows="3" placeholder="สรุปผลการทดสอบ / สิ่งที่พบ">{{ req.result_notes }}</textarea>
+      </div>
+      <div class="mb-2">
+        <label class="form-label" for="my-file-{{ req.pk }}">แนบไฟล์ผล <span class="text-muted fw-normal">(ถ้ามี)</span></label>
+        <input type="file" id="my-file-{{ req.pk }}" name="result_file" class="form-control form-control-sm">
+      </div>
+      <div class="mb-3">
+        <input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="คำอธิบายไฟล์ เช่น รายงานผลการทดสอบ" aria-label="คำอธิบายไฟล์">
+      </div>
+      {% endif %}
+      <div class="d-grid gap-2">
+        <button class="btn btn-primary" type="submit" name="status" value="DONE" data-confirm-done="ยืนยันส่งงาน? เมื่อส่งแล้วคำขอนี้จะปิดเป็น &quot;เสร็จสิ้น&quot; และแก้ไขไม่ได้อีก"><i class="bi bi-send-check me-1" aria-hidden="true"></i>ส่งงาน · เสร็จสิ้น</button>
+        <button class="btn btn-outline-secondary btn-sm" type="submit" name="status" value="IN_PROGRESS" formnovalidate><i class="bi bi-save me-1" aria-hidden="true"></i>บันทึกไว้ก่อน (ยังไม่ส่งงาน)</button>
+      </div>
+    </form>
+
+    {% else %}
+    <div class="small text-muted">คำขอนี้ปิดหรือยกเลิกแล้ว — ไม่สามารถอัปเดตได้</div>
+    {% endif %}
+
+    <a class="my-request-history small d-inline-block mt-3" href="#tasks"><i class="bi bi-clock-history me-1" aria-hidden="true"></i>ประวัติสถานะของคำขอ</a>
+  </div>
+</div>
+{% endfor %}
+{% if my_response_requests %}
+<script nonce="{{ request.csp_nonce }}">
+document.querySelectorAll('[data-confirm-done]').forEach(function(button){
+  button.addEventListener('click',function(event){
+    // A missing report number is flagged by the browser first; confirm only a
+    // submission that would actually go through.
+    if(button.form&&!button.form.checkValidity())return;
+    if(!window.confirm(button.getAttribute('data-confirm-done')))event.preventDefault();
+  });
+});
+</script>
+{% endif %}

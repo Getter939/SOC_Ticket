@@ -189,10 +189,11 @@ host failure still takes both. Ask infrastructure and write the answer down.
 
 ## 1. Sizing the spare VM disk
 
-> **Confirm the actual disk size before provisioning.** 120 GB and 150 GB have
-> both been quoted. The worked example below uses **120 GB** as the conservative
-> case; the formula takes whatever number is real. Check with
-> `Get-Volume` on the spare VM and write the answer into §2 row 10.
+> **Disk size - RESOLVED (measured 2026-09-23): the spare's C: is ~150 GB**
+> (125.5 GB free at 83.8% used-free split, read off the live volume). The 120 vs
+> 150 GB ambiguity is closed. The worked example below still uses **120 GB** as
+> the conservative illustration; the formula takes whatever number is real.
+> Re-check with `Get-Volume` if the VM is ever resized.
 
 Four things share the spare VM's disk. They compete, and the failure mode is
 unpleasant: a runaway archive fills the volume and **stops replication**.
@@ -247,6 +248,13 @@ Two rules regardless of what you choose:
 - **Set `-MaxArchiveGB` on the prune task** (§2.4) to the archive budget. That is
   the backstop that stops the archive starving the standby. Without it, the
   interaction between these two consumers is silent until replication breaks.
+  **`-MaxArchiveGB` defaults to `0`, and `0` DISABLES the cap** - so a prune task
+  registered without the argument silently has no backstop at all, while age-based
+  retention keeps running and everything looks normal. Registering it is not the
+  same as it being set: read the argument back off the live task with
+  `(Get-ScheduledTask -TaskName 'SOC-Archive-Prune').Actions.Arguments`. This was
+  found missing on the live spare on 2026-09-23, a month after the checklist
+  ticked it as done.
 - **Cut the hourly tier first.** It buys fast local rollback on production, which
   is a different job from surviving host loss. The monthly tier is the one that
   carries the statutory retention floor - never cut that to make room.
@@ -785,6 +793,26 @@ $tasks = @(
 > `-SmtpPort 25 -UseSsl` is opportunistic STARTTLS on the submission port;
 > `-MailFrom` must equal an envelope sender the relay accepts (here it equals
 > `-AlertEmail`). See §2.5 for the credential and the silent-send fix.
+>
+> The live task also prefixes the command with
+> `$env:PGPASSFILE='C:\ProgramData\SOCBackup\pgpass-standby.conf'` - that file,
+> **not** `pgpass.conf`, is the standby credential. Any interactive run needs the
+> same prefix, or `psql` cannot authenticate and the standby appears unreachable
+> when it is perfectly healthy.
+
+> **As-built task names and cadences (verified on the live spare 2026-09-23).**
+> These differ from the recipe above; use these when operating the system, and the
+> recipe only when building a new one:
+>
+> | Task | Live name | Cadence | Arguments |
+> |---|---|---|---|
+> | Pull | **`SOC-Pull-Archives`** (not `SOC-Archive-Pull`) | hourly | `-SourceUnc \\10.1.220.118\SOCArchive$` only; `-ArchiveDir` left at its `C:\SOCBackup\archive` default |
+> | Prune | `SOC-Archive-Prune` | **weekly** (not daily) | see the `-MaxArchiveGB` warning in §1 |
+> | Check | `SOC-Archive-Check` | daily 06:00 | as above, plus the `PGPASSFILE` prefix |
+> | Drill | `SOC-Restore-Drill` | weekly, Sat 04:00 | wraps the drill in `try { } finally { Stop-Service postgresql-verify }`, which is better than the §2.7 version - the verify instance is stopped even when a drill fails |
+>
+> Cross-host settings use the IP `10.1.220.118` because production's hostname
+> ends in a hyphen and does not resolve.
 
 ```powershell
 foreach ($t in $tasks) {
@@ -803,6 +831,19 @@ Set `-MaxArchiveGB` to the archive budget you calculated in §1.
 > *"Do not store password"*, Windows switches to an S4U logon, DPAPI keys become
 > unavailable, and `Import-Clixml` fails with a decryption error - the pull stops
 > and only the health check will tell you. Never tick that box on these tasks.
+>
+> **`S4U` is the trap - `ServiceAccount` is not.** Read the distinction off
+> `(Get-ScheduledTask -TaskName 'SOC-*').Principal.LogonType`:
+>
+> | LogonType | Verdict |
+> |---|---|
+> | `Password` | Correct. Required by **`SOC-Pull-Archives`**, which needs a real credential to reach production's share. |
+> | `ServiceAccount` | **Also correct.** SYSTEM / NETWORK SERVICE has no stored password to lose, and it is how the SYSTEM-exported `smtp-cred.xml` is decrypted (§2.5). This is what the other three tasks run as on the live spare. |
+> | `S4U` | **The trap.** DPAPI unavailable, `Import-Clixml` fails, the job dies quietly. |
+> | `InteractiveToken` | Runs only while that user is logged on - effectively never, on a headless VM. |
+>
+> Treating `ServiceAccount` as a fault sends you hunting a credential problem that
+> does not exist; that happened on 2026-09-23.
 
 ### 2.5 Make the alert real
 
@@ -1433,6 +1474,15 @@ that already exists and is already protected. Do **not** merge it with step 3.
 
 ## 6. Go-live checklist
 
+> **Audit 2026-09-23.** A live read of the spare confirmed the system healthy:
+> archives fresh, quarantine empty, 83.8% free, standby `in archive recovery` and
+> caught up, verify instance correctly demand-start, weekly drill passing, all
+> four tasks exiting 0. Three documentation defects and one real config gap were
+> found and are recorded above: the `-MaxArchiveGB` cap was never actually set,
+> the task names and prune cadence differ from §2.4, and the `LogonType` guidance
+> mis-stated `ServiceAccount` as a fault. `scripts/backup/windows/Get-SocSpareHealth.ps1`
+> now reproduces that whole audit in one read-only pass.
+>
 > **Status 2026-09-02:** Phases 1-3 are built and proven - nightly encrypted
 > archives, hourly off-host pull, a **passed restore drill** (2026-08-24, weekly),
 > and a **streaming standby** (reboot-survival verified), with the app stack
@@ -1443,7 +1493,7 @@ that already exists and is already protected. Do **not** merge it with step 3.
 > unverified, not merely un-updated.
 
 **Foundations**
-- [ ] Spare VM disk size **confirmed** (120 vs 150 GB resolved) and written into §2
+- [x] Spare VM disk size **confirmed** - ~150 GB, measured off the live volume 2026-09-23 (§1)
 - [ ] `D` and `A` measured; retention and `-MaxArchiveGB` chosen from the §1 table
 - [ ] PostgreSQL major version identical on production and spare, with a verified Windows patch path
 - [ ] Separate physical host confirmed - or the limitation recorded in writing
@@ -1461,7 +1511,10 @@ that already exists and is already protected. Do **not** merge it with step 3.
 - [x] Share is read-only at **both** share and NTFS level
 - [x] All three tests in §2.3 behave as marked (read works, write refused, delete refused)
 - [x] Pull, prune, and check tasks scheduled with **stored passwords**, not S4U
-- [x] `-MaxArchiveGB` set to the archive budget
+- [ ] `-MaxArchiveGB` set to the archive budget — **was ticked in error**; the
+  live `SOC-Archive-Prune` passed no arguments at all, so the cap sat at its `0`
+  default (disabled) from build until 2026-09-23. Re-tick only after reading the
+  argument back off the registered task.
 - [x] **Alert path tested by deliberately breaking something** — proven via
   `-MinFreePercent 100`; a `[SOC-BACKUP] FAILED` email arrived over the
   authenticated STARTTLS relay (§2.5 as-built)

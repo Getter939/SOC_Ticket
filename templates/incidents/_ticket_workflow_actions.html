@@ -3,13 +3,14 @@
         <h2 class="section-title">การดำเนินการกับรายการ</h2>
         <p class="section-hint mb-0">{% if is_terminal %}ดูผลการดำเนินการและประวัติ{% else %}ตรวจสอบขั้นตอนปัจจุบัน แล้วเลือกดำเนินการ{% endif %}</p>
       </div>
+      {% include 'incidents/_my_response_request.html' %}
       {% if pending_cancellation or ticket.status == 'CANCELLED' %}
       <div class="card cancellation-attention">
         {% include 'incidents/_ticket_cancellation.html' %}
       </div>
       {% endif %}
       {% if is_terminal and ticket.status != 'CANCELLED' %}
-      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0"><dt>Tier 2 ตรวจสอบ</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd></dl></div></div>
+      <div class="card closure-card shadow-sm mb-3"><div class="card-body"><div class="d-flex align-items-center gap-2 mb-3"><i class="bi bi-patch-check-fill text-success fs-3"></i><div><div class="fw-bold">{% if ticket.status == 'CLOSED_EVENT' %}Event ปิดเคสแล้ว{% else %}Incident ผ่านการตรวจสอบแล้ว{% endif %}</div><div class="small text-muted">กระบวนการหลักเสร็จสมบูรณ์</div></div></div><dl class="closure-grid mb-0">{% if event_signoff %}{% with s=event_signoff %}<dt>Tier 2 ตรวจสอบ</dt><dd>{% if s.reviewer %}{{ s.reviewer.get_full_name|default:s.reviewer.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ s.reviewed_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if s.approver %}{{ s.approver.get_full_name|default:s.approver.username }}{% elif s.direct_close and s.reviewer %}<span class="text-muted">Tier 2 ปิดโดยตรง</span>{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ s.closed_at|date:"d M Y H:i"|default:"-" }}</dd>{% endwith %}{% else %}<dt>Tier 2 ตรวจสอบ</dt><dd>{% if ticket.verified_by %}{{ ticket.verified_by.get_full_name|default:ticket.verified_by.username }}{% else %}-{% endif %}</dd><dt>เวลาตรวจสอบ</dt><dd>{{ ticket.verified_at|date:"d M Y H:i"|default:"-" }}</dd><dt>อนุมัติโดย</dt><dd>{% if ticket.approved_by %}{{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}{% else %}-{% endif %}</dd><dt>เวลาปิดเคส</dt><dd>{{ ticket.approved_at|date:"d M Y H:i"|default:"-" }}</dd>{% endif %}</dl></div></div>
       {% endif %}
 
       {% comment %}
@@ -183,7 +184,7 @@
       {% if can_t2_reclassify %}
       <div class="card shadow-sm border-secondary mt-3 workflow-secondary"><div class="card-header bg-light fw-bold">จัดประเภทใหม่เป็น Event</div><div class="card-body"><p class="small text-muted mb-2">หากตรวจสอบแล้วพบว่าไม่ใช่เหตุการณ์จริง — จัดเป็น Event และปิดเคสได้ทันที (ไม่ผ่านผู้จัดการ)</p><form method="post" class="js-submit-loading">{% csrf_token %}<input type="hidden" name="action" value="t2_reclassify_event"><label class="form-label fw-bold small">บันทึกการตัดสินใจ <span class="text-danger">*</span></label><textarea name="decision_note" class="form-control mb-2" rows="2" required></textarea><button class="btn btn-outline-secondary w-100" type="submit">จัดเป็น Event และปิดเคส</button></form></div></div>
       {% endif %}
-      {% elif not can_decide_cancellation %}<div class="alert alert-light border text-center text-muted workflow-primary">ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ</div>{% endif %}
+      {% elif not can_decide_cancellation and not my_response_requests %}<div class="alert alert-light border text-center text-muted workflow-primary">ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ</div>{% endif %}
 
       {% if not can_mgr_forward %}
       <div class="emergency-summary">

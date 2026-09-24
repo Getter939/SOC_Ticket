@@ -96,7 +96,7 @@ A work stream spawned off a single Ticket, tracked independently of the parent T
 _Avoid_: Task, linked ticket
 
 **Response Request**:
-A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It belongs to one Member Ticket, even inside a Project Incident, and runs in parallel to that Ticket's Containment. It is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, its parent Incident cannot be approved (closed) — Event-close is exempt.
+A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It belongs to one Member Ticket, even inside a Project Incident, and runs in parallel to that Ticket's Containment. It is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, its parent Incident cannot be approved (closed) — Event-close is exempt. The assignee accepts it (**รับงาน**: Open → In Progress), does the work outside the system, then marks it Done. No Response Request can be marked Done without the **report number** of the report delivered (SOC-RCA- / SOC-VAPT- / SOC-HARD-YYYYMM-NNNN, prefilled from the case). The report itself is not written in the system. The RCA report is a physical document the SOC Manager collects, so a Forensics / RCA request takes no file; VA/PT and InfraSec may attach an optional result file.
 _Avoid_: Investigation (that is the SOC-side subtask), escalation, ticket
 
 ## People and roles

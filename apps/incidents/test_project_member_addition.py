@@ -75,6 +75,7 @@ class ProjectMemberAdditionTest(TestCase):
             detailed_issue2='C2 Server',
             issue_description=project.summary,
             action_required='Isolate affected systems.',
+            importance=Ticket.IMPORTANCE_GENERAL,
             classification=Ticket.CLASSIFICATION_INCIDENT,
             t1_route=Ticket.T1_ROUTE_ADMIN,
             status=lead_status or (
@@ -122,6 +123,16 @@ class ProjectMemberAdditionTest(TestCase):
         data.update(overrides)
         return data
 
+    def test_ip_address_is_required(self):
+        data = {
+            'device_name': 'Newly reported host',
+            'assigned_admin': str(self.admin.pk),
+            't1_route': Ticket.T1_ROUTE_ADMIN,
+        }
+        form = ProjectIncidentTargetForm(data=data)
+        self.assertFalse(form.is_valid())
+        self.assertIn('ip_address', form.errors)
+
     def test_permission_is_limited_to_creator_and_manager_while_active(self):
         project, lead = self._project()
 
@@ -154,6 +165,10 @@ class ProjectMemberAdditionTest(TestCase):
         self.assertEqual(ticket.severity, lead.severity)
         self.assertEqual(ticket.incident_datetime, lead.incident_datetime)
         self.assertEqual(ticket.issue_description, lead.issue_description)
+        # The analyst's pick is inherited; the Emergency verdict still forces
+        # สำคัญมาก on the report.
+        self.assertEqual(ticket.importance, Ticket.IMPORTANCE_GENERAL)
+        self.assertEqual(ticket.report_importance, Ticket.IMPORTANCE_CRITICAL)
         self.assertEqual(
             list(ticket.iocs.values_list('category', 'value')),
             [('DOMAIN', 'malicious.example')],

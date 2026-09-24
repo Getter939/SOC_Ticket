@@ -1,6 +1,5 @@
 from django.urls import path
 from . import views
-from . import rca_views
 from .cancellation_views import ticket_cancellation
 from . import ti_platform_views as ti_views
 
@@ -42,44 +41,9 @@ urlpatterns = [
     path('log/edit/<int:log_id>/', views.edit_log, name='edit_log'),
     path('ticket/<int:pk>/response-request/new/', views.create_response_request, name='create_response_request'),
     path('subtask/<int:subtask_id>/update/', views.update_subtask, name='update_subtask'),
-    # Forensic Analyst RCA workspace
-    path('rca/<int:subtask_id>/', rca_views.rca_workspace, name='rca_workspace'),
-    path('rca/<int:subtask_id>/start/', rca_views.rca_start, name='rca_start'),
-    path(
-        'rca/<int:subtask_id>/section1/refresh/',
-        rca_views.rca_section1_refresh,
-        name='rca_section1_refresh',
-    ),
-    path(
-        'rca/<int:subtask_id>/timeline/template.csv',
-        rca_views.rca_timeline_template,
-        name='rca_timeline_template',
-    ),
-    path(
-        'rca/<int:subtask_id>/timeline/import/',
-        rca_views.rca_timeline_import,
-        name='rca_timeline_import',
-    ),
-    path(
-        'rca/<int:subtask_id>/iocs/pull/',
-        rca_views.rca_iocs_pull,
-        name='rca_iocs_pull',
-    ),
-    path(
-        'rca/<int:subtask_id>/iocs/push/',
-        rca_views.rca_iocs_push,
-        name='rca_iocs_push',
-    ),
-    path(
-        'rca/<int:subtask_id>/draft.docx',
-        rca_views.rca_draft,
-        name='rca_draft',
-    ),
-    path(
-        'rca/<int:subtask_id>/final/',
-        rca_views.rca_final_submission,
-        name='rca_final_submission',
-    ),
+    path('subtask/<int:subtask_id>/accept/', views.accept_subtask, name='accept_subtask'),
+    # The retired RCA workspace — links in already-sent emails land on the ticket.
+    path('rca/<int:subtask_id>/', views.legacy_rca_workspace, name='legacy_rca_workspace'),
     # Response team (Forensic / Red Team) — "My Requests" work queue
     path('response-requests/', views.response_request_queue, name='response_request_queue'),
     path('history/', views.ticket_history, name='ticket_history'),

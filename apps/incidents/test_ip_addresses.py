@@ -91,17 +91,17 @@ class TicketMultipleIPTest(MFATestCase):
         self.assertEqual(ticket.ip_address, expected)
         self.assertEqual(TicketEditForm(instance=ticket)['ip_address'].value(), expected)
 
-    def test_project_target_supports_multiple_or_no_addresses(self):
-        for value, expected in (('192.0.2.1\n2001:db8::1', '192.0.2.1, 2001:db8::1'), ('', None)):
-            with self.subTest(value=value):
-                form = ProjectIncidentTargetForm(data={
-                    'device_name': 'service', 'ip_address': value,
-                    't1_route': Ticket.T1_ROUTE_OWNER,
-                })
-                self.assertTrue(form.is_valid(), form.errors)
-                ticket = form.save()
-                ticket.refresh_from_db()
-                self.assertEqual(ticket.ip_address, expected)
+    def test_project_target_supports_multiple_addresses_and_requires_one(self):
+        data = {'device_name': 'service', 't1_route': Ticket.T1_ROUTE_OWNER}
+        form = ProjectIncidentTargetForm(data={**data, 'ip_address': '192.0.2.1\n2001:db8::1'})
+        self.assertTrue(form.is_valid(), form.errors)
+        ticket = form.save()
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.ip_address, '192.0.2.1, 2001:db8::1')
+
+        blank = ProjectIncidentTargetForm(data={**data, 'ip_address': ''})
+        self.assertFalse(blank.is_valid())
+        self.assertIn('ip_address', blank.errors)
 
 
 class TicketIPMigrationTest(TransactionTestCase):

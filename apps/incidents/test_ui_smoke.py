@@ -637,12 +637,13 @@ class ResponseTeamUiTest(TestCase):
     # ── Responder controls ────────────────────────────────────────────── #
 
     def test_assignee_sees_update_form_and_can_complete(self):
-        # A non-RCA response request (VA/PT) keeps the inline update form on the
-        # ticket page; RCA requests are worked in the dedicated workspace instead.
+        # An accepted VA/PT request is completed from the assignee's
+        # "งานของคุณ" card on the ticket page.
         t = self._ticket()
         st = TicketSubtask.objects.create(
             ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
             title='Pentest', assigned_to=self.redteam, created_by=self.manager,
+            status=TicketSubtask.STATUS_IN_PROGRESS,
         )
         self.client.force_login(self.redteam)
         detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
@@ -655,6 +656,7 @@ class ResponseTeamUiTest(TestCase):
         resp = self.client.post(reverse('update_subtask', args=[st.pk]), {
             'status': TicketSubtask.STATUS_DONE,
             'result_notes': 'Root cause: phishing.',
+            'report_number': 'SOC-VAPT-202609-0001',
         })
         self.assertRedirects(resp, reverse('ticket_detail', args=[t.pk]))
         st.refresh_from_db()
@@ -662,16 +664,267 @@ class ResponseTeamUiTest(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ['m@example.com'])
 
-    def test_rca_row_shows_workspace_button_not_the_inline_form(self):
+    def test_forensic_gets_a_my_request_card_at_the_top_of_the_action_column(self):
+        # The analyst's own request is pinned into the action column (which sits
+        # beside the case on desktop and first on mobile), instead of the old
+        # "no step for your role" message and a form at the bottom of the page.
         t = self._ticket()
-        st = TicketSubtask.objects.create(
-            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
-            title='RCA', assigned_to=self.forensic, created_by=self.manager,
-        )
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        body = self.client.get(reverse('ticket_detail', args=[t.pk])).content.decode()
+        self.assertIn('id="my-request"', body)
+        self.assertNotIn('ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ', body)
+        card = body.index('id="my-request"')
+        self.assertLess(card, body.index('id="overview"'))
+        self.assertLess(body.index(reverse('accept_subtask', args=[st.pk])), body.index('id="overview"'))
+        # The list row points back to the card instead of duplicating its form.
+        self.assertIn('href="#my-request"', body)
+        self.assertNotIn(f'id="update-subtask-{st.pk}"', body)
+        self.assertNotIn('/rca/', body)
+
+    def test_in_progress_rca_card_asks_for_the_report_number_and_no_file(self):
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
         self.client.force_login(self.forensic)
         detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
-        self.assertContains(detail, reverse('rca_workspace', args=[st.pk]))
-        self.assertNotContains(detail, reverse('update_subtask', args=[st.pk]))
+        self.assertContains(detail, f'id="my-report-number-{st.pk}"')
+        self.assertTrue(st.expected_report_number.startswith('SOC-RCA-'))
+        self.assertContains(detail, f'value="{st.expected_report_number}"')
+        self.assertContains(detail, 'ส่งงาน · เสร็จสิ้น')
+        self.assertNotContains(detail, 'name="result_file"')
+
+    def test_done_card_shows_the_delivered_report_number(self):
+        t = self._ticket()
+        self._rca(t, status=TicketSubtask.STATUS_DONE, report_number='SOC-RCA-202609-0042')
+        self.client.force_login(self.forensic)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(detail, 'ส่งงานแล้ว')
+        self.assertContains(detail, 'SOC-RCA-202609-0042')
+        self.assertNotContains(detail, 'ส่งงาน · เสร็จสิ้น')
+
+    def test_in_progress_va_pt_card_keeps_the_optional_file(self):
+        t = self._ticket()
+        st = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='Pentest',
+            assigned_to=self.redteam, created_by=self.manager,
+            status=TicketSubtask.STATUS_IN_PROGRESS,
+        )
+        self.client.force_login(self.redteam)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(detail, f'id="my-file-{st.pk}"')
+        # Red Team also records the delivered report's number, prefilled with
+        # the VA/PT number of this case.
+        self.assertContains(detail, f'id="my-report-number-{st.pk}"')
+        self.assertTrue(st.expected_report_number.startswith('SOC-VAPT-'))
+        self.assertContains(detail, f'value="{st.expected_report_number}"')
+
+    def test_manager_sees_no_my_request_card(self):
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
+        self.client.force_login(self.manager)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertNotContains(detail, 'id="my-request"')
+        # The manager still gets the inline update form in the list.
+        self.assertContains(detail, f'id="update-subtask-{st.pk}"')
+
+    def test_queue_links_the_assignee_to_their_card(self):
+        t = self._ticket()
+        self._rca(t)
+        self.client.force_login(self.forensic)
+        resp = self.client.get(reverse('response_request_queue'))
+        self.assertContains(resp, f"{reverse('ticket_detail', args=[t.pk])}#my-request")
+
+    # ── Accept (รับงาน) ───────────────────────────────────────────────── #
+
+    def _rca(self, t, **kwargs):
+        return TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='RCA', assigned_to=self.forensic, created_by=self.manager, **kwargs,
+        )
+
+    def test_assignee_sees_accept_and_accepting_starts_the_request(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(detail, reverse('accept_subtask', args=[st.pk]))
+        mail.outbox = []
+        resp = self.client.post(reverse('accept_subtask', args=[st.pk]))
+        self.assertRedirects(
+            resp, f"{reverse('ticket_detail', args=[t.pk])}#my-request",
+            fetch_redirect_response=False,
+        )
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertTrue(
+            st.field_changes.filter(field_name='status', changed_by=self.forensic).exists()
+        )
+        # Once accepted the button is gone.
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertNotContains(detail, reverse('accept_subtask', args=[st.pk]))
+
+    def test_accept_from_queue_returns_to_the_queue(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        queue = reverse('response_request_queue')
+        self.assertContains(self.client.get(queue), reverse('accept_subtask', args=[st.pk]))
+        resp = self.client.post(reverse('accept_subtask', args=[st.pk]), {'next': queue})
+        self.assertRedirects(resp, queue, fetch_redirect_response=False)
+
+    def test_accept_ignores_an_offsite_next(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        resp = self.client.post(
+            reverse('accept_subtask', args=[st.pk]), {'next': 'https://evil.example/'},
+        )
+        self.assertRedirects(
+            resp, f"{reverse('ticket_detail', args=[t.pk])}#my-request",
+            fetch_redirect_response=False,
+        )
+
+    def test_only_the_assignee_can_accept(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.manager)
+        detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertNotContains(detail, reverse('accept_subtask', args=[st.pk]))
+        self.client.post(reverse('accept_subtask', args=[st.pk]))
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_OPEN)
+
+    def test_accept_needs_an_open_request(self):
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('accept_subtask', args=[st.pk]))
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+        self.assertFalse(st.field_changes.filter(field_name='status').exists())
+
+    def test_accept_rejects_get(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        self.assertEqual(self.client.get(reverse('accept_subtask', args=[st.pk])).status_code, 405)
+
+    def test_redteam_can_accept_va_pt(self):
+        t = self._ticket()
+        st = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=self.redteam, created_by=self.manager,
+        )
+        self.client.force_login(self.redteam)
+        self.client.post(reverse('accept_subtask', args=[st.pk]))
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+
+    # ── RCA completion: report number mandatory, note optional, no file ── #
+
+    def test_rca_done_without_report_number_is_rejected(self):
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
+        self.client.force_login(self.forensic)
+        resp = self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE, 'result_notes': 'done', 'report_number': '  ',
+        }, follow=True)
+        st.refresh_from_db()
+        self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+        self.assertContains(resp, 'กรุณาระบุเลขที่รายงาน')
+
+    def test_rca_done_with_number_and_no_note_completes_and_emails(self):
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
+        self.manager.email = 'm@example.com'
+        self.manager.save(update_fields=['email'])
+        self.client.force_login(self.forensic)
+        mail.outbox = []
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE, 'result_notes': '',
+            'report_number': ' SOC-RCA-202609-0015 ',
+        })
+        st.refresh_from_db()
+        self.assertTrue(st.is_done)
+        self.assertEqual(st.report_number, 'SOC-RCA-202609-0015')
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('SOC-RCA-202609-0015', mail.outbox[0].body)
+        self.assertTrue(st.field_changes.filter(
+            field_name='report_number', new_value='SOC-RCA-202609-0015',
+        ).exists())
+
+    def test_rca_update_ignores_an_uploaded_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        t = self._ticket()
+        st = self._rca(t, status=TicketSubtask.STATUS_IN_PROGRESS)
+        self.client.force_login(self.forensic)
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_IN_PROGRESS,
+            'result_file': SimpleUploadedFile('report.txt', b'x'),
+        })
+        self.assertFalse(st.attachments.exists())
+
+    def test_red_team_done_also_requires_a_report_number(self):
+        t = self._ticket()
+        for subtask_type, token in (
+            (TicketSubtask.TYPE_VA_PT, 'SOC-VAPT-'),
+            (TicketSubtask.TYPE_INFRA_SEC, 'SOC-HARD-'),
+        ):
+            with self.subTest(subtask_type=subtask_type):
+                st = TicketSubtask.objects.create(
+                    ticket=t, subtask_type=subtask_type, title=subtask_type,
+                    assigned_to=self.redteam, created_by=self.manager,
+                    status=TicketSubtask.STATUS_IN_PROGRESS,
+                )
+                self.assertTrue(st.expected_report_number.startswith(token))
+                self.client.force_login(self.redteam)
+                self.client.post(reverse('update_subtask', args=[st.pk]), {
+                    'status': TicketSubtask.STATUS_DONE, 'result_notes': 'done',
+                })
+                st.refresh_from_db()
+                self.assertEqual(st.status, TicketSubtask.STATUS_IN_PROGRESS)
+                self.client.post(reverse('update_subtask', args=[st.pk]), {
+                    'status': TicketSubtask.STATUS_DONE,
+                    'report_number': st.expected_report_number,
+                })
+                st.refresh_from_db()
+                self.assertTrue(st.is_done)
+                self.assertEqual(st.report_number, st.expected_report_number)
+
+    def test_red_team_can_still_attach_a_result_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        t = self._ticket()
+        st = TicketSubtask.objects.create(
+            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='Pentest',
+            assigned_to=self.redteam, created_by=self.manager,
+            status=TicketSubtask.STATUS_IN_PROGRESS,
+        )
+        self.client.force_login(self.redteam)
+        self.client.post(reverse('update_subtask', args=[st.pk]), {
+            'status': TicketSubtask.STATUS_DONE, 'report_number': 'SOC-VAPT-1',
+            'result_file': SimpleUploadedFile('scan.txt', b'x'),
+        })
+        st.refresh_from_db()
+        self.assertTrue(st.is_done)
+        self.assertTrue(st.attachments.exists())
+
+    def test_old_rca_workspace_link_lands_on_the_ticket(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.forensic)
+        resp = self.client.get(reverse('legacy_rca_workspace', args=[st.pk]))
+        self.assertRedirects(
+            resp, f"{reverse('ticket_detail', args=[t.pk])}#my-request",
+            fetch_redirect_response=False,
+        )
+
+    def test_old_rca_workspace_link_hides_invisible_tickets(self):
+        t = self._ticket()
+        st = self._rca(t)
+        self.client.force_login(self.redteam)
+        resp = self.client.get(reverse('legacy_rca_workspace', args=[st.pk]))
+        self.assertEqual(resp.status_code, 404)
 
     # ── My Requests queue ─────────────────────────────────────────────── #
 
@@ -691,23 +944,22 @@ class ResponseTeamUiTest(TestCase):
         self.assertContains(resp, 'My RCA')
         self.assertNotContains(resp, 'Their pentest')
 
-    def test_queue_row_links_rca_to_workspace_and_others_to_ticket(self):
+    def test_queue_rows_link_every_type_to_the_ticket(self):
         t = self._ticket()
-        rca = TicketSubtask.objects.create(
+        TicketSubtask.objects.create(
             ticket=t, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
             title='My RCA', assigned_to=self.forensic, created_by=self.manager,
+            report_number='SOC-RCA-202609-0001',
         )
-        va = TicketSubtask.objects.create(
+        TicketSubtask.objects.create(
             ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT,
             title='Their pentest', assigned_to=self.redteam, created_by=self.manager,
         )
         self.client.force_login(self.manager)  # overview sees both
         resp = self.client.get(reverse('response_request_queue'))
-        self.assertContains(resp, reverse('rca_workspace', args=[rca.pk]))
-        self.assertContains(
-            resp, f"{reverse('ticket_detail', args=[t.pk])}#tasks",
-        )
-        self.assertNotContains(resp, reverse('rca_workspace', args=[va.pk]))
+        self.assertContains(resp, f"{reverse('ticket_detail', args=[t.pk])}#tasks")
+        self.assertContains(resp, 'SOC-RCA-202609-0001')
+        self.assertNotContains(resp, '/rca/')
 
     def test_queue_overview_for_soc_shows_all(self):
         t = self._ticket()

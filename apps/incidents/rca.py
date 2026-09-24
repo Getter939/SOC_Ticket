@@ -1,5 +1,11 @@
 """Root Cause Analysis report — the Forensic Analyst's structured deliverable.
 
+DORMANT (2026-09-23): the RCA workspace UI was retired — the analyst now writes
+the report outside the system and records only its number on the request
+(``TicketSubtask.report_number``). No view calls this module any more. It and the
+RCA models are kept with their tables so already-entered data survives. Remove
+them together in the release that drops those tables.
+
 A FORENSIC_RCA response request (TicketSubtask) owns at most one RCAReport. The
 report is split the way the analyst works:
 

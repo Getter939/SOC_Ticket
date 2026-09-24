@@ -73,6 +73,12 @@ class TicketSubtask(models.Model):
         related_name='ticket_subtasks', verbose_name='ผู้รับผิดชอบ',
     )
     result_notes = models.TextField(blank=True, default='', verbose_name='ผลการดำเนินการ')
+    # The number of the report the responder delivered (the RCA report is a
+    # physical document the SOC Manager collects). Mandatory when any response
+    # request is marked DONE — see SubtaskUpdateForm.
+    report_number = models.CharField(
+        max_length=40, blank=True, default='', verbose_name='เลขที่รายงาน',
+    )
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='created_subtasks', verbose_name='ผู้สร้าง',
@@ -143,6 +149,37 @@ class TicketSubtask(models.Model):
     def is_response_request(self):
         """True for a response-team request (VA/PT, InfraSec, Forensics)."""
         return self.subtask_type in self.RESPONSE_TYPES
+
+    # Report kind per response type — the token in its report number
+    # (reports.REPORT_KIND_TOKENS): SOC-RCA- / SOC-VAPT- / SOC-HARD-YYYYMM-NNNN.
+    REPORT_KINDS = {
+        TYPE_FORENSIC_RCA: 'RCA',
+        TYPE_VA_PT: 'VAPT',
+        TYPE_INFRA_SEC: 'HARD',
+    }
+
+    @property
+    def requires_report_number(self):
+        """No response request can be marked DONE without the number of the
+        report the responder delivered."""
+        return self.is_response_request
+
+    @property
+    def accepts_result_file(self):
+        """Whether the responder may attach a result file. Not for Forensics /
+        RCA: that report is a physical document the SOC Manager collects."""
+        return self.subtask_type != self.TYPE_FORENSIC_RCA
+
+    @property
+    def expected_report_number(self):
+        """The system's report number for this request (e.g. SOC-RCA-YYYYMM-NNNN
+        or SOC-VAPT-YYYYMM-NNNN), used to prefill the report-number field; empty
+        for non-response types."""
+        kind = self.REPORT_KINDS.get(self.subtask_type)
+        if not kind:
+            return ''
+        from ..reports import _report_ticket_id
+        return _report_ticket_id(self.ticket, kind=kind)
 
     @classmethod
     def response_routing(cls):

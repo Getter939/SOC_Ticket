@@ -63,6 +63,7 @@ _ANALYST_BLOCKED_STATUSES = [
     Ticket.STATUS_PENDING_MANAGER,
     Ticket.STATUS_PENDING_MGR_EVENT_REVIEW,
 ]
+_ANALYST_CLAIMED_KEY = '__T2_CLAIMED__'
 
 
 def humanize_minutes(total_minutes):
@@ -163,17 +164,36 @@ def dashboard(request):
     now   = today
     terminal = list(Ticket.TERMINAL_STATUSES)
 
-    # ── GET filters: date_range / status / severity ──────────────────────── #
+    # ── GET filters: date range / status / severity ──────────────────────── #
     # Presentation-level scoping only. Default 'all' / '' preserves the
     # original unfiltered behavior, so existing callers are unaffected.
     date_range      = request.GET.get('date_range', 'all')
+    try:
+        date_from = parse_date(request.GET.get('date_from', '').strip())
+    except ValueError:
+        date_from = None
+    try:
+        date_to = parse_date(request.GET.get('date_to', '').strip())
+    except ValueError:
+        date_to = None
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+    if date_from or date_to:
+        date_range = 'custom'
+    elif date_range not in {'today', 'week', 'month', 'all'}:
+        date_range = 'all'
     status_filter   = request.GET.get('status', '')
     severity_filter = request.GET.get('severity', '')
 
     # Org-wide by design; reachable only via the may_see_org_wide gate above.
     all_tickets = Ticket.objects.all()
 
-    if date_range == 'today':
+    if date_range == 'custom':
+        if date_from:
+            all_tickets = all_tickets.filter(created_at__date__gte=date_from)
+        if date_to:
+            all_tickets = all_tickets.filter(created_at__date__lte=date_to)
+    elif date_range == 'today':
         all_tickets = all_tickets.filter(created_at__date=now.date())
     elif date_range == 'week':
         week_start = (now - timedelta(days=now.weekday())).replace(
@@ -299,16 +319,14 @@ def dashboard(request):
         resolved_at__gte=last_month_start, resolved_at__lt=this_month_start).count()
     closed_delta = closed_this_month - closed_last_month
 
-    # Assignee heatmap — ALL analysts. Columns are the statuses the analyst
-    # must personally act on (_ANALYST_OWN_STATUSES), plus ONE aggregated
-    # "blocked" column for everything parked with the manager / system admin /
-    # Tier 2. Before 2026-07-16 this showed all 10 active statuses as if they
-    # were the analyst's load, which inflated every row with work they cannot
-    # touch — the blocking manager review made that badly misleading.
+    # Assignee heatmap — analysts with assigned active work, current Tier 2
+    # claims, or completed Tier 1/2 cases. Lifecycle status columns cover the
+    # opening analyst's own queue; blocked work stays separate, and a Tier 2
+    # claim appears as a status in the ticket owner's expanded breakdown.
     #
-    # 'load' (own-court only) is what the rows sort by: it is the actual
-    # actionable queue. 'blocked' is shown for visibility but is somebody
-    # else's turn; 'total' remains every open ticket they opened.
+    # 'load' is the own-court queue and 'blocked' is somebody else's turn;
+    # 'total' remains every active ticket assigned to the analyst, so it
+    # continues to reconcile to the dashboard's unique active-ticket count.
     assignee_heatmap_statuses = [(s, status_map[s]) for s in _ANALYST_OWN_STATUSES]
     workload_labels = {
         Ticket.STATUS_NEW: 'แจ้งใหม่',
@@ -317,27 +335,116 @@ def dashboard(request):
         Ticket.STATUS_OWNER_REMEDIATED: 'ตรวจผลแก้ไข',
     }
     workload_columns = [
-        {'label': workload_labels.get(slug, display), 'description': display}
+        {'slug': slug, 'label': workload_labels.get(slug, display), 'description': display}
         for slug, display in assignee_heatmap_statuses
     ]
+    workload_columns.append({
+        'slug': _ANALYST_CLAIMED_KEY,
+        'label': 'รับเรื่อง Tier 2',
+        'description': 'เคสในคิว Tier 2 ที่นักวิเคราะห์รับเรื่องแล้ว',
+    })
     heatmap_slugs = [s for s, _ in assignee_heatmap_statuses]
     heat = {}
+
+    def ensure_heat_row(uid, first_name, last_name, username):
+        if uid not in heat:
+            name = f'{first_name} {last_name}'.strip() or username
+            heat[uid] = {
+                'name': name, 'counts': {}, 'load': 0, 'blocked': 0,
+                'total': 0, 'finished': 0,
+            }
+        return heat[uid]
+
     for r in (active_qs.filter(assigned_to__isnull=False)
               .values('assigned_to', 'assigned_to__first_name',
                       'assigned_to__last_name', 'assigned_to__username', 'status')
               .annotate(c=Count('id'))):
         uid = r['assigned_to']
-        if uid not in heat:
-            name = (f"{r['assigned_to__first_name']} "
-                    f"{r['assigned_to__last_name']}").strip() \
-                or r['assigned_to__username']
-            heat[uid] = {'name': name, 'counts': {}, 'load': 0, 'blocked': 0, 'total': 0}
-        heat[uid]['counts'][r['status']] = r['c']
+        row = ensure_heat_row(
+            uid, r['assigned_to__first_name'], r['assigned_to__last_name'],
+            r['assigned_to__username'],
+        )
+        row['counts'][r['status']] = r['c']
         if r['status'] in _ANALYST_BLOCKED_STATUSES:
-            heat[uid]['blocked'] += r['c']
+            row['blocked'] += r['c']
         else:
-            heat[uid]['load'] += r['c']
-        heat[uid]['total'] += r['c']
+            row['load'] += r['c']
+        row['total'] += r['c']
+
+    # A Tier 2 claim is tracked outside Ticket.status. Show the claim as a
+    # breakdown status in the ticket owner's row; the lifecycle state remains
+    # blocked work, because the owner is waiting for Tier 2 to act.
+    claimed_rows = (
+        active_qs.filter(
+            status__in=Ticket.TIER2_QUEUE_STATUSES,
+            t2_claimed_by__isnull=False,
+            assigned_to__isnull=False,
+        )
+        .values('assigned_to', 'assigned_to__first_name',
+                'assigned_to__last_name', 'assigned_to__username')
+        .annotate(c=Count('id'))
+    )
+    for r in claimed_rows:
+        row = ensure_heat_row(
+            r['assigned_to'], r['assigned_to__first_name'],
+            r['assigned_to__last_name'], r['assigned_to__username'],
+        )
+        row['counts'][_ANALYST_CLAIMED_KEY] = r['c']
+
+    # Attribute a resolved case to its Tier 2 verifier when available (the
+    # manager may perform the final approval), otherwise use the actor who
+    # entered the terminal state. Tickets completed by either Tier 1 or Tier 2
+    # therefore appear in the same Finished column under the analyst's row.
+    finished_tickets = all_tickets.filter(status__in=Ticket.RESOLVED_STATUSES)
+    finished_logs = (
+        TicketLog.objects
+        .filter(
+            ticket__in=finished_tickets,
+            status_at_time__in=Ticket.RESOLVED_STATUSES,
+        )
+        .filter(Q(author__isnull=False) | Q(ticket__verified_by__isnull=False))
+        .select_related(
+            'author__profile', 'ticket__verified_by__profile',
+        )
+    )
+
+    def is_tier_analyst(user):
+        profile = getattr(user, 'profile', None) if user else None
+        return bool(profile and (profile.is_tier1 or profile.is_tier2))
+
+    finished_seen = set()
+    for log in finished_logs:
+        analyst = log.ticket.verified_by or log.author
+        if not is_tier_analyst(analyst):
+            continue
+        ticket_actor_key = (log.ticket_id, analyst.pk)
+        if ticket_actor_key in finished_seen:
+            continue
+        finished_seen.add(ticket_actor_key)
+        row = ensure_heat_row(
+            analyst.pk, analyst.first_name, analyst.last_name, analyst.username,
+        )
+        row['finished'] += 1
+
+    # Imported or directly seeded resolved tickets may not have a terminal
+    # TicketLog. Use the recorded verifier/approver first, then the case owner
+    # as the available attribution for those rows.
+    for ticket in (finished_tickets.exclude(
+            logs__status_at_time__in=Ticket.RESOLVED_STATUSES)
+            .select_related(
+                'verified_by__profile', 'approved_by__profile',
+                'assigned_to__profile', 'created_by__profile',
+            )):
+        analyst = next((candidate for candidate in (
+            ticket.verified_by, ticket.approved_by,
+            ticket.assigned_to, ticket.created_by,
+        ) if is_tier_analyst(candidate)), None)
+        if analyst is None:
+            continue
+        row = ensure_heat_row(
+            analyst.pk, analyst.first_name, analyst.last_name, analyst.username,
+        )
+        row['finished'] += 1
     # Busiest ACTIONABLE queue first — a row full of blocked tickets is not a
     # workload problem, so 'load' (not 'total') sets the order.
     assignee_heatmap = sorted(
@@ -351,8 +458,12 @@ def dashboard(request):
         a['cells'] = [a['counts'].get(s, 0) for s in heatmap_slugs]
         a['breakdown'] = [
             {'label': col['label'], 'count': cell}
-            for col, cell in zip(workload_columns, a['cells'])
+            for col, cell in zip(workload_columns[:-1], a['cells'])
         ]
+        a['breakdown'].append({
+            'label': workload_columns[-1]['label'],
+            'count': a['counts'].get(_ANALYST_CLAIMED_KEY, 0),
+        })
         a['load_pct'] = round(a['load'] / max_load * 100) if max_load else 0
 
     unassigned_active = active_qs.filter(assigned_to__isnull=True).count()
@@ -384,25 +495,38 @@ def dashboard(request):
                  'count': hour_counts.get(h, 0)})
             daily_trend_labels.append(f"{h:02d}:00")
     else:
-        ndays = 7 if date_range == 'week' else 30
-        start_date = today_local - timedelta(days=ndays - 1)
+        if date_range == 'custom':
+            end_date = date_to or today_local
+            start_date = date_from or (end_date - timedelta(days=29))
+            if start_date > end_date:
+                end_date = start_date
+        else:
+            ndays = 7 if date_range == 'week' else 30
+            start_date = today_local - timedelta(days=ndays - 1)
+            end_date = today_local
         rows = (
-            all_tickets.filter(created_at__date__gte=start_date)
+            all_tickets.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date,
+            )
             .annotate(d=TruncDate('created_at'))
             .values('d').annotate(c=Count('id'))
         )
         day_counts = {r['d']: r['c'] for r in rows}
-        for i in range(ndays):
-            day = start_date + timedelta(days=i)
+        day = start_date
+        while day <= end_date:
             daily_trend_filtered.append(
                 {'date': day.strftime('%Y-%m-%d'), 'count': day_counts.get(day, 0)})
             daily_trend_labels.append(f"{day.day:02d} {MONTH_ABBR[day.month]}")
+            day += timedelta(days=1)
 
     daily_trend_data = [d['count'] for d in daily_trend_filtered]
     if date_range == 'today':
         volume_title = 'Hourly Case Volume (วันนี้) — ปริมาณคดีรายชั่วโมง'
     elif date_range == 'week':
         volume_title = 'Daily Case Volume (7 วัน) — ปริมาณคดีรายวัน'
+    elif date_range == 'custom':
+        volume_title = 'Daily Case Volume (ช่วงวันที่เลือก) — ปริมาณคดีรายวัน'
     else:
         volume_title = 'Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน'
     volume_window = f"{daily_trend_filtered[0]['date']} – {daily_trend_filtered[-1]['date']}"
@@ -434,6 +558,8 @@ def dashboard(request):
         'severity_choices':    Ticket.SEVERITY_CHOICES,
         'filters': {
             'date_range': date_range,
+            'date_from': date_from.isoformat() if date_from else '',
+            'date_to': date_to.isoformat() if date_to else '',
             'status':     status_filter,
             'severity':   severity_filter,
         },

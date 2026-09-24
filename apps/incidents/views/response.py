@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from ..forms import (
@@ -16,6 +17,7 @@ from ..models import (
     TicketSubtask, validate_attachment,
 )
 from ..policies import (
+    can_accept_subtask as _can_accept_subtask,
     can_upload_subtask_result as _can_upload_subtask_result,
     can_update_subtask as _can_update_subtask,
     response_request_updates_frozen as _response_request_updates_frozen,
@@ -102,15 +104,21 @@ def update_subtask(request, subtask_id):
         # left no audit at all, so a forensic analyst's findings could be
         # replaced silently. Capture what was there first.
         previous_notes = subtask.result_notes
+        previous_report_number = subtask.report_number
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
-            # Optional deliverable file (e.g. forensic report / scan output),
-            # linked to both the subtask and its ticket so it serves through the
-            # hardened download_attachment path. Gated more tightly than the
-            # notes/status update above: can_update lets any SOC member edit a
-            # request, but only the assignee, a SOC manager, or a superuser may
-            # put a file on the ticket through this route.
-            upload = request.FILES.get('result_file')
+            # Optional deliverable file (e.g. VA/PT scan output), linked to both
+            # the subtask and its ticket so it serves through the hardened
+            # download_attachment path. Gated more tightly than the notes/status
+            # update above: can_update lets any SOC member edit a request, but
+            # only the assignee, a SOC manager, or a superuser may put a file on
+            # the ticket through this route. A Forensics / RCA request takes no
+            # file at all — its report is a physical document the SOC Manager
+            # collects, recorded here only by its report number.
+            upload = (
+                request.FILES.get('result_file') if subtask.accepts_result_file
+                else None
+            )
             result_upload = None
             if upload is not None:
                 if not _can_upload_subtask_result(subtask, request.user):
@@ -134,6 +142,7 @@ def update_subtask(request, subtask_id):
                     previous_status=previous_status,
                     previous_notes=previous_notes,
                     was_done=was_done,
+                    previous_report_number=previous_report_number,
                     result_upload=result_upload,
                     result_description=request.POST.get('result_file_desc', '').strip(),
                 ).subtask
@@ -143,8 +152,85 @@ def update_subtask(request, subtask_id):
 
             messages.success(request, f'อัปเดตงานย่อย "{subtask.title}" เรียบร้อยแล้ว')
         else:
-            messages.error(request, 'ไม่สามารถอัปเดตงานย่อยได้ — กรุณาตรวจสอบข้อมูล')
+            errors = form.errors.get('report_number')
+            messages.error(
+                request,
+                errors[0] if errors else 'ไม่สามารถอัปเดตงานย่อยได้ — กรุณาตรวจสอบข้อมูล',
+            )
     return redirect('ticket_detail', pk=ticket.pk)
+
+
+def _request_page_url(subtask, user):
+    """Where a request link lands: the assignee's own "งานของคุณ" card at the
+    top of the ticket, or the request list for everyone else."""
+    anchor = 'my-request' if subtask.assigned_to_id == user.pk else 'tasks'
+    return f"{reverse('ticket_detail', args=[subtask.ticket_id])}#{anchor}"
+
+
+@login_required
+@require_POST
+def accept_subtask(request, subtask_id):
+    """รับงาน — the assignee acknowledges a response request (OPEN → IN_PROGRESS).
+
+    One click instead of picking a status in the update form, so the SOC Manager
+    can see at a glance that the request was seen and started. Goes through
+    save_subtask_update so the status history and status_changed_at are written
+    exactly as for any other status change. Sends no email.
+    """
+    subtask = get_object_or_404(TicketSubtask, pk=subtask_id)
+    ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=subtask.ticket_id)
+    back = request.POST.get('next', '')
+    if not url_has_allowed_host_and_scheme(
+        back, allowed_hosts={request.get_host()}, require_https=request.is_secure(),
+    ):
+        back = f"{reverse('ticket_detail', args=[ticket.pk])}#my-request"
+
+    # Same freeze-then-permission order as update_subtask.
+    if _response_request_updates_frozen(subtask):
+        messages.error(request, 'รายการนี้ปิดหรือยกเลิกแล้ว ไม่สามารถรับงานได้')
+        return redirect(back)
+    if not _can_accept_subtask(subtask, request.user):
+        messages.error(request, 'รับงานได้เฉพาะผู้รับผิดชอบ และเฉพาะคำขอที่ยังเปิดอยู่เท่านั้น')
+        return redirect(back)
+
+    form = SubtaskUpdateForm(
+        {
+            'status': TicketSubtask.STATUS_IN_PROGRESS,
+            'result_notes': subtask.result_notes,
+            'report_number': subtask.report_number,
+        },
+        instance=subtask,
+    )
+    if not form.is_valid():  # pragma: no cover — IN_PROGRESS never fails validation
+        messages.error(request, 'ไม่สามารถรับงานได้ — กรุณาลองใหม่')
+        return redirect(back)
+    try:
+        save_subtask_update(
+            ticket=ticket,
+            actor=request.user,
+            update_form=form,
+            previous_status=TicketSubtask.STATUS_OPEN,
+            previous_notes=subtask.result_notes,
+            was_done=False,
+            previous_report_number=subtask.report_number,
+        )
+    except ValidationError as exc:
+        messages.error(request, ' '.join(exc.messages))
+        return redirect(back)
+    messages.success(request, f'รับงาน "{subtask.title}" แล้ว — สถานะ: กำลังดำเนินการ')
+    return redirect(back)
+
+
+@login_required
+def legacy_rca_workspace(request, subtask_id):
+    """The RCA workspace was retired (the report is now written outside the
+    system); an old emailed link lands on the request's ticket instead."""
+    subtask = get_object_or_404(
+        TicketSubtask,
+        pk=subtask_id,
+        ticket__in=Ticket.objects.visible_to(request.user),
+    )
+    return redirect(_request_page_url(subtask, request.user))
 
 
 @login_required
@@ -183,15 +269,11 @@ def response_request_queue(request):
 
     requests = list(requests_qs)
     open_count = sum(1 for s in requests if s.status not in TicketSubtask.TERMINAL_STATUSES)
-    # Resolve each row's destination here rather than branching on the subtask
-    # type string in the template: an RCA request opens its workspace, every
-    # other response type opens the ticket's task list.
+    # Every request type is worked on its ticket; the RCA report itself is
+    # written outside the system.
     for req in requests:
-        req.is_rca_request = req.subtask_type == TicketSubtask.TYPE_FORENSIC_RCA
-        req.work_url = (
-            reverse('rca_workspace', args=[req.pk]) if req.is_rca_request
-            else f"{reverse('ticket_detail', args=[req.ticket_id])}#tasks"
-        )
+        req.work_url = _request_page_url(req, request.user)
+        req.can_accept = _can_accept_subtask(req, request.user)
 
     return render(request, 'incidents/response_request_queue.html', {
         'requests': requests,

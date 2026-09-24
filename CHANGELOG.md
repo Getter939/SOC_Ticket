@@ -9,6 +9,82 @@ release (tag) dates.
 ## [Unreleased]
 
 ### Changed
+- **Forensic Analyst's work is simpler: the RCA report is no longer written in the
+  system.** The RCA workspace (Section 1 prefill, assets, timeline + CSV import, root
+  causes, IOC pull/push, recommendations, DOCX draft) is retired. The analyst now
+  finds the request in *งานตอบสนอง*, clicks **รับงาน**, writes the report outside
+  the system, and marks the request **เสร็จสิ้น** from the ticket's request panel.
+  This is the same panel VA/PT and InfraSec requests already use.
+  - Marking **any** response request **เสร็จสิ้น** now **requires the number of
+    the report delivered**: Forensics / RCA and the Red Team's VA/PT and InfraSec.
+    The field is prefilled with the case's number for that report kind
+    (`SOC-RCA-…`, `SOC-VAPT-…`, `SOC-HARD-…` YYYYMM-NNNN) and can be edited. Notes
+    are optional. An RCA request accepts no file, because that report is the
+    physical document the SOC Manager collects. VA/PT and InfraSec keep their
+    optional result file. The number is audited in the history, shown on the request
+    and in the queue, and included in the completion email to SOC Managers (new
+    `{report_number}` placeholder).
+  - Old `/incidents/rca/<id>/` links from emails already sent open the request on
+    its ticket.
+  - The RCA tables and any data already in them are **kept** (no migration drops
+    them). Only the screens are gone.
+
+### Added
+- **"งานของคุณ" card for the response-team assignee.** A Forensic Analyst or Red
+  Team Manager used to open a ticket, find *ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ*
+  in the action column, and have to scroll past every section to reach their
+  request at the bottom. Their own request is now pinned at the top of the action
+  column: beside the case on desktop, first on mobile. The card has a
+  รับงาน → ดำเนินการ → ส่งงาน step tracker, the manager's brief, and the รับงาน
+  button, then the completion form, open rather than collapsed. Every type asks for
+  the report number (required, with a browser check) and optional notes. VA/PT and
+  InfraSec also offer an optional file. **ส่งงาน · เสร็จสิ้น** asks for confirmation;
+  **บันทึกไว้ก่อน** saves without closing. Once done, the card shows the delivered
+  report number. The queue's *เปิดคำขอ*, the new-request email, and old RCA links
+  now open this card (`#my-request`). The SOC Managers' completion email still opens
+  the request list. In the request list, the assignee's own row is highlighted and
+  links to the card instead of repeating the form.
+- **Ticket page sections are visually distinct.** Every section card has its own
+  accent rule, an icon badge and a tinted header band, so the long page no longer
+  reads as one continuous white column.
+- **รับงาน (accept) button** for every response request (Forensics / RCA, VA/PT,
+  InfraSec). It appears on the request panel and in the *งานตอบสนอง* queue. One
+  click by the assignee moves the request from เปิด to กำลังดำเนินการ, so the SOC
+  Manager can see it has been picked up. Migration `incidents 0087` adds
+  `TicketSubtask.report_number`.
+
+## [v1.7.5] — 2026-09-23
+
+### Added
+- **Every ticket list now leads with what the case is called (ชื่อเรื่อง).** The
+  four ticket tables — *Ticket ที่กำลังดำเนินการ*, *รายการรอตรวจโดยผู้จัดการ SOC*,
+  *คิวงาน Tier 2* and *ประวัติ Ticket* — used to identify a case by its host
+  (*ระบบ / บริการ*) or by its threat sub-category; none of them showed the name an
+  analyst had actually given it. They now share one **ชื่อเรื่อง** column, and the
+  host drops to the small secondary line beneath it. The ticket detail page reads
+  name-first for the same reason.
+  - The column prints the new `Ticket.display_name`: the analyst's **ชื่อเรื่อง**
+    (`incident_name`) when there is one, otherwise the **หมวดหมู่ย่อย** label. That
+    fallback is why no row is ever blank — `incident_name` is still optional, and
+    most existing tickets have none.
+  - *Ticket ที่กำลังดำเนินการ* is now searchable by ชื่อเรื่อง, and gained a
+    **ความรุนแรง** sort option (ranked Critical → Unknown, not alphabetically).
+
+### Changed
+- **Two field labels renamed.** *เรื่องที่แจ้ง* → **หมวดหมู่ย่อย**
+  (`detailed_issue2`, the threat sub-category dropdown) and *ชื่อเหตุการณ์* →
+  **ชื่อเรื่อง** (`incident_name`), on the create form, the Project Incident form,
+  the ticket editor and the Tier 2 review card. Label-only: no field changed
+  meaning, and the incident/event report keeps its own row wording
+  (*1.5 ชื่อ incident/event*, *1.4 ชื่อ Event*) untouched.
+- **One visual language across the four ticket tables.** *คิวงาน Tier 2* used to
+  flood an emergency row in solid red while the other lists drew a quiet accent
+  stripe; it now uses the same stripe and the same outlined **ฉุกเฉิน** flag.
+  Relative times read alike, *ประวัติ Ticket* gained the exact-timestamp tooltip
+  the other pages already had, and the Project Incident pill reads *Project · …*
+  everywhere. The shared table styling and the Event/Incident and Project pills
+  moved into `base.html` and two partials, so the next change lands once instead
+  of three times.
 - **The Tier 2 queue (คิวงาน Tier 2) moved from `/wazuh/escalation_queue/` to
   `/incidents/tier2-queue/`.** It had lived in `apps/wazuh_ingest` since June 2026,
   when escalation was still an alert-level concept; the page has queried nothing but
@@ -16,17 +92,25 @@ release (tag) dates.
   template `templates/incidents/tier2_queue.html`. Nothing changes for analysts: the
   page, its filters and the sidebar link are identical, and the old URL redirects
   permanently (query string preserved) so existing bookmarks still work.
-- **Tier 2 now routes a confirmed Incident straight to the SOC Manager — the
-  "รอ Tier 1 ทบทวน" (`T1_REVIEW`) step is gone.** Tier 2's review is a single
-  decision: *Event* → close or monitor; *Incident* → choose the handling lane
-  (System Admin + who, or Owner) → SOC Manager review. Cases no longer wait on
-  Tier 1 after escalation. The lane is now required on every hand-off to the
-  manager, so a case can never arrive with nothing to forward to (the conclude-
-  monitoring → Incident form carries the same lane picker).
-- **SOC Manager "return for completion" goes back to whoever routed the case** —
-  Tier 2 if it was ever escalated, otherwise the creator's preparation (they fix it
-  and press *Submit* again; no repeat owner email, and direct self-cancel is no
-  longer offered on a reviewed ticket). The button says which.
+
+### Fixed
+- **"ล้างตัวกรองทั้งหมด" on the manager queue no longer navigates off it.** Both
+  the clear-filters link and the filtered empty state pointed at
+  *Ticket ที่กำลังดำเนินการ*, so a SOC Manager clearing a filter silently left
+  their own queue.
+- **The Tier 2 queue now reads tickets through `Ticket.objects.visible_to()`**
+  like every other list, instead of querying the table directly. No one's view
+  changes — the page is already gated to Tier 2, who see every ticket either way
+  — it just removes the one list that bypassed the single authoritative
+  visibility rule.
+
+> Migrations `incidents/0085` and `incidents/0086` are `AlterField` on
+> `detailed_issue2` / `incident_name` carrying **nothing but the new
+> `verbose_name`** — no column, constraint or data change, and reversible.
+> `device_name` is untouched, so the DOCX/PDF reports are byte-for-byte
+> unaffected.
+
+## [v1.7.4] — 2026-09-22
 
 ### Added
 - **Analyst-chosen importance (ระดับความสำคัญ) on the ticket.** A new mandatory
@@ -52,6 +136,32 @@ release (tag) dates.
   choice included), plus a banner on the ticket. Opening the ticket clears it; it
   is not counted in the sidebar badge.
 
+### Changed
+- **Tier 2 now routes a confirmed Incident straight to the SOC Manager — the
+  "รอ Tier 1 ทบทวน" (`T1_REVIEW`) step is gone.** Tier 2's review is a single
+  decision: *Event* → close or monitor; *Incident* → choose the handling lane
+  (System Admin + who, or Owner) → SOC Manager review. Cases no longer wait on
+  Tier 1 after escalation. The lane is now required on every hand-off to the
+  manager, so a case can never arrive with nothing to forward to (the conclude-
+  monitoring → Incident form carries the same lane picker).
+- **SOC Manager "return for completion" goes back to whoever routed the case** —
+  Tier 2 if it was ever escalated, otherwise the creator's preparation (they fix it
+  and press *Submit* again; no repeat owner email, and direct self-cancel is no
+  longer offered on a reviewed ticket). The button says which.
+
+> Migration `incidents/0084` adds `Ticket.importance` (nullable/blank; the field
+> is optional at the DB level so existing rows stay valid and read through the
+> `report_importance` fallback — the forms are what make it mandatory). AddField
+> only; reversible.
+>
+> Migration `incidents/0083` adds `first_submitted_at` / `t2_changed_at` /
+> `creator_seen_at` and moves any ticket still in `T1_REVIEW` back to Tier 2
+> (`ESCALATED_T2`) with a log note — one-way; old log rows keep the code and
+> render as "ส่งกลับ Tier 1 (legacy)".
+
+## [v1.7.3] — 2026-09-22
+
+### Added
 - **Monitoring re-anchored to the Event classification, fully Tier‑2‑owned.**
   Monitoring is no longer a *"decide later"* state entered before Event/Incident is
   chosen — it is now a **watch phase of an Event**. Tier 2 starts it only as an
@@ -66,25 +176,59 @@ release (tag) dates.
   in one step. This supersedes the 2026‑09‑18 Event‑downgrade‑via‑Monitoring gate
   (a monitored case is now always an Event, so that bypass no longer applies).
 
+- **สรุปเหตุการณ์ — a short summary distinct from the full write-up.** Report row
+  **1.14 รายละเอียด** used to reprint Section 2 verbatim because there was no
+  separate summary field. Tickets and Project Incidents now carry an optional
+  `event_summary`, and the row falls back to the full description when it is
+  blank, so nothing changes for a ticket that does not use it.
+
+### Changed
+- **Thai text in the exported DOCX now honours the intended sizes.**
+  `python-docx` writes only `w:sz`, so Word fell back to its stock 11pt
+  complex-script default for Thai even inside a 16pt body or a 22pt title; the
+  builders now write `w:szCs` alongside it (the `Normal` style included, which
+  evidence captions inherit). The v2 report template was rebuilt, and the report
+  preview keeps the whole appendix — heading, intro, clause and table — together
+  on a fresh page.
+
 ### Removed
 - **Tier 1's "recommend monitoring" control.** The advisory `propose_monitoring`
   checkbox (create form and submit‑preparation card) and its backing
   `Ticket.monitoring_proposed` field are gone — deciding to monitor is entirely
   Tier 2's, so the recommendation no longer exists.
 
-> Migration `incidents/0084` adds `Ticket.importance` (nullable/blank; the field
-> is optional at the DB level so existing rows stay valid and read through the
-> `report_importance` fallback — the forms are what make it mandatory). AddField
-> only; reversible.
->
-> Migration `incidents/0083` adds `first_submitted_at` / `t2_changed_at` /
-> `creator_seen_at` and moves any ticket still in `T1_REVIEW` back to Tier 2
-> (`ESCALATED_T2`) with a log note — one-way; old log rows keep the code and
-> render as "ส่งกลับ Tier 1 (legacy)".
+> Migration `incidents/0081` adds the optional `Ticket.event_summary` (AddField
+> only; reversible).
 >
 > Migration `incidents/0082` drops `monitoring_proposed` (reversible; the field was
 > advisory‑only and carried no operational data). Rollback follows the deploy
 > runbook's §4a (previous‑tag checkout).
+
+## [v1.7.2] — 2026-09-18
+
+_Also tagged `v1.7.1.1` — the two tags point at the same commit._
+
+### Changed
+- **Documentation brought up to the shipped system.** A new end-to-end workflow
+  reference (`docs/architecture/soc-end-to-end-workflow.md` plus a 12-page
+  drawio), a refreshed `ticket-lifecycle-states.md`, and all eight Thai role
+  manuals rebuilt from their `_build` sources — the v1.7.1 Thai patch had renamed
+  almost every menu the manuals quoted.
+- The **Executive** role now sees the same navigation section as SOC roles
+  (`base.html`); it was excluded by an `is_soc`-only condition.
+
+## [v1.7.1] — 2026-09-17
+
+### Changed
+- **The interface is Thai throughout.** Remaining English UI strings across the
+  templates, the Django admin, model `verbose_name`s and choice labels were
+  translated, keeping established English terms (Event, Incident, Ticket, OLA,
+  Tier 1/2, SIEM, IOC) as they were. Display-label changes only — no field, value
+  or behaviour changed.
+
+> Migrations `accounts/0013`, `incidents/0080` and `wazuh_ingest/0008` are
+> `AlterField`s carrying nothing but new `verbose_name`/`choices` labels — no
+> column or data change, and reversible.
 
 ## [v1.7.0] — 2026-09-17
 

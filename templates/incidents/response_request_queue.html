@@ -46,7 +46,8 @@
                         <th>ผู้ร้องขอ</th>
                         <th>วันที่</th>
                         <th>สถานะ</th>
-                        <th style="width:100px;"></th>
+                        <th>เลขที่รายงาน</th>
+                        <th style="width:170px;"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -59,10 +60,19 @@
                         <td>{% if req.created_by %}{{ req.created_by.get_full_name|default:req.created_by.username }}{% else %}-{% endif %}</td>
                         <td>{{ req.created_at|date:"d/m/Y" }}</td>
                         <td><span class="req-status {% if req.is_done %}bg-success text-white{% else %}bg-light text-dark border{% endif %}">{{ req.get_status_display }}</span></td>
-                        <td class="cell-actions"><a href="{{ req.work_url }}" class="btn btn-sm {% if req.is_rca_request %}btn-warning{% else %}btn-outline-secondary{% endif %}">{% if req.is_rca_request %}เปิด RCA{% else %}เปิดคำขอ{% endif %}</a></td>
+                        <td class="cell-technical">{{ req.report_number|default:"-" }}</td>
+                        <td class="cell-actions"><div class="d-flex gap-1 justify-content-end">
+                            {% if req.can_accept %}
+                            <form method="post" action="{% url 'accept_subtask' req.pk %}">{% csrf_token %}
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <button type="submit" class="btn btn-sm btn-success text-nowrap"><i class="bi bi-hand-thumbs-up me-1" aria-hidden="true"></i>รับงาน</button>
+                            </form>
+                            {% endif %}
+                            <a href="{{ req.work_url }}" class="btn btn-sm btn-outline-secondary text-nowrap">เปิดคำขอ</a>
+                        </div></td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="{% if is_overview %}8{% else %}7{% endif %}">{% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่ตรงกับสถานะที่เลือก' %}</td></tr>
+                    <tr><td colspan="{% if is_overview %}9{% else %}8{% endif %}">{% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่ตรงกับสถานะที่เลือก' %}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

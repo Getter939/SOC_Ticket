@@ -69,6 +69,7 @@ from apps.incidents.notifications import (
     notify_response_request_created,
     notify_response_request_completed,
 )
+from apps.incidents.selectors import get_closed_event_signoff
 from apps.incidents.views import (
     _can_create_ticket_from_triage, _can_delete_ticket_attachment,
     _can_upload_ticket_attachment,
@@ -1666,6 +1667,49 @@ class Tier2EscalationTest(TestCase):
 
         t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirmed benign')
         self.assertEqual(t.status, Ticket.STATUS_CLOSED_EVENT)
+
+    def test_event_signoff_direct_close_names_tier2(self):
+        """verified_by/approved_by stay blank on an Event close, so the closure
+        card reads the sign-off from the timeline instead."""
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_EVENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, self.t2, 'confirmed benign')
+        # Post-close rows (evidence, comments) share the CLOSED_EVENT status.
+        TicketLog.objects.create(
+            ticket=t, note='late note', status_at_time=t.status, author=self.t1)
+
+        signoff = get_closed_event_signoff(t)
+        self.assertEqual(signoff['reviewer'], self.t2)
+        self.assertIsNotNone(signoff['reviewed_at'])
+        self.assertIsNone(signoff['approver'])
+        self.assertTrue(signoff['direct_close'])
+        self.assertEqual(signoff['closed_at'], t.closed_at)
+
+        self.client.force_login(self.t2)
+        resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
+        self.assertContains(resp, 'Tier 2 ปิดโดยตรง')
+
+    def test_event_signoff_after_manager_review_names_both(self):
+        manager = _make_user('t2t_mgr_sign', UserProfile.ROLE_SOC_MANAGER)
+        t = _make_ticket(
+            created_by=self.t1, classification=Ticket.CLASSIFICATION_INCIDENT,
+            status=Ticket.STATUS_NEW,
+        )
+        t.transition_to(Ticket.STATUS_ESCALATED_T2, self.t1, 'escalate')
+        t.classification = Ticket.CLASSIFICATION_EVENT
+        t.transition_to(Ticket.STATUS_PENDING_MGR_EVENT_REVIEW, self.t2, 'benign')
+        # A comment while it waits must not be mistaken for the proposal.
+        TicketLog.objects.create(
+            ticket=t, note='checking', status_at_time=t.status, author=manager)
+        t.transition_to(Ticket.STATUS_CLOSED_EVENT, manager, 'agreed, benign')
+
+        signoff = get_closed_event_signoff(t)
+        self.assertEqual(signoff['reviewer'], self.t2)
+        self.assertEqual(signoff['approver'], manager)
+        self.assertFalse(signoff['direct_close'])
 
     def test_t2_cannot_assign_to_admin(self):
         """No ESCALATED_T2 → AWAITING_CONTAINMENT edge exists at all."""
@@ -3539,6 +3583,7 @@ class AttachmentWorkflowPermissionTest(TestCase):
             data={
                 'status': TicketSubtask.STATUS_DONE,
                 'result_notes': 'Report attached',
+                'report_number': 'SOC-VAPT-202609-0001',
                 'result_file': SimpleUploadedFile(filename, b'findings'),
             },
         )
@@ -3565,19 +3610,21 @@ class AttachmentWorkflowPermissionTest(TestCase):
         # The documented exception: for a response request the court that
         # matters is the REQUEST, not the ticket's workflow status. The
         # ticket-level rule for PENDING_MGR_TRIAGE answers is_soc_manager,
-        # which would wrongly refuse the assigned responder.
-        forensic = _make_forensic('attachment_forensic')
+        # which would wrongly refuse the assigned responder. (VA/PT, because a
+        # Forensics / RCA request takes no file at all — see
+        # ResponseTeamUiTest.test_rca_update_ignores_an_uploaded_file.)
+        redteam = _make_redteam_manager('attachment_redteam')
         ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
         subtask = TicketSubtask.objects.create(
-            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
-            title='RCA', assigned_to=forensic,
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
+            title='Pentest', assigned_to=redteam,
         )
-        self.assertFalse(_can_upload_ticket_attachment(ticket, forensic))
+        self.assertFalse(_can_upload_ticket_attachment(ticket, redteam))
 
-        self._update_subtask(forensic, subtask, filename='rca.log')
+        self._update_subtask(redteam, subtask, filename='scan.log')
 
         self.assertTrue(TicketAttachment.objects.filter(
-            ticket=ticket, subtask=subtask, uploaded_by=forensic).exists())
+            ticket=ticket, subtask=subtask, uploaded_by=redteam).exists())
 
     def test_soc_manager_can_attach_a_result(self):
         mgr = _make_user('attachment_sub_mgr', UserProfile.ROLE_SOC_MANAGER)
@@ -4329,6 +4376,7 @@ class ProjectIncidentFanOutTest(TestCase):
     def test_event_route_is_visible_and_does_not_require_an_assignment(self):
         form = ProjectIncidentTargetForm(data={
             'device_name': 'Benign host',
+            'ip_address': '192.0.2.30',
             't1_route': ProjectIncidentTargetForm.ROUTE_EVENT,
         })
 
@@ -4447,6 +4495,10 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertEqual(second.status, Ticket.STATUS_AWAITING_OWNER)
         self.assertTrue(first.is_emergency)
         self.assertTrue(second.is_emergency)
+        # The analyst's shared pick is kept; Emergency forces สำคัญมาก on the report.
+        for member in (first, second):
+            self.assertEqual(member.importance, Ticket.IMPORTANCE_IMPORTANT)
+            self.assertEqual(member.report_importance, Ticket.IMPORTANCE_CRITICAL)
         self.assertTrue(ProjectIncidentLog.objects.filter(project=project).exists())
         self.assertEqual(ProjectIncidentAttachment.objects.filter(project=project).count(), 1)
 
@@ -4498,6 +4550,15 @@ class ProjectIncidentFanOutTest(TestCase):
         self.assertEqual(resp.status_code, 200)  # re-rendered with errors
         self.assertFalse(ProjectIncident.objects.exists())
         self.assertFalse(Ticket.objects.exists())
+
+    def test_target_without_ip_address_is_rejected(self):
+        self.client.login(username='pi_t1', password='testpass123')
+        data = _pi_post_data(self.admin_a, self.admin_b)
+        data['target-1-ip_address'] = ''
+        resp = self.client.post(reverse('create_project_incident'), data)
+        self.assertEqual(resp.status_code, 200)  # re-rendered with errors
+        self.assertIn('ip_address', resp.context['target_formset'].forms[1].errors)
+        self.assertFalse(ProjectIncident.objects.exists())
 
     def test_non_tier1_cannot_open_fanout_page(self):
         # TEMP: Tier 2 is temporarily allowed to open Project Incidents (revert
@@ -5449,22 +5510,20 @@ class ResponseRequestNotificationTest(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ['mgr@example.com'])
 
-    def test_rca_created_email_links_to_the_workspace(self):
+    def test_rca_created_email_links_to_the_ticket_tasks(self):
         st = self._request(self.forensic)
         notify_response_request_created(st)
         body = mail.outbox[0].body
-        self.assertIn(reverse('rca_workspace', args=[st.pk]), body)
-        self.assertNotIn(reverse('ticket_detail', args=[self.ticket.pk]), body)
+        self.assertIn(f"{reverse('ticket_detail', args=[self.ticket.pk])}#my-request", body)
+        self.assertNotIn('/rca/', body)
 
-    def test_non_rca_created_email_links_to_the_ticket(self):
-        st = TicketSubtask.objects.create(
-            ticket=self.ticket, subtask_type=TicketSubtask.TYPE_VA_PT,
-            title='Pentest', assigned_to=self.forensic, created_by=self.mgr,
-        )
-        notify_response_request_created(st)
-        body = mail.outbox[0].body
-        self.assertIn(reverse('ticket_detail', args=[self.ticket.pk]), body)
-        self.assertNotIn(reverse('rca_workspace', args=[st.pk]), body)
+    def test_completed_email_carries_the_report_number(self):
+        st = self._request(self.forensic, status=TicketSubtask.STATUS_DONE,
+                           report_number='SOC-RCA-202609-0015')
+        notify_response_request_completed(st)
+        self.assertIn('SOC-RCA-202609-0015', mail.outbox[0].body)
+        # Managers land on the request list, not the responder's card.
+        self.assertIn(f"{reverse('ticket_detail', args=[self.ticket.pk])}#tasks", mail.outbox[0].body)
 
     def test_custom_template_using_only_ticket_url_still_sends(self):
         from apps.incidents.models import NotificationTemplate
@@ -7245,6 +7304,7 @@ class TicketFieldHistoryTest(TestCase):
         self.client.post(reverse('update_subtask', args=[redteam_task.pk]), {
             'status': TicketSubtask.STATUS_DONE,
             'result_notes': 'Assessment delivered',
+            'report_number': 'SOC-VAPT-202609-0001',
         })
         redteam_task.refresh_from_db()
         redteam_status_change = ticket.field_changes.get(
