@@ -65,7 +65,7 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
 
 - Cover version string and date are set in `common.js` (`buildManual`, cover block)
   and inline in `build-tier1.js` — **two places, keep them in step**. Currently
-  `v1.7.1` / 18 Sep 2026 (manual edition 1.3). Before this pass the two had drifted
+  `v1.7.6` / 24 Sep 2026 (manual edition 1.4). Before the v1.7.1 pass the two had drifted
   apart (1.1 vs 1.2); if you ever see them disagree again, that is the cause.
 - Content is written against
   [`docs/architecture/ticket-lifecycle-states.md`](../../../architecture/ticket-lifecycle-states.md),

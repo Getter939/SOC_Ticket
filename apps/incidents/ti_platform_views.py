@@ -14,7 +14,8 @@ from django.views.decorators.http import require_GET, require_POST
 from .forms import ManualIOCEditForm, ManualIOCFormSet
 from .ioc_values import INVENTORY_CATEGORY_CHOICES, TICKET_CATEGORY_CHOICES
 from .ti_platform import (
-    build_ioc_database, can_manage_inventory, create_manual_iocs,
+    can_manage_inventory, create_manual_iocs, decorate_ioc_rows,
+    ioc_database_counts, ioc_database_queryset,
     remove_analyst_ioc, set_note, set_review_status, update_manual_ioc,
 )
 
@@ -37,7 +38,12 @@ def _database_page(request, manual_formset=None, status=200):
     status_filter = request.GET.get('status', 'all')
     source_filter = request.GET.get('source', 'all')
     category_filter = request.GET.get('category', 'all')
-    rows, counts = build_ioc_database(query, status_filter, source_filter, category_filter)
+    # Filter, order and page in the database: only this page's rows are fetched,
+    # then decorated. (The whole list used to be built in Python each view.)
+    database = Paginator(
+        ioc_database_queryset(query, status_filter, source_filter, category_filter), 30,
+    ).get_page(request.GET.get('page'))
+    database.object_list = decorate_ioc_rows(database.object_list)
     return render(request, 'incidents/ioc_database.html', {
         'manual_formset': manual_formset if manual_formset is not None else ManualIOCFormSet(),
         # Keep the entry section open when we are re-rendering its errors.
@@ -50,8 +56,8 @@ def _database_page(request, manual_formset=None, status=200):
         # five kinds the analyst can record (File Name is context, not a category).
         'category_choices': TICKET_CATEGORY_CHOICES,
         'manual_category_choices': INVENTORY_CATEGORY_CHOICES,
-        'counts': counts,
-        'database': Paginator(rows, 30).get_page(request.GET.get('page')),
+        'counts': ioc_database_counts(),
+        'database': database,
         'current_path': request.get_full_path(),
     }, status=status)
 

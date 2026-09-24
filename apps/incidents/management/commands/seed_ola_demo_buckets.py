@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from apps.incidents import ola as ola_buckets
+from apps.incidents.management import seed_actors
 from apps.incidents.models import Ticket
 
 
@@ -75,6 +76,9 @@ class Command(BaseCommand):
         if not options['apply']:
             self.stdout.write('No database changes written. Re-run with --apply to persist.')
             return
+        # Rewrites the OLA deadline of every selected active ticket — without
+        # --reference-prefix that is every real open case.
+        seed_actors.require_seeding_allowed('seed_ola_demo_buckets')
 
         for key in ola_buckets.BUCKET_KEYS:
             pks = [ticket.pk for ticket, bucket in assignments.items() if bucket == key]

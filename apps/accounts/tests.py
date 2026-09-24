@@ -131,6 +131,28 @@ class SessionCookieSecurityTest(TestCase):
         self.assertTrue(self._login_and_get_session_cookie()['secure'])
 
 
+class SessionKeepaliveTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='keepalive_user', password='testpass123',
+        )
+
+    def test_requires_authentication(self):
+        response = self.client.get(reverse('session_keepalive'))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse('login'), response['Location'])
+
+    def test_returns_current_idle_window_and_fresh_csrf_token(self):
+        from django.conf import settings
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('session_keepalive'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['idle_seconds'], settings.SESSION_COOKIE_AGE)
+        self.assertEqual(response.json()['user_id'], self.user.pk)
+        self.assertTrue(response.json()['csrf_token'])
+
+
 @override_settings(
     EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
     PASSWORD_RESET_RATE_LIMIT_PER_EMAIL=3,
@@ -603,3 +625,49 @@ class ActingTierGrantTest(TestCase):
         qs = User.objects.filter(pk=self.manager.pk)
         grant_acting_tier(None, self._request(self.manager), qs)
         self.assertFalse(User.objects.get(pk=self.manager.pk).profile.acting_tier_access)
+
+
+class PasswordResetClientIpTest(TestCase):
+    """The per-IP reset throttle must key on an address the client cannot pick.
+    IIS ARR appends the real address to any X-Forwarded-For the client sent, so
+    only the rightmost hop is trustworthy."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _ip(self, **meta):
+        from .passwords import _client_ip
+        return _client_ip(self.factory.get('/', **meta))
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_uses_the_hop_the_trusted_proxy_appended(self):
+        self.assertEqual(
+            self._ip(HTTP_X_FORWARDED_FOR='6.6.6.6, 203.0.113.9', REMOTE_ADDR='127.0.0.1'),
+            '203.0.113.9',
+        )
+        self.assertEqual(
+            self._ip(HTTP_X_FORWARDED_FOR='203.0.113.9', REMOTE_ADDR='127.0.0.1'),
+            '203.0.113.9',
+        )
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True, PASSWORD_RESET_RATE_LIMIT_PER_IP=3)
+    def test_spoofed_leading_entries_do_not_reset_the_limit(self):
+        from .passwords import password_reset_request_allowed
+        allowed = [
+            password_reset_request_allowed(
+                self.factory.post(
+                    '/', HTTP_X_FORWARDED_FOR=f'10.9.9.{n}, 203.0.113.9',
+                    REMOTE_ADDR='127.0.0.1',
+                ),
+                f'user{n}@example.test',
+            )
+            for n in range(5)
+        ]
+        self.assertEqual(allowed, [True, True, True, False, False])
+
+    @override_settings(TRUST_X_FORWARDED_FOR=False)
+    def test_ignores_the_header_unless_the_proxy_is_trusted(self):
+        self.assertEqual(
+            self._ip(HTTP_X_FORWARDED_FOR='203.0.113.9', REMOTE_ADDR='198.51.100.4'),
+            '198.51.100.4',
+        )

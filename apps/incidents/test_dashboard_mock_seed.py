@@ -5,7 +5,7 @@ from io import StringIO
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
@@ -14,6 +14,7 @@ from apps.incidents.tests import _make_user, _make_t1, _make_t2
 from apps.wazuh_ingest.models import WazuhAlert
 
 
+@override_settings(ALLOW_SEED_COMMANDS=True)
 class DashboardMockupSeedTest(TestCase):
     """The mockup seeder used to invent its own accounts and, on --reset, delete
     every non-superuser user plus every ticket. It now attributes tickets to the

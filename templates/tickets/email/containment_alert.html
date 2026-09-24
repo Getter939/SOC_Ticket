@@ -1,126 +1,157 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>แจ้งเตือนการกักกัน</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>แจ้งให้ดำเนินการควบคุมเหตุการณ์</title>
+  <style>
+    body { font-family: Tahoma, "Leelawadee UI", "Noto Sans Thai", "Segoe UI", Arial, sans-serif; }
+    @media only screen and (max-width: 620px) {
+      .email-shell { width: 100% !important; }
+      .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }
+      .detail-label, .detail-value { display: block !important; width: auto !important; }
+      .detail-label { padding: 12px 14px 2px !important; border-bottom: 0 !important; }
+      .detail-value { padding: 0 14px 12px !important; }
+    }
+  </style>
 </head>
-<body style="margin:0; padding:0; background-color:#f5f5f5; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f5; padding:24px 0;">
+<body style="margin:0; padding:0; background-color:#ffffff; color:#202124; font-family:Tahoma, 'Leelawadee UI', 'Noto Sans Thai', 'Segoe UI', Arial, sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background-color:#ffffff;">
     <tr>
-      <td align="center">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:6px; overflow:hidden;">
-
-          <!-- Header -->
+      <td align="center" style="padding:16px 10px;">
+        <table class="email-shell" role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:640px; background-color:#ffffff;">
           <tr>
-            <td style="background-color:#1a2332; color:#ffffff; padding:24px 32px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="font-size:18px; font-weight:bold; color:#ffffff; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
-                    [{{ ticket.ticket_id }}] ต้องดำเนินการกักกัน &ndash; {{ ticket.device_name }}
-                  </td>
-                  <td align="right" style="white-space:nowrap;">
-                    {% if severity_th == 'วิกฤต' %}
-                      <span style="background-color:#E24B4A; color:#ffffff; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:bold; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">วิกฤต</span>
-                    {% elif severity_th == 'สูง' %}
-                      <span style="background-color:#E8890C; color:#ffffff; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:bold; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">สูง</span>
-                    {% elif severity_th == 'ปานกลาง' %}
-                      <span style="background-color:#C9960C; color:#ffffff; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:bold; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">ปานกลาง</span>
-                    {% else %}
-                      <span style="background-color:#185FA5; color:#ffffff; padding:4px 12px; border-radius:4px; font-size:12px; font-weight:bold; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">ต่ำ</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              </table>
+            <td class="email-gutter" style="padding:18px 28px 16px; border-top:3px solid #244b75; border-bottom:1px solid #d9dde3;">
+              <div style="font-size:14px; line-height:1.6; color:#4b5563;">การแจ้งเตือนจากทีม SOC</div>
+              <div style="margin-top:5px; font-size:23px; line-height:1.45; font-weight:bold; color:#202124;">โปรดดำเนินการควบคุมเหตุการณ์</div>
+              <div style="margin-top:5px; font-size:16px; line-height:1.7; color:#202124;">ตั๋ว #{{ ticket.ticket_id }} &nbsp;|&nbsp; {{ ticket.device_name }}</div>
+              <div style="margin-top:8px; font-size:15px; line-height:1.7; font-weight:bold;">
+                {% if severity_th == 'วิกฤต' %}
+                  <span style="color:#8b1e1e;">ระดับความรุนแรง: วิกฤต</span>
+                {% elif severity_th == 'สูง' %}
+                  <span style="color:#7a3e00;">ระดับความรุนแรง: สูง</span>
+                {% elif severity_th == 'ปานกลาง' %}
+                  <span style="color:#654f00;">ระดับความรุนแรง: ปานกลาง</span>
+                {% elif severity_th == 'ต่ำ' %}
+                  <span style="color:#244b75;">ระดับความรุนแรง: ต่ำ</span>
+                {% else %}
+                  <span style="color:#4b5563;">ระดับความรุนแรง: {{ severity_th|default:'ไม่ทราบ' }}</span>
+                {% endif %}
+              </div>
             </td>
           </tr>
 
-          <!-- Intro -->
           <tr>
-            <td style="padding:24px 32px 0 32px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color:#333333; font-size:14px; line-height:1.6;">
-              <p style="margin:0 0 16px 0;">ตั๋ว #{{ ticket.ticket_id }} ถูกส่งต่อถึงคุณเพื่อดำเนินการกักกัน</p>
+            <td class="email-gutter" style="padding:18px 28px 8px; font-size:16px; line-height:1.75; color:#202124;">
+              <p style="margin:0;">คุณได้รับมอบหมายให้ดำเนินการควบคุมเหตุการณ์นี้ กรุณาตรวจสอบรายละเอียดและแนวทางด้านล่าง แล้วเปิดตั๋วเพื่อบันทึกผล</p>
             </td>
           </tr>
 
-          <!-- Meta block -->
+          {% if ticket.is_emergency %}
           <tr>
-            <td style="padding:0 32px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f5; border-radius:6px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:14px; color:#333333;">
-                <tr>
-                  <td style="padding:12px 16px; font-weight:bold; width:140px; vertical-align:top;">รหัสตั๋ว</td>
-                  <td style="padding:12px 16px; font-family: 'Courier New', Courier, monospace; vertical-align:top;">{{ ticket.ticket_id }}</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 16px 12px 16px; font-weight:bold; width:140px; vertical-align:top;">สรุปเหตุการณ์</td>
-                  <td style="padding:0 16px 12px 16px; vertical-align:top;">{{ ticket.summary }}</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 16px 12px 16px; font-weight:bold; width:140px; vertical-align:top;">ผู้รับผิดชอบ</td>
-                  <td style="padding:0 16px 12px 16px; vertical-align:top;">{{ ticket.assigned_to }}</td>
-                </tr>
-                <tr>
-                  <td style="padding:0 16px 12px 16px; font-weight:bold; width:140px; vertical-align:top;">ส่งโดย</td>
-                  <td style="padding:0 16px 12px 16px; vertical-align:top;">{{ ticket.routed_by }}</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          <!-- Info cards -->
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td width="50%" style="padding-right:8px;">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border:1px solid #e0e0e0; border-radius:6px;">
-                      <tr>
-                        <td style="padding:14px 16px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;">
-                          <div style="font-size:12px; color:#888888; margin-bottom:4px;">เวลาที่สร้าง</div>
-                          <div style="font-size:14px; color:#333333; font-weight:bold;">{{ ticket.created_at }}</div>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                  <td width="50%" style="padding-left:8px;"></td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          {% if reason %}
-          <!-- Resubmission reason -->
-          <tr>
-            <td style="padding:16px 32px 0 32px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FFF7E6; border:1px solid #E8890C; border-radius:6px;">
-                <tr>
-                  <td style="padding:14px 16px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:14px; color:#333333; line-height:1.6;">
-                    <div style="font-weight:bold; color:#E8890C; margin-bottom:6px;">ตั๋วนี้ถูกส่งกลับมาเพื่อดำเนินการกักกันใหม่</div>
-                    <div style="margin-bottom:6px;">หมายเหตุจากนักวิเคราะห์:</div>
-                    <div>{{ reason }}</div>
-                  </td>
-                </tr>
-              </table>
+            <td class="email-gutter" style="padding:8px 28px 4px; font-size:16px; line-height:1.7; color:#7a1f1f;">
+              <strong>เหตุฉุกเฉิน:</strong> โปรดประสานงานกับ SOC และดำเนินการตามลำดับความเร่งด่วน
             </td>
           </tr>
           {% endif %}
 
-          <!-- CTA -->
           <tr>
-            <td align="center" style="padding:32px 32px 24px 32px;">
-              <a href="{{ ticket_url }}" style="display:inline-block; background-color:#1a2332; color:#ffffff; text-decoration:none; padding:14px 28px; border-radius:6px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:14px; font-weight:bold;">
-                เปิดตั๋ว #{{ ticket.ticket_id }} และส่งรายงานการกักกัน &rarr;
-              </a>
+            <td class="email-gutter" style="padding:12px 28px 18px;">
+              <a href="{{ ticket_url }}" style="display:inline-block; padding:11px 16px; border:1px solid #244b75; background-color:#244b75; color:#ffffff; text-decoration:none; font-family:Tahoma, 'Leelawadee UI', 'Noto Sans Thai', 'Segoe UI', Arial, sans-serif; font-size:16px; line-height:1.5; font-weight:bold;">เปิดตั๋วและส่งรายงานการควบคุม</a>
+              <div style="margin-top:8px; font-size:14px; line-height:1.6; color:#4b5563;">ต้องเข้าสู่ระบบก่อนจึงจะเปิดตั๋วได้</div>
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
-            <td style="background-color:#f5f5f5; padding:20px 32px; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:12px; color:#888888; line-height:1.6; text-align:center;">
-              อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ<br>
-              หากต้องการยกระดับด่วน ติดต่อเจ้าหน้าที่ SOC ผ่าน MS Teams #soc-escalation หรือโทรภายใน XXXX
+            <td class="email-gutter" style="padding:12px 28px 0;">
+              <div style="padding-bottom:8px; border-bottom:1px solid #c9ced6; font-size:18px; line-height:1.5; font-weight:bold; color:#202124;">รายละเอียดเหตุการณ์</div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; margin-top:4px; font-family:Tahoma, 'Leelawadee UI', 'Noto Sans Thai', 'Segoe UI', Arial, sans-serif;">
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">ระบบ / บริการ</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.device_name }}</td>
+                </tr>
+                {% if ticket.ip_address %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">IP Address</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.ip_address|linebreaksbr }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">สรุปเหตุการณ์</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.summary|truncatechars:280|linebreaksbr }}</td>
+                </tr>
+                {% if ticket.occurred_at %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">เวลาเกิดเหตุ</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.occurred_at|date:'d/m/Y H:i' }} น. (เวลาไทย)</td>
+                </tr>
+                {% endif %}
+                {% if ticket.detected_at %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">เวลาตรวจพบ</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.detected_at|date:'d/m/Y H:i' }} น. (เวลาไทย)</td>
+                </tr>
+                {% endif %}
+                {% if ticket.containment_deadline %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">กำหนดควบคุม (OLA)</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; font-weight:bold; color:#7a1f1f;">{{ ticket.containment_deadline|date:'d/m/Y H:i' }} น. (เวลาไทย)</td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">กำหนดควบคุม (OLA)</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">ไม่มีเวลาเป้าหมายการควบคุมสำหรับระดับนี้</td>
+                </tr>
+                {% endif %}
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">ผู้ประสานงาน SOC</td>
+                  <td class="detail-value" style="padding:11px 0; border-bottom:1px solid #e2e5e9; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.assigned_to }}</td>
+                </tr>
+                <tr>
+                  <td class="detail-label" width="34%" style="padding:11px 14px 11px 0; vertical-align:top; font-size:15px; line-height:1.6; font-weight:bold; color:#3f4752;">แหล่งที่มา / ผู้เปิดรายการ</td>
+                  <td class="detail-value" style="padding:11px 0; vertical-align:top; font-size:16px; line-height:1.7; color:#202124;">{{ ticket.routed_by }}</td>
+                </tr>
+              </table>
             </td>
           </tr>
 
+          {% if ticket.action_required %}
+          <tr>
+            <td class="email-gutter" style="padding:18px 28px 0;">
+              <div style="padding-bottom:7px; border-bottom:1px solid #c9ced6; font-size:18px; line-height:1.5; font-weight:bold; color:#202124;">แนวทางดำเนินการ</div>
+              <div style="padding-top:9px; font-size:16px; line-height:1.75; color:#202124;">{{ ticket.action_required|truncatechars:600|linebreaksbr }}</div>
+            </td>
+          </tr>
+          {% endif %}
+
+          {% if ticket.action_precautions %}
+          <tr>
+            <td class="email-gutter" style="padding:18px 28px 0;">
+              <div style="padding-bottom:7px; border-bottom:1px solid #c9ced6; font-size:18px; line-height:1.5; font-weight:bold; color:#202124;">ข้อควรระวัง</div>
+              <div style="padding-top:9px; font-size:16px; line-height:1.75; color:#202124;">{{ ticket.action_precautions|truncatechars:600|linebreaksbr }}</div>
+            </td>
+          </tr>
+          {% endif %}
+
+          {% if reason %}
+          <tr>
+            <td class="email-gutter" style="padding:18px 28px 0;">
+              <div style="padding-bottom:7px; border-bottom:1px solid #c9ced6; font-size:18px; line-height:1.5; font-weight:bold; color:#202124;">เหตุผลที่ส่งกลับมาให้ดำเนินการอีกครั้ง</div>
+              <div style="padding-top:9px; font-size:16px; line-height:1.75; color:#202124;">{{ reason|linebreaksbr }}</div>
+            </td>
+          </tr>
+          {% endif %}
+
+          <tr>
+            <td class="email-gutter" style="padding:22px 28px 12px; border-top:1px solid #d9dde3; font-size:15px; line-height:1.7; color:#3f4752;">
+              หากต้องการความช่วยเหลือ โปรดติดต่อ SOC ผ่าน MS Teams: <strong>#soc-escalation</strong>
+            </td>
+          </tr>
+          <tr>
+            <td class="email-gutter" style="padding:12px 28px 18px; font-size:14px; line-height:1.7; color:#4b5563;">
+              อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ<br>ต้องเข้าสู่ระบบเพื่อดูข้อมูลในระบบ SOC
+            </td>
+          </tr>
         </table>
       </td>
     </tr>

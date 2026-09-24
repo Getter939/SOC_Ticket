@@ -7,6 +7,7 @@ and response-request completion notifications.
 
 from dataclasses import dataclass, field
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from . import history
@@ -93,6 +94,19 @@ def save_subtask_update(
 ):
     """Save a validated subtask update, its history, and optional deliverable."""
     with transaction.atomic():
+        # The assignee and the SOC Manager both write to a request. Lock the row
+        # and refuse if it was saved after this form's copy was loaded; otherwise
+        # the later submit silently replaces the earlier one's notes/status and
+        # the audit history records the wrong "before" value.
+        locked = (
+            TicketSubtask.objects.select_for_update()
+            .filter(pk=update_form.instance.pk).values_list('updated_at', flat=True).first()
+        )
+        if locked is not None and locked != update_form.instance.updated_at:
+            raise ValidationError(
+                'คำขอนี้ถูกอัปเดตโดยผู้อื่นระหว่างที่คุณดำเนินการ '
+                'กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง — ไม่มีการบันทึกข้อมูล'
+            )
         subtask = update_form.save()
         history.record_subtask_status_change(
             subtask,

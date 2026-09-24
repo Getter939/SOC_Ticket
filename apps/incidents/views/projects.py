@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -48,6 +49,7 @@ from ._helpers import (
     _active_threat_guidance,
     _case_switch_qs,
     _attachment_limits,
+    _int_param,
 )
 
 
@@ -73,7 +75,7 @@ def create_project_incident(request):
     source_alert = None
     alert_pk = request.POST.get('wazuh_alert') or request.GET.get('wazuh_alert')
     if alert_pk:
-        source_alert = WazuhAlert.objects.filter(pk=alert_pk).first()
+        source_alert = WazuhAlert.objects.filter(pk=_int_param(alert_pk)).first()
         if (source_alert and request.method == 'GET'
                 and not _can_create_ticket_from_wazuh(source_alert, request.user)):
             messages.error(request, 'Wazuh Alert นี้ไม่ได้อยู่ในความรับผิดชอบของคุณ หรือถูกดำเนินการไปแล้ว')
@@ -84,7 +86,7 @@ def create_project_incident(request):
     source_triage = None
     triage_pk = request.POST.get('triage_id') or request.GET.get('triage_id')
     if triage_pk:
-        source_triage = TriageRecord.objects.filter(pk=triage_pk).first()
+        source_triage = TriageRecord.objects.filter(pk=_int_param(triage_pk)).first()
         if (source_triage and request.method == 'GET'
                 and not _can_create_ticket_from_triage(source_triage, request.user)):
             messages.error(request, 'รายการ Manual Triage นี้ไม่พร้อมสำหรับการสร้าง Project Incident')
@@ -117,6 +119,12 @@ def create_project_incident(request):
                     f'สร้าง Project Incident {result.project.project_code} เรียบร้อย — '
                     f'{len(result.tickets)} Ticket ตามระบบที่ได้รับผลกระทบ',
                 )
+                draft_key = 'project_incident_form_draft'
+                if source_alert:
+                    draft_key += f'_alert_{source_alert.pk}'
+                elif source_triage:
+                    draft_key += f'_triage_{source_triage.pk}'
+                request.session['clear_project_draft_key'] = draft_key
                 return redirect('project_incident_detail', pk=result.project.pk)
     else:
         initial = {}
@@ -151,6 +159,7 @@ def create_project_incident(request):
         evidence_token = request.GET.get('evidence_token', '')
 
     return render(request, 'incidents/project_incident_form.html', {
+        'idle_seconds': settings.SESSION_COOKIE_AGE,
         'form': shared_form,
         'target_formset': target_formset,
         'detailed_issue_cascade': Ticket.detailed_issue_cascade(),
@@ -174,6 +183,12 @@ def create_project_incident(request):
 def project_incident_detail(request, pk):
     """Overview of a case bundle: the shared incident and its member tickets."""
     project = get_object_or_404(ProjectIncident, pk=pk)
+    # A user who can see none of the members has no business on the bundle page.
+    # Checked before any POST action runs, so the per-action permission gates
+    # below are never the only thing standing between a stranger and the bundle.
+    visible_members = project.member_tickets.visible_to(request.user)
+    if not request.user.is_superuser and not visible_members.exists():
+        raise Http404('ไม่พบ Project Incident')
     profile = getattr(request.user, 'profile', None)
     can_manage_project = request.user.is_superuser or (
         profile is not None and profile.is_soc_manager
@@ -264,13 +279,10 @@ def project_incident_detail(request, pk):
             return redirect('project_incident_detail', pk=project.pk)
 
     members = (
-        project.member_tickets.visible_to(request.user)
+        visible_members
         .select_related('assigned_admin', 'system_owner', 'project_incident')
         .order_by('bundle_suffix', 'created_at')
     )
-    # A user who can see none of the members has no business on the bundle page.
-    if not members and not request.user.is_superuser:
-        raise Http404('ไม่พบ Project Incident')
     # Shared incident facts (NCSA severity, log source, MITRE) are copied to
     # every member at creation, so the page reads them off one "lead" member.
     # Deliberately taken from the UNSCOPED set: `members` above is filtered by
@@ -290,6 +302,7 @@ def project_incident_detail(request, pk):
         .first()
     )
     return render(request, 'incidents/project_incident_detail.html', {
+        'clear_project_draft_key': request.session.pop('clear_project_draft_key', ''),
         'project': project,
         'members': members,
         'lead': lead,
@@ -305,10 +318,14 @@ def project_incident_detail(request, pk):
             project, request.user),
         'can_restore_project_attachment': _can_restore_ticket_attachment(
             request.user),
+        # Only the people who can restore see what was removed — the same rule
+        # as the ticket page (selectors.get_ticket_detail_read_model). Anyone
+        # who could see one member used to see every deletion and its reason.
         'deleted_attachments': (
             project.attachments.model.all_objects
             .filter(project=project, deleted_at__isnull=False)
             .select_related('deleted_by')
+            if _can_restore_ticket_attachment(request.user) else []
         ),
         'pending_member_count': project.member_tickets.filter(
             status=Ticket.STATUS_PENDING_MGR_TRIAGE,

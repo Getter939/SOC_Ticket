@@ -320,7 +320,7 @@
     </table>
   </main>
   {% if show_report_actions %}
-    <script>
+    <script nonce="{{ request.csp_nonce }}">
       document.getElementById('hideEmptyFields').addEventListener('change', function () {
         document.getElementById('emptyFieldsForm').requestSubmit();
       });

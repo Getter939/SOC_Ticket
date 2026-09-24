@@ -320,7 +320,7 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn('เวลามัธยฐานในการแก้ไข (MTTR)', html)
         self.assertIn('เฉลี่ย', html)
         # Header timestamp + filter bar still present
-        self.assertIn('ข้อมูล ณ เวลา:', html)
+        self.assertIn('Dashboard refreshed:', html)
         self.assertIn('date_range=today', html)
 
     def test_recent_cases_labels_and_sorts_the_ticket_opener(self):
@@ -336,12 +336,20 @@ class DashboardManagementViewTest(TestCase):
             assigned_to=self.soc,
         )
 
+        other = _make_ticket(status=Ticket.STATUS_NEW)
+        Ticket.objects.filter(pk=other.pk).update(created_by=self.soc)
+
         html = self._get().content.decode()
 
         self.assertIn('ผู้เปิดเคส / Opened by', html)
-        self.assertIn('data-key="openedBy"', html)
-        self.assertIn('data-opened-by="Case Opener"', html)
-        self.assertNotIn('>Assignee<span', html)
+        # Sorting is server-side: the header links to ?sort=openedBy.
+        self.assertIn('sort=openedBy', html)
+        self.assertIn('Case Opener', html)
+        self.assertNotIn('>Assignee<', html)
+
+        # "Case Opener" sorts before "soc_mgmt" (no full name → username).
+        rows = self._get(sort='openedBy', dir='asc').context['recent_tickets']
+        self.assertEqual([row.pk for row in rows], [ticket.pk, other.pk])
 
     # ── Removed sections must be gone ──────────────────────────────────── #
 
@@ -395,14 +403,17 @@ class DashboardManagementViewTest(TestCase):
         self.assertIn("document.visibilityState !== 'visible'", html)
         self.assertIn('window.location.reload()', html)
 
-    def test_recent_cases_table_persists_state_across_reload(self):
-        """The detail table saves its sort/page so the auto-refresh reload
-        doesn't reset the manager's view back to defaults."""
+    def test_recent_cases_sort_survives_reload_and_filtering(self):
+        """Sort and page live in the URL, so the auto-refresh reload keeps the
+        manager's view; the filter form carries the sort through a re-filter."""
         _make_ticket(status=Ticket.STATUS_NEW)
-        html = self._get().content.decode()
-        self.assertIn("recentCasesTableState", html)
-        self.assertIn("sessionStorage.setItem(STORE_KEY", html)
-        self.assertIn("sessionStorage.getItem(STORE_KEY", html)
+        resp = self._get(sort='created', dir='asc')
+        self.assertEqual(resp.context['recent_sort'], 'created')
+        self.assertEqual(resp.context['recent_sort_direction'], 'asc')
+        html = resp.content.decode()
+        self.assertIn('name="sort" value="created"', html)
+        self.assertIn('name="dir" value="asc"', html)
+        self.assertIn('window.location.reload()', html)
 
     def test_pipeline_chart_renders(self):
         """Pipeline remains available after moving beside analyst workload."""
@@ -504,14 +515,17 @@ class DashboardManagementViewTest(TestCase):
         self.assertTrue(trend)
         self.assertRegex(trend[0]['date'], r'^\d{4}-\d{2}-\d{2} \d{2}:00$')
 
-    def test_recent_cases_sends_full_active_queue(self):
-        """Every active case is sent to the template (sort/paginate is client-side),
-        and each gets a data-row so the JS can sort + page the whole dataset."""
-        for _ in range(20):
+    def test_recent_cases_are_paginated_server_side(self):
+        """The active queue is paged 25 at a time on the server; the total
+        still counts every active case."""
+        for _ in range(30):
             _make_ticket(status=Ticket.STATUS_NEW)
-        resp = self._get()
-        self.assertEqual(len(resp.context['recent_tickets']), 20)
-        self.assertEqual(resp.content.decode().count('<tr data-row'), 20)
+        first = self._get()
+        self.assertEqual(len(first.context['recent_tickets']), 25)
+        self.assertEqual(first.context['recent_total'], 30)
+        self.assertIn('Showing 1–25 of 30 active cases', first.content.decode())
+        second = self._get(page=2)
+        self.assertEqual(len(second.context['recent_tickets']), 5)
 
     def test_recent_cases_default_sort_severity_then_created(self):
         """Initial order: severity DESC (Critical first), then created_at DESC."""
@@ -529,7 +543,7 @@ class DashboardManagementViewTest(TestCase):
         """Status Updated column renders and status_changed_at is populated."""
         _make_ticket(status=Ticket.STATUS_NEW)
         resp = self._get()
-        self.assertIn('อัปเดตสถานะล่าสุด', resp.content.decode())
+        self.assertIn('สถานะเปลี่ยนเมื่อ (ICT)', resp.content.decode())
         self.assertIsNotNone(resp.context['recent_tickets'][0].status_changed_at)
 
     def test_recent_cases_status_color_pill(self):

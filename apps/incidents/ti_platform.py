@@ -14,7 +14,11 @@ from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Max
+from django.db.models import (
+    BooleanField, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Q,
+    Subquery, TextField, Value,
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .ioc_values import TICKET_CATEGORY_CHOICES, normalize_for_category
@@ -31,78 +35,165 @@ def can_manage_inventory(user):
 
 # ── The unified view ──────────────────────────────────────────────────────── #
 
-def build_ioc_database(query='', status='all', source='all', category='all'):
-    """Every distinct indicator (category, value) from BOTH sources, annotated with
-    the FA's review status and note. Returns (rows, counts).
+#
+# The page used to load every indicator from both sources into Python, merge and
+# filter them there, and then show 30. That is now done by PostgreSQL, which
+# returns only the page being viewed. The merge is split into two DISJOINT
+# halves so a plain UNION ALL can combine them:
+#
+#   1. every (category, value) seen on a ticket — grouped over TicketIOC, with
+#      the matching active manual entry (if any) looked up alongside it
+#   2. every active manual entry whose (category, value) is on NO ticket
+#
+# An indicator in both sources therefore appears exactly once, in half 1, which
+# is what the old in-memory merge produced. Both halves select the same columns
+# in the same order (all aliased, see _KEY_COLUMNS) because a UNION matches
+# columns by position, not by name.
 
-    ``counts`` are over the whole database (before filters), for the summary line.
+_KEY_COLUMNS = (
+    'k_category', 'k_value', 'k_ticket_count', 'k_last_seen',
+    'k_manual_id', 'k_ext_id', 'k_checked', 'k_note',
+)
+
+
+def _review(value_ref, field, default, output_field):
+    """The FA's annotation for the outer row's (category, value)."""
+    return Coalesce(
+        Subquery(
+            IOCReviewStatus.objects
+            .filter(category=OuterRef('category'), value=OuterRef(value_ref))
+            .values(field)[:1]
+        ),
+        Value(default),
+        output_field=output_field,
+    )
+
+
+def _ticket_half():
+    """Half 1: one row per distinct indicator seen on a ticket."""
+    manual = AnalystIOC.objects.filter(
+        is_active=True, category=OuterRef('category'), ioc_detail=OuterRef('value'),
+    )
+    return (
+        TicketIOC.objects.order_by()   # Meta.ordering would leak into the GROUP BY
+        .values('category', 'value')
+        .annotate(
+            k_category=F('category'),
+            k_value=F('value'),
+            k_ticket_count=Count('ticket', distinct=True),
+            k_last_seen=Max('ticket__created_at'),
+            k_manual_id=Subquery(manual.values('pk')[:1]),
+            k_ext_id=Coalesce(Subquery(manual.values('ext_id')[:1]), Value(''),
+                              output_field=CharField()),
+            k_checked=_review('value', 'checked', False, BooleanField()),
+            k_note=_review('value', 'note', '', TextField()),
+        )
+    )
+
+
+def _manual_half():
+    """Half 2: active manual entries that appear on no ticket."""
+    on_a_ticket = TicketIOC.objects.filter(
+        category=OuterRef('category'), value=OuterRef('ioc_detail'),
+    )
+    return (
+        AnalystIOC.objects.order_by()
+        .filter(is_active=True)
+        .exclude(Exists(on_a_ticket))
+        .annotate(
+            k_category=F('category'),
+            k_value=F('ioc_detail'),
+            k_ticket_count=Value(0, output_field=IntegerField()),
+            k_last_seen=F('created_at'),
+            k_manual_id=F('pk'),
+            k_ext_id=F('ext_id'),
+            k_checked=_review('ioc_detail', 'checked', False, BooleanField()),
+            k_note=_review('ioc_detail', 'note', '', TextField()),
+        )
+    )
+
+
+def _filtered(half, query, status, category):
+    if category in TICKET_CATEGORY_LABELS:
+        half = half.filter(k_category=category)
+    if status in ('checked', 'not_checked'):
+        half = half.filter(k_checked=(status == 'checked'))
+    if query:
+        half = half.filter(
+            Q(k_value__icontains=query) | Q(k_note__icontains=query)
+            | Q(k_ext_id__icontains=query)
+        )
+    return half.values(*_KEY_COLUMNS)
+
+
+def ioc_database_queryset(query='', status='all', source='all', category='all'):
+    """The filtered, ordered IOC Database as one lazy queryset of raw key rows.
+
+    Nothing is fetched until it is sliced (by the Paginator) or iterated; pass
+    each row through decorate_ioc_rows() before rendering.
     """
-    observed = {}
-    for row in (TicketIOC.objects.values('category', 'value')
-                .annotate(ticket_count=Count('ticket', distinct=True),
-                          last_seen=Max('ticket__created_at'))):
-        observed[(row['category'], row['value'])] = row
+    query = (query or '').strip()
+    ticket_half = _filtered(_ticket_half(), query, status, category)
+    manual_half = _filtered(_manual_half(), query, status, category)
+    if source == 'ticket':
+        combined = ticket_half
+    elif source == 'analyst':
+        # Half 1 rows that also carry a manual entry, plus all of half 2.
+        combined = ticket_half.filter(k_manual_id__isnull=False).union(manual_half, all=True)
+    else:
+        combined = ticket_half.union(manual_half, all=True)
+    # Not-checked first (the worklist), then busiest, then value.
+    return combined.order_by('k_checked', '-k_ticket_count', 'k_value')
 
-    manual = {}
-    for rec in AnalystIOC.objects.filter(is_active=True):
-        manual[(rec.category, rec.ioc_detail)] = rec
 
-    annotations = {
-        (a['category'], a['value']): a
-        for a in IOCReviewStatus.objects.values('category', 'value', 'checked', 'note')
-    }
+def ioc_database_counts():
+    """Summary-line totals over the whole database, before any filter."""
+    ticket_half, manual_half = _ticket_half(), _manual_half()
+    total = ticket_half.count() + manual_half.count()
+    checked = (
+        ticket_half.filter(k_checked=True).count()
+        + manual_half.filter(k_checked=True).count()
+    )
+    return {'total': total, 'checked': checked, 'not_checked': total - checked}
 
+
+def decorate_ioc_rows(key_rows):
+    """Turn raw key rows into what ioc_database.html renders. One query loads
+    the manual entries for exactly these rows (for their edit/remove buttons)."""
+    key_rows = list(key_rows)
+    manual_ids = [row['k_manual_id'] for row in key_rows if row['k_manual_id']]
+    records = AnalystIOC.objects.in_bulk(manual_ids)
     rows = []
-    for key in set(observed) | set(manual):
-        category_code, value = key
-        obs = observed.get(key)
-        rec = manual.get(key)
-        annotation = annotations.get(key)
+    for row in key_rows:
+        rec = records.get(row['k_manual_id'])
         sources = [name for name, present in
-                   (('ticket', obs is not None), ('analyst', rec is not None)) if present]
-        if obs:
-            last_seen = obs['last_seen']
-        elif rec is not None:
-            last_seen = rec.created_at
-        else:
-            last_seen = None
+                   (('ticket', row['k_ticket_count'] > 0), ('analyst', rec is not None))
+                   if present]
         rows.append({
-            'category': category_code,
-            'category_label': TICKET_CATEGORY_LABELS.get(category_code, category_code),
-            'value': value,
-            'note': (annotation or {}).get('note', ''),
+            'category': row['k_category'],
+            'category_label': TICKET_CATEGORY_LABELS.get(row['k_category'], row['k_category']),
+            'value': row['k_value'],
+            'note': row['k_note'],
             'sources': sources,
             'source_label': ' + '.join(SOURCE_LABELS[name] for name in sources),
-            'status': 'checked' if (annotation or {}).get('checked') else 'not_checked',
-            'ticket_count': obs['ticket_count'] if obs else 0,
-            'last_seen': last_seen,
+            'status': 'checked' if row['k_checked'] else 'not_checked',
+            'ticket_count': row['k_ticket_count'],
+            'last_seen': row['k_last_seen'],
             'analyst_rec': rec,
         })
+    return rows
 
-    counts = {
-        'total': len(rows),
-        'checked': sum(1 for row in rows if row['status'] == 'checked'),
-        'not_checked': sum(1 for row in rows if row['status'] == 'not_checked'),
-    }
 
-    query = (query or '').strip().lower()
-    if query:
-        def matches(row):
-            rec = row['analyst_rec']
-            return (query in row['value'].lower()
-                    or query in (row['note'] or '').lower()
-                    or (rec is not None and query in (rec.ext_id or '').lower()))
-        rows = [row for row in rows if matches(row)]
-    if status in ('checked', 'not_checked'):
-        rows = [row for row in rows if row['status'] == status]
-    if source in ('ticket', 'analyst'):
-        rows = [row for row in rows if source in row['sources']]
-    if category in TICKET_CATEGORY_LABELS:
-        rows = [row for row in rows if row['category'] == category]
+def build_ioc_database(query='', status='all', source='all', category='all'):
+    """Every matching indicator, decorated, plus the summary counts.
 
-    # Not-checked first (the worklist), then busiest, then value.
-    rows.sort(key=lambda row: (row['status'] != 'not_checked', -row['ticket_count'], row['value']))
-    return rows, counts
+    Evaluates the WHOLE filtered list — for tests and one-off scripts. The page
+    itself pages through ioc_database_queryset() so only 30 rows are fetched.
+    """
+    return (
+        decorate_ioc_rows(ioc_database_queryset(query, status, source, category)),
+        ioc_database_counts(),
+    )
 
 
 # ── Annotations (shared by both sources) ──────────────────────────────────── #

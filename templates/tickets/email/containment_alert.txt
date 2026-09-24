@@ -1,0 +1,41 @@
+{% autoescape off %}
+ตั๋ว #{{ ticket.ticket_id }} — ต้องดำเนินการควบคุม
+ระบบ / บริการ: {{ ticket.device_name }}
+ระดับความรุนแรง: {{ severity_th|default:'ไม่ทราบ' }}
+{% if ticket.is_emergency %}สถานะ: เหตุฉุกเฉิน
+{% endif %}
+คุณได้รับมอบหมายให้ควบคุม Incident นี้ กรุณาตรวจสอบข้อมูลและส่งรายงานผ่านระบบ
+
+ข้อมูลเหตุการณ์
+--------------
+ระบบ / บริการ: {{ ticket.device_name }}
+{% if ticket.ip_address %}IP Address:
+{{ ticket.ip_address }}
+{% endif %}สรุปเหตุการณ์:
+{{ ticket.summary|truncatechars:280 }}
+{% if ticket.occurred_at %}เวลาเกิดเหตุ: {{ ticket.occurred_at|date:'d/m/Y H:i' }} น. (เวลาไทย)
+{% endif %}{% if ticket.detected_at %}เวลาตรวจพบ: {{ ticket.detected_at|date:'d/m/Y H:i' }} น. (เวลาไทย)
+{% endif %}{% if ticket.containment_deadline %}กำหนดควบคุม (OLA): {{ ticket.containment_deadline|date:'d/m/Y H:i' }} น. (เวลาไทย)
+{% else %}กำหนดควบคุม (OLA): ไม่มีเวลาเป้าหมายการควบคุมสำหรับระดับนี้
+{% endif %}ผู้ประสานงาน SOC: {{ ticket.assigned_to }}
+แหล่งที่มา / ผู้เปิดรายการ: {{ ticket.routed_by }}
+
+{% if ticket.action_required %}แนวทางดำเนินการ
+-----------------
+{{ ticket.action_required|truncatechars:600 }}
+
+{% endif %}{% if ticket.action_precautions %}ข้อควรระวัง
+-------------
+{{ ticket.action_precautions|truncatechars:600 }}
+
+{% endif %}{% if reason %}เหตุผลที่ส่งกลับมาให้ดำเนินการอีกครั้ง
+--------------------------------------
+{{ reason }}
+
+{% endif %}เปิดตั๋วและส่งรายงานการควบคุม:
+{{ ticket_url }}
+ต้องเข้าสู่ระบบก่อนจึงจะเปิดตั๋วได้
+
+หากต้องการความช่วยเหลือ โปรดติดต่อ SOC ผ่าน MS Teams: #soc-escalation
+อีเมลนี้ส่งโดยระบบอัตโนมัติ กรุณาอย่าตอบกลับ
+{% endautoescape %}

@@ -6,6 +6,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordResetForm
 from django.http import HttpResponseRedirect, JsonResponse
+from django.middleware.csrf import get_token
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_GET
 
@@ -92,11 +93,13 @@ def session_keepalive(request):
     long form page (e.g. the RCA workspace) can send that request from the client
     while the analyst types, without navigating. It never extends an idle
     session on its own — the page only calls it after real activity — so the
-    30-minute policy still expires an abandoned console. An expired session never
+    configured idle policy still expires an abandoned console. An expired session never
     reaches here (the auth middleware 302s to login), which the caller reads as
     "expired". Returns the idle window so the client can time its own warning.
     """
     return JsonResponse({
         'ok': True,
         'idle_seconds': settings.SESSION_COOKIE_AGE,
+        'csrf_token': get_token(request),
+        'user_id': request.user.pk,
     })

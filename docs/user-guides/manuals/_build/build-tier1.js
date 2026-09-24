@@ -184,10 +184,10 @@ cover.push(new Table({
 }));
 cover.push(spacer(360));
 cover.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-  children: [r("เวอร์ชันระบบ v1.7.1", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }),
-             r("ปรับปรุงล่าสุด 18 กันยายน 2026", { color: INK, size: 28 })] }));
+  children: [r("เวอร์ชันระบบ v1.7.6", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }),
+             r("ปรับปรุงล่าสุด 24 กันยายน 2026", { color: INK, size: 28 })] }));
 cover.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-  children: [r("คู่มือฉบับที่ 1.3", { color: MUTED, size: 28 })] }));
+  children: [r("คู่มือฉบับที่ 1.4", { color: MUTED, size: 28 })] }));
 cover.push(spacer(700));
 cover.push(new Paragraph({ alignment: AlignmentType.CENTER,
   children: [r("เอกสารใช้ภายในองค์กร — บริษัท โทรคมนาคมแห่งชาติ จำกัด (มหาชน)", { italics: true, color: MUTED, size: 26 })] }));

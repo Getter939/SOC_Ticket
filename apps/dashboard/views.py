@@ -86,6 +86,28 @@ def humanize_minutes(total_minutes):
     return f'{mins}m'
 
 
+def _wazuh_ingest_freshness(now):
+    """Return Wazuh poll and source-event ages, separate from page render time."""
+    watermark = IngestWatermark.objects.only(
+        'last_timestamp', 'last_successful_poll_at',
+    ).first()
+    if not watermark:
+        return None
+
+    def age_label(timestamp):
+        if not timestamp:
+            return None
+        age_minutes = max(0, int((now - timestamp).total_seconds() // 60))
+        return humanize_minutes(age_minutes)
+
+    return {
+        'poll_at': watermark.last_successful_poll_at,
+        'event_at': watermark.last_timestamp,
+        'poll_age': age_label(watermark.last_successful_poll_at),
+        'event_age': age_label(watermark.last_timestamp),
+    }
+
+
 def _with_resolved_at(queryset):
     """Annotate terminal tickets with their authoritative resolution time."""
     terminal = list(Ticket.TERMINAL_STATUSES)
@@ -167,23 +189,7 @@ def dashboard(request):
     today = timezone.now()
     now   = today
     local_now = timezone.localtime(now)
-    ingest_watermark = IngestWatermark.objects.only(
-        'last_timestamp', 'last_successful_poll_at',
-    ).first()
-    wazuh_ingest_freshness = None
-    if ingest_watermark:
-        wazuh_ingest_freshness = {
-            'poll_at': ingest_watermark.last_successful_poll_at,
-            'event_at': ingest_watermark.last_timestamp,
-            'poll_age': (
-                humanize_minutes(max(0, int((now - ingest_watermark.last_successful_poll_at).total_seconds() // 60)))
-                if ingest_watermark.last_successful_poll_at else None
-            ),
-            'event_age': (
-                humanize_minutes(max(0, int((now - ingest_watermark.last_timestamp).total_seconds() // 60)))
-                if ingest_watermark.last_timestamp else None
-            ),
-        }
+    wazuh_ingest_freshness = _wazuh_ingest_freshness(now)
     terminal = list(Ticket.TERMINAL_STATUSES)
 
     # ── GET filters: date range / status / severity ──────────────────────── #
@@ -855,6 +861,7 @@ def executive_dashboard(request):
         raise PermissionDenied
 
     now = timezone.now()
+    local_now = timezone.localtime(now)
     terminal = list(Ticket.TERMINAL_STATUSES)
     HIGH_CRIT = ('Critical', 'High')
 
@@ -895,13 +902,13 @@ def executive_dashboard(request):
         if date_range not in {'today', 'week', 'month', 'all'}:
             date_range = 'all'
         if date_range == 'today':
-            range_tickets = range_tickets.filter(created_at__date=now.date())
+            range_tickets = range_tickets.filter(created_at__date=local_now.date())
         elif date_range == 'week':
-            week_start = (now - timedelta(days=now.weekday())).replace(
+            week_start = (local_now - timedelta(days=local_now.weekday())).replace(
                 hour=0, minute=0, second=0, microsecond=0)
             range_tickets = range_tickets.filter(created_at__gte=week_start)
         elif date_range == 'month':
-            month_start = now.replace(
+            month_start = local_now.replace(
                 day=1, hour=0, minute=0, second=0, microsecond=0)
             range_tickets = range_tickets.filter(created_at__gte=month_start)
         range_label = {
@@ -920,18 +927,38 @@ def executive_dashboard(request):
     )
     mttr_stats = _mttr_stats(executive_resolved_qs, now)
 
-    # ── KPI 1: total High/Critical cases + delta vs start of this month ─── #
+    # ── KPI 1: all-time High/Critical total + month-to-date comparison ───── #
     # Incident grain, not ticket grain — see _incident_count. The executive
     # view answers "how many incidents", so a multi-system bundle counts once.
     total_hc = _incident_count(all_tickets.filter(severity__in=HIGH_CRIT))
 
-    this_month_start = now.replace(
+    this_month_start = local_now.replace(
         day=1, hour=0, minute=0, second=0, microsecond=0)
-    prev_total_hc = _incident_count(
-        all_tickets
-        .filter(severity__in=HIGH_CRIT, created_at__lt=this_month_start)
+    previous_month_last_day = this_month_start.date() - timedelta(days=1)
+    previous_month_start = this_month_start.replace(
+        year=previous_month_last_day.year,
+        month=previous_month_last_day.month,
     )
-    total_hc_delta = total_hc - prev_total_hc
+    comparison_days = min(local_now.day, previous_month_last_day.day)
+    previous_month_cutoff = previous_month_start + timedelta(days=comparison_days)
+
+    this_month_hc = _incident_count(
+        all_tickets
+        .filter(
+            severity__in=HIGH_CRIT,
+            created_at__gte=this_month_start,
+            created_at__lte=now,
+        )
+    )
+    previous_month_hc = _incident_count(
+        all_tickets
+        .filter(
+            severity__in=HIGH_CRIT,
+            created_at__gte=previous_month_start,
+            created_at__lt=previous_month_cutoff,
+        )
+    )
+    total_hc_delta = this_month_hc - previous_month_hc
 
     # ── Progress bar: closure rate over ALL High/Critical tickets ───────── #
     hc_range = range_tickets.filter(severity__in=HIGH_CRIT).exclude(status=Ticket.STATUS_CANCELLED)
@@ -1116,15 +1143,24 @@ def executive_dashboard(request):
         # dereferences it, so without this the table costs a query per row.
         table_qs.select_related(
             'assigned_to', 'assigned_admin', 'project_incident')
-        .order_by('-updated_at')
+        .annotate(status_age_anchor=Coalesce('status_changed_at', 'created_at'))
+        # Put cases that have sat longest in their current status first. Notes
+        # and other edits do not reset status_changed_at, unlike updated_at.
+        .order_by('status_age_anchor', 'created_at', 'pk')
     )
     paginator = Paginator(table_qs, 10)
     page_obj = paginator.get_page(request.GET.get('page'))
-    table_tickets = page_obj
+    table_tickets = list(page_obj.object_list)
+    for ticket in table_tickets:
+        ticket.status_started_at = ticket.status_changed_at or ticket.created_at
+        status_age_minutes = max(
+            0, int((now - ticket.status_started_at).total_seconds() // 60))
+        ticket.status_age_label = humanize_minutes(status_age_minutes)
 
     return render(request, 'dashboard/executive.html', {
         'cancelled_count': range_tickets.filter(status=Ticket.STATUS_CANCELLED).count(),
         'now': now,
+        'wazuh_ingest_freshness': _wazuh_ingest_freshness(now),
         'total_hc': total_hc,
         'total_hc_delta': total_hc_delta,
         'emergency_active': emergency_active,

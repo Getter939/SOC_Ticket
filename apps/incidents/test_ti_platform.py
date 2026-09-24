@@ -211,6 +211,52 @@ class IOCDatabaseTests(MFATestCase):
         self.assertEqual(list(self._rows(source='ticket')), ['only.ticket'])
         self.assertEqual(list(self._rows(category='domain')), ['only.ticket'])
 
+    def test_indicator_in_both_sources_is_one_merged_row(self):
+        self.add_manual(category='hash', value=HASH, note='a note')
+        for _ in range(2):
+            ticket = Ticket.objects.create(created_by=self.soc)
+            TicketIOC.objects.create(ticket=ticket, category='hash', value=HASH)
+        rows, counts = build_ioc_database()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(counts, {'total': 1, 'checked': 0, 'not_checked': 1})
+        row = rows[0]
+        self.assertEqual(row['sources'], ['ticket', 'analyst'])
+        self.assertEqual(row['ticket_count'], 2)
+        self.assertEqual(row['note'], 'a note')
+        self.assertIsNotNone(row['analyst_rec'])
+        self.assertEqual([r['value'] for r in build_ioc_database(query='man-')[0]], [HASH])
+
+    def test_page_is_paged_in_the_database(self):
+        """Only the requested page is fetched and decorated; the query count does
+        not grow with the size of the database."""
+        create_manual_iocs(
+            [{'category': 'domain', 'value': f'host{n:02d}.example', 'file_name': '', 'note': ''}
+             for n in range(35)],
+            self.forensic,
+        )
+        self.client.force_login(self.forensic)
+        first = self.client.get(reverse('ioc_database'))
+        self.assertEqual(len(first.context['database'].object_list), 30)
+        self.assertEqual(first.context['database'].paginator.count, 35)
+        self.assertEqual(first.context['counts']['total'], 35)
+        second = self.client.get(reverse('ioc_database'), {'page': 2})
+        self.assertEqual(len(second.context['database'].object_list), 5)
+
+        before = self._queries_for_page()
+        create_manual_iocs(
+            [{'category': 'domain', 'value': f'more{n:02d}.example', 'file_name': '', 'note': ''}
+             for n in range(40)],
+            self.forensic,
+        )
+        self.assertEqual(self._queries_for_page(), before)
+
+    def _queries_for_page(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(connection) as ctx:
+            self.client.get(reverse('ioc_database'))
+        return len(ctx.captured_queries)
+
     def test_page_shows_entry_section_note_column_and_manual_badge(self):
         self.add_manual(category='hash', value=HASH, note='a note')
         self.client.force_login(self.forensic)

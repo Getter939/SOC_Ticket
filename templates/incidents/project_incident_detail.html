@@ -335,4 +335,5 @@
   <a href="{% url 'ticket_list' %}" class="btn btn-light border px-4 mt-2"><i class="bi bi-arrow-left me-1"></i>กลับไปที่รายการ Ticket</a>
 </div>
 </div>
+{% if clear_project_draft_key %}<script nonce="{{ request.csp_nonce }}">try{localStorage.removeItem("{{ clear_project_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
 {% endblock %}

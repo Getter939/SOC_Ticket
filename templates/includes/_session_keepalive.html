@@ -5,9 +5,11 @@ Requires `idle_seconds` in the context (the server's SESSION_COOKIE_AGE). While
 the user is actively typing/clicking, this pings an authenticated endpoint so
 SESSION_SAVE_EVERY_REQUEST slides the idle clock; a genuinely idle session still
 expires on schedule. Two minutes before expiry it shows a countdown modal.
+At expiry it saves the form draft and redirects to login with this URL as next.
 {% endcomment %}
 <div id="session-keepalive" hidden
-     data-url="{% url 'session_keepalive' %}" data-idle="{{ idle_seconds }}"></div>
+     data-url="{% url 'session_keepalive' %}" data-login-url="{% url 'login' %}"
+     data-user-id="{{ request.user.pk }}" data-idle="{{ idle_seconds }}"></div>
 
 <div class="modal fade" id="session-warning-modal" tabindex="-1" aria-hidden="true"
      aria-labelledby="session-warning-title">
@@ -23,24 +25,19 @@ expires on schedule. Two minutes before expiry it shows a countdown modal.
           <p class="mb-2">คุณจะถูกออกจากระบบโดยอัตโนมัติในอีก
             <strong id="session-countdown">120</strong> วินาที เนื่องจากไม่มีการใช้งาน</p>
           <p class="small text-muted mb-0">กด "อยู่ในระบบต่อ" เพื่อทำงานต่อ
-            ข้อมูลที่ยังไม่ได้บันทึกจะหายหากเซสชันหมดอายุ</p>
+            หากหมดเวลา ระบบจะพาไปเข้าสู่ระบบและกู้คืนข้อมูลร่าง (ไฟล์ที่ยังไม่ได้แนบต้องเลือกใหม่)</p>
         </div>
-        <div id="session-expired-body" hidden>
-          <p class="mb-2 text-danger fw-semibold">เซสชันหมดอายุแล้ว</p>
-          <p class="small text-muted mb-0">กรุณาคัดลอกข้อความที่ยังไม่ได้บันทึกไว้ก่อน
-            แล้วเข้าสู่ระบบใหม่ในอีกแท็บเพื่อไม่ให้ข้อมูลหาย</p>
+        <div id="session-connection-body" hidden>
+          <p class="mb-2 text-danger fw-semibold">ไม่สามารถตรวจสอบเซสชันได้</p>
+          <p class="small text-muted mb-0" id="session-connection-message">
+            กรุณาตรวจสอบการเชื่อมต่อ แล้วลองอีกครั้ง ข้อมูลในฟอร์มยังอยู่
+          </p>
         </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-primary" id="session-stay-btn">
           <i class="bi bi-shield-check me-1"></i>อยู่ในระบบต่อ
         </button>
-        <a class="btn btn-primary" id="session-relogin-btn" hidden
-           href="{% url 'login' %}" target="_blank" rel="noopener">
-          <i class="bi bi-box-arrow-in-right me-1"></i>เข้าสู่ระบบใหม่ (แท็บใหม่)
-        </a>
-        <button type="button" class="btn btn-outline-secondary" id="session-dismiss-btn" hidden
-                data-bs-dismiss="modal">ปิดหน้าต่างนี้</button>
       </div>
     </div>
   </div>
@@ -52,6 +49,8 @@ function initSessionKeepalive() {
   const root = document.getElementById('session-keepalive');
   if (!root || typeof bootstrap === 'undefined') return;
   const url = root.dataset.url;
+  const loginUrl = root.dataset.loginUrl;
+  const userId = Number(root.dataset.userId);
   const idleMs = parseInt(root.dataset.idle, 10) * 1000;
   if (!idleMs) return;
   const WARN_MS = 120000;        // show the countdown 2 minutes before expiry
@@ -63,71 +62,160 @@ function initSessionKeepalive() {
   const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
   const countdownEl = document.getElementById('session-countdown');
   const warnBody = document.getElementById('session-warn-body');
-  const expiredBody = document.getElementById('session-expired-body');
+  const connectionBody = document.getElementById('session-connection-body');
+  const connectionMessage = document.getElementById('session-connection-message');
   const stayBtn = document.getElementById('session-stay-btn');
-  const reloginBtn = document.getElementById('session-relogin-btn');
-  const dismissBtn = document.getElementById('session-dismiss-btn');
+  const form = document.querySelector('form[enctype="multipart/form-data"]');
 
   let lastContact = Date.now();  // page load itself slid the clock
   let lastPing = Date.now();
   let activity = false;
-  let expired = false;
   let warningOpen = false;
+  let connectionIssue = false;
+  let redirecting = false;
+  let checking = false;
+  let preflighting = false;
+  let expiryChecking = false;
+  let allowSubmit = false;
+  let pingPromise = null;
 
   ['input', 'keydown', 'click', 'scroll'].forEach((evt) =>
     document.addEventListener(evt, () => { activity = true; }, { passive: true }));
 
-  async function ping() {
-    // lastPing is set for BOTH outcomes: a failed ping still consumes the
-    // cadence, so a genuinely dead session (server restart, sign-out in another
-    // tab) does not turn the 1 Hz tick into a request-per-second storm that
-    // just follows the 302 and re-downloads the login page.
+  function ping() {
+    if (pingPromise) return pingPromise;
+    pingPromise = performPing().finally(() => { pingPromise = null; });
+    return pingPromise;
+  }
+
+  async function performPing() {
+    checking = true;
+    // Failed checks also consume the cadence, avoiding a request every second.
     lastPing = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const resp = await fetch(url, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
         credentials: 'same-origin',
+        signal: controller.signal,
       });
-      if (resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        if (data && data.ok) {
-          lastContact = Date.now();
-          activity = false;
-          return true;
-        }
+      if (resp.redirected || resp.status === 401 || resp.status === 403) return 'expired';
+      if (!resp.ok) return 'unavailable';
+      const data = await resp.json().catch(() => null);
+      if (!data || !data.ok) return 'expired';
+      if (Number(data.user_id) !== userId) return 'different-user';
+      const csrfInput = form?.querySelector('input[name="csrfmiddlewaretoken"]');
+      if (csrfInput && data.csrf_token) csrfInput.value = data.csrf_token;
+      lastContact = Date.now();
+      activity = false;
+      connectionIssue = false;
+      if (warningOpen) {
+        warningOpen = false;
+        modal.hide();
       }
-    } catch (e) { /* network blip — treated as no contact */ }
-    return false;
+      return 'ok';
+    } catch (e) {
+      return 'unavailable';
+    } finally {
+      clearTimeout(timer);
+      checking = false;
+    }
   }
 
-  function showExpired() {
-    expired = true;
+  function redirectToLogin() {
+    if (redirecting) return;
+    redirecting = true;
+    form?.dispatchEvent(new Event('session:before-redirect'));
+    const next = window.location.pathname + window.location.search;
+    window.location.assign(loginUrl + '?next=' + encodeURIComponent(next));
+  }
+
+  function showConnectionIssue(message) {
+    connectionIssue = true;
     warnBody.hidden = true;
-    expiredBody.hidden = false;
-    stayBtn.hidden = true;
-    reloginBtn.hidden = false;
-    dismissBtn.hidden = false;
+    connectionBody.hidden = false;
+    connectionMessage.textContent = message || 'กรุณาตรวจสอบการเชื่อมต่อ แล้วลองอีกครั้ง ข้อมูลในฟอร์มยังอยู่';
+    stayBtn.textContent = 'ลองอีกครั้ง';
+    warningOpen = true;
     modal.show();
   }
 
   stayBtn.addEventListener('click', async () => {
-    if (await ping()) { warningOpen = false; modal.hide(); } else { showExpired(); }
+    const result = await ping();
+    if (result === 'expired') redirectToLogin();
+    else if (result === 'different-user') {
+      showConnectionIssue('บัญชีที่เข้าสู่ระบบเปลี่ยนไป กรุณาออกจากระบบและเข้าสู่บัญชีเดิม');
+    } else if (result !== 'ok') showConnectionIssue();
   });
 
-  setInterval(async () => {
-    if (expired) return;
+  if (form) form.addEventListener('submit', async (event) => {
+    if (allowSubmit) { allowSubmit = false; return; }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (preflighting) return;
+    preflighting = true;
+    form.dispatchEvent(new Event('session:before-submit'));
+    const submitter = event.submitter;
+    try {
+      const result = await ping();
+      if (result === 'ok') {
+        allowSubmit = true;
+        try {
+          if (submitter) form.requestSubmit(submitter);
+          else form.requestSubmit();
+        } finally {
+          allowSubmit = false;
+        }
+      } else if (result === 'expired') redirectToLogin();
+      else if (result === 'different-user') {
+        showConnectionIssue('บัญชีที่เข้าสู่ระบบเปลี่ยนไป กรุณาออกจากระบบและเข้าสู่บัญชีเดิม');
+      } else showConnectionIssue();
+    } finally {
+      preflighting = false;
+    }
+  }, true);
+
+  function tick() {
+    if (redirecting) return;
     const now = Date.now();
-    if (activity && now - lastPing >= PING_MIN_MS) { await ping(); }
-    const remaining = idleMs - (Date.now() - lastContact);
-    if (remaining <= 0) { showExpired(); return; }
+    const remaining = idleMs - (now - lastContact);
+    if (remaining <= 0) {
+      if (!checking && !expiryChecking) {
+        expiryChecking = true;
+        ping().then((result) => {
+          expiryChecking = false;
+          if (result !== 'ok') redirectToLogin();
+        });
+      }
+      return;
+    }
+    if (activity && now - lastPing >= PING_MIN_MS && !checking) {
+      ping().then((result) => {
+        if (result === 'expired') redirectToLogin();
+        else if (result === 'different-user') {
+          showConnectionIssue('บัญชีที่เข้าสู่ระบบเปลี่ยนไป กรุณาออกจากระบบและเข้าสู่บัญชีเดิม');
+        }
+      });
+    }
     if (remaining <= WARN_MS) {
       countdownEl.textContent = Math.ceil(remaining / 1000);
-      if (!warningOpen) { warningOpen = true; modal.show(); }
-    } else if (warningOpen) {
+      if (!warningOpen) {
+        warnBody.hidden = false;
+        connectionBody.hidden = true;
+        stayBtn.innerHTML = '<i class="bi bi-shield-check me-1"></i>อยู่ในระบบต่อ';
+        warningOpen = true;
+        modal.show();
+      }
+    } else if (warningOpen && !connectionIssue) {
       warningOpen = false;
       modal.hide();
     }
-  }, 1000);
+  }
+
+  setInterval(tick, 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  window.addEventListener('focus', tick);
 }
 
 // This include is rendered in the page content, before base.html loads the

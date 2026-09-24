@@ -82,6 +82,7 @@
     .detail-table { font-size: 13px; }
     .detail-table thead th { background:#212529; color:#fff; font-size: 13px; white-space: nowrap; }
     .detail-table td { vertical-align: middle; }
+    .detail-table .case-age { white-space: nowrap; font-variant-numeric: tabular-nums; }
     .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
                    border-radius:10px; color:#fff; white-space:nowrap; }
     .priority-pill { font-size:12px; font-weight:700; padding:2px 8px;
@@ -96,9 +97,23 @@
         <h1 class="page-header__title"><i class="bi bi-graph-up-arrow me-2"></i>แดชบอร์ด SOC สำหรับผู้บริหาร</h1>
         <p class="page-header__subtitle">สรุปความเสี่ยงและผลการดำเนินงานสำหรับการตัดสินใจของผู้บริหาร</p>
     </div>
-    <span class="page-header__meta">
-        <i class="bi bi-clock me-1"></i>ข้อมูล ณ เวลา: {{ now|date:"d M Y H:i" }} ICT
-    </span>
+    <div class="page-header__meta text-end">
+        <div><i class="bi bi-clock me-1"></i>หน้าแดชบอร์ดอัปเดต: {{ now|date:"d M Y H:i" }} ICT</div>
+        {% if wazuh_ingest_freshness and wazuh_ingest_freshness.poll_at %}
+        <div title="Poll completed {{ wazuh_ingest_freshness.poll_at|date:'d M Y H:i' }} ICT">
+            <i class="bi bi-cloud-arrow-down me-1"></i>Wazuh poll สำเร็จล่าสุด: {{ wazuh_ingest_freshness.poll_age }} ที่แล้ว
+        </div>
+        {% if wazuh_ingest_freshness.event_at %}
+        <div title="Latest Wazuh source-event timestamp {{ wazuh_ingest_freshness.event_at|date:'d M Y H:i' }} ICT">
+            เหตุการณ์ Wazuh ล่าสุด: {{ wazuh_ingest_freshness.event_age }} ที่แล้ว
+        </div>
+        {% endif %}
+        {% else %}
+        <div title="ต้องรัน migration และให้ Wazuh ingest สำเร็จอย่างน้อยหนึ่งครั้ง">
+            <i class="bi bi-cloud-slash me-1"></i>Wazuh poll: ไม่มีประวัติการดึงสำเร็จ
+        </div>
+        {% endif %}
+    </div>
 </div>
 
 <!-- ── Time range filter for charting/detail sections ──────────────────── -->
@@ -151,6 +166,7 @@
             <div class="panel p-3 d-flex flex-column flex-grow-1">
             <div class="panel-title mb-2">
                 <i class="bi bi-clipboard-check me-1"></i>สรุปสถานการณ์ของทีม SOC
+                <span class="badge text-bg-light ms-1">คิวปัจจุบัน · ทุกช่วงเวลา</span>
             </div>
             <div class="row g-3 align-items-stretch flex-grow-1">
                 <div class="col-5">
@@ -176,8 +192,8 @@
                 </div>
                 <div class="col-7 d-flex flex-column justify-content-evenly criteria-list">
                     {% for c in summary_criteria %}
-                    <a class="criteria-row" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&f={{ c.filter|urlencode }}#detail-table"
-                       title="คลิกเพื่อกรองตารางด้านล่าง">
+                    <a class="criteria-row" href="?date_range=all&f={{ c.filter|urlencode }}#detail-table"
+                       title="เปิดรายการคิวปัจจุบัน">
                         {% if c.level == 'good' %}
                         <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
                         {% elif c.level == 'waiting' %}
@@ -199,13 +215,13 @@
                 <div class="col-6">
                     <div class="stat-card b-blue">
                         <div class="stat-value">{{ total_hc|intcomma }}</div>
-                        <div class="stat-label">เคสทั้งหมด (High/Critical)</div>
+                        <div class="stat-label">เคสทั้งหมด (High/Critical) · ทุกช่วงเวลา</div>
                         {% if total_hc_delta > 0 %}
-                        <div class="stat-sub text-danger">↑{{ total_hc_delta|intcomma }} จากเดือนที่แล้ว</div>
+                        <div class="stat-sub text-danger">↑{{ total_hc_delta|intcomma }} เทียบช่วงเดียวกันเดือนก่อน</div>
                         {% elif total_hc_delta < 0 %}
-                        <div class="stat-sub text-success">↓{{ total_hc_delta|intcomma|slice:"1:" }} จากเดือนที่แล้ว</div>
+                        <div class="stat-sub text-success">↓{{ total_hc_delta|intcomma|slice:"1:" }} เทียบช่วงเดียวกันเดือนก่อน</div>
                         {% else %}
-                        <div class="stat-sub text-muted">เท่ากับเดือนที่แล้ว</div>
+                        <div class="stat-sub text-muted">เท่ากับช่วงเดียวกันเดือนก่อน</div>
                         {% endif %}
                     </div>
                 </div>
@@ -326,6 +342,7 @@
                             <th>ผู้รับผิดชอบ</th>
                             <th>สถานะ Emergency</th>
                             <th>สถานะ</th>
+                            <th title="เวลาตั้งแต่ Ticket เข้าสู่สถานะปัจจุบัน">อยู่สถานะนี้</th>
                             <th>อัปเดตล่าสุด</th>
                         </tr>
                     </thead>
@@ -380,10 +397,11 @@
                                 {# Colors from Ticket.STATUS_PILL_COLORS (single source of truth). #}
                                 <span class="status-pill" style="{{ t.status_pill_css }}">{{ t.get_status_display }}</span>
                             </td>
+                            <td class="case-age" title="สถานะนี้ตั้งแต่ {{ t.status_started_at|date:'d M Y H:i' }} ICT">{{ t.status_age_label }}</td>
                             <td class="text-nowrap">{{ t.updated_at|date:"d M Y H:i" }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="6" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
+                        <tr><td colspan="7" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

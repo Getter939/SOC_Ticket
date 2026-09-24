@@ -89,6 +89,7 @@ class Command(BaseCommand):
                             help="Delete all previous seed data before seeding")
 
     def handle(self, *args, **options):
+        seed_actors.require_seeding_allowed("seed_data")
         n_tickets = options["tickets"]
         n_days    = options["days"]
 

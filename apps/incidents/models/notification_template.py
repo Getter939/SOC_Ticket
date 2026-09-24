@@ -1,4 +1,5 @@
 
+from django.core.exceptions import ValidationError
 from django.db import models
 
 # ======================================================================= #
@@ -73,3 +74,31 @@ class NotificationTemplate(models.Model):
 
     def __str__(self):
         return self.get_key_display()
+
+    def clean(self):
+        """Refuse a template the notification code could not format.
+
+        The sender falls back to the built-in text when a template breaks, so a
+        bad save would otherwise be discovered only as "why is my custom wording
+        not being used?". Checked with dummy values for exactly the placeholders
+        this key supports — the same str.format() call the sender makes.
+        """
+        super().clean()
+        sample = {name: 'x' for name in self.PLACEHOLDERS.get(self.key, [])}
+        errors = {}
+        for field in ('subject', 'body'):
+            text = getattr(self, field) or ''
+            try:
+                text.format(**sample)
+            except KeyError as exc:
+                errors[field] = (
+                    f'ไม่มี placeholder {{{exc.args[0]}}} สำหรับการแจ้งเตือนประเภทนี้ '
+                    '— ใช้วงเล็บปีกกาซ้อน {{ }} หากต้องการแสดงเครื่องหมาย { } ตามตัวอักษร'
+                )
+            except (IndexError, ValueError, AttributeError):
+                errors[field] = (
+                    'รูปแบบ placeholder ไม่ถูกต้อง — ใช้เฉพาะ {ชื่อ} ที่ระบุไว้ '
+                    'และใช้ {{ }} แทนเครื่องหมาย { } ตามตัวอักษร'
+                )
+        if errors:
+            raise ValidationError(errors)

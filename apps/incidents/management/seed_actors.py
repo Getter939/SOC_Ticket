@@ -27,10 +27,33 @@ Typical use::
 
 from itertools import cycle, repeat
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.management.base import CommandError
 
 from apps.accounts.models import UserProfile
+
+
+def require_seeding_allowed(command_name):
+    """Refuse to write demo data on a server that has not opted in.
+
+    Every seeder writes synthetic tickets credited to real staff, and several
+    delete or rewrite rows (seed_all purges accounts with their tickets;
+    seed_ola_demo_buckets moves the OLA deadline of every active ticket). On
+    production that is data loss. A box opts in with DEBUG, or with
+    ALLOW_SEED_COMMANDS=True in its .env (a UAT/demo box running DEBUG=False).
+
+    Call it before the first write — after any dry-run/preview exit, which
+    stays available everywhere.
+    """
+    if settings.DEBUG or settings.ALLOW_SEED_COMMANDS:
+        return
+    raise CommandError(
+        f'{command_name} is disabled on this server: seed commands write demo data '
+        'credited to real staff and can delete or rewrite existing rows. Set '
+        "ALLOW_SEED_COMMANDS=True in this box's .env only if it is a UAT/demo box, "
+        'never production.'
+    )
 
 # key → (role, tier or None, human label used in error messages)
 KEY_SPECS = {

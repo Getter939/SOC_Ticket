@@ -1,6 +1,7 @@
 import logging
 
 from django import forms as django_forms
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -66,6 +67,7 @@ from ._helpers import (
     _attachment_limits,
     _transition_actions,
     _alert_bundle_ids,
+    _int_param,
     _render_ticket_list,
 )
 from .reports import _remediation_checklist_state
@@ -131,7 +133,7 @@ def create_ticket(request):
     # None here would strand the analyst's alert on the first failed submit.
     alert_pk = request.POST.get('wazuh_alert') or request.GET.get('wazuh_alert')
     if triage_id:
-        triage = get_object_or_404(TriageRecord, pk=triage_id)
+        triage = get_object_or_404(TriageRecord, pk=_int_param(triage_id))
         if triage.ticket_id:
             messages.info(request, 'บันทึกการคัดกรองนี้มีเคสอยู่แล้ว')
             return redirect('ticket_detail', pk=triage.ticket_id)
@@ -240,6 +242,7 @@ def create_ticket(request):
     threat_guidance = _active_threat_guidance()
 
     return render(request, 'incidents/ticket_form.html', {
+        'idle_seconds': settings.SESSION_COOKIE_AGE,
         'form': form,
         'triage_id': triage_id or '',
         'case_mode': 'single',
@@ -730,6 +733,7 @@ def ticket_detail(request, pk):
         # clear the matching localStorage draft. Popped so a later plain visit
         # to a ticket never wipes an unrelated in-progress draft.
         'clear_draft_key': request.session.pop('clear_ticket_draft_key', ''),
+        'clear_edit_draft_key': request.session.pop('clear_ticket_edit_draft_key', ''),
         'attachment_form': attachment_form,
         'attachment_limits': _attachment_limits(),
         'can_access_report': _can_access_ticket_report(request.user),
@@ -847,6 +851,9 @@ def edit_ticket(request, pk):
                     )
                 if not result.changes and not result.attachments:
                     messages.info(request, 'ไม่มีข้อมูลที่เปลี่ยนแปลง')
+                request.session['clear_ticket_edit_draft_key'] = (
+                    f'ticket_edit_draft_{request.user.pk}_{ticket.pk}'
+                )
                 return redirect('ticket_detail', pk=pk)
     else:
         if is_preparation:
@@ -858,6 +865,7 @@ def edit_ticket(request, pk):
             form = TicketEditForm(instance=ticket)
 
     return render(request, 'incidents/ticket_edit.html', {
+        'idle_seconds': settings.SESSION_COOKIE_AGE,
         'ticket': ticket,
         'is_preparation': is_preparation,
         'form': form,

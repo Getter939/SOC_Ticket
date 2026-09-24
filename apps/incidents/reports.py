@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -634,13 +634,18 @@ def _register_symbol_font(xhtml2pdf_default=None):
 
 
 def _resolve_pdf_resource(uri, rel):
-    parsed = urlparse(uri)
-    if parsed.scheme == 'file':
-        path = unquote(parsed.path)
-        if re.match(r'^/[A-Za-z]:/', path):
-            path = path[1:]
-        return path
-    return uri
+    """xhtml2pdf's resource resolver: inline ``data:`` URIs only.
+
+    The report embeds its logo and evidence images as data URIs, so it never
+    needs anything else. Returning any other URI would make the renderer fetch
+    it — an http(s) URL from the server (SSRF, or a Waitress thread waiting on
+    a request back to itself), or a file: path from local disk — the moment
+    something in the rendered HTML pointed there.
+    """
+    if urlparse(uri).scheme == 'data':
+        return uri
+    logger.warning('Refused external resource in PDF report: %s', uri[:200])
+    return ''
 
 
 def _load_ticket(ticket_id):
@@ -778,50 +783,73 @@ def _replace_docx_paragraph_prefix(paragraph, old, new):
         run.text = ''
 
 
+_PLACEHOLDER_RE = re.compile(r'\{\{([^}]+)\}\}')
+
+# Characters XML 1.0 cannot carry. Pasted log excerpts routinely contain them
+# (NUL, ANSI escape codes), and python-docx refuses the whole string — which
+# used to fail the entire export over one stray byte.
+_XML_INVALID_CHARS_RE = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]')
+
+
+def _xml_safe(text):
+    return _XML_INVALID_CHARS_RE.sub('', text)
+
+
 def _replace_placeholders(doc, context):
     # Replace within individual runs (not whole paragraphs) so each run keeps
     # its own font — the template authors every {{placeholder}} as its own run,
     # letting checkbox glyphs (DejaVu Sans) and labels (TH Sarabun New) coexist
     # in one cell. run.text's setter turns \n into <w:br>, so multi-line values
-    # keep their line breaks. A placeholder split across runs is left in place
-    # and caught by the unresolved-placeholder check below.
-    replacements = {f'{{{{{key}}}}}': str(value) for key, value in context.items()}
+    # keep their line breaks.
+    #
+    # One regex pass over the TEMPLATE's text: a substituted value is never
+    # scanned again. Ticket content is analyst- and attacker-supplied (an SSTI
+    # payload captured as an IOC is literally "{{7*7}}"), so re-scanning it
+    # would either splice other fields into it or fail the export as an
+    # "unresolved placeholder" that the template never contained.
+    #
+    # The unresolved check therefore runs on the template before anything is
+    # filled: a placeholder with no context key, or one split across runs, is a
+    # template authoring error and still fails loudly.
+    unresolved = set()
+    for paragraph in _iter_paragraphs(doc):
+        run_keys = set()
+        for run in paragraph.runs:
+            run_keys.update(_PLACEHOLDER_RE.findall(run.text))
+        for key in _PLACEHOLDER_RE.findall(paragraph.text):
+            if key not in context or key not in run_keys:
+                unresolved.add(f'{{{{{key}}}}}')
+    if unresolved:
+        raise ValueError(
+            f'Unresolved report template placeholders: {", ".join(sorted(unresolved))}'
+        )
+
     for paragraph in _iter_paragraphs(doc):
         for run in paragraph.runs:
             text = run.text
             if '{{' not in text:
                 continue
-            replaced = text
-            for placeholder, value in replacements.items():
-                if placeholder in replaced:
-                    replaced = replaced.replace(placeholder, value)
+            replaced = _PLACEHOLDER_RE.sub(
+                lambda match: str(context[match.group(1)]), text,
+            )
             if replaced != text:
                 _fill_run(run, replaced)
-    remaining = sorted({
-        match
-        for paragraph in _iter_paragraphs(doc)
-        for match in re.findall(r'\{\{[^}]+\}\}', paragraph.text)
-    })
-    if remaining:
-        raise ValueError(f'Unresolved report template placeholders: {", ".join(remaining)}')
 
 
 def _fill_docx_row(row, values):
     """Fill one table row's ``{{key}}`` placeholders from ``values`` (key→text),
     blanking any placeholder the mapping does not cover. Goes through _fill_run so
-    ballot glyphs and per-run fonts are preserved."""
-    replacements = {f'{{{{{key}}}}}': str(value) for key, value in values.items()}
+    ballot glyphs and per-run fonts are preserved. Single pass, like
+    _replace_placeholders, so a value is never re-scanned for placeholders."""
     for cell in row.cells:
         for paragraph in cell.paragraphs:
             for run in paragraph.runs:
                 text = run.text
                 if '{{' not in text:
                     continue
-                for placeholder, value in replacements.items():
-                    if placeholder in text:
-                        text = text.replace(placeholder, value)
-                text = re.sub(r'\{\{[^}]+\}\}', '', text)
-                _fill_run(run, text)
+                _fill_run(run, _PLACEHOLDER_RE.sub(
+                    lambda match: str(values.get(match.group(1), '')), text,
+                ))
 
 
 def _expand_docx_repeat_rows(doc, prefix, rows):
@@ -911,7 +939,7 @@ def _append_docx_evidence_images(paragraph, images):
         )
         if image.caption:
             picture.add_break()
-            caption = image_paragraph.add_run(image.caption)
+            caption = image_paragraph.add_run(_xml_safe(image.caption))
             caption.bold = True
         previous = image_paragraph
 
@@ -921,6 +949,7 @@ def _fill_run(run, text):
     — TH Sarabun New has no such glyphs — while the rest keeps the run's own
     font. \\n becomes a Word line break. The common no-ballot case is a plain
     ``run.text = text`` (which itself converts \\n to <w:br>)."""
+    text = _xml_safe(text)
     if not any(ch in _BALLOT_CHARS for ch in text):
         run.text = text
         return
@@ -1165,12 +1194,8 @@ def _prepare_report_evidence_image(
             prepared.save(output, format='PNG', optimize=True)
             content_type = 'image/png'
         else:
-            if has_alpha:
-                background = Image.new('RGB', prepared.size, 'white')
-                background.paste(prepared, mask=prepared.getchannel('A'))
-                prepared = background
-            else:
-                prepared = prepared.convert('RGB')
+            # Alpha always takes the PNG branch above, so this is opaque.
+            prepared = prepared.convert('RGB')
             prepared.save(output, format='JPEG', quality=85, optimize=True)
             content_type = 'image/jpeg'
 

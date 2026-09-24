@@ -61,6 +61,7 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        seed_actors.require_seeding_allowed('seed_ceo_demo')
         existing = Ticket.objects.filter(
             reference_id__in=[REFERENCE_ACTIVE, REFERENCE_CLOSED])
 

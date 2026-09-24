@@ -10,7 +10,16 @@ Rules
   alert must not abort the whole batch.
 • A single-row IngestWatermark tracks the last ingested @timestamp so that
   repeat runs only fetch new alerts. The watermark only advances after a
-  successful write.
+  successful write. A hit that fails to PARSE does not hold it back — retrying
+  a malformed document cannot succeed — but the failure is logged, returned in
+  'errors', and keeps last_successful_poll_at from moving, so the dashboard's
+  freshness line shows the poll as unhealthy.
+• Each run starts WAZUH_INGEST_OVERLAP_MINUTES before the watermark. @timestamp
+  is when the manager raised the alert, not when it reached the Indexer, so an
+  alert shipped late (Filebeat backlog, manager restart, a second cluster node)
+  can land behind a watermark that newer alerts already advanced. The overlap
+  re-reads that window; the opensearch_id dedup makes the re-read a no-op for
+  everything already stored.
 • The @timestamp range filter is >=gte<= (never >gt<): several alerts can share
   one timestamp, and a batch cut can land mid-group, so the boundary timestamp
   must be re-fetched — the unique opensearch_id makes re-ingestion a no-op.
@@ -134,6 +143,14 @@ def store_alert_hits(hits, min_level=10, advance_watermark=True):
     new_alerts = []
     newest_timestamp = None
 
+    # One query for the whole page instead of one per hit — the overlap window
+    # means most of a page can be alerts already stored.
+    page_ids = [hit.get('_id') for hit in hits if isinstance(hit, dict) and hit.get('_id')]
+    seen_ids = set(
+        WazuhAlert.objects.filter(opensearch_id__in=page_ids)
+        .values_list('opensearch_id', flat=True)
+    )
+
     for hit in hits:
         try:
             source = hit['_source']
@@ -148,12 +165,13 @@ def store_alert_hits(hits, min_level=10, advance_watermark=True):
                 continue
 
             opensearch_id = hit['_id']
-            if WazuhAlert.objects.filter(opensearch_id=opensearch_id).exists():
+            if opensearch_id in seen_ids:
                 result['skipped'] += 1
                 continue
 
             kwargs = _parse_hit(hit)
             new_alerts.append(WazuhAlert(**kwargs))
+            seen_ids.add(opensearch_id)   # a page repeating a doc stores it once
             if newest_timestamp is None or kwargs['timestamp'] > newest_timestamp:
                 newest_timestamp = kwargs['timestamp']
         except Exception as exc:
@@ -209,6 +227,10 @@ def fetch_and_store_alerts(min_level=10, batch_size=500, max_pages=20):
     since = watermark.last_timestamp
     if since is None:
         since = timezone.now() - timedelta(hours=24)
+    else:
+        # Re-read a window behind the watermark for late-indexed alerts — see
+        # the module docstring. Already-stored ids are skipped by the dedup.
+        since -= timedelta(minutes=settings.WAZUH_INGEST_OVERLAP_MINUTES)
     boundary_ids = []   # doc ids already fetched at exactly ``since`` this run
 
     for _page in range(max_pages):

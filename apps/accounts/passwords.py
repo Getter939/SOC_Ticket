@@ -35,11 +35,18 @@ def _identity_digest(kind, value):
 
 
 def _client_ip(request):
-    """Use proxy-provided client IP only when that proxy is explicitly trusted."""
+    """Use proxy-provided client IP only when that proxy is explicitly trusted.
+
+    The RIGHTMOST X-Forwarded-For entry is the one the trusted proxy wrote.
+    Proxies that append (IIS ARR does) leave whatever the client sent in front
+    of it, so the leftmost entry is attacker-chosen and would let a requester
+    reset the per-IP limit on every request by inventing a new address.
+    """
     if getattr(settings, 'TRUST_X_FORWARDED_FOR', False):
         forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if forwarded_for:
-            return forwarded_for.split(',', 1)[0].strip()
+        hops = [hop.strip() for hop in forwarded_for.split(',') if hop.strip()]
+        if hops:
+            return hops[-1]
     return request.META.get('REMOTE_ADDR', '')
 
 

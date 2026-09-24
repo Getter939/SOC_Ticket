@@ -227,8 +227,10 @@ repoint Django + log in).
 
 ### Phase E — Cutover to live *(~1–2 days, plus a chosen date)*
 
-- [ ] **Clean the production database.** `seed_all` purges legacy `uat_*` /
-  `seed_*` / `mock` accounts — but verify by hand that no seed tickets, no
+- [ ] **Clean the production database.** `seed_all --purge-only` purges legacy `uat_*` /
+  `seed_*` / `mock` accounts (it refuses to run unless `ALLOW_SEED_COMMANDS=True`
+  is set in `.env` — set it for the one run, review `--dry-run` first, then remove
+  it) — but verify by hand that no seed tickets, no
   `[UAT-STATE]` fixtures, and no test accounts (`sysowner1`, anything in
   `test_accounts.txt`) survive into prod.
 - [ ] **Create the real user accounts** and rotate every dev/UAT password. Several

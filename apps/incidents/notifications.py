@@ -15,10 +15,27 @@ from django.contrib.auth.models import User
 from django.core.mail import EmailMessage, send_mail
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import NotificationTemplate
 
 logger = logging.getLogger(__name__)
+
+# Raw bytes of file attachments per email. Base64 inflates them by a third, so
+# this keeps a message under the common 25 MB SMTP ceiling; files beyond it are
+# listed in the body instead of silently failing the whole send.
+MAX_EMAIL_ATTACHMENT_BYTES = 15 * 1024 * 1024
+
+# What a malformed admin-edited template raises from str.format(): an unknown
+# placeholder (KeyError), a positional one (IndexError), a stray brace
+# (ValueError) or attribute access on a string value (AttributeError).
+TEMPLATE_FORMAT_ERRORS = (KeyError, IndexError, ValueError, AttributeError)
+
+
+def _one_line(text):
+    """Collapse whitespace so user text can go in a header — email headers must
+    not contain line breaks, and Django refuses to send one that does."""
+    return ' '.join((text or '').split())
 
 
 def notify_ticket_cancellation(record_id, action):
@@ -49,6 +66,7 @@ SEVERITY_TH = {
     'High': 'สูง',
     'Medium': 'ปานกลาง',
     'Low': 'ต่ำ',
+    'Unknown': 'ไม่ทราบ',
 }
 
 
@@ -80,16 +98,15 @@ def _render(key, context, default_subject, default_body):
     malformed custom templates fall back to the default rather than erroring.
     """
     template = NotificationTemplate.objects.filter(key=key).first()
-    subject, body = default_subject, default_body
     if template:
         try:
             subject = template.subject.format(**context)
             body = template.body.format(**context)
-            return subject, body
-        except (KeyError, IndexError) as exc:
+            return _one_line(subject), body
+        except TEMPLATE_FORMAT_ERRORS as exc:
             logger.warning('Invalid NotificationTemplate %s — falling back to default: %s', key, exc)
 
-    return default_subject.format(**context), default_body.format(**context)
+    return _one_line(default_subject.format(**context)), default_body.format(**context)
 
 
 def _send(subject, body, recipient_email, ticket_id, attachments=None):
@@ -104,17 +121,31 @@ def _send(subject, body, recipient_email, ticket_id, attachments=None):
     )
     try:
         email = EmailMessage(
-            subject=subject,
+            subject=_one_line(subject),
             body=body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=recipients,
         )
+        attached_bytes = 0
+        left_out = []
         for att in (attachments or []):
             try:
+                size = att.file.size
+                if attached_bytes + size > MAX_EMAIL_ATTACHMENT_BYTES:
+                    left_out.append(att.original_name)
+                    continue
                 with att.file.open('rb') as f:
                     email.attach(att.original_name, f.read(), 'application/octet-stream')
+                attached_bytes += size
             except Exception as att_exc:
                 logger.warning('Could not attach %s: %s', att.original_name, att_exc)
+        if left_out:
+            email.body = (
+                f'{body}\n\n'
+                'ไฟล์ต่อไปนี้ไม่ได้แนบมากับอีเมลเนื่องจากขนาดรวมเกินกำหนด '
+                'กรุณาติดต่อทีม SOC หากต้องการไฟล์:\n'
+                + '\n'.join(f'  - {name}' for name in left_out)
+            )
         email.send(fail_silently=False)
         logger.info('Email sent to %s for ticket %s.', ', '.join(recipients), ticket_id)
         return True
@@ -540,7 +571,10 @@ def notify_system_owner_closed(ticket, attachments=None):
         closed_by = ''
         if ticket.approved_by:
             closed_by = ticket.approved_by.get_full_name() or ticket.approved_by.username
-        closed_at = ticket.approved_at.strftime('%d/%m/%Y %H:%M') if ticket.approved_at else '-'
+        closed_at = (
+            timezone.localtime(ticket.approved_at).strftime('%d/%m/%Y %H:%M')
+            if ticket.approved_at else '-'
+        )
         outcome = (
             'เหตุการณ์ดังกล่าวได้รับการควบคุม ตรวจสอบ และอนุมัติปิดเคสเรียบร้อยแล้ว\n'
             f'  ผู้อนุมัติ : {closed_by}\n'
@@ -610,27 +644,36 @@ def notify_containment_alert(ticket, reason=None):
 
     context = {
         'ticket': {
-            'id': ticket.ticket_id,
             'ticket_id': ticket.ticket_id,
-            'summary': ticket.issue_description,
+            'summary': ticket.event_summary or ticket.issue_description,
             'severity': SEVERITY_TH.get(ticket.severity, ticket.severity),
-            'assigned_to': assigned_to,
-            'created_at': ticket.created_at,
+            'assigned_to': assigned_to or 'ไม่ระบุ',
             'routed_by': routed_by,
             'device_name': ticket.device_name,
+            'ip_address': ticket.ip_address,
+            'detected_at': ticket.incident_datetime,
+            'occurred_at': ticket.event_occurred_at,
+            'containment_deadline': ticket.ola_contain_deadline,
+            'is_emergency': ticket.is_emergency,
+            'action_required': ticket.action_required,
+            'action_precautions': ticket.action_precautions,
         },
         'severity_th': SEVERITY_TH.get(ticket.severity, ticket.severity),
         'ticket_url': ticket_url,
         'reason': reason,
     }
 
-    subject = f'[{ticket.ticket_id}] ต้องดำเนินการกักกัน – {ticket.issue_description[:60]}'
+    subject = (
+        f'[{ticket.ticket_id}] [{SEVERITY_TH.get(ticket.severity, ticket.severity)}] '
+        f'ต้องดำเนินการควบคุม – {ticket.device_name[:60]}'
+    )
     html_message = render_to_string('tickets/email/containment_alert.html', context)
+    plain_message = render_to_string('tickets/email/containment_alert.txt', context)
 
     try:
         send_mail(
-            subject=subject,
-            message='',
+            subject=_one_line(subject),
+            message=plain_message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[admin.email],
             html_message=html_message,

@@ -732,6 +732,7 @@ onto its own wrapped row, which space-between then left-aligned.
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
 {% if can_t2_review %}{% include 'incidents/_occurred_copy_script.html' %}{% endif %}
 {% if clear_draft_key %}<script nonce="{{ request.csp_nonce }}">try{localStorage.removeItem("{{ clear_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
+{% if clear_edit_draft_key %}<script nonce="{{ request.csp_nonce }}">try{sessionStorage.removeItem("{{ clear_edit_draft_key|escapejs }}");}catch(e){}</script>{% endif %}
 <script nonce="{{ request.csp_nonce }}">
 (function(){
   var nav=document.querySelector('[data-section-nav]');

@@ -8,6 +8,74 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Fixed
+- **Ticket forms now handle idle-session expiry before submit.** The default
+  timeout is 30 minutes. Active form work keeps the session alive; a two-minute
+  warning lets the user extend it. On expiry the page saves a draft and redirects
+  to login, then restores the form after sign-in. A final session check before
+  submit avoids losing work to an expired POST.
+- **Admin-edited email templates can no longer break a workflow action.** A
+  stray `{` / `}` or attribute access in a Notification Template raised past the
+  fallback and returned a 500 *after* the ticket had already moved. The sender now
+  falls back to the built-in text for every formatting error, and the admin form
+  refuses a template it could not format.
+- **Email subjects are always one line.** A multi-line field in a subject made
+  Django refuse the whole email.
+- **Closure email to the System Owner shows the approval time in Thai time**, not
+  UTC (it was 7 hours off). Attachments beyond 15 MB per email are listed in the
+  body instead of making the send fail.
+- **DOCX export no longer fails on ticket text.** Text containing `{{…}}` (e.g. a
+  captured template-injection payload) was re-scanned as a placeholder and either
+  failed the export or pulled in another field; control characters pasted from
+  logs made python-docx refuse the file. Placeholders are now filled in one pass
+  over the template only, and XML-invalid characters are stripped.
+- **Report preview's "hide empty / show signatures" checkboxes apply on change
+  again.** Their script lacked the CSP nonce, so the browser blocked it.
+- **Ticket history's default month is the Thai-time month.** Tickets opened
+  00:00–06:59 on the 1st were missing, and before 07:00 on the 1st the page showed
+  the previous month.
+- **Malformed ids and dates return a normal response instead of a 500** — ticket
+  history dates, `triage_id` / `wazuh_alert` on the create forms, and `alert_id` /
+  `ticket_id` on the Wazuh triage and Tier 2 queue actions.
+- **Wazuh ingest re-reads a 10-minute window behind the watermark**
+  (`WAZUH_INGEST_OVERLAP_MINUTES`), so an alert indexed late with an older
+  `@timestamp` is no longer skipped forever. Already-stored alerts are skipped with
+  one query per page instead of one per alert.
+- **A workflow action no longer silently overwrites a newer save.** If the ticket
+  (or a response request) was saved by someone else after the page loaded, the
+  action is refused with "reload and try again" instead of rolling their change
+  back. Claims, "seen" stamps and report-export metadata written in the meantime
+  are preserved.
+- **IOC Database pages in the database.** The page used to load every indicator
+  from both sources into memory on each view, merge and filter them in Python,
+  and then show 30. PostgreSQL now merges (two non-overlapping halves joined with
+  `UNION ALL`), filters, sorts and returns only the requested page; the query count
+  no longer grows with the database. Results are identical except that the last
+  tie-break (value) follows the database collation.
+- **Five dashboard tests updated** for the server-side sorted/paginated case
+  table shipped in v1.7.6 — CI was red on `main`.
+
+### Security
+- **Password-reset per-IP throttle uses the rightmost `X-Forwarded-For` hop.** It
+  took the leftmost, which the client controls behind IIS ARR, so the limit could
+  be reset on every request.
+- **CSP `script-src` names the two exact jsDelivr files** (Bootstrap, Chart.js)
+  instead of the whole host, which serves every npm package.
+- **PDF export fetches no external resources.** The renderer's resolver now
+  accepts only inline `data:` URIs (the report uses nothing else), closing an
+  SSRF / local-file read path.
+- **Project Incident page checks visibility before running any POST action**, and
+  lists deleted shared evidence only to the users who can restore it.
+- **Every seed command refuses to write on a server that has not opted in**
+  (`DEBUG`, or `ALLOW_SEED_COMMANDS=True` in `.env`): `seed_all`, `seed_data`,
+  `seed_uat_states`, `seed_ceo_demo`, `seed_dashboard_mockup`,
+  `seed_ola_demo_buckets`. They write demo data credited to real staff, `seed_all`
+  deletes accounts matched by common nicknames together with their tickets, and
+  `seed_ola_demo_buckets --apply` rewrote the OLA deadline of every real open case.
+  Dry runs and previews always work.
+
+## [v1.7.6] — 2026-09-24
+
 ### Added
 - **"งานของคุณ" card for the response-team assignee.** A Forensic Analyst or Red
   Team Manager used to open a ticket, find *ยังไม่มีขั้นตอนที่ต้องดำเนินการสำหรับบทบาทของคุณ*

@@ -16,6 +16,7 @@ from django.shortcuts import redirect, render
 
 from ..models import Ticket, TicketLog
 from ..ticket_workflow import claim_tier2_ticket
+from ._helpers import _int_param
 
 
 def _has_tier2_access(user):
@@ -39,7 +40,7 @@ def claim_escalation(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 2 เท่านั้นที่สามารถรับ Ticket ได้')
         return redirect('escalation_queue')
 
-    ticket = Ticket.objects.filter(pk=request.POST.get('ticket_id')).first()
+    ticket = Ticket.objects.filter(pk=_int_param(request.POST.get('ticket_id'))).first()
     claimed = ticket is not None and claim_tier2_ticket(
         ticket=ticket, actor=request.user,
     ).claimed
@@ -71,7 +72,7 @@ def release_escalation(request):
         messages.error(request, 'กรุณาระบุเหตุผลในการคืน Ticket กลับเข้าคิว')
         return redirect('escalation_queue')
 
-    ticket_pk = request.POST.get('ticket_id')
+    ticket_pk = _int_param(request.POST.get('ticket_id'))
     with transaction.atomic():
         ticket = (
             Ticket.objects.select_for_update()

@@ -4258,6 +4258,13 @@ class ProjectIncidentFanOutTest(TestCase):
         )
         self.assertEqual(resp.status_code, 302)
 
+        detail = self.client.get(resp.url)
+        self.assertContains(detail, 'localStorage.removeItem("project_incident_form_draft")')
+        self.assertNotContains(
+            self.client.get(resp.url),
+            'localStorage.removeItem("project_incident_form_draft")',
+        )
+
         project = ProjectIncident.objects.get()
         members = list(project.members)
         self.assertEqual(len(members), 2)
@@ -7595,9 +7602,18 @@ class TicketEditViewTest(TestCase):
     def test_edit_saves_and_records_the_change(self):
         ticket = self._ticket()
         self.client.force_login(self.creator)
-        self.client.post(
+        response = self.client.post(
             reverse('edit_ticket', args=[ticket.pk]),
             self._payload(ticket, device_name='FIXED-HOST'))
+        detail = self.client.get(response.url)
+        self.assertContains(
+            detail,
+            f'sessionStorage.removeItem("ticket_edit_draft_{self.creator.pk}_{ticket.pk}")',
+        )
+        self.assertNotContains(
+            self.client.get(response.url),
+            f'sessionStorage.removeItem("ticket_edit_draft_{self.creator.pk}_{ticket.pk}")',
+        )
 
         ticket.refresh_from_db()
         self.assertEqual(ticket.device_name, 'FIXED-HOST')

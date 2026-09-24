@@ -1415,3 +1415,78 @@ class PurgeVulnerabilityAlertsTest(TestCase):
         output = self._run()
 
         self.assertIn('Nothing to delete', output)
+
+
+class IngestOverlapWindowTest(TestCase):
+    """Each run re-reads a window behind the watermark, so an alert indexed late
+    with an older @timestamp is still ingested, and re-read alerts are no-ops."""
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_query_starts_the_overlap_window_before_the_watermark(self, mock_post):
+        watermark = parse_datetime('2025-09-09T10:00:00.000Z')
+        IngestWatermark.objects.create(pk=1, last_timestamp=watermark)
+        mock_post.return_value = _mock_response([])
+
+        with self.settings(WAZUH_INGEST_OVERLAP_MINUTES=10):
+            fetch_and_store_alerts(min_level=10)
+
+        query = mock_post.call_args.kwargs['json']
+        since = query['query']['bool']['filter'][1]['range']['@timestamp']['gte']
+        self.assertEqual(parse_datetime(since), watermark - timedelta(minutes=10))
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_late_indexed_alert_behind_the_watermark_is_ingested_once(self, mock_post):
+        t_new = '2025-09-09T10:00:00.000Z'
+        t_late = '2025-09-09T09:57:00.000Z'   # older @timestamp, indexed later
+        _make_alert(opensearch_id='already-stored', timestamp=parse_datetime(t_new))
+        IngestWatermark.objects.create(pk=1, last_timestamp=parse_datetime(t_new))
+        mock_post.return_value = _mock_response([
+            _make_hit('late-arrival', timestamp=t_late),
+            _make_hit('already-stored', timestamp=t_new),
+        ])
+
+        result = fetch_and_store_alerts(min_level=10)
+
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(result['skipped'], 1)
+        self.assertTrue(WazuhAlert.objects.filter(opensearch_id='late-arrival').exists())
+        # The watermark never moves backwards for an older alert.
+        self.assertEqual(
+            IngestWatermark.objects.get(pk=1).last_timestamp, parse_datetime(t_new),
+        )
+
+    @patch('apps.wazuh_ingest.ingest.requests.post')
+    def test_a_doc_repeated_within_one_page_is_stored_once(self, mock_post):
+        IngestWatermark.objects.create(pk=1, last_timestamp=parse_datetime('2025-09-09T09:00:00.000Z'))
+        mock_post.return_value = _mock_response([_make_hit('dup'), _make_hit('dup')])
+
+        result = fetch_and_store_alerts(min_level=10)
+
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(WazuhAlert.objects.filter(opensearch_id='dup').count(), 1)
+
+
+class NonNumericAlertIdTest(TestCase):
+    """A hand-edited or stale form with a non-numeric alert_id gets the normal
+    "not yours" response instead of a 500 from the ORM."""
+
+    def setUp(self):
+        _make_user('badid_t1', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T1)
+        self.client.login(username='badid_t1', password='testpass123')
+
+    def test_claim_and_release_redirect_back_to_the_queue(self):
+        for name, data in (
+            ('claim_alert', {'alert_id': 'abc'}),
+            ('release_alert', {'alert_id': 'abc', 'release_reason': 'x'}),
+        ):
+            with self.subTest(view=name):
+                response = self.client.post(reverse(name), data)
+                self.assertRedirects(
+                    response, reverse('triage_queue'), fetch_redirect_response=False,
+                )
+
+    def test_triage_action_is_404(self):
+        response = self.client.post(
+            reverse('triage_action'), {'alert_id': '1 OR 1=1', 'action': 'create_ticket'},
+        )
+        self.assertEqual(response.status_code, 404)

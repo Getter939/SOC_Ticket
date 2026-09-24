@@ -82,6 +82,7 @@ class Command(BaseCommand):
                             help="Delete previous UAT-STATE seed rows before seeding")
 
     def handle(self, *args, **options):
+        seed_actors.require_seeding_allowed("seed_uat_states")
         per_state = options["per_state"]
 
         if options["flush"]:

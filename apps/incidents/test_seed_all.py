@@ -11,7 +11,8 @@ from io import StringIO
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
-from django.test import TestCase
+from django.core.management.base import CommandError
+from django.test import TestCase, override_settings
 
 from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket
@@ -20,6 +21,59 @@ from apps.incidents.tests import (
 )
 
 
+@override_settings(DEBUG=False, ALLOW_SEED_COMMANDS=False)
+class SeedProductionGuardTest(TestCase):
+    """Every seeder writes demo data credited to real staff, and several delete
+    or rewrite rows; a server must opt in before any of them writes."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t1 = _make_t1('guard_t1')
+        _make_t2('guard_t2')
+        _make_user('guard_mgr', UserProfile.ROLE_SOC_MANAGER)
+        _make_user('guard_admin', UserProfile.ROLE_SYSTEM_ADMIN)
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command(*args, stdout=out, stderr=StringIO())
+        return out.getvalue()
+
+    def test_every_writing_invocation_is_refused_and_writes_nothing(self):
+        legacy = _make_t1('uat_t1')
+        live = Ticket.objects.create(
+            ticket_id='LIVE-1', device_name='H', ip_address='10.0.0.9',
+            issue_description='a real open case', created_by=self.t1,
+        )
+        deadline = live.ola_contain_deadline
+        for args in (
+            ('seed_all', '--purge-only'),
+            ('seed_all',),
+            ('seed_data', '--tickets', '2'),
+            ('seed_uat_states',),
+            ('seed_ceo_demo',),
+            ('seed_ceo_demo', '--remove'),
+            ('seed_dashboard_mockup', '--reset', '--apply'),
+            ('seed_ola_demo_buckets', '--apply'),
+        ):
+            with self.subTest(command=' '.join(args)):
+                with self.assertRaisesMessage(CommandError, 'ALLOW_SEED_COMMANDS'):
+                    self._run(*args)
+        self.assertTrue(User.objects.filter(pk=legacy.pk).exists())
+        self.assertEqual(list(Ticket.objects.values_list('pk', flat=True)), [live.pk])
+        live.refresh_from_db()
+        self.assertEqual(live.ola_contain_deadline, deadline)
+
+    def test_previews_are_always_allowed(self):
+        self.assertIn('Dry run', self._run('seed_all', '--dry-run'))
+        self.assertIn('DRY RUN', self._run('seed_dashboard_mockup'))
+        self.assertIn('DRY RUN', self._run('seed_ola_demo_buckets'))
+
+    @override_settings(DEBUG=True)
+    def test_debug_box_is_allowed(self):
+        self._run('seed_ceo_demo', '--remove')
+
+
+@override_settings(ALLOW_SEED_COMMANDS=True)   # a UAT box that has opted in
 class SeedAllTest(TestCase):
     @classmethod
     def setUpTestData(cls):

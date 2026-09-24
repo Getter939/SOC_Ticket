@@ -68,6 +68,14 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry = options['dry_run']
 
+        # Production guard. This command hard-deletes accounts matched by a list
+        # of common nicknames (LEGACY_USER_NAMES) together with every ticket
+        # they authored, then writes synthetic tickets credited to the real
+        # role-holders — all of which is unrecoverable on a live database.
+        # --dry-run writes nothing and is always allowed.
+        if not dry:
+            seed_actors.require_seeding_allowed('seed_all')
+
         actors = seed_actors.resolve()
         self.stdout.write(self.style.MIGRATE_HEADING('Real accounts by role'))
         self.stdout.write(seed_actors.summary(actors))

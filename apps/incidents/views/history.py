@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from ..models import (
     Ticket,
@@ -15,6 +16,13 @@ from ..models import (
 
 logger = logging.getLogger('apps.incidents.views')
 
+
+def _parse_date_param(value):
+    """A YYYY-MM-DD query value as a date, or None when blank or malformed."""
+    try:
+        return parse_date(value) if value else None
+    except ValueError:  # well-formed but impossible, e.g. 2026-02-31
+        return None
 
 
 @login_required
@@ -74,8 +82,20 @@ def ticket_history(request):
     end_date = request.GET.get('end_date', '').strip()
     all_time = request.GET.get('all_time', '').strip()
 
+    # A hand-edited or truncated date must not 500 the page: an unparseable
+    # value is treated as absent, like the other filters below.
+    start_date_obj = _parse_date_param(start_date)
+    end_date_obj = _parse_date_param(end_date)
+    if start_date and start_date_obj is None:
+        start_date = ''
+    if end_date and end_date_obj is None:
+        end_date = ''
+
     if not start_date and not end_date and not all_time:
-        today = timezone.now()
+        # The current month in local (Bangkok) time. timezone.now() is UTC, so
+        # using it here dropped tickets opened 00:00–06:59 on the 1st and, before
+        # 07:00 on the 1st, showed the previous month altogether.
+        today = timezone.localtime()
         start_date_obj = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         last_day = calendar.monthrange(today.year, today.month)[1]
         end_date_obj = today.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
@@ -83,7 +103,7 @@ def ticket_history(request):
         start_date = start_date_obj.strftime('%Y-%m-%d')
         end_date = end_date_obj.strftime('%Y-%m-%d')
     elif start_date and end_date:
-        query_set = query_set.filter(created_at__date__range=[start_date, end_date])
+        query_set = query_set.filter(created_at__date__range=[start_date_obj, end_date_obj])
 
     if search_ticket:
         query_set = query_set.filter(ticket_id__icontains=search_ticket)

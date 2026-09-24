@@ -102,6 +102,18 @@ def _sort_headers(current_sort):
 # a value; nothing writes it now.
 
 
+def _posted_alert_id(request):
+    """The POSTed alert_id as an int, or None when missing or non-numeric.
+
+    Filtering pk= on a non-numeric string raises inside the ORM (a 500); None
+    simply matches no alert, so each view takes its normal "not yours" path.
+    """
+    try:
+        return int(request.POST.get('alert_id', ''))
+    except (TypeError, ValueError):
+        return None
+
+
 def _severity_for_rule_level(rule_level):
     """Map a Wazuh rule.level to a Ticket severity choice."""
     if rule_level >= 13:
@@ -373,7 +385,7 @@ def claim_alert(request):
         messages.error(request, 'เฉพาะเจ้าหน้าที่ SOC Tier 1 เท่านั้นที่สามารถรับ Alert มา Triage ได้')
         return redirect('triage_queue')
 
-    alert_id = request.POST.get('alert_id')
+    alert_id = _posted_alert_id(request)
     # kind is re-checked here, not just in the queue's SELECT: claiming is the
     # only door into TRIAGING, and everything downstream (triage_action, the
     # ticket form's alert selector) gates on "claimed by me". Guarding this one
@@ -412,7 +424,7 @@ def release_alert(request):
         messages.error(request, 'กรุณาระบุเหตุผลในการคืน Alert กลับเข้า Queue')
         return redirect('triage_queue')
 
-    alert_id = request.POST.get('alert_id')
+    alert_id = _posted_alert_id(request)
     with transaction.atomic():
         alert = (
             WazuhAlert.objects.select_for_update()
@@ -475,7 +487,7 @@ def triage_action(request):
     # Read-only ownership gate: nothing is written here, so no row lock is
     # needed. The alert deliberately stays claimed and TRIAGING until the
     # Ticket is saved — a cancelled ticket form must not lose the claim.
-    alert = get_object_or_404(WazuhAlert, pk=request.POST.get('alert_id'))
+    alert = get_object_or_404(WazuhAlert, pk=_posted_alert_id(request))
     owns_triage = (
         alert.triage_status == WazuhAlert.TRIAGE_TRIAGING
         and alert.claimed_by_id == request.user.id

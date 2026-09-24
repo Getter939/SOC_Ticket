@@ -511,7 +511,12 @@ server and no way to log in.
 >
 > `seed_all` **purges user accounts** matching legacy prefixes. On production
 > that is data loss, not test setup. The production database stays empty until
-> real tickets arrive.
+> real tickets arrive. Every seeder above enforces this itself: with
+> `DEBUG=False` it refuses to write unless `ALLOW_SEED_COMMANDS=True` is in `.env`
+> — never set it on production. Previews (`seed_all --dry-run`, and
+> `seed_dashboard_mockup` / `seed_ola_demo_buckets` without `--apply`) always
+> work. `seed_ola_demo_buckets --apply` would otherwise rewrite the OLA deadline
+> of every real open case.
 
 > **This is the one-time build. For every subsequent release** — re-deploying a
 > new version onto this box, or rolling one back — follow

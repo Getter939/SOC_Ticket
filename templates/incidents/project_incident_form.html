@@ -620,8 +620,9 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
     saveTimer = setTimeout(saveDraft, 500);
   });
   form.addEventListener('change', saveDraft);
-
-  form.addEventListener('submit', () => localStorage.removeItem(DRAFT_KEY));
+  form.addEventListener('session:before-submit', saveDraft);
+  form.addEventListener('session:before-redirect', saveDraft);
+  // Keep the draft until the server confirms the project was created.
   document.getElementById('cancel-btn')?.addEventListener('click', function (e) {
     if (!localStorage.getItem(DRAFT_KEY)) return;
     if (!confirm('ยกเลิกและล้างข้อมูลที่กรอกไว้ทั้งหมดใช่หรือไม่?')) {
@@ -660,4 +661,5 @@ document.querySelectorAll('#severity-group input[type=radio]').forEach(radio => 
 </script>
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% include 'incidents/_occurred_copy_script.html' %}
+{% include 'includes/_session_keepalive.html' %}
 {% endblock %}

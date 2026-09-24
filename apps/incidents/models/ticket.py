@@ -1764,11 +1764,34 @@ class Ticket(models.Model):
         from ..cancellation import perform_cancellation
         return perform_cancellation(ticket=self, actor=actor, action=action, **kwargs)
 
+    # Columns written only with queryset .update(), which never bumps updated_at.
+    # transition_to copies them from the locked row so its full-row save cannot
+    # roll back a claim, a "seen" stamp or a report export that landed after
+    # this instance was loaded.
+    _UPDATE_ONLY_FIELDS = (
+        't2_claimed_by_id', 't2_claimed_at', 'creator_seen_at', 't2_changed_at',
+        'report_template_version', 'report_format', 'report_generated_by_id',
+        'report_generated_at', 'report_ticket_updated_at', 'report_sha256',
+    )
+
     def transition_to(self, new_status, user, note=''):
         with transaction.atomic():
             current = Ticket.objects.select_for_update().get(pk=self.pk)
             if current.status != self.status or current.status == self.STATUS_CANCELLED:
                 raise ValidationError('สถานะรายการเปลี่ยนแล้ว กรุณาโหลดหน้าใหม่')
+            # _transition_to ends in a full-row save of THIS instance. If
+            # someone saved the ticket after it was loaded (a content edit, an
+            # emergency reassessment), that save would silently overwrite their
+            # change, so refuse instead. Every save() bumps updated_at, and the
+            # workflow callers that change fields first save them through this
+            # same instance, so an unchanged row always matches.
+            if current.updated_at != self.updated_at:
+                raise ValidationError(
+                    'Ticket นี้ถูกแก้ไขโดยผู้อื่นระหว่างที่คุณดำเนินการ '
+                    'กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง'
+                )
+            for field in self._UPDATE_ONLY_FIELDS:
+                setattr(self, field, getattr(current, field))
             self._transition_to(new_status, user, note)
 
     def _transition_to(self, new_status, user, note=''):

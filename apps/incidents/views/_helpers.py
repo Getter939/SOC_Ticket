@@ -211,6 +211,20 @@ def _notify_containment(ticket, reason, request):
 
 # ── Ticket views ─────────────────────────────────────────────────────── #
 
+def _int_param(value):
+    """A positive integer id from a query/form value, or None.
+
+    Filtering pk= on a non-numeric string raises ValueError inside the ORM,
+    which surfaced as a 500 for a hand-edited URL or a stale form. Callers treat
+    None exactly like "no such row".
+    """
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def _alert_bundle_ids(request):
     """Return distinct selected Wazuh alert ids, preserving form order."""
     values = request.POST.getlist('alert_bundle') or request.GET.getlist('alert_bundle')

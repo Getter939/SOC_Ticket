@@ -322,6 +322,7 @@ class Command(BaseCommand):
             return
         if not options['reset']:
             raise CommandError('This seed mutates existing data. Use --reset --apply.')
+        seed_actors.require_seeding_allowed('seed_dashboard_mockup')
 
         with transaction.atomic():
             self._clear_existing_data()

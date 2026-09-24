@@ -506,6 +506,8 @@ updateDecisionPanels();
     saveTimer = setTimeout(saveDraft, 500);
   });
   form.addEventListener('change', saveDraft);
+  form.addEventListener('session:before-submit', saveDraft);
+  form.addEventListener('session:before-redirect', saveDraft);
 
   // The draft is intentionally NOT cleared on submit: a submit can fail after
   // the POST leaves (expired idle session → login redirect, CSRF 403) and

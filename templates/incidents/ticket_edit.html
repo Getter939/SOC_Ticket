@@ -112,5 +112,47 @@
 {% include 'incidents/_detailed_issue_cascade.html' %}
 {% include 'incidents/_occurred_copy_script.html' %}
 {% if can_upload_attachment %}{% include 'incidents/_evidence_picker_js.html' %}{% endif %}
+<script nonce="{{ request.csp_nonce }}">
+(() => {
+  const form = document.querySelector('form[enctype="multipart/form-data"]');
+  if (!form) return;
+  const key = 'ticket_edit_draft_{{ request.user.pk }}_{{ ticket.pk }}';
+  const restorable = (field) => field.name && field.type !== 'file'
+    && field.type !== 'hidden' && field.name !== 'csrfmiddlewaretoken';
+
+  function saveDraft() {
+    const fields = {};
+    form.querySelectorAll('input, select, textarea').forEach((field) => {
+      if (!restorable(field)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        if (field.checked) fields[field.name] = field.value;
+      } else fields[field.name] = field.value;
+    });
+    try { sessionStorage.setItem(key, JSON.stringify(fields)); } catch (e) { /* storage unavailable */ }
+  }
+
+  {% if not form.is_bound %}
+  try {
+    const fields = JSON.parse(sessionStorage.getItem(key) || 'null');
+    if (fields) form.querySelectorAll('input, select, textarea').forEach((field) => {
+      if (!restorable(field) || !(field.name in fields)) return;
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        field.checked = field.value === fields[field.name];
+        if (field.checked) field.dispatchEvent(new Event('change'));
+      } else field.value = fields[field.name];
+    });
+  } catch (e) { /* no recoverable draft */ }
+  {% endif %}
+
+  let saveTimer;
+  form.addEventListener('input', () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 500);
+  });
+  form.addEventListener('change', saveDraft);
+  form.addEventListener('session:before-submit', saveDraft);
+  form.addEventListener('session:before-redirect', saveDraft);
+})();
+</script>
 {% include 'includes/_session_keepalive.html' %}
 {% endblock %}

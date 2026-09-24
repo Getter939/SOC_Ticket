@@ -49,6 +49,7 @@ class _TicketEditForm:
 class _SubtaskUpdateForm:
     def __init__(self, subtask, status, result_notes):
         self.subtask = subtask
+        self.instance = subtask   # as on a ModelForm; the service reads it
         self.status = status
         self.result_notes = result_notes
 

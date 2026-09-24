@@ -177,10 +177,10 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # Idle timeout. Browser-close expiry alone does not help the common SOC case: a
 # shared console left logged in with the browser still open. SESSION_COOKIE_AGE
 # is the inactivity window and SESSION_SAVE_EVERY_REQUEST slides it on every
-# request, so an analyst who is actively working is never logged out mid-task,
-# while an abandoned session dies after 60 minutes by default. Override the
+# authenticated request. Ticket forms also ping while the analyst works, while
+# an abandoned session dies after 30 minutes by default. Override the
 # inactivity window via SESSION_IDLE_MINUTES in .env when needed.
-SESSION_COOKIE_AGE = config('SESSION_IDLE_MINUTES', default=60, cast=int) * 60
+SESSION_COOKIE_AGE = config('SESSION_IDLE_MINUTES', default=30, cast=int) * 60
 SESSION_SAVE_EVERY_REQUEST = True
 
 # Required for HTTPS POSTs once TLS terminates at a proxy (Django checks Origin
@@ -220,8 +220,10 @@ _BEHIND_PROXY = config('USE_PROXY_SSL_HEADER', default=False, cast=bool)
 if _BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
-# Only trust X-Forwarded-For when the reverse proxy strips a client-supplied
-# header. The bundled nginx configuration does so before forwarding traffic.
+# Whether the password-reset throttle reads X-Forwarded-For at all. When it
+# does it takes the RIGHTMOST entry — the hop the trusted proxy appended — never
+# the leftmost, which a client can set to anything (IIS ARR appends to a
+# client-supplied header rather than replacing it). See accounts.passwords.
 TRUST_X_FORWARDED_FOR = config(
     'TRUST_X_FORWARDED_FOR', default=_BEHIND_PROXY, cast=bool
 )
@@ -242,11 +244,11 @@ AXES_COOLOFF_TIME    = timedelta(
 AXES_LOCKOUT_PARAMETERS = [['username', 'ip_address']]
 AXES_RESET_ON_SUCCESS = True          # a good login clears that client's tally
 AXES_LOCKOUT_TEMPLATE = 'registration/lockout.html'
-# Behind the bundled nginx reverse proxy, trust exactly one X-Forwarded-For hop
-# so lockouts key on the real client IP, not the proxy's. Without a proxy Axes
-# uses REMOTE_ADDR directly.
-if _BEHIND_PROXY:
-    AXES_IPWARE_PROXY_COUNT = config('AXES_PROXY_COUNT', default=1, cast=int)
+# Axes keys lockouts on REMOTE_ADDR (django-ipware is not installed, so none of
+# the AXES_IPWARE_* settings apply). In production that is already the real
+# client: Waitress runs with --trusted-proxy=127.0.0.1
+# --trusted-proxy-headers="x-forwarded-for …" (run-prod.cmd) and rewrites
+# REMOTE_ADDR from the hop IIS appended.
 
 # ── Content-Security-Policy (applied by config.middleware) ─────────────────
 # Defense-in-depth against XSS / clickjacking / data exfiltration.
@@ -258,8 +260,16 @@ if _BEHIND_PROXY:
 #     in the Bootstrap templates and can't carry a nonce.
 #   • Everything else is locked to 'self' plus the one CDN the UI loads
 #     (Bootstrap + Chart.js from jsdelivr).
+#   • script-src names the two exact CDN files, not the whole host: jsdelivr
+#     serves every npm package, so a host-wide allowance would let an injected
+#     <script src> load any of them and step around the nonce. Bump these
+#     together with the <script src> tags in base.html / the dashboards.
 # Flip *_REPORT_ONLY on to trial changes without enforcing.
 _CSP_CDN = 'https://cdn.jsdelivr.net'
+_CSP_CDN_SCRIPTS = ' '.join((
+    f'{_CSP_CDN}/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js',
+    f'{_CSP_CDN}/npm/chart.js@4.4.0/dist/chart.umd.min.js',
+))
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
     "base-uri 'self'; "
@@ -269,7 +279,7 @@ CONTENT_SECURITY_POLICY = (
     "img-src 'self' data:; "
     f"font-src 'self' {_CSP_CDN}; "
     f"style-src 'self' 'unsafe-inline' {_CSP_CDN}; "
-    f"script-src 'self' 'nonce-{{NONCE}}' {_CSP_CDN}; "
+    f"script-src 'self' 'nonce-{{NONCE}}' {_CSP_CDN_SCRIPTS}; "
     "connect-src 'self'"
 )
 CONTENT_SECURITY_POLICY_REPORT_ONLY = config(
@@ -322,8 +332,19 @@ OPENSEARCH_VERIFY_SSL  = config('OPENSEARCH_VERIFY_SSL', default=True, cast=bool
 # Path to a CA bundle (PEM) for verifying a self-signed/internal Wazuh/OpenSearch
 # certificate. If set, takes precedence over OPENSEARCH_VERIFY_SSL=True/False.
 OPENSEARCH_CA_BUNDLE  = config('OPENSEARCH_CA_BUNDLE', default='')
+# How far behind the watermark each ingest run starts re-reading, to catch
+# alerts indexed late with an older @timestamp (see wazuh_ingest.ingest).
+WAZUH_INGEST_OVERLAP_MINUTES = config('WAZUH_INGEST_OVERLAP_MINUTES', default=10, cast=int)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Opt-in for the demo seeders (seed_all, seed_data, seed_uat_states,
+# seed_ceo_demo, seed_dashboard_mockup, seed_ola_demo_buckets). They write
+# synthetic data credited to real staff and some delete or rewrite rows, so they
+# refuse to write unless DEBUG is on or this is set — a UAT/demo box running
+# DEBUG=False. Never production. Previews/dry runs always work.
+# See seed_actors.require_seeding_allowed.
+ALLOW_SEED_COMMANDS = config('ALLOW_SEED_COMMANDS', default=False, cast=bool)
 
 LOG_DIR = config('LOG_DIR', default=str(BASE_DIR / 'logs'))
 try:
