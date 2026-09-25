@@ -1,6 +1,7 @@
 import calendar
 import logging
 from datetime import timedelta
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -25,6 +26,7 @@ from ..notifications import (
     notify_containment_alert,
 )
 from ..policies import (
+    can_bulk_export_ticket_reports as _can_bulk_export_ticket_reports,
     user_can_drive as _user_can_drive,
 )
 from ..models import TicketCancellationRequest
@@ -253,14 +255,16 @@ def _parse_date_param(value):
         return None
 
 
-def _date_range_params(request):
+def _date_range_params(params):
     """The start_date/end_date query pair as (start_str, end_str, start, end).
 
-    A hand-edited or truncated date must not 500 the page: an unparseable value
-    is treated as absent, and its string is blanked so the form doesn't echo it.
+    `params` is the query (request.GET, or the page's querystring re-posted by
+    the bulk report export). A hand-edited or truncated date must not 500 the
+    page: an unparseable value is treated as absent, and its string is blanked
+    so the form doesn't echo it.
     """
-    start_str = request.GET.get('start_date', '').strip()
-    end_str = request.GET.get('end_date', '').strip()
+    start_str = params.get('start_date', '').strip()
+    end_str = params.get('end_date', '').strip()
     start = _parse_date_param(start_str)
     end = _parse_date_param(end_str)
     return (start_str if start else '', end_str if end else '', start, end)
@@ -482,12 +486,40 @@ def _ticket_search_q(term):
     )
 
 
-def _render_ticket_list(request, visible, *, page_title, heading, description,
-                        is_manager_queue=False, date_filter=False):
-    """Render a filtered, non-terminal ticket list with shared list controls.
+# Bulk PDF export (Active Tickets + History). Each report renders synchronously
+# (a few seconds with evidence images) and the export streams, so this caps how
+# long one request can hold a worker thread.
+BULK_REPORT_LIMIT = 100
 
-    date_filter adds the วันที่แจ้ง (created_at) range + quick presets. Off by
-    default: the Manager Queue shares this renderer and doesn't get it.
+
+def _bulk_export_context(request, export_url):
+    """Context for the results bar's bulk-export control; export_url '' = none.
+
+    Only for the SOC Manager and Tier 2 (policies.can_bulk_export_ticket_reports
+    — narrower than the single export, which all SOC staff have). The page's
+    querystring, minus the page number, is posted back so the export rebuilds
+    exactly the filtered, sorted list on screen.
+    """
+    if not export_url or not _can_bulk_export_ticket_reports(request.user):
+        return {'export_url': ''}
+    query = request.GET.copy()
+    query.pop('page', None)
+    return {
+        'export_url': export_url,
+        'export_query': query.urlencode(),
+        'bulk_report_limit': BULK_REPORT_LIMIT,
+    }
+
+
+def _filter_open_tickets(request, params, visible, *, is_manager_queue=False,
+                         date_filter=False):
+    """The non-terminal ticket list, filtered and sorted from `params`.
+
+    Shared by the page (params = request.GET) and the bulk report export
+    (params = the page's querystring, re-posted), so the ZIP holds exactly the
+    tickets the page shows. Returns a namespace: `qs` plus the validated filter
+    state the page renders. date_filter adds the วันที่แจ้ง (created_at) range;
+    the Manager Queue doesn't get it.
     """
     tickets_qs = visible.exclude(
         status__in=list(Ticket.TERMINAL_STATUSES)
@@ -515,12 +547,12 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
             )
         )
 
-    search = request.GET.get('q', '').strip()
-    status_filter = request.GET.get('status', '').strip()
-    severity_filter = request.GET.get('severity', '').strip()
-    classification_filter = request.GET.get('classification', '').strip()
-    emergency_filter = request.GET.get('emergency', '').strip()
-    sort = request.GET.get('sort', 'ola').strip()
+    search = params.get('q', '').strip()
+    status_filter = params.get('status', '').strip()
+    severity_filter = params.get('severity', '').strip()
+    classification_filter = params.get('classification', '').strip()
+    emergency_filter = params.get('emergency', '').strip()
+    sort = params.get('sort', 'ola').strip()
 
     if search:
         tickets_qs = tickets_qs.filter(_ticket_search_q(search))
@@ -529,7 +561,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     # just because it is old. The range only narrows when the user sets one.
     start_date = end_date = ''
     if date_filter:
-        start_date, end_date, start_obj, end_obj = _date_range_params(request)
+        start_date, end_date, start_obj, end_obj = _date_range_params(params)
         tickets_qs = _apply_date_range(tickets_qs, 'created_at', start_obj, end_obj)
 
     active_status_choices = [
@@ -564,7 +596,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     # OLA-pressure bucket filter — shares thresholds with the dashboard chart
     # (apps.incidents.ola) so the dashboard's "Overdue/Due ≤1h/…" bars can
     # deep-link straight to the matching slice of this list.
-    ola_filter = request.GET.get('ola', '').strip()
+    ola_filter = params.get('ola', '').strip()
     if ola_filter in ola_buckets.BUCKET_KEYS:
         tickets_qs = tickets_qs.filter(
             ola_buckets.bucket_filter(ola_filter, timezone.now()))
@@ -615,6 +647,34 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     if sort in ('severity', 'severity_asc'):
         tickets_qs = tickets_qs.with_severity_rank()
     tickets_qs = tickets_qs.order_by(*sort_map[sort])
+
+    return SimpleNamespace(
+        qs=tickets_qs, search=search, status_filter=status_filter,
+        severity_filter=severity_filter, classification_filter=classification_filter,
+        emergency_filter=emergency_filter, ola_filter=ola_filter, sort=sort,
+        start_date=start_date, end_date=end_date,
+        active_status_choices=active_status_choices,
+        is_system_admin_viewer=is_system_admin_viewer,
+    )
+
+
+def _render_ticket_list(request, visible, *, page_title, heading, description,
+                        is_manager_queue=False, date_filter=False, export_url=''):
+    """Render a filtered, non-terminal ticket list with shared list controls.
+
+    date_filter adds the วันที่แจ้ง (created_at) range + quick presets. Off by
+    default: the Manager Queue shares this renderer and doesn't get it. Nor does
+    it get export_url — the bulk PDF export is Active Tickets + History only.
+    """
+    f = _filter_open_tickets(request, request.GET, visible,
+                             is_manager_queue=is_manager_queue, date_filter=date_filter)
+    tickets_qs = f.qs
+    search, status_filter, severity_filter = f.search, f.status_filter, f.severity_filter
+    classification_filter, emergency_filter = f.classification_filter, f.emergency_filter
+    ola_filter, sort = f.ola_filter, f.sort
+    start_date, end_date = f.start_date, f.end_date
+    active_status_choices = f.active_status_choices
+    is_system_admin_viewer = f.is_system_admin_viewer
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -670,6 +730,7 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'result_count': paginator.count,
         'result_total': open_tickets.count(),
         'ola_breach_count': ola_breach_count,
+        **_bulk_export_context(request, export_url),
         'filter_chips': filter_chips,
         'has_clearable_filters': bool(filter_chips),
         'more_filter_count': sum(bool(value) for value in (

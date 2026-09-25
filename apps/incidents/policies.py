@@ -358,6 +358,23 @@ def can_access_ticket_report(user):
     return is_soc(user)
 
 
+def can_bulk_export_ticket_reports(user):
+    """Whether user may export the reports of a whole filtered list at once.
+
+    Narrower than can_access_ticket_report on purpose: the SOC Manager and
+    Tier 2 only (and superusers). A bulk export restamps the report provenance
+    of up to BULK_REPORT_LIMIT tickets in one click and pulls every one of
+    those reports — evidence images included — into a single file. Sending
+    sets of reports onward is Manager / Tier 2 work; Tier 1 keeps the
+    one-report export on the ticket page. A Manager on acting-tier access is a
+    Manager either way, so that flag changes nothing here.
+    """
+    if is_soc_manager(user):
+        return True
+    profile = getattr(user, 'profile', None)
+    return bool(profile and profile.is_tier2)
+
+
 def can_create_ticket_from_triage(triage, user):
     """Return whether ``user`` may convert a manual triage record."""
     if triage.ticket_id or triage.project_incident_id:

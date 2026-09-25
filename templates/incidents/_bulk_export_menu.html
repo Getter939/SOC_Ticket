@@ -1,0 +1,44 @@
+{% comment %}
+Bulk PDF export of the filtered list (Active Tickets + Ticket History only; the
+views pass export_url, and only for users who may export reports — SOC).
+
+It posts the page's own querystring as `query`, so the ZIP holds exactly the
+tickets this list shows — all pages of them, in this order. Its own small form,
+NOT part of the filter form. The two options mirror the single export on the
+ticket page (hide empty fields on, signatures off).
+
+  export_url, export_query, bulk_report_limit, result_count
+{% endcomment %}
+<div class="dropdown">
+    <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" data-bs-toggle="dropdown"
+            data-bs-auto-close="outside" aria-expanded="false" {% if not result_count %}disabled{% endif %}>
+        <i class="bi bi-file-earmark-zip me-1" aria-hidden="true"></i>ส่งออก PDF ({{ result_count }})
+    </button>
+    <div class="dropdown-menu dropdown-menu-end p-3" style="min-width: 290px;">
+        {% if result_count > bulk_report_limit %}
+        <p class="small mb-0">
+            <i class="bi bi-exclamation-triangle text-warning me-1" aria-hidden="true"></i>
+            ส่งออกได้ครั้งละไม่เกิน {{ bulk_report_limit }} เคส — รายการนี้มี {{ result_count }} เคส
+            กรองให้แคบลง เช่น ใช้ช่วงวันที่ที่สั้นลง
+        </p>
+        {% else %}
+        <form method="post" action="{{ export_url }}">
+            {% csrf_token %}
+            <input type="hidden" name="query" value="{{ export_query }}">
+            <div class="small fw-semibold mb-2">รายงาน PDF ของทั้ง {{ result_count }} เคสในรายการนี้ (ไฟล์ ZIP)</div>
+            <div class="form-check small">
+                <input class="form-check-input" type="checkbox" name="hide_empty" value="1" id="bulk-hide-empty" checked>
+                <label class="form-check-label" for="bulk-hide-empty">ซ่อนช่องที่ว่าง</label>
+            </div>
+            <div class="form-check small mb-2">
+                <input class="form-check-input" type="checkbox" name="show_signoff" value="1" id="bulk-show-signoff">
+                <label class="form-check-label" for="bulk-show-signoff">แสดงช่องลงนาม</label>
+            </div>
+            <button type="submit" class="btn btn-dark btn-sm w-100">
+                <i class="bi bi-download me-1" aria-hidden="true"></i>ดาวน์โหลด ZIP
+            </button>
+            <div class="small text-muted mt-2">ไฟล์เริ่มดาวน์โหลดทันทีและเพิ่มขึ้นระหว่างสร้าง — หลายเคสหรือเคสที่มีรูปหลักฐานอาจใช้เวลาสักครู่</div>
+        </form>
+        {% endif %}
+    </div>
+</div>

@@ -204,6 +204,83 @@ def generate_ticket_report_pdf(
     )
 
 
+BULK_REPORT_FAILURES_NAME = '_ไม่สามารถสร้างรายงาน.txt'
+
+
+class _ZipStreamSink:
+    """Write-only, non-seekable file object for zipfile to write into.
+
+    With no seek()/tell(), zipfile streams each member with a trailing data
+    descriptor instead of rewriting headers, so the archive can go to the
+    client piece by piece. The generator drains what was written after each
+    member.
+    """
+
+    def __init__(self):
+        self._chunks = []
+
+    def write(self, data):
+        self._chunks.append(bytes(data))
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def drain(self):
+        data = b''.join(self._chunks)
+        self._chunks = []
+        return data
+
+
+def stream_ticket_reports_zip(
+    tickets, *, generated_by=None, base_url=None, hide_empty=True, show_signoff=False,
+):
+    """Yield a ZIP of one PDF report per ticket, one member at a time.
+
+    `tickets` is a sequence of (pk, ticket_id). Each report goes through
+    generate_ticket_report_pdf — the single export — so the file inside is the
+    same file, named the same way, and the ticket's report_* provenance is
+    recorded exactly as a single export records it. Streaming keeps bytes
+    flowing to the client while later reports render, so a long batch doesn't
+    sit idle behind the proxy's response timeout.
+
+    A ticket that fails to render is logged and skipped; the archive ends with
+    a text file naming every one that failed, so one bad ticket doesn't cost
+    the rest of the batch.
+    """
+    import zipfile
+
+    sink = _ZipStreamSink()
+    used_names, failed = set(), []
+    with zipfile.ZipFile(sink, 'w') as archive:
+        for pk, ticket_label in tickets:
+            try:
+                report = generate_ticket_report_pdf(
+                    pk, generated_by=generated_by, base_url=base_url,
+                    hide_empty=hide_empty, show_signoff=show_signoff,
+                )
+            except Exception:
+                logger.exception('Bulk PDF export: report failed for ticket %s', pk)
+                failed.append(ticket_label)
+                continue
+            name = report.filename
+            if name in used_names:
+                stem, _, ext = name.rpartition('.')
+                name = f'{stem} ({pk}).{ext}'
+            used_names.add(name)
+            # PDFs are already compressed; storing them skips pointless work.
+            archive.writestr(name, report.content, compress_type=zipfile.ZIP_STORED)
+            yield sink.drain()
+        if failed:
+            archive.writestr(
+                BULK_REPORT_FAILURES_NAME,
+                ('สร้างรายงานของเคสต่อไปนี้ไม่สำเร็จ — ลองส่งออกทีละเคสจากหน้ารายละเอียด '
+                 'หรือแจ้งผู้ดูแลระบบ\n\n' + '\n'.join(failed) + '\n').encode('utf-8'),
+                compress_type=zipfile.ZIP_DEFLATED,
+            )
+    yield sink.drain()
+
+
 def build_ticket_report_render_context(
     ticket, generated_at=None, show_report_actions=True, hide_empty=True,
     show_signoff=False,

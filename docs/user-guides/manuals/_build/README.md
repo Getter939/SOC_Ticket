@@ -81,6 +81,13 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   filter** (so an emergency can't be hidden); History's date range counts from the
   **opening** date (วันที่แจ้ง), not the close date; the Manager Queue has no date
   range; the System Owner's open list is full and paged (it stopped at 10).
+- **Bulk PDF export (Unreleased).** Active Tickets and History have a
+  "ส่งออก PDF (N)" menu (ZIP, max 100) for the **SOC Manager and Tier 2 only**
+  (`policies.can_bulk_export_ticket_reports`). It is described by
+  `bulkExportParagraphs()` in `common.js`, switched on with
+  `listControls({ canExport: true })` in tier2 and manager. **Tier 1 does not get
+  it** (Tier 1 keeps the one-report export on the ticket page), and neither do
+  admin or the response teams.
 - Content is written against
   [`docs/architecture/ticket-lifecycle-states.md`](../../../architecture/ticket-lifecycle-states.md),
   which is the authority for the state machine. When a release changes the workflow,

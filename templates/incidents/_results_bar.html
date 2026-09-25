@@ -12,6 +12,8 @@ and apply on change (.js-autosubmit in base.html).
   per_page, per_page_choices  optional page-size select (the Wazuh triage queue);
                       submitting the form drops the page number on purpose —
                       page 3 of 25-per-page may not exist at 100 to a page
+  export_url          optional: the bulk PDF export (Active Tickets + History,
+                      SOC only) — see incidents/_bulk_export_menu.html
 {% endcomment %}
 <div class="results-bar">
     <div>
@@ -40,5 +42,6 @@ and apply on change (.js-autosubmit in base.html).
             {% endfor %}
         </select>
         {% endif %}
+        {% if export_url %}{% include 'incidents/_bulk_export_menu.html' %}{% endif %}
     </div>
 </div>

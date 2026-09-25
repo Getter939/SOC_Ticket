@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.incidents import history
@@ -83,6 +84,7 @@ def ticket_list(request):
         heading='Ticket ที่กำลังดำเนินการ',
         description='ติดตามเคสเปิดทั้งหมดที่อยู่ในขอบเขตสิทธิ์ของคุณ',
         date_filter=True,
+        export_url=reverse('ticket_list_reports_pdf'),
     )
 
 

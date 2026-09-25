@@ -8,6 +8,26 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Added
+- **Bulk PDF export from Active Tickets and Ticket History.** A "ส่งออก PDF (N)"
+  menu in the results bar downloads the incident reports of every ticket the
+  list currently shows, across all pages, in the list's sort order.
+  - It's a ZIP with one PDF per ticket, the same file and name as the single
+    export on the ticket page.
+  - It has the same two options: hide empty fields (on) and include signatures
+    (off).
+  - Each ticket's report provenance (who generated it, when, the stale-report
+    badge) is recorded just like a single export.
+  - The limit is 100 tickets per export; over that, the menu asks you to narrow
+    the filters.
+  - The ZIP streams while it builds, so a large batch doesn't hit the proxy
+    timeout. A report that fails to render is skipped and named in a text file
+    inside the ZIP.
+  - SOC Manager and Tier 2 only. Tier 1 keeps the one-report export on the
+    ticket page, but a bulk export restamps up to 100 tickets' report provenance
+    and pulls their full reports into one file, so it gets a narrower rule. The
+    Manager Queue doesn't get it.
+
 ### Changed
 - **Account emails are now in Thai.** The password-reset and password-changed
   emails were translated. The system name stays "SOC Support System", as in the

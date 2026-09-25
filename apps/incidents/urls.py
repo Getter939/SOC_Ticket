@@ -47,6 +47,9 @@ urlpatterns = [
     # Response team (Forensic / Red Team) — "My Requests" work queue
     path('response-requests/', views.response_request_queue, name='response_request_queue'),
     path('history/', views.ticket_history, name='ticket_history'),
+    # Bulk PDF export of the filtered list (POST, SOC only) — a ZIP, streamed.
+    path('reports/active.zip', views.ticket_list_reports_pdf, name='ticket_list_reports_pdf'),
+    path('history/reports.zip', views.ticket_history_reports_pdf, name='ticket_history_reports_pdf'),
     # Triage
     # My Queue — Tier 1's single work queue. The historical 'triage_list' name
     # stays on the same view so every manual-triage redirect and deep link

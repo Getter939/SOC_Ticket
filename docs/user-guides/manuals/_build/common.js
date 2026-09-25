@@ -151,7 +151,21 @@ function dataTable(headers, rows, widths) {
 // first) and its own shot(). Set `ticketLists: false` for a persona that does
 // not see เคสที่กำลังดำเนินการอยู่ / ประวัติเคสที่ปิดไปแล้ว / ค้นหา IOC.
 // build-tier1.js keeps its own inline copy (it predates this file).
-function listControls({ pages = [], ticketLists = true } = {}) {
+// Bulk PDF export (Unreleased, after v1.7.8) — SOC Manager + Tier 2 only
+// (policies.can_bulk_export_ticket_reports). Tier 1 does NOT get it.
+function bulkExportParagraphs() {
+  return [
+    bullet([r("ส่งออกรายงานทั้งรายการ: ", { bold: true }), r("ในหน้า "), menuTag("เคสที่กำลังดำเนินการอยู่"), r(" และ "),
+      menuTag("ประวัติเคสที่ปิดไปแล้ว"), r(" ปุ่ม "), ui("ส่งออก PDF (N)"),
+      r(" ในแถบผลลัพธ์ดาวน์โหลดรายงาน PDF ของทุกเคสที่รายการแสดงอยู่ (ทุกหน้า ตามลำดับเดียวกัน) เป็นไฟล์ ZIP — หนึ่งไฟล์ต่อเคส ชื่อและเนื้อหาเหมือนการออกรายงานทีละเคส เลือก "),
+      ui("ซ่อนช่องที่ว่าง"), r(" / "), ui("แสดงช่องลงนาม"),
+      r(" ได้ก่อนกด ดาวน์โหลด ZIP ส่งออกได้ครั้งละไม่เกิน 100 เคส — ถ้าเกินให้กรองให้แคบลง เช่น ใช้ช่วงวันที่ที่สั้นลง ระบบบันทึกว่าคุณเป็นผู้ออกรายงานของแต่ละเคสเหมือนการส่งออกทีละเคส และถ้ามีเคสที่สร้างรายงานไม่สำเร็จ จะมีไฟล์ข้อความใน ZIP บอกเลขเคสนั้น")]),
+  ];
+}
+
+// `canExport`: the SOC Manager and Tier 2 may bulk-export PDF reports from
+// Active Tickets / History (narrower than the single export — not Tier 1).
+function listControls({ pages = [], ticketLists = true, canExport = false } = {}) {
   const out = [];
   out.push(P("ทุกหน้าที่เป็นรายการใช้แถบค้นหาและการเรียงลำดับแบบเดียวกัน:"));
   out.push(bullet([r("ค้นหา: ", { bold: true }), r("พิมพ์คำค้นแล้วกด Enter หรือกดปุ่มแว่นขยาย โดยทั่วไปค้นได้จากเลข Ticket ชื่อเรื่อง ระบบ/บริการ IP และรายละเอียด")]));
@@ -165,6 +179,7 @@ function listControls({ pages = [], ticketLists = true } = {}) {
     r("เพื่อเรียงทั้งรายการ ไม่ใช่เฉพาะหน้าที่เห็นอยู่ กดครั้งแรกจะเรียงแบบที่ใช้บ่อยที่สุด — ใหม่สุดก่อน, Critical ก่อน, OLA ใกล้ครบกำหนดก่อน, ชื่อตามตัวอักษร, สถานะตามลำดับขั้นตอนงาน — กดซ้ำเพื่อกลับด้าน ลูกศร ▲ ▼ ชี้คอลัมน์ที่ใช้เรียงอยู่ แถวที่ไม่มีค่าอยู่ท้ายเสมอ และช่อง เรียงตาม จะขึ้นว่า "),
     ui("ตามคอลัมน์ในตาราง"), r(" คอลัมน์ข้อความยาว เช่น รายละเอียด เรียงไม่ได้")]));
   out.push(bullet([r("ลิงก์ ", { bold: true }), r("ของป้าย หน้าถัดไป และหัวคอลัมน์ คงเงื่อนไขทั้งหมดไว้ คัดลอกที่อยู่ในเบราว์เซอร์ส่งให้เพื่อนร่วมทีมเพื่อเปิดมุมมองเดียวกันได้")]));
+  if (canExport) out.push(...bulkExportParagraphs());
   const rows = [...pages];
   if (ticketLists) {
     rows.push(

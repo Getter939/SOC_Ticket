@@ -1,5 +1,6 @@
 import calendar
 import logging
+from types import SimpleNamespace
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -8,6 +9,7 @@ from django.core.paginator import Paginator
 from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from ..models import (
@@ -16,6 +18,7 @@ from ..models import (
 )
 from ._helpers import (
     _apply_date_range,
+    _bulk_export_context,
     _by,
     _choice_label_expr,
     _column_sort_headers,
@@ -125,8 +128,14 @@ HISTORY_STATUS_PILLS = (
 )
 
 
-@login_required
-def ticket_history(request):
+def _filter_history(request, params):
+    """The closed-ticket list, filtered and sorted from `params`.
+
+    Shared by the page (params = request.GET) and the bulk report export
+    (params = the page's querystring, re-posted), so the ZIP holds exactly the
+    tickets the page shows. Returns a namespace: `qs` plus the validated filter
+    state and the result-pill counts the page renders.
+    """
     terminal = Ticket.objects.visible_to(request.user).filter(
         status__in=list(Ticket.TERMINAL_STATUSES)
     )
@@ -136,15 +145,15 @@ def ticket_history(request):
 
     # `q` matches Active Tickets; `search_ticket` is the old name, still read
     # so existing links and bookmarks keep working.
-    search = (request.GET.get('q') or request.GET.get('search_ticket') or '').strip()
-    status_filter = request.GET.get('status', '').strip()
-    severity_filter = request.GET.get('severity', '').strip()
-    classification_filter = request.GET.get('classification', '').strip()
-    emergency_filter = request.GET.get('emergency', '').strip()
-    sort = request.GET.get('sort', 'closed').strip()
-    approved_by_filter = request.GET.get('approved_by', '').strip()
-    all_time = request.GET.get('all_time', '').strip()
-    start_date, end_date, start_date_obj, end_date_obj = _date_range_params(request)
+    search = (params.get('q') or params.get('search_ticket') or '').strip()
+    status_filter = params.get('status', '').strip()
+    severity_filter = params.get('severity', '').strip()
+    classification_filter = params.get('classification', '').strip()
+    emergency_filter = params.get('emergency', '').strip()
+    sort = params.get('sort', 'closed').strip()
+    approved_by_filter = params.get('approved_by', '').strip()
+    all_time = params.get('all_time', '').strip()
+    start_date, end_date, start_date_obj, end_date_obj = _date_range_params(params)
     # The date inputs echo only what the user chose, not the implied default
     # month — otherwise the next filter change would pin that month explicitly.
     date_input_start, date_input_end = start_date, end_date
@@ -238,9 +247,30 @@ def ticket_history(request):
         sort = 'closed'
     if sort in ('severity', 'severity_asc'):
         query_set = query_set.with_severity_rank()
-    tickets_qs = query_set.select_related('project_incident').prefetch_related(
-        'logs'
-    ).order_by(*sort_map[sort])
+    return SimpleNamespace(
+        qs=query_set.order_by(*sort_map[sort]), terminal=terminal,
+        search=search, status_filter=status_filter, status_pills=status_pills,
+        severity_filter=severity_filter, classification_filter=classification_filter,
+        emergency_filter=emergency_filter, sort=sort,
+        approved_by_filter=approved_by_filter, closer_pk=closer_pk, all_time=all_time,
+        start_date=start_date, end_date=end_date,
+        date_input_start=date_input_start, date_input_end=date_input_end,
+        is_default_month=is_default_month,
+    )
+
+
+@login_required
+def ticket_history(request):
+    f = _filter_history(request, request.GET)
+    terminal, search, status_filter = f.terminal, f.search, f.status_filter
+    status_pills, severity_filter = f.status_pills, f.severity_filter
+    classification_filter, emergency_filter, sort = (
+        f.classification_filter, f.emergency_filter, f.sort)
+    approved_by_filter, closer_pk, all_time = f.approved_by_filter, f.closer_pk, f.all_time
+    start_date, end_date = f.start_date, f.end_date
+    date_input_start, date_input_end = f.date_input_start, f.date_input_end
+    is_default_month = f.is_default_month
+    tickets_qs = f.qs.select_related('project_incident').prefetch_related('logs')
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -319,6 +349,7 @@ def ticket_history(request):
             or any(not chip['is_default'] for chip in filter_chips)),
         'more_filter_count': sum(bool(value) for value in (
             classification_filter, emergency_filter)),
+        **_bulk_export_context(request, reverse('ticket_history_reports_pdf')),
         'sort_options': HISTORY_SORT_OPTIONS,
         'sort_headers': _column_sort_headers(HISTORY_COLUMNS, sort),
         'sort_is_from_column': sort not in dict(HISTORY_SORT_OPTIONS),
