@@ -3,6 +3,8 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db.models import Count, Q, Value
+from django.db.models.functions import Lower, NullIf
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -14,12 +16,11 @@ from ..forms import (
 )
 from ..models import (
     Ticket,
-    TicketSubtask, validate_attachment,
+    TicketSubtask,
 )
 from ..policies import (
     can_accept_subtask as _can_accept_subtask,
     can_change_subtask_status as _can_change_subtask_status,
-    can_upload_subtask_result as _can_upload_subtask_result,
     can_update_subtask as _can_update_subtask,
     response_request_updates_frozen as _response_request_updates_frozen,
 )
@@ -27,8 +28,59 @@ from ..subtask_creation import (
     create_response_request as create_response_request_operation,
 )
 from ..ticket_updates import save_subtask_update
+from ._helpers import (
+    _by,
+    _choice_label_expr,
+    _choice_order_expr,
+    _column_sort_headers,
+    _filter_chip,
+    _person_name_expr,
+)
 
 logger = logging.getLogger('apps.incidents.views')
+
+
+# ── Response Requests queue: sortable columns ─────────────────────────── #
+# (label, first-click sort, second-click sort, first click ascending?, th class)
+# — see _helpers._column_sort_headers. ผู้รับผิดชอบ only shows in the all-team
+# overview. Sorting is by what each cell shows: the type LABEL, the status in
+# workflow order, people by full name; blank report numbers sort last.
+RESPONSE_QUEUE_COLUMNS = (
+    ('ประเภท', 'type', '-type', True, ''),
+    ('หัวข้อคำขอ', 'title', '-title', True, ''),
+    ('เคส', '-ticket', 'ticket', False, ''),
+    ('ผู้รับผิดชอบ', 'assignee', '-assignee', True, ''),
+    ('ผู้ร้องขอ', 'requester', '-requester', True, ''),
+    ('วันที่', 'newest', 'oldest', False, ''),
+    ('สถานะ', 'status', '-status', True, ''),
+    ('เลขที่รายงาน', 'report', '-report', True, ''),
+    ('', None, None, True, ''),
+)
+_RQ_TIE = ('-created_at', '-pk')
+RESPONSE_QUEUE_SORTS = {
+    # Default: open work first (workflow order), newest within each status.
+    'status': (_choice_order_expr('status', TicketSubtask), *_RQ_TIE),
+    '-status': (_choice_order_expr('status', TicketSubtask).desc(), *_RQ_TIE),
+    'newest': _RQ_TIE,
+    'oldest': ('created_at', 'pk'),
+    'type': (_by(_choice_label_expr('subtask_type', TicketSubtask)), *_RQ_TIE),
+    '-type': (_by(_choice_label_expr('subtask_type', TicketSubtask), descending=True), *_RQ_TIE),
+    'title': (_by(Lower('title')), *_RQ_TIE),
+    '-title': (_by(Lower('title'), descending=True), *_RQ_TIE),
+    '-ticket': ('-ticket__ticket_id', *_RQ_TIE),
+    'ticket': ('ticket__ticket_id', *_RQ_TIE),
+    'assignee': (_by(_person_name_expr('assigned_to__')), *_RQ_TIE),
+    '-assignee': (_by(_person_name_expr('assigned_to__'), descending=True), *_RQ_TIE),
+    'requester': (_by(_person_name_expr('created_by__')), *_RQ_TIE),
+    '-requester': (_by(_person_name_expr('created_by__'), descending=True), *_RQ_TIE),
+    'report': (_by(NullIf('report_number', Value(''))), *_RQ_TIE),
+    '-report': (_by(NullIf('report_number', Value('')), descending=True), *_RQ_TIE),
+}
+RESPONSE_QUEUE_SORT_OPTIONS = (
+    ('status', 'สถานะ (งานค้างก่อน)'),
+    ('newest', 'ใหม่สุดก่อน'),
+    ('oldest', 'เก่าสุดก่อน'),
+)
 
 
 
@@ -37,11 +89,10 @@ logger = logging.getLogger('apps.incidents.views')
 @login_required
 @require_POST
 def create_response_request(request, pk):
-    """SOC Manager spawns a response-team request (VA/PT, InfraSec, Forensics).
+    """SOC Manager spawns one or more response-team requests.
 
-    The type fixes the receiving role; the assignee is resolved here:
-    auto-assigned when a single active role-holder exists, taken from the
-    picker when several do, and blocked when none exist.
+    Each selected type becomes a separate request. Its assignee is chosen from
+    the eligible accounts or auto-assigned when exactly one is eligible.
     """
     ticket = get_object_or_404(Ticket.objects.visible_to(request.user), pk=pk)
     profile = getattr(request.user, 'profile', None)
@@ -55,7 +106,12 @@ def create_response_request(request, pk):
 
     form = ResponseRequestForm(request.POST)
     if not form.is_valid():
-        messages.error(request, 'ไม่สามารถส่งคำขอได้ — กรุณาตรวจสอบข้อมูล')
+        errors = ' '.join(
+            str(error)
+            for field_errors in form.errors.values()
+            for error in field_errors
+        )
+        messages.error(request, f'ไม่สามารถส่งคำขอได้ — {errors or "กรุณาตรวจสอบข้อมูล"}')
         return redirect('ticket_detail', pk=pk)
 
     try:
@@ -71,14 +127,25 @@ def create_response_request(request, pk):
     if not result.notification_sent:
         messages.warning(
             request,
-            'สร้างคำขอแล้ว แต่ส่งอีเมลแจ้งผู้รับผิดชอบไม่สำเร็จ',
+            'สร้างคำขอแล้ว แต่ส่งอีเมลแจ้งผู้รับผิดชอบบางรายไม่สำเร็จ',
         )
-    messages.success(
-        request,
-        f'ส่งคำขอ "{result.subtask.get_subtask_type_display()}" ให้ '
-        f'{result.subtask.assigned_to.get_full_name() or result.subtask.assigned_to.username} '
-        'เรียบร้อยแล้ว',
-    )
+    if len(result.subtasks) == 1:
+        subtask = result.subtask
+        recipient = subtask.assigned_to.get_full_name() or subtask.assigned_to.username
+        messages.success(
+            request,
+            f'ส่งคำขอ "{subtask.get_subtask_type_display()}" ให้ {recipient} เรียบร้อยแล้ว',
+        )
+    else:
+        assignments = '; '.join(
+            f'{subtask.get_subtask_type_display()} → '
+            f'{subtask.assigned_to.get_full_name() or subtask.assigned_to.username}'
+            for subtask in result.subtasks
+        )
+        messages.success(
+            request,
+            f'ส่งคำขอ {len(result.subtasks)} รายการเรียบร้อยแล้ว: {assignments}',
+        )
     return redirect('ticket_detail', pk=pk)
 
 
@@ -107,8 +174,8 @@ def update_subtask(request, subtask_id):
         previous_notes = subtask.result_notes
         previous_report_number = subtask.report_number
         # Status and report number are gated more tightly than notes: see
-        # can_change_subtask_status. Refuse the whole POST (notes and file
-        # included) rather than silently saving part of it with those dropped.
+        # can_change_subtask_status. Refuse the whole POST rather than silently
+        # saving only its notes.
         posted_number = request.POST.get('report_number')
         if not _can_change_subtask_status(subtask, request.user) and (
             request.POST.get('status', subtask.status) != subtask.status
@@ -122,33 +189,6 @@ def update_subtask(request, subtask_id):
             return redirect('ticket_detail', pk=ticket.pk)
         form = SubtaskUpdateForm(request.POST, instance=subtask)
         if form.is_valid():
-            # Optional deliverable file (e.g. VA/PT scan output), linked to both
-            # the subtask and its ticket so it serves through the hardened
-            # download_attachment path. Gated more tightly than the notes/status
-            # update above: can_update lets any SOC member edit a request, but
-            # only the assignee, a SOC manager, or a superuser may put a file on
-            # the ticket through this route. A Forensics / RCA request takes no
-            # file at all — its report is a physical document the SOC Manager
-            # collects, recorded here only by its report number.
-            upload = (
-                request.FILES.get('result_file') if subtask.accepts_result_file
-                else None
-            )
-            result_upload = None
-            if upload is not None:
-                if not _can_upload_subtask_result(subtask, request.user):
-                    messages.error(
-                        request,
-                        'คุณไม่มีสิทธิ์แนบไฟล์ผลการดำเนินการของคำขอนี้ '
-                        '— บันทึกข้อความถูกจัดเก็บแล้ว แต่ไฟล์ไม่ถูกแนบ',
-                    )
-                else:
-                    try:
-                        validate_attachment(upload)
-                        result_upload = upload
-                    except ValidationError as e:
-                        messages.error(request, e.message)
-
             try:
                 subtask = save_subtask_update(
                     ticket=ticket,
@@ -158,8 +198,6 @@ def update_subtask(request, subtask_id):
                     previous_notes=previous_notes,
                     was_done=was_done,
                     previous_report_number=previous_report_number,
-                    result_upload=result_upload,
-                    result_description=request.POST.get('result_file_desc', '').strip(),
                 ).subtask
             except ValidationError as exc:
                 messages.error(request, ' '.join(exc.messages))
@@ -251,8 +289,9 @@ def legacy_rca_workspace(request, subtask_id):
 @login_required
 def response_request_queue(request):
     """'My Requests' — the response-team member's work queue of requests routed
-    to them. Forensic Analysts see Forensics/RCA; Red Team Managers see VA/PT and
-    InfraSec. SOC/superusers get an all-team overview."""
+    to them. Forensic Analysts see Forensics/RCA; Red Team Managers see their
+    designated function and their own historical requests. SOC/superusers get
+    an all-team overview."""
     profile = getattr(request.user, 'profile', None)
     is_response = profile is not None and profile.is_response_team
     is_overview = request.user.is_superuser or (profile is not None and profile.is_soc)
@@ -260,40 +299,94 @@ def response_request_queue(request):
         messages.error(request, 'หน้านี้สำหรับทีมตอบสนองเท่านั้น')
         return redirect('ticket_list')
 
-    requests_qs = (
+    scope_qs = (
         TicketSubtask.objects
         .filter(subtask_type__in=TicketSubtask.RESPONSE_TYPES)
         .select_related('ticket', 'assigned_to', 'created_by')
-        .order_by('status', '-created_at')
     )
+    visible_types = TicketSubtask.RESPONSE_TYPES
     if is_response and not is_overview:
         # Both conditions matter. assigned_to alone would surface a request of
         # another team's type that was mis-assigned by a seed, a data migration,
         # or the admin — the queue must not be the place that invariant is
         # discovered. Mirrors the same filter in TicketQuerySet.visible_to().
-        requests_qs = requests_qs.filter(
+        visible_types = TicketSubtask.types_for_profile(profile)
+        scope_qs = scope_qs.filter(
             assigned_to=request.user,
-            subtask_type__in=TicketSubtask.types_for_role(profile.role),
+            subtask_type__in=visible_types,
         )
+    show_overview = is_overview and not is_response
 
+    # Filter bar (the same one the ticket lists use): free-text search and a
+    # type filter; the status pills below count what clicking them would show.
+    search = request.GET.get('q', '').strip()
+    type_choices = [
+        (code, label) for code, label in TicketSubtask.TYPE_CHOICES if code in visible_types
+    ]
+    type_filter = request.GET.get('type', '').strip()
+    if type_filter not in dict(type_choices):
+        type_filter = ''
+    requests_qs = scope_qs
+    if search:
+        requests_qs = requests_qs.filter(
+            Q(title__icontains=search) | Q(description__icontains=search)
+            | Q(ticket__ticket_id__icontains=search) | Q(report_number__icontains=search)
+        )
+    if type_filter:
+        requests_qs = requests_qs.filter(subtask_type=type_filter)
+
+    status_tally = dict(
+        requests_qs.order_by().values_list('status').annotate(n=Count('pk')).values_list('status', 'n')
+    )
     status_filter = request.GET.get('status', '').strip()
     if status_filter in dict(TicketSubtask.STATUS_CHOICES):
         requests_qs = requests_qs.filter(status=status_filter)
     else:
         status_filter = ''
+    status_pills = [{'code': '', 'label': 'ทั้งหมด', 'count': sum(status_tally.values())}] + [
+        {'code': code, 'label': label, 'count': status_tally.get(code, 0)}
+        for code, label in TicketSubtask.STATUS_CHOICES
+    ]
 
-    requests = list(requests_qs)
-    open_count = sum(1 for s in requests if s.status not in TicketSubtask.TERMINAL_STATUSES)
+    sort = request.GET.get('sort', 'status').strip()
+    if sort not in RESPONSE_QUEUE_SORTS:
+        sort = 'status'
+    requests = list(requests_qs.order_by(*RESPONSE_QUEUE_SORTS[sort]))
+    # "ยังไม่เสร็จ" describes the whole queue, not the filtered slice.
+    open_count = scope_qs.exclude(status__in=TicketSubtask.TERMINAL_STATUSES).count()
     # Every request type is worked on its ticket; the RCA report itself is
     # written outside the system.
     for req in requests:
         req.work_url = _request_page_url(req, request.user)
         req.can_accept = _can_accept_subtask(req, request.user)
 
+    filter_chips = []
+    if search:
+        filter_chips.append(_filter_chip(request, f'ค้นหา: “{search}”', ('q',)))
+    if type_filter:
+        filter_chips.append(_filter_chip(
+            request, f'ประเภท: {dict(type_choices)[type_filter]}', ('type',)))
+    columns = [
+        column for column in RESPONSE_QUEUE_COLUMNS
+        if show_overview or column[1] != 'assignee'
+    ]
+
     return render(request, 'incidents/response_request_queue.html', {
         'requests': requests,
         'status_filter': status_filter,
         'status_choices': TicketSubtask.STATUS_CHOICES,
+        'status_pills': status_pills,
         'open_count': open_count,
-        'is_overview': is_overview and not is_response,
+        'is_overview': show_overview,
+        'search': search,
+        'type_filter': type_filter,
+        'type_choices': type_choices,
+        'filter_chips': filter_chips,
+        'has_clearable_filters': bool(filter_chips or status_filter),
+        'result_count': len(requests),
+        'result_total': scope_qs.count(),
+        'sort': sort,
+        'sort_options': RESPONSE_QUEUE_SORT_OPTIONS,
+        'sort_headers': _column_sort_headers(columns, sort),
+        'sort_is_from_column': sort not in dict(RESPONSE_QUEUE_SORT_OPTIONS),
     })

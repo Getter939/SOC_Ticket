@@ -43,30 +43,16 @@ Context: my_response_requests (selectors.get_ticket_detail_read_model).
     </div>
 
     {% elif req.can_update %}
-    <form method="post" action="{% url 'update_subtask' req.pk %}" enctype="multipart/form-data" class="my-request-form">{% csrf_token %}
+    <form method="post" action="{% url 'update_subtask' req.pk %}" class="my-request-form">{% csrf_token %}
       <div class="mb-3">
         <label class="form-label" for="my-report-number-{{ req.pk }}">เลขที่รายงานที่ส่ง <span class="text-danger">*</span></label>
-        <input type="text" id="my-report-number-{{ req.pk }}" name="report_number" class="form-control font-monospace" maxlength="40" value="{{ req.report_number_prefill }}" placeholder="{{ req.expected_report_number|default:'SOC-XXX-YYYYMM-NNNN' }}" required aria-describedby="my-report-number-help-{{ req.pk }}">
-        <div class="form-text" id="my-report-number-help-{{ req.pk }}">ระบบเติมเลขของเคสนี้ไว้ให้ — แก้ไขได้หากเลขบนรายงานต่างออกไป ต้องระบุก่อนส่งงาน</div>
+        <input type="text" id="my-report-number-{{ req.pk }}" name="report_number" class="form-control font-monospace" maxlength="40" value="{{ req.report_number_prefill }}" placeholder="{{ req.expected_report_number }}" required aria-describedby="my-report-number-help-{{ req.pk }}">
+        <div class="form-text" id="my-report-number-help-{{ req.pk }}">{% if req.uses_manual_report_number %}ระบุเลขที่รายงานตามลำดับของงานประเภทนี้ด้วยตนเอง ({{ req.expected_report_number }}){% else %}ระบบเติมเลขของเคสนี้ไว้ให้ — แก้ไขได้หากเลขบนรายงานต่างออกไป{% endif %} ต้องระบุก่อนส่งงาน</div>
       </div>
-      {% if not req.accepts_result_file %}
       <div class="mb-3">
         <label class="form-label" for="my-notes-{{ req.pk }}">หมายเหตุ <span class="text-muted fw-normal">(ถ้ามี)</span></label>
         <textarea id="my-notes-{{ req.pk }}" name="result_notes" class="form-control" rows="3" placeholder="เช่น ส่งรายงานฉบับจริงให้ผู้จัดการ SOC แล้ว">{{ req.result_notes }}</textarea>
       </div>
-      {% else %}
-      <div class="mb-3">
-        <label class="form-label" for="my-notes-{{ req.pk }}">ผลการดำเนินการ <span class="text-muted fw-normal">(ถ้ามี)</span></label>
-        <textarea id="my-notes-{{ req.pk }}" name="result_notes" class="form-control" rows="3" placeholder="สรุปผลการทดสอบ / สิ่งที่พบ">{{ req.result_notes }}</textarea>
-      </div>
-      <div class="mb-2">
-        <label class="form-label" for="my-file-{{ req.pk }}">แนบไฟล์ผล <span class="text-muted fw-normal">(ถ้ามี)</span></label>
-        <input type="file" id="my-file-{{ req.pk }}" name="result_file" class="form-control form-control-sm">
-      </div>
-      <div class="mb-3">
-        <input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="คำอธิบายไฟล์ เช่น รายงานผลการทดสอบ" aria-label="คำอธิบายไฟล์">
-      </div>
-      {% endif %}
       <div class="d-grid gap-2">
         <button class="btn btn-primary" type="submit" name="status" value="DONE" data-confirm-done="ยืนยันส่งงาน? เมื่อส่งแล้วคำขอนี้จะปิดเป็น &quot;เสร็จสิ้น&quot; และแก้ไขไม่ได้อีก"><i class="bi bi-send-check me-1" aria-hidden="true"></i>ส่งงาน · เสร็จสิ้น</button>
         <button class="btn btn-outline-secondary btn-sm" type="submit" name="status" value="IN_PROGRESS" formnovalidate><i class="bi bi-save me-1" aria-hidden="true"></i>บันทึกไว้ก่อน (ยังไม่ส่งงาน)</button>

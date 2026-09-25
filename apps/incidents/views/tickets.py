@@ -82,6 +82,7 @@ def ticket_list(request):
         page_title='Ticket ที่กำลังดำเนินการ',
         heading='Ticket ที่กำลังดำเนินการ',
         description='ติดตามเคสเปิดทั้งหมดที่อยู่ในขอบเขตสิทธิ์ของคุณ',
+        date_filter=True,
     )
 
 

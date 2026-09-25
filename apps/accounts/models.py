@@ -1,4 +1,6 @@
 from django.db import models
+from django.db.models import Q
+from django.core.exceptions import ValidationError
 from .mfa_models import AuthenticatorDevice, MFAAudit, MFARecoveryCode  # noqa: F401
 from django.contrib.auth.models import User
 
@@ -25,6 +27,15 @@ class UserProfile(models.Model):
         (ROLE_REDTEAM_MANAGER, 'ผู้จัดการ Red Team'),
     ]
 
+    REDTEAM_VA = 'VA'
+    REDTEAM_PENTEST = 'PENTEST'
+    REDTEAM_HARDENING = 'HARDENING'
+    REDTEAM_FUNCTION_CHOICES = [
+        (REDTEAM_VA, 'Vulnerability Assessment (VA)'),
+        (REDTEAM_PENTEST, 'Penetration Test'),
+        (REDTEAM_HARDENING, 'Hardening'),
+    ]
+
     TIER_T1 = 'T1'
     TIER_T2 = 'T2'
     TIER_CHOICES = [
@@ -47,6 +58,11 @@ class UserProfile(models.Model):
     role         = models.CharField(
         max_length=20, choices=ROLE_CHOICES, verbose_name="บทบาท",
     )
+    redteam_function = models.CharField(
+        max_length=20, choices=REDTEAM_FUNCTION_CHOICES, blank=True, default='',
+        verbose_name='งาน Red Team ที่รับผิดชอบ',
+        help_text='กำหนดให้บัญชีผู้จัดการ Red Team หนึ่งคนต่อหนึ่งประเภทงาน',
+    )
     tier         = models.CharField(
         max_length=5, choices=TIER_CHOICES, blank=True, default='', verbose_name="ระดับ (Tier)",
     )
@@ -68,6 +84,22 @@ class UserProfile(models.Model):
     acting_tier_granted_at = models.DateTimeField(
         null=True, blank=True, verbose_name="ให้สิทธิ์เมื่อ",
     )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['redteam_function'],
+                condition=Q(role='REDTEAM_MANAGER') & ~Q(redteam_function=''),
+                name='unique_redteam_manager_per_function',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.redteam_function and not self.is_redteam_manager:
+            raise ValidationError({
+                'redteam_function': 'กำหนดประเภทงานได้เฉพาะผู้จัดการ Red Team',
+            })
 
     @property
     def is_soc_staff(self):
@@ -96,7 +128,7 @@ class UserProfile(models.Model):
 
     @property
     def is_redteam_manager(self):
-        """Red Team Manager — receives VA_PT and INFRA_SEC response requests."""
+        """Red Team Manager, assigned to one response function."""
         return self.role == self.ROLE_REDTEAM_MANAGER
 
     @property

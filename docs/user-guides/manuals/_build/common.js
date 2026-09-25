@@ -173,7 +173,7 @@ function buildManual(cfg) {
     }),
     spacer(360),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("เวอร์ชันระบบ v1.7.6", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 24 กันยายน 2026", { color: INK, size: 28 })] }),
+      children: [r("เวอร์ชันระบบ v1.7.6", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 25 กันยายน 2026", { color: INK, size: 28 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
       children: [r("คู่มือฉบับที่ 1.4", { color: MUTED, size: 28 })] }),
     spacer(700),

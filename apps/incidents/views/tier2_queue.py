@@ -13,10 +13,45 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, F
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
+from apps.incidents import ola as ola_buckets
 from ..models import Ticket, TicketLog
 from ..ticket_workflow import claim_tier2_ticket
-from ._helpers import _int_param
+from ._helpers import (
+    _by,
+    _choice_label_expr,
+    _column_sort_headers,
+    _filter_chip,
+    _int_param,
+    _person_name_expr,
+    _status_order_expr,
+    _ticket_name_expr,
+    _ticket_search_q,
+)
+
+
+# Table columns in cell order: (label, first-click sort, second-click sort,
+# first click ascending?, th class) — see _helpers._column_sort_headers.
+# รอมานาน's first click is the LONGEST wait (oldest status_changed_at), shown as
+# descending because the cell displays the age.
+TIER2_COLUMNS = (
+    ('เคส', '-id', 'id', False, ''),
+    ('ขั้นตอน', 'stage', '-stage', True, ''),
+    ('ความรุนแรง', 'severity', 'severity_asc', False, ''),
+    ('ประเภท', 'classification', '-classification', True, ''),
+    ('ชื่อเรื่อง', 'name', '-name', True, ''),
+    ('OLA', 'ola', '-ola', True, ''),
+    ('รอมานาน', 'waiting', 'newest', False, ''),
+    ('ผู้รับเรื่อง', 'claimer', '-claimer', True, ''),
+    ('ตรวจสอบ', None, None, True, 'text-end'),
+)
+TIER2_SORT_OPTIONS = (
+    ('emergency', 'Emergency ก่อน'),
+    ('ola', 'OLA ใกล้ครบกำหนด'),
+    ('newest', 'เข้าคิวล่าสุด'),
+    ('severity', 'ความรุนแรง'),
+)
 
 
 def _has_tier2_access(user):
@@ -106,6 +141,10 @@ def escalation_queue(request):
     claim_filter = request.GET.get('claim', '').strip()
     stage_filter = request.GET.get('stage', '').strip()
     sort = request.GET.get('sort', 'emergency').strip()
+    search = request.GET.get('q', '').strip()
+    severity_filter = request.GET.get('severity', '').strip()
+    classification_filter = request.GET.get('classification', '').strip()
+    ola_filter = request.GET.get('ola', '').strip()
 
     # The Tier 2 queue covers all three T2 stages: escalation triage plus the
     # two verification stages (admin containment / owner remediation).
@@ -132,8 +171,27 @@ def escalation_queue(request):
     # for is_soc, so this changes nothing today — it just stops the queue being
     # the one list that reads the table directly instead of the single
     # authoritative visibility rule.
-    base_qs = Ticket.objects.visible_to(request.user).filter(
+    queue_qs = Ticket.objects.visible_to(request.user).filter(
         status__in=Ticket.TIER2_QUEUE_STATUSES)
+
+    # Toolbar filters (same bar as Active Tickets / History). They narrow the
+    # pills' counts too, so each pill still counts what clicking it would show.
+    # Deliberately no emergency filter — see the template's note.
+    base_qs = queue_qs
+    if search:
+        base_qs = base_qs.filter(_ticket_search_q(search))
+    if severity_filter in dict(Ticket.SEVERITY_CHOICES):
+        base_qs = base_qs.filter(severity=severity_filter)
+    else:
+        severity_filter = ''
+    if classification_filter in dict(Ticket.CLASSIFICATION_CHOICES):
+        base_qs = base_qs.filter(classification=classification_filter)
+    else:
+        classification_filter = ''
+    if ola_filter in ola_buckets.BUCKET_KEYS:
+        base_qs = base_qs.filter(ola_buckets.bucket_filter(ola_filter, timezone.now()))
+    else:
+        ola_filter = ''
 
     def _apply_stage(qs):
         return qs.filter(status=stage_map[stage_filter]) if stage_filter else qs
@@ -193,15 +251,31 @@ def escalation_queue(request):
     # left alone: `ola` answers "what breaches next", and an emergency with 4h of
     # slack outranking an already-overdue ticket would defeat that. The red row
     # tint and EMERGENCY badge carry the signal under every sort.
+    tie = ('-status_changed_at', '-pk')
     sort_map = {
-        'emergency': ('-is_emergency', '-status_changed_at'),
+        # Dropdown presets.
+        'emergency': ('-is_emergency', *tie),
         # Nulls last: Medium/Low have no contain deadline, so they belong below
         # everything that is actually on a clock.
-        'ola': (F('ola_contain_deadline').asc(nulls_last=True), '-status_changed_at'),
-        'newest': ('-status_changed_at',),
+        'ola': (F('ola_contain_deadline').asc(nulls_last=True), *tie),
+        'newest': tie,
         # -sev_rank, NOT 'severity': the raw CharField sorts alphabetically,
         # which ranks Low above Medium. See TicketQuerySet.with_severity_rank.
-        'severity': ('-sev_rank', '-status_changed_at'),
+        'severity': ('-sev_rank', *tie),
+        # Column headers (TIER2_COLUMNS), sorting by what each cell shows.
+        '-id': ('-ticket_id', '-pk'),
+        'id': ('ticket_id', 'pk'),
+        'stage': (_status_order_expr(), *tie),
+        '-stage': (_status_order_expr().desc(), *tie),
+        'severity_asc': ('sev_rank', *tie),
+        'classification': (_by(_choice_label_expr('classification')), *tie),
+        '-classification': (_by(_choice_label_expr('classification'), descending=True), *tie),
+        'name': (_by(_ticket_name_expr()), *tie),
+        '-name': (_by(_ticket_name_expr(), descending=True), *tie),
+        '-ola': (F('ola_contain_deadline').desc(nulls_last=True), *tie),
+        'waiting': ('status_changed_at', 'pk'),
+        'claimer': (_by(_person_name_expr('t2_claimed_by__')), *tie),
+        '-claimer': (_by(_person_name_expr('t2_claimed_by__'), descending=True), *tie),
     }
     if sort not in sort_map:
         sort = 'emergency'
@@ -209,6 +283,22 @@ def escalation_queue(request):
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
+
+    # Chips for the toolbar filters. Stage and claim are pills, which already
+    # show what is selected, so they get none.
+    ola_labels = {code: label for code, label, _ in ola_buckets.OLA_BUCKETS}
+    filter_chips = []
+    if search:
+        filter_chips.append(_filter_chip(request, f'ค้นหา: “{search}”', ('q',)))
+    if severity_filter:
+        filter_chips.append(_filter_chip(
+            request, f'ความรุนแรง: {dict(Ticket.SEVERITY_CHOICES)[severity_filter]}', ('severity',)))
+    if classification_filter:
+        filter_chips.append(_filter_chip(
+            request, f'ประเภท: {dict(Ticket.CLASSIFICATION_CHOICES)[classification_filter]}',
+            ('classification',)))
+    if ola_filter:
+        filter_chips.append(_filter_chip(request, f'OLA: {ola_labels[ola_filter]}', ('ola',)))
 
     return render(request, 'incidents/tier2_queue.html', {
         'page_obj': page_obj,
@@ -223,4 +313,19 @@ def escalation_queue(request):
         'stage_facets': stage_facets,
         'claim_facets': claim_facets,
         'sort': sort,
+        'sort_options': TIER2_SORT_OPTIONS,
+        'sort_headers': _column_sort_headers(TIER2_COLUMNS, sort),
+        'sort_is_from_column': sort not in dict(TIER2_SORT_OPTIONS),
+        # Results bar: "N เคส จาก M ในคิว" (M = the whole queue, unfiltered).
+        'result_count': paginator.count,
+        'result_total': queue_qs.count(),
+        'search': search,
+        'severity_filter': severity_filter,
+        'classification_filter': classification_filter,
+        'ola_filter': ola_filter,
+        'severity_choices': Ticket.SEVERITY_CHOICES,
+        'classification_choices': Ticket.CLASSIFICATION_CHOICES,
+        'ola_bucket_choices': ola_buckets.OLA_BUCKETS,
+        'filter_chips': filter_chips,
+        'has_clearable_filters': bool(filter_chips or stage_filter or claim_filter),
     })

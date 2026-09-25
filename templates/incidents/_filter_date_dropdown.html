@@ -1,0 +1,45 @@
+{% comment %}
+Date-range dropdown for the list filter bars. Must sit inside the filter <form>:
+the custom From/To inputs submit with it.
+
+  date_presets, date_label            from views._helpers (_date_presets / _date_range_label)
+  date_input_start, date_input_end    what the user chose (History leaves these empty for its implied month)
+  empty_label                         the "no range" option: 'ทั้งหมด' (Active) / 'ทุกช่วงเวลา' (History)
+  empty_active                        whether that option is the current one
+  empty_sets_all_time                 History: "no range" means all_time=1, not the default month
+  is_set                              highlight the control (a range the user chose is narrowing the list)
+
+The preset links go through {% querystring %}, so every other filter is kept.
+data-bs-auto-close="outside" keeps the menu open while typing a custom range.
+{% endcomment %}
+<div class="filter-bar__label" id="filter-date-label">วันที่แจ้ง</div>
+<div class="dropdown">
+    <button type="button" class="form-select form-select-sm filter-date-toggle {% if is_set %}is-set{% endif %}"
+            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+            aria-labelledby="filter-date-label filter-date-value">
+        <i class="bi bi-calendar3 me-1" aria-hidden="true"></i><span id="filter-date-value">{{ date_label|default:empty_label }}</span>
+    </button>
+    <div class="dropdown-menu p-2 filter-date-menu">
+        <a class="dropdown-item rounded {% if empty_active %}active{% endif %}"
+           href="{% if empty_sets_all_time %}{% querystring start_date=None end_date=None all_time=1 page=None %}{% else %}{% querystring start_date=None end_date=None page=None %}{% endif %}">{{ empty_label }}</a>
+        {% for preset in date_presets %}
+        <a class="dropdown-item rounded {% if preset.active %}active{% endif %}"
+           href="{% querystring start_date=preset.start end_date=preset.end all_time=None page=None %}">{{ preset.label }}</a>
+        {% endfor %}
+        <div class="dropdown-divider"></div>
+        <div class="px-2">
+            <div class="small text-muted mb-1">กำหนดเอง</div>
+            <div class="row g-2">
+                <div class="col-6">
+                    <label class="form-label small mb-1" for="filter-start-date">ตั้งแต่</label>
+                    <input type="date" id="filter-start-date" name="start_date" class="form-control form-control-sm" value="{{ date_input_start }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small mb-1" for="filter-end-date">ถึง</label>
+                    <input type="date" id="filter-end-date" name="end_date" class="form-control form-control-sm" value="{{ date_input_end }}">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-dark btn-sm w-100 mt-2">ใช้ช่วงวันที่</button>
+        </div>
+    </div>
+</div>

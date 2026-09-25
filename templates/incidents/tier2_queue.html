@@ -3,66 +3,93 @@
 {% block content %}
 <div class="page-header">
   <div><h1 class="page-header__title"><i class="bi bi-arrow-up-circle-fill me-2"></i>คิวงาน Tier 2</h1><p class="page-header__subtitle">Ticket ที่รอ Tier 2 — ตรวจสอบเคสที่ส่งต่อ (Escalation) และยืนยันผลการควบคุมของ System Admin / System Owner</p></div>
-  <div class="page-header__actions"><span class="badge bg-warning text-dark">{{ escalated_count }} เคส</span></div>
 </div>
 {% comment %}
-Pills, not dropdowns: with three low-cardinality scopes a select cost three
-interactions (open → pick → submit) and, worse, hid the distribution — the
-stage split was unknowable without filtering three times. Each pill carries the
-count you would get by clicking it, so the breakdown reads at a glance and the
-old ambiguous "{{ escalated_count }} tickets" header badge is no longer the only
-number on the page.
+Filter bar — the same one as Active Tickets / History, with this queue's two
+scopes kept as count pills on top.
+
+Pills, not dropdowns, for stage and claim: with three low-cardinality scopes a
+select cost three interactions (open → pick → submit) and, worse, hid the
+distribution — the stage split was unknowable without filtering three times.
+Each pill carries the count you would get by clicking it (within the other
+filters), so the breakdown reads at a glance.
 
 Claim state rather than an Emergency filter: the default sort already floats
 emergencies and every emergency row is tinted + badged, so an Emergency filter
 only restated the sort — while its "Normal only" value could hide an active
-emergency. Claim state is what the table cannot answer on its own.
+emergency. Claim state is what the table cannot answer on its own. For the same
+reason the shared bar here has no ความฉุกเฉิน select, and no date range either:
+this queue is worked by time-in-stage (รอมานาน), not by วันที่แจ้ง.
+
+Selects apply on change (.js-autosubmit), the search on Enter; sort lives in the
+results bar above the table and in the sortable headers.
 {% endcomment %}
-<div class="card filter-toolbar mb-3"><div class="card-body py-3">
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-    <span class="small fw-bold text-muted" style="min-width:5.5rem;">ขั้นตอน</span>
-    {% for facet in stage_facets %}
-    <a href="{% querystring stage=facet.key page=None %}"
-       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
-      {{ facet.label }}
-      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
-    </a>
-    {% endfor %}
+<form method="GET" id="ticket-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+  <div class="card-body py-3">
+    {% if stage_filter %}<input type="hidden" name="stage" value="{{ stage_filter }}">{% endif %}
+    {% if claim_filter %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2" role="group" aria-label="ขั้นตอน">
+      <span class="filter-bar__label mb-0" style="min-width:5.5rem;">ขั้นตอน</span>
+      {% for facet in stage_facets %}
+      <a href="{% querystring stage=facet.key page=None %}" class="level-pill {% if facet.active %}active{% endif %}"
+         {% if facet.active %}aria-current="true"{% endif %}>{{ facet.label }} <span class="level-pill__count">{{ facet.count }}</span></a>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3" role="group" aria-label="การรับเรื่อง">
+      <span class="filter-bar__label mb-0" style="min-width:5.5rem;">การรับเรื่อง</span>
+      {% for facet in claim_facets %}
+      <a href="{% querystring claim=facet.key page=None %}" class="level-pill {% if facet.active %}active{% endif %}"
+         {% if facet.active %}aria-current="true"{% endif %}>{{ facet.label }} <span class="level-pill__count">{{ facet.count }}</span></a>
+      {% endfor %}
+    </div>
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-lg-6">
+        <label class="filter-bar__label" for="filter-q">ค้นหา</label>
+        <div class="input-group input-group-sm">
+          <input type="search" id="filter-q" name="q" class="form-control {% if search %}is-set{% endif %}" value="{{ search }}"
+                 placeholder="เลข Ticket, ชื่อเรื่อง, ระบบ/บริการ, IP...">
+          <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-severity">ความรุนแรง</label>
+        <select id="filter-severity" name="severity" class="form-select form-select-sm js-autosubmit {% if severity_filter %}is-set{% endif %}">
+          <option value="">ทั้งหมด</option>
+          {% for code, label in severity_choices %}
+          <option value="{{ code }}" {% if severity_filter == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-classification">ประเภท</label>
+        <select id="filter-classification" name="classification" class="form-select form-select-sm js-autosubmit {% if classification_filter %}is-set{% endif %}">
+          <option value="">ทั้งหมด</option>
+          {% for code, label in classification_choices %}
+          <option value="{{ code }}" {% if classification_filter == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-ola">OLA</label>
+        <select id="filter-ola" name="ola" class="form-select form-select-sm js-autosubmit {% if ola_filter %}is-set{% endif %}">
+          <option value="">ทั้งหมด</option>
+          {% for code, label, color in ola_bucket_choices %}
+          <option value="{{ code }}" {% if ola_filter == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    {% include 'incidents/_filter_chips.html' %}
   </div>
-  <div class="d-flex flex-wrap align-items-center gap-2">
-    <span class="small fw-bold text-muted" style="min-width:5.5rem;">การรับเรื่อง</span>
-    {% for facet in claim_facets %}
-    <a href="{% querystring claim=facet.key page=None %}"
-       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
-      {{ facet.label }}
-      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
-    </a>
-    {% endfor %}
-    {# Sort stays a select — four mutually exclusive options that gain nothing #}
-    {# from counts. Auto-submits via the shared .js-autosubmit handler in      #}
-    {# base.html, so there is no submit button anywhere on this page.          #}
-    <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
-      {% if stage_filter %}<input type="hidden" name="stage" value="{{ stage_filter }}">{% endif %}
-      {% if claim_filter %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
-      <label class="form-label small fw-bold mb-0" for="t2-sort">เรียงตาม</label>
-      <select name="sort" id="t2-sort" class="form-select form-select-sm js-autosubmit" style="width:auto;">
-        <option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option>
-        <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
-        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>เข้าคิวล่าสุด</option>
-        <option value="severity" {% if sort == 'severity' %}selected{% endif %}>ความรุนแรง</option>
-      </select>
-    </form>
-  </div>
-  {% if stage_filter or claim_filter %}
-  <div class="mt-2"><a href="{% url 'escalation_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a></div>
-  {% endif %}
-</div></div>
-<div class="card ops-card"><div class="table-responsive"><table class="table table-hover align-middle operational-table">
+</form>
+<div class="card ops-card">
+{% include 'incidents/_results_bar.html' with form_id='ticket-filters' result_total_label='ในคิว' %}
+<div class="table-responsive"><table class="table table-hover align-middle operational-table">
   {# Emergency lost its own column: it rendered "-" on ~92% of rows to restate #}
   {# a signal the row stripe and the default sort already carry. The flag      #}
   {# moved into the Ticket cell, and Tier 1 into the ชื่อเรื่อง cell — together  #}
   {# ~200px back, which is what kept the table from fitting a 1280px laptop.   #}
-  <thead class="table-light"><tr><th>เคส</th><th>ขั้นตอน</th><th>ความรุนแรง</th><th>ประเภท</th><th>ชื่อเรื่อง</th><th>OLA</th><th>รอมานาน</th><th>ผู้รับเรื่อง</th><th class="text-end">ตรวจสอบ</th></tr></thead>
+  <thead class="table-light"><tr>{% include 'incidents/_sortable_headers.html' %}</tr></thead>
   <tbody>{% for ticket in tickets %}<tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}"
       data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link"
       aria-label="เปิด Ticket {{ ticket.ticket_id }}">
@@ -104,7 +131,7 @@ emergency. Claim state is what the table cannot answer on its own.
       {% else %}<span class="text-muted small">กำลังดำเนินการโดยผู้อื่น</span>{% endif %}
     </td>
   </tr>{% empty %}<tr><td colspan="9">
-    {% if stage_filter or claim_filter %}
+    {% if has_clearable_filters %}
       {% url 'escalation_queue' as empty_action_url %}
       {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบ Ticket ที่ตรงกับเงื่อนไขที่เลือก' description='ลองเปลี่ยนขั้นตอนหรือสถานะการรับเรื่องเพื่อดูรายการอื่นในคิว' action_url=empty_action_url action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
     {% else %}
@@ -122,8 +149,8 @@ emergency. Claim state is what the table cannot answer on its own.
 </div></div></div>
 {% endif %}{% endfor %}
 {# {% querystring %} (Django 6) copies the live request.GET and overrides only #}
-{# page, so stage/claim/sort survive paging and a future filter needs no edit  #}
-{# here — unlike the hand-built param chain in incidents/ticket_list.html.     #}
+{# page, so every filter and the sort survive paging and a future filter      #}
+{# needs no edit here.                                                         #}
 {% if page_obj.paginator.num_pages > 1 %}
 <nav class="mt-3" aria-label="หน้าคิว Tier 2">
   <ul class="pagination pagination-sm justify-content-center">

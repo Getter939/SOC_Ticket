@@ -11,6 +11,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.incidents.views._helpers import _column_sort_headers, _filter_chip
+
 from .models import WazuhAlert
 
 ESCALATE_TIER_CHOICES = dict(WazuhAlert.TIER_CHOICES)
@@ -73,27 +75,15 @@ def _sort_headers(current_sort):
     """Header cells for the queue table, each carrying the sort it links to.
 
     Clicking a header applies its ascending sort; clicking the one already
-    active flips it. Built here rather than in the template so the arrow shown
-    and the link followed cannot disagree.
+    active flips it. Delegates to the builder every ticket list uses (and
+    renders through the same incidents/_sortable_headers.html), so this queue's
+    headers look and behave like theirs. The action column is right-aligned.
     """
-    headers = []
-    for label, asc_key, desc_key in QUEUE_COLUMNS:
-        if asc_key is None:
-            headers.append({'label': label, 'sortable': False})
-            continue
-        if current_sort == asc_key:
-            next_sort, direction = desc_key, 'asc'
-        elif current_sort == desc_key:
-            next_sort, direction = asc_key, 'desc'
-        else:
-            next_sort, direction = asc_key, None
-        headers.append({
-            'label': label,
-            'sortable': True,
-            'next_sort': next_sort,
-            'direction': direction,
-        })
-    return headers
+    columns = [
+        (label, asc_key, desc_key, True, 'text-end' if index == len(QUEUE_COLUMNS) - 1 else '')
+        for index, (label, asc_key, desc_key) in enumerate(QUEUE_COLUMNS)
+    ]
+    return _column_sort_headers(columns, current_sort)
 
 # Triage no longer collects an incident category — the ticket form owns the
 # threat taxonomy (Ticket.DETAILED_ISSUE_HIERARCHY), so the coarse alert-side
@@ -371,8 +361,21 @@ def triage_queue(request):
         'sort': sort,
         'sort_headers': _sort_headers(sort),
         'sort_is_from_column': sort not in DROPDOWN_SORTS,
+        'sort_options': (
+            ('ola', 'OLA ใกล้ครบกำหนด'),
+            ('level', 'Rule level สูงสุด'),
+            ('newest', 'Alert ล่าสุด'),
+        ),
         'per_page': per_page,
         'per_page_choices': PER_PAGE_CHOICES,
+        # The three pill rows show their own selection; only the free-text
+        # search needs a chip. "Clear all" returns to the default scope
+        # (พร้อมดำเนินการ, every OLA band and level).
+        'filter_chips': (
+            [_filter_chip(request, f'ค้นหา: “{search_query}”', ('q',))] if search_query else []
+        ),
+        'has_clearable_filters': bool(
+            claim_filter != 'actionable' or ola_filter or rule_level_filter or search_query),
     })
 
 

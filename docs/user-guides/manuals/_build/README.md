@@ -23,8 +23,9 @@ Each manual is a Word `.docx` built with [docx-js](https://docx.js.org/).
 - `ownsRcaRequests` — the Forensic Analyst hands in Forensics / RCA requests with a
   report number (prefilled `SOC-RCA-YYYYMM-NNNN`, editable), an optional **หมายเหตุ**
   and **no file**, because the RCA report is written outside the system. The Red
-  Team Manager instead hands in with a report number (`SOC-VAPT-` / `SOC-HARD-`),
-  notes and an optional file, and gets the note that the legacy intra-SOC subtask
+  Team Manager instead enters a report number (guided by `VA-YYYY-NNNN`,
+  `PT-YYYY-NNNN`, or `BL-YYYY-NNNN`), optional notes, and no file. Each
+  Red Team account is designated for one function in admin. The manual also notes that the legacy intra-SOC subtask
   form is gone. The report number is **mandatory for every response type**. This flag
   was `hasRcaWorkspace` until the RCA workspace was retired (CHANGELOG [Unreleased]);
   the workspace section and its glossary rows are gone.
@@ -65,7 +66,7 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
 
 - Cover version string and date are set in `common.js` (`buildManual`, cover block)
   and inline in `build-tier1.js` — **two places, keep them in step**. Currently
-  `v1.7.6` / 24 Sep 2026 (manual edition 1.4). Before the v1.7.1 pass the two had drifted
+  `v1.7.6` / 25 Sep 2026 (manual edition 1.4). Before the v1.7.1 pass the two had drifted
   apart (1.1 vs 1.2); if you ever see them disagree again, that is the cause.
 - Content is written against
   [`docs/architecture/ticket-lifecycle-states.md`](../../../architecture/ticket-lifecycle-states.md),
@@ -185,11 +186,10 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 - `FOR-my-request` / `RED-my-request`: the card on a request that is still **เปิด**. It
   shows the tracker at step 1, the brief, the requester, the dates and the green รับงาน
   button.
-- `FOR-my-request-submit` / `RED-my-request-submit`: the card on a request that is
-  **กำลังดำเนินการ**, with its open form. Capture the Forensic one on a Forensics / RCA
-  request, which shows the report number and หมายเหตุ fields and no file input. Capture
-  the Red Team one on a VA/PT request, which shows the report number, ผลการดำเนินการ and
-  file fields.
+- `FOR-my-request-submit`: the card on a Forensics / RCA request that is
+  **กำลังดำเนินการ**, showing the report number and หมายเหตุ fields without a file input.
+  The old `RED-my-request-submit` screenshot showed a retired file field and is no
+  longer included in the Red Team manual until a current screenshot is captured.
 - Take both on a desktop viewport so the card sits in the right rail beside the case.
 
 These replace `FOR-accept`, `RED-accept`, `FOR-update` and `RED-update`. Those four were

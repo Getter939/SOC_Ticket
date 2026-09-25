@@ -391,9 +391,10 @@ class EscalationQueueFilterTest(TestCase):
 
     def test_clear_filters_link_only_shows_while_filtering(self):
         self._ticket()
-        self.assertNotContains(self._get(), 'ล้างตัวกรองทั้งหมด')
-        self.assertContains(self._get(claim='mine'), 'ล้างตัวกรองทั้งหมด')
-        self.assertContains(self._get(stage='escalated'), 'ล้างตัวกรองทั้งหมด')
+        self.assertNotContains(self._get(), 'ล้างทั้งหมด')
+        self.assertContains(self._get(claim='mine'), 'ล้างทั้งหมด')
+        self.assertContains(self._get(stage='escalated'), 'ล้างทั้งหมด')
+        self.assertContains(self._get(severity='High'), 'ล้างทั้งหมด')
 
     def test_count_badge_reflects_active_filters(self):
         self._ticket(claimed_by=self.t2)
@@ -466,3 +467,124 @@ class LegacyWazuhUrlRedirectTest(TestCase):
 
     def test_the_queue_now_lives_under_incidents(self):
         self.assertEqual(reverse('escalation_queue'), '/incidents/tier2-queue/')
+
+
+class Tier2QueueFilterBarAndSortTest(TestCase):
+    """The shared filter bar (search / severity / type / OLA, chips, results
+    bar) and server-side header sorting, on top of the stage/claim pills.
+
+    Three tickets whose every sortable column orders them differently, so no
+    ordering assertion can pass on a shared tie-break.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.t2 = _make_user('bar_t2', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2)
+        zed = _make_user('bar_zed', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2)
+        amy = _make_user('bar_amy', UserProfile.ROLE_SOC_STAFF, tier=UserProfile.TIER_T2)
+        User.objects.filter(pk=zed.pk).update(first_name='Zed')
+        User.objects.filter(pk=amy.pk).update(first_name='Amy')
+        now = timezone.now()
+        rows = (
+            # ticket_id, stage, severity, name, sub-category, ola, waiting, claimer
+            ('T2Q-003', Ticket.STATUS_ESCALATED_T2, 'Low', 'golf', 'Investigating Other',
+             now + timedelta(hours=1), 3, zed),
+            # Blank name: the queue shows the sub-category LABEL ("Login
+            # ล้มเหลว…"), which sorts after 'golf' — the code would not.
+            ('T2Q-001', Ticket.STATUS_CONTAINMENT_REPORTED, 'Critical', '', 'Failed Login',
+             None, 1, None),
+            ('T2Q-002', Ticket.STATUS_PENDING_T2_REVIEW, 'Medium', 'alpha', 'Investigating Other',
+             now + timedelta(hours=5), 2, amy),
+        )
+        cls.a, cls.b, cls.c = [
+            Ticket.objects.create(
+                ticket_id=ticket_id, status=status, severity=severity,
+                incident_name=name, detailed_issue2=sub, device_name=f'HOST-{ticket_id}',
+                ip_address='192.0.2.10', issue_description='fixture',
+                classification=Ticket.CLASSIFICATION_INCIDENT,
+                t2_claimed_by=claimer, t2_claimed_at=now if claimer else None,
+            )
+            for ticket_id, status, severity, name, sub, _, _, claimer in rows
+        ]
+        # save() derives the OLA deadline and seeds status_changed_at; pin both.
+        for ticket, (*_, deadline, hours, _claimer) in zip((cls.a, cls.b, cls.c), rows):
+            Ticket.objects.filter(pk=ticket.pk).update(
+                ola_contain_deadline=deadline, status_changed_at=now - timedelta(hours=hours))
+
+    def setUp(self):
+        self.client.force_login(self.t2)
+
+    def _get(self, **params):
+        return self.client.get(reverse('escalation_queue'), params)
+
+    def _order(self, sort):
+        response = self._get(sort=sort)
+        self.assertEqual(response.context['sort'], sort)
+        return [t.pk for t in response.context['tickets']]
+
+    def test_every_column_sorts_both_ways(self):
+        a, b, c = self.a.pk, self.b.pk, self.c.pk
+        rank = {code: i for i, (code, _) in enumerate(Ticket.STATUS_CHOICES)}
+        by_stage = [t.pk for t in sorted((self.a, self.b, self.c), key=lambda t: rank[t.status])]
+        expected = {
+            '-id': [a, c, b], 'id': [b, c, a],
+            'stage': by_stage, '-stage': by_stage[::-1],
+            'severity': [b, c, a], 'severity_asc': [a, c, b],
+            'name': [c, a, b], '-name': [b, a, c],
+            # Blank OLA / claimer go last in BOTH directions.
+            'ola': [a, c, b], '-ola': [c, a, b],
+            'claimer': [c, a, b], '-claimer': [a, c, b],
+            # รอมานาน: first click = longest wait.
+            'waiting': [a, c, b], 'newest': [b, c, a],
+        }
+        for sort, order in expected.items():
+            with self.subTest(sort=sort):
+                self.assertEqual(self._order(sort), order)
+
+    def test_headers_mark_the_active_column_and_link_to_the_next_sort(self):
+        response = self._get(sort='waiting', severity='Low')
+        headers = {h['label']: h for h in response.context['sort_headers']}
+        # The wait column shows an AGE, so longest-first reads as descending.
+        self.assertEqual((headers['รอมานาน']['direction'], headers['รอมานาน']['next_sort']),
+                         ('desc', 'newest'))
+        self.assertEqual(headers['เคส']['next_sort'], '-id')
+        self.assertFalse(headers['ตรวจสอบ']['sortable'])
+        self.assertTrue(response.context['sort_is_from_column'])
+        self.assertContains(response, '<option value="waiting" selected>ตามคอลัมน์ในตาราง</option>')
+        self.assertContains(response, 'href="?sort=newest&amp;severity=Low"')
+
+    def test_default_emergency_sort_marks_no_column(self):
+        response = self._get()
+        self.assertEqual(response.context['sort'], 'emergency')
+        self.assertFalse(response.context['sort_is_from_column'])
+        self.assertTrue(all(h.get('direction') is None for h in response.context['sort_headers']))
+
+    def test_search_matches_the_displayed_name_and_narrows_the_pills(self):
+        response = self._get(q='alpha')
+        self.assertEqual([t.pk for t in response.context['tickets']], [self.c.pk])
+        stage_all = next(f for f in response.context['stage_facets'] if f['key'] is None)
+        self.assertEqual(stage_all['count'], 1)
+        self.assertEqual(response.context['result_total'], 3)
+        self.assertContains(response, 'จาก 3 ในคิว')
+
+    def test_toolbar_filters_show_as_chips(self):
+        response = self._get(severity='Critical', classification=Ticket.CLASSIFICATION_INCIDENT)
+        labels = [chip['label'] for chip in response.context['filter_chips']]
+        self.assertEqual(labels[0], 'ความรุนแรง: Critical')
+        self.assertTrue(labels[1].startswith('ประเภท: '))
+        self.assertEqual([t.pk for t in response.context['tickets']], [self.b.pk])
+        remove_severity = response.context['filter_chips'][0]['remove_url']
+        self.assertNotIn('severity=', remove_severity)
+        self.assertIn('classification=', remove_severity)
+
+    def test_ola_filter_uses_the_dashboard_buckets(self):
+        Ticket.objects.filter(pk=self.a.pk).update(ola_contain_deadline=timezone.now() - timedelta(hours=1))
+        response = self._get(ola='overdue')
+        self.assertEqual([t.pk for t in response.context['tickets']], [self.a.pk])
+        self.assertIn('OLA: Overdue', [chip['label'] for chip in response.context['filter_chips']])
+
+    def test_bar_keeps_the_deliberate_absence_of_emergency_and_date_filters(self):
+        response = self._get()
+        self.assertNotContains(response, 'name="emergency"')
+        self.assertNotContains(response, 'name="start_date"')
+        self.assertContains(response, 'name="q"')

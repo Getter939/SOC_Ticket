@@ -14,9 +14,35 @@ from django.views.decorators.http import require_GET, require_POST
 from .forms import ManualIOCEditForm, ManualIOCFormSet
 from .ioc_values import INVENTORY_CATEGORY_CHOICES, TICKET_CATEGORY_CHOICES
 from .ti_platform import (
-    can_manage_inventory, create_manual_iocs, decorate_ioc_rows,
+    IOC_SORTS, can_manage_inventory, create_manual_iocs, decorate_ioc_rows,
     ioc_database_counts, ioc_database_queryset,
     remove_analyst_ioc, set_note, set_review_status, update_manual_ioc,
+)
+from .views._helpers import _column_sort_headers, _filter_chip
+
+STATUS_FILTER_LABELS = {
+    'all': 'ทั้งหมด', 'not_checked': 'ยังไม่ได้ตรวจสอบ', 'checked': 'ตรวจสอบแล้ว',
+}
+SOURCE_FILTER_LABELS = {'all': 'ทั้งหมด', 'ticket': 'เคส', 'analyst': 'บันทึกเอง'}
+
+# Table columns in cell order: (label, first-click sort, second-click sort,
+# first click ascending?, th class) — see views._helpers._column_sort_headers.
+# Keys are ti_platform.IOC_SORTS. อยู่ในเคส / กิจกรรมล่าสุด start at the busiest /
+# most recent; สถานะ starts at ยังไม่ได้ตรวจสอบ (the worklist end).
+IOC_COLUMNS = (
+    ('หมวดหมู่', 'category', '-category', True, ''),
+    ('ตัวบ่งชี้', 'value', '-value', True, ''),
+    ('หมายเหตุ', 'note', '-note', True, ''),
+    ('สถานะ', 'status', '-status', True, ''),
+    ('แหล่งที่มา', 'source', '-source', True, ''),
+    ('อยู่ในเคส', 'tickets', 'tickets_asc', False, ''),
+    ('กิจกรรมล่าสุด', 'last', 'last_oldest', False, ''),
+    ('การดำเนินการ', None, None, True, ''),
+)
+IOC_SORT_OPTIONS = (
+    ('worklist', 'ยังไม่ได้ตรวจสอบก่อน'),
+    ('last', 'กิจกรรมล่าสุด'),
+    ('tickets', 'พบในเคสมากสุด'),
 )
 
 
@@ -36,14 +62,41 @@ def _safe_next(request):
 def _database_page(request, manual_formset=None, status=200):
     query = (request.GET.get('q') or '').strip()[:255]
     status_filter = request.GET.get('status', 'all')
+    if status_filter not in STATUS_FILTER_LABELS:
+        status_filter = 'all'
     source_filter = request.GET.get('source', 'all')
+    if source_filter not in SOURCE_FILTER_LABELS:
+        source_filter = 'all'
     category_filter = request.GET.get('category', 'all')
+    category_labels = dict(TICKET_CATEGORY_CHOICES)
+    if category_filter not in category_labels:
+        category_filter = 'all'
+    sort = request.GET.get('sort', 'worklist').strip()
+    if sort not in IOC_SORTS:
+        sort = 'worklist'
     # Filter, order and page in the database: only this page's rows are fetched,
-    # then decorated. (The whole list used to be built in Python each view.)
-    database = Paginator(
-        ioc_database_queryset(query, status_filter, source_filter, category_filter), 30,
-    ).get_page(request.GET.get('page'))
+    # then decorated. (The whole list used to be built in Python each view, and
+    # the headers sorted only the 30 rows on screen, in the browser.)
+    paginator = Paginator(
+        ioc_database_queryset(query, status_filter, source_filter, category_filter, sort), 30,
+    )
+    database = paginator.get_page(request.GET.get('page'))
     database.object_list = decorate_ioc_rows(database.object_list)
+    counts = ioc_database_counts()
+
+    filter_chips = []
+    if query:
+        filter_chips.append(_filter_chip(request, f'ค้นหา: “{query}”', ('q',)))
+    if status_filter != 'all':
+        filter_chips.append(_filter_chip(
+            request, f'สถานะ: {STATUS_FILTER_LABELS[status_filter]}', ('status',)))
+    if source_filter != 'all':
+        filter_chips.append(_filter_chip(
+            request, f'แหล่งที่มา: {SOURCE_FILTER_LABELS[source_filter]}', ('source',)))
+    if category_filter != 'all':
+        filter_chips.append(_filter_chip(
+            request, f'ประเภท: {category_labels[category_filter]}', ('category',)))
+
     return render(request, 'incidents/ioc_database.html', {
         'manual_formset': manual_formset if manual_formset is not None else ManualIOCFormSet(),
         # Keep the entry section open when we are re-rendering its errors.
@@ -56,9 +109,17 @@ def _database_page(request, manual_formset=None, status=200):
         # five kinds the analyst can record (File Name is context, not a category).
         'category_choices': TICKET_CATEGORY_CHOICES,
         'manual_category_choices': INVENTORY_CATEGORY_CHOICES,
-        'counts': ioc_database_counts(),
+        'counts': counts,
         'database': database,
         'current_path': request.get_full_path(),
+        'filter_chips': filter_chips,
+        'has_clearable_filters': bool(filter_chips),
+        'result_count': paginator.count,
+        'result_total': counts['total'],
+        'sort': sort,
+        'sort_options': IOC_SORT_OPTIONS,
+        'sort_headers': _column_sort_headers(IOC_COLUMNS, sort),
+        'sort_is_from_column': sort not in dict(IOC_SORT_OPTIONS),
     }, status=status)
 
 

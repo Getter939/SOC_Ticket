@@ -4,10 +4,8 @@ Selectors centralize query shape and read-only decoration.  They do not mutate
 workflow state and do not construct forms or HTTP responses.
 """
 
-from django.contrib.auth.models import User
 from django.db.models import Prefetch
 
-from apps.accounts.models import UserProfile
 
 from .models import (
     Ticket,
@@ -122,26 +120,23 @@ def get_ticket_detail_read_model(
         # The viewer's own response request is worked from the "งานของคุณ" card
         # at the top of the action column, not from the list further down.
         subtask.is_mine = subtask.is_response_request and subtask.assigned_to_id == user.pk
-        # Prefill for the RCA report-number input; the analyst's own value wins.
+        # New Red Team numbers are entered by their manager, not derived from
+        # the parent ticket. FA keeps its existing case-based suggestion.
         subtask.report_number_prefill = (
-            subtask.report_number or subtask.expected_report_number
+            subtask.report_number or (
+                '' if subtask.uses_manual_report_number else subtask.expected_report_number
+            )
         )
         for attachment in subtask.attachments.all():
             attachment.can_delete = can_delete_ticket_attachment(ticket, attachment, user)
 
-    response_routing = {}
-    response_member_roles = {}
+    response_eligible_assignees = {}
     if can_request_response:
-        response_routing = TicketSubtask.response_routing()
-        response_member_roles = {
-            str(pk): role
-            for pk, role in User.objects.filter(
-                is_active=True,
-                profile__role__in=(
-                    UserProfile.ROLE_FORENSIC,
-                    UserProfile.ROLE_REDTEAM_MANAGER,
-                ),
-            ).values_list('pk', 'profile__role')
+        response_eligible_assignees = {
+            subtask_type: [str(pk) for pk in TicketSubtask.eligible_assignees(
+                subtask_type,
+            ).values_list('pk', flat=True)]
+            for subtask_type in TicketSubtask.NEW_RESPONSE_TYPES
         }
 
     can_restore_attachment = can_restore_ticket_attachment(user)
@@ -165,8 +160,7 @@ def get_ticket_detail_read_model(
         ).select_related('changed_by', 'subtask')[:50],
         'can_restore_attachment': can_restore_attachment,
         'deleted_attachments': deleted_attachments,
-        'response_routing': response_routing,
-        'response_member_roles': response_member_roles,
+        'response_eligible_assignees': response_eligible_assignees,
         'subtasks': subtasks,
         # Response-team requests are the live list; retired legacy Investigation/
         # Countermeasure rows (if any historical ones exist) render read-only in a

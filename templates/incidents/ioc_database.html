@@ -48,68 +48,64 @@
   </div>
 </div></div>
 
-{# ── Filter toolbar ── #}
-<div class="card filter-toolbar mb-3"><div class="card-body py-3">
-  <form method="GET" class="row g-2 align-items-end js-submit-loading">
-    <div class="col-md-4">
-      <label class="form-label small fw-bold mb-1">ค้นหา / Search</label>
-      <div class="input-group input-group-sm">
-        <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
-        <input type="text" name="q" class="form-control" value="{{ query }}" maxlength="255" placeholder="ค่า, ID หรือหมายเหตุ">
+{% comment %}
+── Filter bar ── the same one the ticket lists use: selects apply on change
+(.js-autosubmit), the search on Enter, every active filter shows as a
+removable chip. Sorting is server-side (headers + the results-bar presets) —
+the table is paged in SQL, so the old in-browser header sort only reordered
+the 30 rows on screen.
+{% endcomment %}
+<form method="GET" id="ioc-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-lg-6">
+        <label class="filter-bar__label" for="filter-q">ค้นหา / Search</label>
+        <div class="input-group input-group-sm">
+          <input type="search" id="filter-q" name="q" class="form-control {% if query %}is-set{% endif %}" value="{{ query }}" maxlength="255" placeholder="ค่า, ID หรือหมายเหตุ">
+          <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-status">สถานะ / Status</label>
+        <select id="filter-status" name="status" class="form-select form-select-sm js-autosubmit {% if status_filter != 'all' %}is-set{% endif %}">
+          <option value="all">ทั้งหมด / All</option>
+          <option value="not_checked" {% if status_filter == 'not_checked' %}selected{% endif %}>ยังไม่ได้ตรวจสอบ</option>
+          <option value="checked" {% if status_filter == 'checked' %}selected{% endif %}>ตรวจสอบแล้ว</option>
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-source">แหล่งที่มา / Source</label>
+        <select id="filter-source" name="source" class="form-select form-select-sm js-autosubmit {% if source_filter != 'all' %}is-set{% endif %}">
+          <option value="all">ทั้งหมด / All</option>
+          <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>เคส</option>
+          <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>บันทึกเอง</option>
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="filter-bar__label" for="filter-category">ประเภท / Category</label>
+        <select id="filter-category" name="category" class="form-select form-select-sm js-autosubmit {% if category_filter != 'all' %}is-set{% endif %}">
+          <option value="all">ทั้งหมด / All</option>
+          {% for code, label in category_choices %}
+          <option value="{{ code }}" {% if category_filter == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
       </div>
     </div>
-    <div class="col-md-2">
-      <label class="form-label small fw-bold mb-1">สถานะ / Status</label>
-      <select name="status" class="form-select form-select-sm">
-        <option value="all">ทั้งหมด / All</option>
-        <option value="not_checked" {% if status_filter == 'not_checked' %}selected{% endif %}>ยังไม่ได้ตรวจสอบ</option>
-        <option value="checked" {% if status_filter == 'checked' %}selected{% endif %}>ตรวจสอบแล้ว</option>
-      </select>
-    </div>
-    <div class="col-md-2">
-      <label class="form-label small fw-bold mb-1">แหล่งที่มา / Source</label>
-      <select name="source" class="form-select form-select-sm">
-        <option value="all">ทั้งหมด / All</option>
-        <option value="ticket" {% if source_filter == 'ticket' %}selected{% endif %}>เคส</option>
-        <option value="analyst" {% if source_filter == 'analyst' %}selected{% endif %}>บันทึกเอง</option>
-      </select>
-    </div>
-    <div class="col-md-2">
-      <label class="form-label small fw-bold mb-1">ประเภท / Category</label>
-      <select name="category" class="form-select form-select-sm">
-        <option value="all">ทั้งหมด / All</option>
-        {% for code, label in category_choices %}
-        <option value="{{ code }}" {% if category_filter == code %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-1 d-grid">
-      <button type="submit" class="btn btn-dark btn-sm">กรอง</button>
-    </div>
-    {% if query or status_filter != 'all' or source_filter != 'all' or category_filter != 'all' %}
-    <div class="col-12"><a href="{% url 'ioc_database' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด / Clear filters</a></div>
-    {% endif %}
-  </form>
-</div></div>
+    {% include 'incidents/_filter_chips.html' %}
+  </div>
+</form>
 
 <div class="text-muted small mb-2">ทั้งหมด {{ counts.total }} · <span class="text-danger">ยังไม่ได้ตรวจสอบ {{ counts.not_checked }}</span> · <span class="text-success">ตรวจสอบแล้ว {{ counts.checked }}</span></div>
 
-<div class="card"><div class="card-body">
+<div class="card ops-card">
+  {% include 'incidents/_results_bar.html' with form_id='ioc-filters' result_unit='รายการ' result_total_label='ในฐานข้อมูล' %}
+  <div class="card-body">
   <div class="table-responsive">
     <table class="table table-sm align-middle" data-ioc-table>
-      <thead><tr>
-        <th class="sortable" data-key="category" role="button" tabindex="0">หมวดหมู่<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="value" role="button" tabindex="0">ตัวบ่งชี้<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="note" role="button" tabindex="0">หมายเหตุ<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="status" role="button" tabindex="0">สถานะ<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="source" role="button" tabindex="0">แหล่งที่มา<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="tickets" data-num="1" role="button" tabindex="0">อยู่ในเคส<span class="sort-arrow"></span></th>
-        <th class="sortable" data-key="last" data-num="1" role="button" tabindex="0">กิจกรรมล่าสุด<span class="sort-arrow"></span></th>
-        <th>การดำเนินการ</th>
-      </tr></thead>
+      <thead><tr>{% include 'incidents/_sortable_headers.html' %}</tr></thead>
       <tbody>
       {% for row in database %}
-      <tr data-row data-category="{{ row.category_label }}" data-value="{{ row.value }}" data-note="{{ row.note }}" data-status="{{ row.status }}" data-source="{{ row.source_label }}" data-tickets="{{ row.ticket_count }}" data-last="{{ row.last_seen|date:'U'|default:'0' }}">
+      <tr>
         <td>{{ row.category_label }}</td>
         <td class="font-monospace text-break" style="max-width:300px">{{ row.value }}</td>
         <td class="text-break" style="max-width:220px">
@@ -217,36 +213,13 @@
 </div>
 
 <style>
-  [data-ioc-table] th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
-  [data-ioc-table] th.sortable:hover { background:var(--ui-hover, #f1f3f5); }
   .ioc-modal { position:fixed; inset:0; z-index:1080; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.45); }
   .ioc-modal[hidden] { display:none; }
   .ioc-modal__dialog { width:100%; max-width:460px; margin:1rem; }
 </style>
 <script nonce="{{ request.csp_nonce }}">
 (() => {
-  // ── Client-side sort of the current page ──
-  const table = document.querySelector('[data-ioc-table]');
-  if (table && !table.dataset.init) {
-    table.dataset.init = '1';
-    const tbody = table.querySelector('tbody');
-    const headers = Array.from(table.querySelectorAll('th.sortable'));
-    let key = null, dir = 'asc';
-    const val = (tr, k, num) => { const v = tr.dataset[k] || ''; return num ? (parseFloat(v) || 0) : v.toLowerCase(); };
-    function sortBy(k, num) {
-      dir = (key === k && dir === 'asc') ? 'desc' : 'asc';
-      key = k;
-      const rows = Array.from(tbody.querySelectorAll('tr[data-row]'));
-      rows.sort((a, b) => { const av = val(a, k, num), bv = val(b, k, num); let c = av < bv ? -1 : av > bv ? 1 : 0; return dir === 'desc' ? -c : c; });
-      rows.forEach(tr => tbody.appendChild(tr));
-      headers.forEach(th => { const a = th.querySelector('.sort-arrow'); if (a) a.textContent = th.dataset.key === k ? (dir === 'asc' ? ' ▲' : ' ▼') : ''; });
-    }
-    headers.forEach(th => {
-      const trigger = () => sortBy(th.dataset.key, th.dataset.num === '1');
-      th.addEventListener('click', trigger);
-      th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); trigger(); } });
-    });
-  }
+  // Column sorting is server-side now (incidents/_sortable_headers.html).
 
   // ── Status checkbox saves immediately ──
   document.querySelectorAll('form[data-status-form] input[type=checkbox]').forEach(cb => {

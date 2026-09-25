@@ -25,6 +25,26 @@ the full width it needs (the manual rows carry up to four action buttons) and
 put the counts where they're seen without scrolling. The returned-cases alert
 stays above the tabs so the most urgent signal shows on every tab.
 {% endcomment %}
+{% comment %}
+One search for the whole page: it narrows every work tab (Ticket ของฉัน,
+กำลังเฝ้าระวัง, Tier 2 แก้ไข, รับแจ้งด้วยตนเอง) and their tab badges; the
+last-10 history and the alerts above stay whole. The hidden `tab` follows the
+tab on screen (script at the bottom), so a search reloads onto the same tab.
+Each tab's headers sort that tab on the server with their own parameter.
+{% endcomment %}
+<form method="GET" id="queue-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+  <div class="card-body py-3">
+    <input type="hidden" name="tab" value="{{ active_tab }}" data-active-tab>
+    <label class="filter-bar__label" for="filter-q">ค้นหาในคิวของฉัน</label>
+    <div class="input-group input-group-sm">
+      <input type="search" id="filter-q" name="q" class="form-control {% if search %}is-set{% endif %}" value="{{ search }}"
+             placeholder="เลข Ticket, ชื่อเรื่อง, ระบบ/บริการ, IP, รายละเอียด...">
+      <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+    </div>
+    {% include 'incidents/_filter_chips.html' %}
+  </div>
+</form>
+
 <ul class="nav nav-tabs mb-0" role="tablist">
   <li class="nav-item" role="presentation">
     <button class="nav-link {% if active_tab == 'tickets' %}active{% endif %}" id="tab-btn-tickets"
@@ -78,7 +98,7 @@ stays above the tabs so the most urgent signal shows on every tab.
     {# which tracks lifecycle moves only — never note edits or emergency toggles  #}
     {# (see Ticket.status_changed_at). Labelling it "last updated" made an        #}
     {# actively-worked case look stale.                                           #}
-    <thead class="table-light"><tr><th>เคส</th><th>สถานะ</th><th>ความรุนแรง</th><th>OLA</th><th>ระบบ / บริการ</th><th>สถานะเปลี่ยนเมื่อ</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
+    <thead class="table-light"><tr>{% include 'incidents/_sortable_headers.html' with sort_headers=tickets_sort_headers %}</tr></thead>
     <tbody>{% for ticket in my_tickets %}<tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}"
       data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
@@ -95,11 +115,11 @@ stays above the tabs so the most urgent signal shows on every tab.
 <nav class="mb-4" aria-label="การแบ่งหน้าเคส">
   <ul class="pagination pagination-sm justify-content-center mb-0">
     {% if page_obj.has_previous %}
-      <li class="page-item"><a class="page-link" href="?tab=tickets&page={{ page_obj.previous_page_number }}">«</a></li>
+      <li class="page-item"><a class="page-link" href="{% querystring tab='tickets' page=page_obj.previous_page_number %}">«</a></li>
     {% endif %}
     <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
     {% if page_obj.has_next %}
-      <li class="page-item"><a class="page-link" href="?tab=tickets&page={{ page_obj.next_page_number }}">»</a></li>
+      <li class="page-item"><a class="page-link" href="{% querystring tab='tickets' page=page_obj.next_page_number %}">»</a></li>
     {% endif %}
   </ul>
 </nav>
@@ -110,7 +130,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 <div class="tab-pane fade {% if active_tab == 'monitoring' %}show active{% endif %}" id="tab-monitoring" role="tabpanel" aria-labelledby="tab-btn-monitoring">
 <div class="card ops-card mb-4 rounded-top-0">
   <div class="table-responsive"><table class="table table-hover align-middle operational-table">
-    <thead class="table-light"><tr><th>เคส</th><th>สถานะเฝ้าระวัง</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>ครบกำหนด</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
+    <thead class="table-light"><tr>{% include 'incidents/_sortable_headers.html' with sort_headers=monitoring_sort_headers %}</tr></thead>
     <tbody>{% for ticket in monitoring_tickets %}<tr class="clickable-row" data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
       <td>{% include 'incidents/_monitoring_badge.html' with mon=ticket.monitoring_badge %}</td>
@@ -130,7 +150,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 <div class="tab-pane fade {% if active_tab == 't2changes' %}show active{% endif %}" id="tab-t2changes" role="tabpanel" aria-labelledby="tab-btn-t2changes">
 <div class="card ops-card mb-4 rounded-top-0">
   <div class="table-responsive"><table class="table table-hover align-middle operational-table">
-    <thead class="table-light"><tr><th>เคส</th><th>สถานะ</th><th>ความรุนแรง</th><th>ระบบ / บริการ</th><th>Tier 2 แก้ไขเมื่อ</th><th class="text-end"><span class="visually-hidden">การดำเนินการ</span></th></tr></thead>
+    <thead class="table-light"><tr>{% include 'incidents/_sortable_headers.html' with sort_headers=t2changes_sort_headers %}</tr></thead>
     <tbody>{% for ticket in t2_changed_tickets %}<tr class="clickable-row" data-row-href="{% url 'ticket_detail' ticket.pk %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
       <td><a class="font-monospace fw-bold text-dark" href="{% url 'ticket_detail' ticket.pk %}">#{{ ticket.ticket_id }}</a></td>
       <td>{% include 'incidents/_status_badge.html' with ticket=ticket %}</td>
@@ -147,7 +167,7 @@ stays above the tabs so the most urgent signal shows on every tab.
 <div class="tab-pane fade {% if active_tab == 'manual' %}show active{% endif %}" id="tab-manual" role="tabpanel" aria-labelledby="tab-btn-manual">
 <div class="card ops-card mb-4 rounded-top-0">
   <div class="table-responsive"><table class="table table-hover align-middle operational-table">
-  <thead class="table-light"><tr><th>รับแจ้งเมื่อ</th><th>แหล่งที่มา</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th class="text-end">การดำเนินการ</th></tr></thead>
+  <thead class="table-light"><tr>{% include 'incidents/_sortable_headers.html' with sort_headers=manual_sort_headers %}</tr></thead>
   <tbody>{% for triage in manual_queue %}<tr><td class="small">{{ triage.created_at|date:"d/m/Y H:i" }}</td><td>{{ triage.get_source_display }}</td><td style="max-width:460px;"><div>{{ triage.alert_description|truncatechars:120 }}</div>{% if triage.release_reason %}<small class="text-muted">Release ล่าสุด: {{ triage.release_reason }}</small>{% endif %}</td><td>{% if triage.claimed_by %}{{ triage.claimed_by.get_full_name|default:triage.claimed_by.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td><td class="text-end">
     {% if not triage.claimed_by %}<form class="d-inline" method="post" action="{% url 'claim_manual_triage' triage.pk %}">{% csrf_token %}<button class="btn btn-sm btn-primary" type="submit">รับรายการ (Claim)</button></form>
     {% elif triage.claimed_by_id == request.user.id %}<a class="btn btn-sm btn-success" href="{% url 'create_ticket' %}?triage_id={{ triage.pk }}">สร้าง Ticket (Create Ticket)</a><a class="btn btn-sm btn-primary" href="{% url 'create_project_incident' %}?triage_id={{ triage.pk }}"><i class="bi bi-diagram-3 me-1"></i>Project Incident (หลายระบบ)</a><button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#releaseManual{{ triage.pk }}">คืนคิว (Release)</button><button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#dismissManual{{ triage.pk }}">ปิดรายการ (ไม่เปิดเคส)</button>
@@ -165,4 +185,14 @@ stays above the tabs so the most urgent signal shows on every tab.
 </div>
 
 </div>{# /tab-content #}
+{# Keep the search form's hidden `tab` on the tab being viewed, so searching #}
+{# reloads onto it. Nonce'd rather than inline (CSP has no 'unsafe-inline').  #}
+<script nonce="{{ request.csp_nonce }}">
+  document.querySelectorAll('button[data-bs-toggle="tab"]').forEach((button) => {
+    button.addEventListener('shown.bs.tab', () => {
+      const field = document.querySelector('[data-active-tab]');
+      if (field) field.value = (button.dataset.bsTarget || '').replace('#tab-', '');
+    });
+  });
+</script>
 {% endblock %}

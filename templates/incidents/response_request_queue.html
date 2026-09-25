@@ -4,10 +4,7 @@
 
 {% block content %}
 <style>
-  .level-pill {
-    display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .6rem;
-    border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
-  }
+  /* Base .level-pill lives in base.html; this queue keeps its own blue. */
   .level-pill.active { background: #2f6fb2; color: #fff; border-color: #2f6fb2; }
   .req-type { display:inline-flex; align-items:center; gap:4px; font-size:.72rem; font-weight:700;
     color:#2f6fb2; background:#2f6fb21a; border:1px solid #2f6fb266; padding:2px 8px; border-radius:6px; white-space:nowrap; }
@@ -17,38 +14,59 @@
 <div class="page-header">
     <div>
         <h1 class="page-header__title"><i class="bi bi-shield-shaded me-2"></i>งานตอบสนอง</h1>
-        <p class="page-header__subtitle">Response Requests · {% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA/PT และ Infra Security ที่มอบหมายให้คุณ{% endif %}</p>
+        <p class="page-header__subtitle">Response Requests · {% if is_overview %}ภาพรวมทุกทีม{% else %}งาน Forensics, RCA, VA, PenTest และ Hardening ที่มอบหมายให้คุณ{% endif %}</p>
     </div>
     <div class="page-header__actions"><span class="badge bg-info text-dark" style="font-size:.85rem;">{{ open_count }} ยังไม่เสร็จ</span></div>
 </div>
 
-<div class="card filter-toolbar mb-3">
-        <div class="card-body py-3">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-                <span class="fw-semibold" style="font-size:.85rem;">กรองตามสถานะ:</span>
-                <a href="?" class="level-pill {% if not status_filter %}active{% endif %}">ทั้งหมด</a>
-                {% for code, label in status_choices %}
-                <a href="?status={{ code }}" class="level-pill {% if status_filter == code %}active{% endif %}">{{ label }}</a>
-                {% endfor %}
-            </div>
+{% comment %}
+Filter bar — the same one the ticket lists use. Status stays count pills
+(each counts what clicking it would show, within the search and type filter);
+the type select applies on change, the search on Enter, and both show as chips.
+Sorting is server-side: the headers, and the presets in the results bar.
+{% endcomment %}
+<form method="GET" id="request-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+    <div class="card-body py-3">
+        {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3" role="group" aria-label="สถานะ">
+            <span class="filter-bar__label mb-0">สถานะ:</span>
+            {% for pill in status_pills %}
+            <a href="{% if pill.code %}{% querystring status=pill.code %}{% else %}{% querystring status=None %}{% endif %}"
+               class="level-pill {% if status_filter == pill.code %}active{% endif %}"
+               {% if status_filter == pill.code %}aria-current="true"{% endif %}>{{ pill.label }} <span class="level-pill__count">{{ pill.count }}</span></a>
+            {% endfor %}
         </div>
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-lg-6">
+                <label class="filter-bar__label" for="filter-q">ค้นหา</label>
+                <div class="input-group input-group-sm">
+                    <input type="search" id="filter-q" name="q" class="form-control {% if search %}is-set{% endif %}" value="{{ search }}"
+                           placeholder="หัวข้อ, รายละเอียด, เลข Ticket, เลขที่รายงาน...">
+                    <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+                </div>
+            </div>
+            {% if type_choices|length > 1 %}
+            <div class="col-6 col-lg-3">
+                <label class="filter-bar__label" for="filter-type">ประเภท</label>
+                <select id="filter-type" name="type" class="form-select form-select-sm js-autosubmit {% if type_filter %}is-set{% endif %}">
+                    <option value="">ทั้งหมด</option>
+                    {% for code, label in type_choices %}
+                    <option value="{{ code }}" {% if type_filter == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        </div>
+        {% include 'incidents/_filter_chips.html' %}
     </div>
+</form>
 
 <div class="card ops-card">
+        {% include 'incidents/_results_bar.html' with form_id='request-filters' result_unit='คำขอ' result_total_label='ในคิว' %}
         <div class="table-responsive">
             <table class="table table-hover align-middle operational-table">
                 <thead>
-                    <tr>
-                        <th>ประเภท</th>
-                        <th>หัวข้อคำขอ</th>
-                        <th>เคส</th>
-                        {% if is_overview %}<th>ผู้รับผิดชอบ</th>{% endif %}
-                        <th>ผู้ร้องขอ</th>
-                        <th>วันที่</th>
-                        <th>สถานะ</th>
-                        <th>เลขที่รายงาน</th>
-                        <th style="width:170px;"></th>
-                    </tr>
+                    <tr>{% include 'incidents/_sortable_headers.html' %}</tr>
                 </thead>
                 <tbody>
                     {% for req in requests %}
@@ -72,7 +90,13 @@
                         </div></td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="{% if is_overview %}9{% else %}8{% endif %}">{% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่ตรงกับสถานะที่เลือก' %}</td></tr>
+                    <tr><td colspan="{% if is_overview %}9{% else %}8{% endif %}">
+                        {% if has_clearable_filters %}
+                        {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบคำขอที่ตรงกับตัวกรอง' description='ลองปรับคำค้นหา ประเภท หรือสถานะ' action_url=request.path action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
+                        {% else %}
+                        {% include 'includes/_empty_state.html' with icon='bi-shield-check' title='ไม่มีคำขอในคิว' description='ยังไม่มีงานตอบสนองที่มอบหมายให้คุณ' %}
+                        {% endif %}
+                    </td></tr>
                     {% endfor %}
                 </tbody>
             </table>

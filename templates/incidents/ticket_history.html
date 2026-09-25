@@ -3,197 +3,185 @@
 {% block title %}ประวัติ Ticket — ระบบสนับสนุนงาน SOC{% endblock %}
 
 {% block content %}
-<style>
-  .level-pill {
-    display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .6rem;
-    border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
-  }
-  .level-pill.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-</style>
 <div class="page-header">
     <div>
         <h1 class="page-header__title"><i class="bi bi-archive-fill me-2"></i>ประวัติ Ticket</h1>
-        <p class="page-header__subtitle">เคสที่อนุมัติหรือปิดแล้ว พร้อมผู้อนุมัติและผลการแก้ไขล่าสุด</p>
-    </div>
-    <div class="page-header__actions">
-        <span class="badge bg-success" style="font-size:.85rem;">{{ approved_count }} อนุมัติแล้ว</span>
-        <span class="badge bg-secondary" style="font-size:.85rem;">{{ event_count }} Event</span>
+        <p class="page-header__subtitle">เคสที่อนุมัติ ปิดเป็น Event หรือยกเลิกแล้ว พร้อมผู้อนุมัติ/ปิดเคสและการแก้ไขล่าสุด</p>
     </div>
 </div>
 
-<div class="card filter-toolbar mb-3">
-        <div class="card-body py-3">
-            <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
-                <span class="fw-semibold" style="font-size:.85rem;">กรองตามผลลัพธ์:</span>
-                <a href="?status=CANCELLED{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CANCELLED' %}active{% endif %}">ยกเลิกแล้ว</a>
-                <a href="?{% if search_ticket %}search_ticket={{ search_ticket }}&{% endif %}{% if all_time %}all_time=1{% endif %}" class="level-pill {% if not status_filter %}active{% endif %}">ทั้งหมด</a>
-                <a href="?status=APPROVED{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'APPROVED' %}active{% endif %}">อนุมัติแล้ว</a>
-                <a href="?status=CLOSED_EVENT{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if all_time %}&all_time=1{% endif %}" class="level-pill {% if status_filter == 'CLOSED_EVENT' %}active{% endif %}">Event</a>
-            </div>
-            <form method="GET" class="row g-2 align-items-end js-submit-loading">
-                {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
-                <div class="col-md-3">
-                    <label class="form-label small fw-bold mb-1">ค้นหาเลข Ticket</label>
-                    <input type="text" name="search_ticket" class="form-control form-control-sm" placeholder="เช่น SOC-..." value="{{ search_ticket|default:'' }}">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">ความรุนแรง</label>
-                    <select name="severity" class="form-select form-select-sm">
-                        <option value="">ทั้งหมด</option>
-                        {% for value, label in severity_choices %}
-                            <option value="{{ value }}" {% if severity_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">ประเภท</label>
-                    <select name="classification" class="form-select form-select-sm">
-                        <option value="">ทั้งหมด</option>
-                        {% for value, label in classification_choices %}
-                            <option value="{{ value }}" {% if classification_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">ความฉุกเฉิน</label>
-                    <select name="emergency" class="form-select form-select-sm"><option value="">ทั้งหมด</option><option value="1" {% if emergency_filter == '1' %}selected{% endif %}>เฉพาะเคสฉุกเฉิน</option><option value="0" {% if emergency_filter == '0' %}selected{% endif %}>เฉพาะเคสปกติ</option></select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">เรียงตาม</label>
-                    <select name="sort" class="form-select form-select-sm"><option value="newest" {% if sort == 'newest' %}selected{% endif %}>ล่าสุด</option><option value="emergency" {% if sort == 'emergency' %}selected{% endif %}>Emergency ก่อน</option></select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">ผู้อนุมัติ/ปิดเคส</label>
-                    <select name="approved_by" class="form-select form-select-sm">
-                        <option value="">ทั้งหมด</option>
-                        {% for user in approver_choices %}
-                            <option value="{{ user.id }}" {% if approved_by_filter == user.id|stringformat:"s" %}selected{% endif %}>
-                                {{ user.get_full_name|default:user.username }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">จากวันที่</label>
-                    <input type="date" name="start_date" class="form-control form-control-sm" value="{{ start_date|default:'' }}">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold mb-1">ถึงวันที่</label>
-                    <input type="date" name="end_date" class="form-control form-control-sm" value="{{ end_date|default:'' }}">
-                </div>
-                <div class="col-md-1 d-flex align-items-end">
-                    <button type="submit" class="btn btn-dark btn-sm w-100">ค้นหา</button>
-                </div>
-                <div class="col-12">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="all_time" value="1" id="allTimeCheck" {% if all_time %}checked{% endif %}>
-                        <label class="form-check-label small" for="allTimeCheck">แสดงทุกช่วงเวลา (ไม่จำกัดเฉพาะเดือนนี้)</label>
-                    </div>
-                </div>
-            </form>
+{% comment %}
+── Filter bar ── same layout as Active Tickets. The result pills (with counts
+within the other filters) replace a status select; their links go through
+{% querystring %}, so every other filter, the date range and the search are
+kept. The date range is by OPENING date (วันที่แจ้ง), which the table doesn't
+show, so the control says so — otherwise a case closed this month but opened
+last month looks like it is missing. With no range chosen the page shows the
+current month (a muted, default chip); "no range" means all_time=1.
+{% endcomment %}
+<form method="GET" id="ticket-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+    <div class="card-body py-3">
+        {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+        {% if all_time %}<input type="hidden" name="all_time" value="1">{% endif %}
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3" role="group" aria-label="ผลลัพธ์">
+            <span class="filter-bar__label mb-0">ผลลัพธ์:</span>
+            {% for pill in status_pills %}
+            <a href="{% if pill.code %}{% querystring status=pill.code page=None %}{% else %}{% querystring status=None page=None %}{% endif %}"
+               class="level-pill {% if status_filter == pill.code %}active{% endif %}"
+               {% if status_filter == pill.code %}aria-current="true"{% endif %}>{{ pill.label }} <span class="level-pill__count">{{ pill.count }}</span></a>
+            {% endfor %}
         </div>
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-lg-4">
+                <label class="filter-bar__label" for="filter-q">ค้นหา</label>
+                <div class="input-group input-group-sm">
+                    <input type="search" id="filter-q" name="q" class="form-control {% if search %}is-set{% endif %}" value="{{ search }}"
+                           placeholder="เลข Ticket, ชื่อเรื่อง, ระบบ/บริการ, IP...">
+                    <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+                </div>
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="filter-bar__label" for="filter-severity">ความรุนแรง</label>
+                <select id="filter-severity" name="severity" class="form-select form-select-sm js-autosubmit {% if severity_filter %}is-set{% endif %}">
+                    <option value="">ทั้งหมด</option>
+                    {% for code, label in severity_choices %}
+                    <option value="{{ code }}" {% if severity_filter == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-lg-2">
+                <label class="filter-bar__label" for="filter-approver">ผู้อนุมัติ/ปิดเคส</label>
+                <select id="filter-approver" name="approved_by" class="form-select form-select-sm js-autosubmit {% if approved_by_filter %}is-set{% endif %}">
+                    <option value="">ทั้งหมด</option>
+                    {% for user in approver_choices %}
+                    <option value="{{ user.id }}" {% if approved_by_filter == user.id|stringformat:"s" %}selected{% endif %}>{{ user.get_full_name|default:user.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-lg-2">
+                {% include 'incidents/_filter_date_dropdown.html' with empty_label='ทุกช่วงเวลา' empty_active=date_is_empty empty_sets_all_time=True is_set=date_is_set %}
+            </div>
+            <div class="col-6 col-lg-2 d-grid">
+                <button type="button" class="btn btn-sm btn-outline-secondary more-filters-toggle {% if not more_filter_count %}collapsed{% endif %}"
+                        data-bs-toggle="collapse" data-bs-target="#more-filters"
+                        aria-expanded="{% if more_filter_count %}true{% else %}false{% endif %}" aria-controls="more-filters">
+                    <i class="bi bi-sliders me-1" aria-hidden="true"></i>ตัวกรองเพิ่มเติม
+                    {% if more_filter_count %}<span class="badge rounded-pill text-bg-primary ms-1">{{ more_filter_count }}</span>{% endif %}
+                </button>
+            </div>
+        </div>
+        <div class="collapse {% if more_filter_count %}show{% endif %}" id="more-filters">
+            <div class="row g-2 pt-2">
+                <div class="col-6 col-lg-2">
+                    <label class="filter-bar__label" for="filter-classification">ประเภท</label>
+                    <select id="filter-classification" name="classification" class="form-select form-select-sm js-autosubmit {% if classification_filter %}is-set{% endif %}">
+                        <option value="">ทั้งหมด</option>
+                        {% for code, label in classification_choices %}
+                        <option value="{{ code }}" {% if classification_filter == code %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-lg-2">
+                    <label class="filter-bar__label" for="filter-emergency">ความฉุกเฉิน</label>
+                    <select id="filter-emergency" name="emergency" class="form-select form-select-sm js-autosubmit {% if emergency_filter %}is-set{% endif %}">
+                        <option value="">ทั้งหมด</option>
+                        <option value="1" {% if emergency_filter == '1' %}selected{% endif %}>เฉพาะเคสฉุกเฉิน</option>
+                        <option value="0" {% if emergency_filter == '0' %}selected{% endif %}>เฉพาะเคสปกติ</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        {% include 'incidents/_filter_chips.html' %}
     </div>
+</form>
 
 <div class="card ops-card">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle operational-table">
-                <thead>
-                    <tr>
-                        <th>เลข Ticket</th>
-                        <th>ชื่อเรื่อง</th>
-                        <th>รายละเอียดเหตุการณ์</th>
-                        <th>ความรุนแรง</th>
-                        <th>ประเภท</th>
-                        <th>การแก้ไขล่าสุด</th>
-                        <th>วันที่แจ้ง</th>
-                        <th>สถานะ</th>
-                        <th>ผู้อนุมัติ/ปิดเคส</th>
-                        <th style="width: 100px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for ticket in tickets %}
-                    <tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}" data-row-href="{% url 'ticket_detail' ticket.id %}" tabindex="0" role="link" aria-label="เปิด Ticket {{ ticket.ticket_id }}">
-                        <td>
-                            <strong class="cell-technical">#{{ ticket.ticket_id }}</strong>
-                            {% include 'incidents/_project_pill.html' with ticket=ticket %}
-                            {% if ticket.is_emergency %}
-                            <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="cell-primary">{{ ticket.display_name|truncatechars:50 }}</div>
-                            <div class="cell-secondary">{{ ticket.device_name|default:"-" }}</div>
-                        </td>
-                        {% comment %}
-                        text-truncate needs a block box — on a <td> under auto
-                        table layout max-width is ignored and the full text
-                        renders, so the clamp lives on an inner div.
-                        {% endcomment %}
-                        <td>
-                            <div class="text-truncate" style="max-width: 150px;"
-                                 title="{{ ticket.issue_description }}">{{ ticket.issue_description }}</div>
-                        </td>
-                        <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
-                        <td>{% include 'incidents/_classification_badge.html' with classification=ticket.classification %}</td>
-                        <td>
-                            {% with last_log=ticket.logs.first %}
-                            <div class="text-truncate" style="max-width: 150px;"
-                                 {% if last_log %}title="{{ last_log.note }}"{% endif %}>{% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}</div>
-                            {% endwith %}
-                        </td>
-                        <td class="cell-secondary text-nowrap" title="{{ ticket.created_at|date:'d/m/Y H:i' }}">{{ ticket.created_at|date:"d/m/Y" }}</td>
-                        <td class="cell-actions">
-                            {# Soft status pill (color from the model's status map). Emergency #}
-                            {# is shown as its own flag by the Ticket ID, not here. #}
-                            <span class="status-soft" style="{{ ticket.status_pill_soft_css }}">
-                                <span class="dot" style="background:{{ ticket.status_color }};"></span>{{ ticket.get_status_display }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if ticket.approved_by %}
-                                {{ ticket.approved_by.get_full_name|default:ticket.approved_by.username }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td>
-                            <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-secondary">เปิด Ticket</a>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="10">{% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบข้อมูล' description='ไม่มี Ticket ที่ตรงกับผลลัพธ์ ช่วงเวลา หรือเงื่อนไขที่เลือก' %}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    {% include 'incidents/_results_bar.html' with form_id='ticket-filters' %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle operational-table">
+            <thead>
+                <tr>{% include 'incidents/_sortable_headers.html' %}</tr>
+            </thead>
+            <tbody>
+                {% for ticket in tickets %}
+                <tr class="clickable-row {% if ticket.is_emergency %}is-emergency{% endif %}"
+                    data-row-href="{% url 'ticket_detail' ticket.id %}" tabindex="0" role="link"
+                    aria-label="เปิด Ticket {{ ticket.ticket_id }}">
+                    <td class="ps-4">
+                        <a href="{% url 'ticket_detail' ticket.id %}" class="font-monospace fw-bold text-dark text-decoration-none">#{{ ticket.ticket_id }}</a>
+                        {% include 'incidents/_project_pill.html' with ticket=ticket %}
+                        {% if ticket.is_emergency %}
+                        <div class="mt-1"><span class="emg-flag">ฉุกเฉิน</span></div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="cell-primary">{{ ticket.display_name|truncatechars:50 }}</div>
+                        <div class="cell-secondary">{{ ticket.device_name|default:"-" }}{% if ticket.ip_address %} → <span class="cell-technical">{{ ticket.ip_address }}</span>{% endif %}</div>
+                    </td>
+                    {% comment %}
+                    text-truncate needs a block box — on a <td> under auto
+                    table layout max-width is ignored and the full text
+                    renders, so the clamp lives on an inner div.
+                    {% endcomment %}
+                    <td>
+                        <div class="text-truncate" style="max-width: 150px;"
+                             title="{{ ticket.issue_description }}">{{ ticket.issue_description }}</div>
+                    </td>
+                    <td>{% include 'incidents/_severity_badge.html' with severity=ticket.severity %}</td>
+                    <td>{% include 'incidents/_classification_badge.html' with classification=ticket.classification %}</td>
+                    <td>
+                        {% with last_log=ticket.logs.first %}
+                        <div class="text-truncate" style="max-width: 150px;"
+                             {% if last_log %}title="{{ last_log.note }}"{% endif %}>{% if last_log %}{{ last_log.note|truncatechars:50 }}{% else %}-{% endif %}</div>
+                        {% endwith %}
+                    </td>
+                    <td class="cell-secondary text-nowrap" {% if ticket.close_date %}title="{{ ticket.close_date|date:'d/m/Y H:i' }}"{% endif %}>{{ ticket.close_date|date:"d/m/Y"|default:"-" }}</td>
+                    <td>
+                        {# Soft status pill (color from the model's status map). Emergency #}
+                        {# is shown as its own flag by the Ticket ID, not here. #}
+                        <span class="status-soft" style="{{ ticket.status_pill_soft_css }}">
+                            <span class="dot" style="background:{{ ticket.status_color }};"></span>{{ ticket.get_status_display }}
+                        </span>
+                    </td>
+                    <td class="small">
+                        {% if ticket.closer %}
+                            <span class="fw-semibold">{{ ticket.closer.get_full_name|default:ticket.closer.username }}</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="pe-3 cell-actions">
+                        <a href="{% url 'ticket_detail' ticket.id %}" class="btn btn-sm btn-outline-secondary px-3 text-nowrap">เปิด Ticket</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10">
+                        {% if has_clearable_filters %}
+                            {% include 'includes/_empty_state.html' with icon='bi-funnel' title='ไม่พบข้อมูล' description='ไม่มี Ticket ที่ตรงกับผลลัพธ์ ช่วงเวลา หรือเงื่อนไขที่เลือก' action_url=request.path action_label='ล้างตัวกรอง' action_icon='bi-x-circle' %}
+                        {% else %}
+                            {# Nothing opened this month yet: clearing would land right back here. #}
+                            {% include 'includes/_empty_state.html' with icon='bi-calendar3' title='ยังไม่มีเคสที่แจ้งในเดือนนี้' description='เคสที่แจ้งก่อนเดือนนี้ดูได้จาก "ทุกช่วงเวลา"' action_url='?all_time=1' action_label='แสดงทุกช่วงเวลา' action_icon='bi-clock-history' %}
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
+</div>
 
-    {% if page_obj.paginator.num_pages > 1 %}
-    <nav class="mt-3">
-      <ul class="pagination pagination-sm justify-content-center">
-        {% if page_obj.has_previous %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if classification_filter %}&classification={{ classification_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">«</a></li>
-        {% endif %}
-        <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
-        {% if page_obj.has_next %}
-          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}{% if search_ticket %}&search_ticket={{ search_ticket }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if severity_filter %}&severity={{ severity_filter }}{% endif %}{% if classification_filter %}&classification={{ classification_filter }}{% endif %}{% if approved_by_filter %}&approved_by={{ approved_by_filter }}{% endif %}{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if all_time %}&all_time=1{% endif %}{% if emergency_filter %}&emergency={{ emergency_filter }}{% endif %}&sort={{ sort }}">»</a></li>
-        {% endif %}
-      </ul>
-    </nav>
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="mt-3" aria-label="หน้ารายการเคส">
+  <ul class="pagination pagination-sm justify-content-center">
+    {% if page_obj.has_previous %}
+      <li class="page-item"><a class="page-link" href="{% querystring page=page_obj.previous_page_number %}">«</a></li>
     {% endif %}
-{# "Show all time" clears the date range and resubmits. Wired here rather than #}
-{# via an inline onchange= so it satisfies the nonce-based CSP (no             #}
-{# 'unsafe-inline' in script-src).                                             #}
-<script nonce="{{ request.csp_nonce }}">
-    document.getElementById('allTimeCheck')?.addEventListener('change', function () {
-        const form = this.form;
-        if (!form) return;
-        form.start_date.value = '';
-        form.end_date.value = '';
-        form.submit();
-    });
-</script>
+    <li class="page-item disabled"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+    {% if page_obj.has_next %}
+      <li class="page-item"><a class="page-link" href="{% querystring page=page_obj.next_page_number %}">»</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
 {% endblock %}

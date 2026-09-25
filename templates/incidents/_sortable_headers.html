@@ -1,0 +1,24 @@
+{% comment %}
+Table header cells that sort the list on the server (the lists are paginated,
+so a browser-side sort would only reorder one page). `sort_headers` comes from
+views._helpers._column_sort_headers: each sortable cell links to the sort it
+would apply — the column's most useful direction first, flipped when it is
+already active — and {% querystring %} keeps every filter while dropping the
+page number. A page with several sortable tables passes a ready `header.href`
+instead (its own sort/page parameter names). aria-sort sits on the <th>, where
+ARIA expects it. Pass `sort_headers` with `{% include … with sort_headers=… %}`
+when a page has more than one table.
+{% endcomment %}
+{% for header in sort_headers %}
+<th{% if header.th_class %} class="{{ header.th_class }}"{% endif %}{% if header.sortable %} aria-sort="{% if header.direction == 'asc' %}ascending{% elif header.direction == 'desc' %}descending{% else %}none{% endif %}"{% endif %}>
+    {% if header.sortable %}
+    <a class="th-sort{% if header.direction %} is-active{% endif %}" href="{% if header.href %}{{ header.href }}{% else %}{% querystring sort=header.next_sort page=None %}{% endif %}"
+       title="เรียงตาม{{ header.label }}">
+        <span>{{ header.label }}</span>
+        {% if header.direction == 'asc' %}<i class="bi bi-caret-up-fill" aria-hidden="true"></i>
+        {% elif header.direction == 'desc' %}<i class="bi bi-caret-down-fill" aria-hidden="true"></i>
+        {% else %}<i class="bi bi-chevron-expand th-sort__idle" aria-hidden="true"></i>{% endif %}
+    </a>
+    {% else %}{{ header.label }}{% endif %}
+</th>
+{% endfor %}

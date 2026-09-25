@@ -93,6 +93,8 @@ def save_subtask_update(
     result_description='',
 ):
     """Save a validated subtask update, its history, and optional deliverable."""
+    if result_upload is not None and update_form.instance.is_response_request:
+        raise ValidationError('คำขอทีมตอบสนองไม่รับไฟล์แนบรายงาน')
     with transaction.atomic():
         # The assignee and the SOC Manager both write to a request. Lock the row
         # and refuse if it was saved after this form's copy was loaded; otherwise

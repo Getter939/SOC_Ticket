@@ -20,7 +20,7 @@ def pending_triage_count(request):
     if profile is not None and profile.is_response_team:
         return {
             'response_request_queue_count': TicketSubtask.objects.filter(
-                subtask_type__in=TicketSubtask.RESPONSE_TYPES,
+                subtask_type__in=TicketSubtask.types_for_profile(profile),
                 assigned_to=user,
             ).exclude(status__in=TicketSubtask.TERMINAL_STATUSES).count(),
         }

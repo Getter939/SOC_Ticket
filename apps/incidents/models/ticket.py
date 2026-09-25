@@ -67,7 +67,7 @@ class TicketQuerySet(models.QuerySet):
         if profile.is_response_team:
             return self.filter(
                 subtasks__assigned_to=user,
-                subtasks__subtask_type__in=TicketSubtask.types_for_role(profile.role),
+                subtasks__subtask_type__in=TicketSubtask.types_for_profile(profile),
             ).distinct()
         return self.none()
 
@@ -1547,7 +1547,7 @@ class Ticket(models.Model):
 
     @property
     def has_open_response_requests(self):
-        """True if any response-team request (VA/PT, InfraSec, Forensics) on this
+        """True if any response-team request on this
         ticket is not yet DONE.
 
         Gates final approval: an Incident cannot be APPROVED while response work

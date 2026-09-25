@@ -6,7 +6,8 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import CharField, F, Q, Value
+from django.db.models.functions import NullIf
 from django.http import JsonResponse
 from django.shortcuts import render
 
@@ -15,8 +16,79 @@ from ..models import (
     TriageRecord,
 )
 from ..ioc_values import INVENTORY_CATEGORY_CHOICES, normalize_for_category
+from ._helpers import (
+    _by,
+    _choice_label_expr,
+    _column_sort_headers,
+    _status_order_expr,
+)
 
 logger = logging.getLogger('apps.incidents.views')
+
+# The two result tables sort and page independently, so each has its own
+# parameters: ts/tp for tickets, rs/rp for triage records. Columns are
+# (label, first-click sort, second-click sort, first click ascending?, th class)
+# — see _helpers._column_sort_headers. Free-text columns aren't sortable.
+TICKET_RESULT_COLUMNS = (
+    ('เลข Ticket', '-id', 'id', False, ''),
+    ('IP ต้นทาง', 'device', '-device', True, ''),
+    ('IoC ปลายทาง', 'dest', '-dest', True, ''),
+    ('รายละเอียด', None, None, True, ''),
+    ('สถานะ', 'status', '-status', True, ''),
+    ('วันที่แจ้ง', 'newest', 'oldest', False, ''),
+    ('', None, None, True, ''),
+)
+TRIAGE_RESULT_COLUMNS = (
+    ('แหล่งที่มา', 'source', '-source', True, ''),
+    ('IP ต้นทาง', 'ip', '-ip', True, ''),
+    ('รายละเอียด Alert', None, None, True, ''),
+    ('การตัดสินใจ', 'decision', '-decision', True, ''),
+    ('วันที่', 'newest', 'oldest', False, ''),
+    ('', None, None, True, ''),
+)
+
+
+def _blank_as_null(field):
+    return NullIf(field, Value(''), output_field=CharField())
+
+
+def _ticket_result_order(sort):
+    """(ordering, annotations) for the ticket results. The query is DISTINCT
+    (the IOC join fans out), and Postgres requires every ORDER BY expression of
+    a DISTINCT query to be selected — so computed keys go in as annotations."""
+    tie = ('-created_at', '-pk')
+    orders = {
+        'newest': (tie, {}),
+        'oldest': (('created_at', 'pk'), {}),
+        '-id': (('-ticket_id', '-pk'), {}),
+        'id': (('ticket_id', 'pk'), {}),
+        'device': ((_by(F('device_name')), *tie), {}),
+        '-device': ((_by(F('device_name'), descending=True), *tie), {}),
+        # Blank destination is '' (shown as "-"): NULL it so it sorts last.
+        'dest': ((_by(F('sort_dest')), *tie), {'sort_dest': _blank_as_null('destination_ip')}),
+        '-dest': ((_by(F('sort_dest'), descending=True), *tie),
+                  {'sort_dest': _blank_as_null('destination_ip')}),
+        'status': (('sort_status', *tie), {'sort_status': _status_order_expr()}),
+        '-status': (('-sort_status', *tie), {'sort_status': _status_order_expr()}),
+    }
+    return orders.get(sort)
+
+
+def _triage_result_order(sort):
+    tie = ('-created_at', '-pk')
+    source = _choice_label_expr('source', TriageRecord)
+    decision = _choice_label_expr('decision', TriageRecord)
+    orders = {
+        'newest': tie,
+        'oldest': ('created_at', 'pk'),
+        'source': (_by(source), *tie),
+        '-source': (_by(source, descending=True), *tie),
+        'ip': (_by(F('source_ip')), *tie),
+        '-ip': (_by(F('source_ip'), descending=True), *tie),
+        'decision': (_by(decision), *tie),
+        '-decision': (_by(decision, descending=True), *tie),
+    }
+    return orders.get(sort)
 
 
 
@@ -88,15 +160,28 @@ def global_search(request):
     triage_results = []
     ticket_total = triage_total = 0
 
+    ticket_sort = request.GET.get('ts', 'newest').strip()
+    ticket_order = _ticket_result_order(ticket_sort)
+    if ticket_order is None:
+        ticket_sort = 'newest'
+        ticket_order = _ticket_result_order(ticket_sort)
+    triage_sort = request.GET.get('rs', 'newest').strip()
+    triage_order = _triage_result_order(triage_sort)
+    if triage_order is None:
+        triage_sort = 'newest'
+        triage_order = _triage_result_order(triage_sort)
+
     if query:
         # Tickets match on their own fields and their structured IOC values, so a
         # hash/IP/domain search surfaces the cases it appeared on (handy for
         # triage). IOC coverage vs the TI platform lives on the IOC Database page.
+        ordering, annotations = ticket_order
         ticket_qs = (
             Ticket.objects.visible_to(request.user)
             .filter(_ticket_search_match(query))
+            .annotate(**annotations)
             .distinct()
-            .order_by('-created_at')
+            .order_by(*ordering)
         )
         ticket_paginator = Paginator(ticket_qs, SEARCH_PAGE_SIZE)
         # Separate page params: the two result sets page independently.
@@ -108,7 +193,7 @@ def global_search(request):
                 TriageRecord.objects
                 .filter(_substring_match(TRIAGE_SEARCH_FIELDS, query))
                 .select_related('ticket')
-                .order_by('-created_at')
+                .order_by(*triage_order)
             )
             triage_paginator = Paginator(triage_qs, SEARCH_PAGE_SIZE)
             triage_results = triage_paginator.get_page(request.GET.get('rp'))
@@ -121,6 +206,12 @@ def global_search(request):
         'can_search_triage': can_search_triage,
         'triage_results': triage_results,
         'triage_total': triage_total,
+        'ticket_sort': ticket_sort,
+        'triage_sort': triage_sort,
+        'ticket_sort_headers': _column_sort_headers(
+            TICKET_RESULT_COLUMNS, ticket_sort, request=request, param='ts', page_param='tp'),
+        'triage_sort_headers': _column_sort_headers(
+            TRIAGE_RESULT_COLUMNS, triage_sort, request=request, param='rs', page_param='rp'),
     })
 
 

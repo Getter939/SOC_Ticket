@@ -562,6 +562,8 @@ class ResponseTeamUiTest(TestCase):
         cls.forensic.email = 'f@example.com'
         cls.forensic.save(update_fields=['email'])
         cls.redteam  = _make_redteam_manager('rt_ui_redteam')
+        cls.redteam.profile.redteam_function = UserProfile.REDTEAM_PENTEST
+        cls.redteam.profile.save(update_fields=['redteam_function'])
 
     def _ticket(self, status=Ticket.STATUS_AWAITING_CONTAINMENT, **kwargs):
         return _make_ticket(
@@ -592,11 +594,10 @@ class ResponseTeamUiTest(TestCase):
         resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
         self.assertContains(resp, 'resp-type-select')
         self.assertContains(resp, 'resp-assignee-select')
-        self.assertContains(resp, 'resp-routing-data')
-        self.assertContains(resp, 'resp-member-roles-data')
-        # The routing map must carry the real type→role pairs.
+        self.assertContains(resp, 'resp-eligible-assignees-data')
+        # The picker must carry the new request types and eligible manager.
         self.assertContains(resp, TicketSubtask.TYPE_FORENSIC_RCA)
-        self.assertContains(resp, UserProfile.ROLE_REDTEAM_MANAGER)
+        self.assertContains(resp, TicketSubtask.TYPE_PENTEST)
 
     def test_manager_spawn_auto_assigns_sole_role_holder(self):
         t = self._ticket()
@@ -621,7 +622,7 @@ class ResponseTeamUiTest(TestCase):
         t = self._ticket()
         self.client.force_login(self.manager)
         resp = self.client.post(reverse('create_response_request', args=[t.pk]), {
-            'subtask_type': TicketSubtask.TYPE_VA_PT, 'title': 'Pentest',
+            'subtask_type': TicketSubtask.TYPE_PENTEST, 'title': 'Pentest',
         }, follow=True)
         self.assertEqual(t.subtasks.count(), 0)
         self.assertContains(resp, 'ยังไม่มีบัญชีผู้ใช้ในบทบาท')
@@ -702,21 +703,21 @@ class ResponseTeamUiTest(TestCase):
         self.assertContains(detail, 'SOC-RCA-202609-0042')
         self.assertNotContains(detail, 'ส่งงาน · เสร็จสิ้น')
 
-    def test_in_progress_va_pt_card_keeps_the_optional_file(self):
+    def test_in_progress_pentest_card_has_manual_number_and_no_file(self):
         t = self._ticket()
         st = TicketSubtask.objects.create(
-            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='Pentest',
+            ticket=t, subtask_type=TicketSubtask.TYPE_PENTEST, title='Pentest',
             assigned_to=self.redteam, created_by=self.manager,
             status=TicketSubtask.STATUS_IN_PROGRESS,
         )
         self.client.force_login(self.redteam)
         detail = self.client.get(reverse('ticket_detail', args=[t.pk]))
-        self.assertContains(detail, f'id="my-file-{st.pk}"')
-        # Red Team also records the delivered report's number, prefilled with
-        # the VA/PT number of this case.
+        self.assertNotContains(detail, 'name="result_file"')
+        # The PenTest manager enters the report number rather than receiving
+        # a case-derived value.
         self.assertContains(detail, f'id="my-report-number-{st.pk}"')
-        self.assertTrue(st.expected_report_number.startswith('SOC-VAPT-'))
-        self.assertContains(detail, f'value="{st.expected_report_number}"')
+        self.assertEqual(st.expected_report_number, 'PT-YYYY-NNNN')
+        self.assertNotContains(detail, f'value="{st.expected_report_number}"')
 
     def test_manager_sees_no_my_request_card(self):
         t = self._ticket()
@@ -892,22 +893,22 @@ class ResponseTeamUiTest(TestCase):
                 self.assertTrue(st.is_done)
                 self.assertEqual(st.report_number, st.expected_report_number)
 
-    def test_red_team_can_still_attach_a_result_file(self):
+    def test_red_team_upload_is_ignored(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         t = self._ticket()
         st = TicketSubtask.objects.create(
-            ticket=t, subtask_type=TicketSubtask.TYPE_VA_PT, title='Pentest',
+            ticket=t, subtask_type=TicketSubtask.TYPE_PENTEST, title='Pentest',
             assigned_to=self.redteam, created_by=self.manager,
             status=TicketSubtask.STATUS_IN_PROGRESS,
         )
         self.client.force_login(self.redteam)
         self.client.post(reverse('update_subtask', args=[st.pk]), {
-            'status': TicketSubtask.STATUS_DONE, 'report_number': 'SOC-VAPT-1',
+            'status': TicketSubtask.STATUS_DONE, 'report_number': 'PT-2026-0001',
             'result_file': SimpleUploadedFile('scan.txt', b'x'),
         })
         st.refresh_from_db()
         self.assertTrue(st.is_done)
-        self.assertTrue(st.attachments.exists())
+        self.assertFalse(st.attachments.exists())
 
     def test_old_rca_workspace_link_lands_on_the_ticket(self):
         t = self._ticket()

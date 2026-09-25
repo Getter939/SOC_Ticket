@@ -15,10 +15,10 @@ from uuid import uuid4
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import (
-    BooleanField, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Q,
-    Subquery, TextField, Value,
+    BooleanField, Case, CharField, Count, Exists, F, IntegerField, Max, OuterRef, Q,
+    Subquery, TextField, Value, When,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, NullIf
 from django.utils import timezone
 
 from .ioc_values import TICKET_CATEGORY_CHOICES, normalize_for_category
@@ -53,7 +53,13 @@ def can_manage_inventory(user):
 _KEY_COLUMNS = (
     'k_category', 'k_value', 'k_ticket_count', 'k_last_seen',
     'k_manual_id', 'k_ext_id', 'k_checked', 'k_note',
+    # Sort-only columns. A UNION can only be ordered by columns it selects, so
+    # the table's header sorts need these materialised in both halves:
+    # k_source = the SOURCE label the row shows; k_note_sort = the note with
+    # blank as NULL, so unannotated rows sort last in either direction.
+    'k_source', 'k_note_sort',
 )
+_SOURCE_BOTH = f"{SOURCE_LABELS['ticket']} + {SOURCE_LABELS['analyst']}"
 
 
 def _review(value_ref, field, default, output_field):
@@ -88,6 +94,13 @@ def _ticket_half():
             k_checked=_review('value', 'checked', False, BooleanField()),
             k_note=_review('value', 'note', '', TextField()),
         )
+        .annotate(
+            k_source=Case(
+                When(k_manual_id__isnull=False, then=Value(_SOURCE_BOTH)),
+                default=Value(SOURCE_LABELS['ticket']), output_field=CharField(),
+            ),
+            k_note_sort=NullIf(F('k_note'), Value(''), output_field=TextField()),
+        )
     )
 
 
@@ -110,6 +123,10 @@ def _manual_half():
             k_checked=_review('ioc_detail', 'checked', False, BooleanField()),
             k_note=_review('ioc_detail', 'note', '', TextField()),
         )
+        .annotate(
+            k_source=Value(SOURCE_LABELS['analyst'], output_field=CharField()),
+            k_note_sort=NullIf(F('k_note'), Value(''), output_field=TextField()),
+        )
     )
 
 
@@ -126,11 +143,38 @@ def _filtered(half, query, status, category):
     return half.values(*_KEY_COLUMNS)
 
 
-def ioc_database_queryset(query='', status='all', source='all', category='all'):
+# Orderings for the IOC Database, by sort key. 'worklist' is the default (the
+# FA's queue: not-checked first, then busiest). The rest back the table's
+# sortable headers and the results-bar presets. Every one ends on value then
+# category so ties stay stable across pages. Union orderings may only name
+# selected columns — hence k_source / k_note_sort in _KEY_COLUMNS.
+_TIE = ('k_value', 'k_category')
+IOC_SORTS = {
+    'worklist': ('k_checked', '-k_ticket_count', *_TIE),
+    'category': ('k_category', *_TIE),
+    '-category': ('-k_category', *_TIE),
+    'value': ('k_value', 'k_category'),
+    '-value': ('-k_value', 'k_category'),
+    'note': (F('k_note_sort').asc(nulls_last=True), *_TIE),
+    '-note': (F('k_note_sort').desc(nulls_last=True), *_TIE),
+    'status': ('k_checked', *_TIE),
+    '-status': ('-k_checked', *_TIE),
+    'source': ('k_source', *_TIE),
+    '-source': ('-k_source', *_TIE),
+    'tickets': ('-k_ticket_count', *_TIE),
+    'tickets_asc': ('k_ticket_count', *_TIE),
+    'last': ('-k_last_seen', *_TIE),
+    'last_oldest': ('k_last_seen', *_TIE),
+}
+
+
+def ioc_database_queryset(query='', status='all', source='all', category='all',
+                          sort='worklist'):
     """The filtered, ordered IOC Database as one lazy queryset of raw key rows.
 
     Nothing is fetched until it is sliced (by the Paginator) or iterated; pass
-    each row through decorate_ioc_rows() before rendering.
+    each row through decorate_ioc_rows() before rendering. The sort runs in
+    SQL too, so it orders the whole database, not just the page on screen.
     """
     query = (query or '').strip()
     ticket_half = _filtered(_ticket_half(), query, status, category)
@@ -142,8 +186,7 @@ def ioc_database_queryset(query='', status='all', source='all', category='all'):
         combined = ticket_half.filter(k_manual_id__isnull=False).union(manual_half, all=True)
     else:
         combined = ticket_half.union(manual_half, all=True)
-    # Not-checked first (the worklist), then busiest, then value.
-    return combined.order_by('k_checked', '-k_ticket_count', 'k_value')
+    return combined.order_by(*IOC_SORTS.get(sort, IOC_SORTS['worklist']))
 
 
 def ioc_database_counts():

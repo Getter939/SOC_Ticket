@@ -1,11 +1,17 @@
+import calendar
 import logging
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import (
+    Case, CharField, Exists, F, IntegerField, OuterRef, Q, Value, When,
+)
+from django.db.models.functions import Coalesce, Concat, Lower, NullIf, Trim
 from django.shortcuts import render
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 from apps.incidents import ola as ola_buckets
 from ..models import (
@@ -239,9 +245,250 @@ def _alert_bundle_ids(request):
     return ids
 
 
+def _parse_date_param(value):
+    """A YYYY-MM-DD query value as a date, or None when blank or malformed."""
+    try:
+        return parse_date(value) if value else None
+    except ValueError:  # well-formed but impossible, e.g. 2026-02-31
+        return None
+
+
+def _date_range_params(request):
+    """The start_date/end_date query pair as (start_str, end_str, start, end).
+
+    A hand-edited or truncated date must not 500 the page: an unparseable value
+    is treated as absent, and its string is blanked so the form doesn't echo it.
+    """
+    start_str = request.GET.get('start_date', '').strip()
+    end_str = request.GET.get('end_date', '').strip()
+    start = _parse_date_param(start_str)
+    end = _parse_date_param(end_str)
+    return (start_str if start else '', end_str if end else '', start, end)
+
+
+def _apply_date_range(qs, field, start, end):
+    """Bound a queryset by a local-date range on `field`; either side optional."""
+    if start:
+        qs = qs.filter(**{f'{field}__date__gte': start})
+    if end:
+        qs = qs.filter(**{f'{field}__date__lte': end})
+    return qs
+
+
+def _date_presets(start_str, end_str):
+    """One-click local-date ranges for the list toolbars.
+
+    'เดือนนี้' runs to the last day of the month, not today, so it matches the
+    Ticket History default and shows as active there.
+    """
+    today = timezone.localdate()
+    month_end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    ranges = (
+        ('วันนี้', today, today),
+        ('7 วัน', today - timedelta(days=6), today),
+        ('30 วัน', today - timedelta(days=29), today),
+        ('เดือนนี้', today.replace(day=1), month_end),
+    )
+    presets = []
+    for label, start, end in ranges:
+        start_iso, end_iso = start.isoformat(), end.isoformat()
+        presets.append({
+            'label': label, 'start': start_iso, 'end': end_iso,
+            'active': start_str == start_iso and end_str == end_iso,
+        })
+    return presets
+
+
+def _date_range_label(start_str, end_str, presets):
+    """What the date-range button says: the preset's name, else the dates."""
+    for preset in presets:
+        if preset['active']:
+            return preset['label']
+    start = _parse_date_param(start_str)
+    end = _parse_date_param(end_str)
+    if start and end:
+        return f'{start:%d/%m/%Y} – {end:%d/%m/%Y}'
+    if start:
+        return f'ตั้งแต่ {start:%d/%m/%Y}'
+    if end:
+        return f'ถึง {end:%d/%m/%Y}'
+    return ''
+
+
+def _filter_chip(request, label, keys, *, set_params=None, is_default=False):
+    """One removable "active filter" chip for the list toolbars.
+
+    remove_url is the current query minus `keys` (and the page number), plus
+    `set_params` — History removes its date range by switching to all_time.
+    A default chip (History's current month) is shown muted and doesn't count
+    towards "clear all".
+    """
+    params = request.GET.copy()
+    for key in (*keys, 'page'):
+        params.pop(key, None)
+    for key, value in (set_params or {}).items():
+        params[key] = value
+    query = params.urlencode()
+    return {
+        'label': label,
+        'remove_url': f'{request.path}?{query}' if query else request.path,
+        'is_default': is_default,
+    }
+
+
+# ── Column sorting (Active Tickets / Manager Queue / Ticket History) ── #
+# Server-side because the lists are paginated: a browser-side sort would only
+# reorder the 25 rows on screen. Mirrors the Wazuh triage queue's headers
+# (apps.wazuh_ingest.views._sort_headers). The expressions below sort by what
+# the cell SHOWS, not the raw column: Thai choice labels, the display-name
+# fallback, a person's full name, the workflow order of statuses.
+
+def _choice_label_expr(field_name, model=Ticket):
+    """A field's choice LABEL (what the cell shows) as an orderable expression."""
+    field = model._meta.get_field(field_name)
+    return Case(
+        *[When(**{field_name: code}, then=Value(str(label))) for code, label in field.flatchoices],
+        default=F(field_name), output_field=CharField(),
+    )
+
+
+def _ticket_name_expr():
+    """Ticket.display_name in SQL: incident_name, else the sub-category label."""
+    return Lower(Coalesce(
+        NullIf(Trim('incident_name'), Value('')),
+        _choice_label_expr('detailed_issue2'),
+        output_field=CharField(),
+    ))
+
+
+def _choice_order_expr(field_name, model=Ticket):
+    """A choice field in its DECLARED order (e.g. workflow order), not by code."""
+    choices = model._meta.get_field(field_name).flatchoices
+    return Case(
+        *[When(**{field_name: code}, then=Value(index))
+          for index, (code, _) in enumerate(choices)],
+        default=Value(len(choices)), output_field=IntegerField(),
+    )
+
+
+def _status_order_expr():
+    """Ticket statuses in workflow order (STATUS_CHOICES), not alphabetical codes."""
+    return _choice_order_expr('status')
+
+
+def _person_name_expr(prefix=''):
+    """get_full_name|default:username in SQL; NULL when there is no user."""
+    full_name = Trim(Concat(
+        F(f'{prefix}first_name'), Value(' '), F(f'{prefix}last_name'),
+        output_field=CharField(),
+    ))
+    return Lower(Coalesce(
+        NullIf(full_name, Value('')), F(f'{prefix}username'), output_field=CharField(),
+    ))
+
+
+def _by(expression, descending=False):
+    """Order by an expression with blanks last in BOTH directions, so rows
+    missing the value never push real rows off the first page."""
+    if descending:
+        return expression.desc(nulls_last=True)
+    return expression.asc(nulls_last=True)
+
+
+def _column_sort_headers(columns, current_sort, *, request=None, param='sort',
+                         page_param='page', extra_params=None):
+    """Header cells for a list table, each carrying the sort it links to.
+
+    columns: (label, first_key, second_key, first_is_ascending, th_class);
+    first_key None = not sortable. Clicking a header applies its first sort —
+    the most useful direction for that column — and clicking the active one
+    flips it. `direction` is the VISUAL direction for aria-sort and the caret
+    (e.g. '-id', newest first, is descending). Built here rather than in the
+    template so the arrow shown and the link followed cannot disagree.
+
+    A page with ONE sortable table leaves `request` out: the header partial
+    builds `?sort=…` with {% querystring %}. A page with several tables (IOC
+    search, My Queue's tabs) passes `request` plus its own `param` /
+    `page_param`, and `extra_params` (e.g. {'tab': 'manual'}), and each header
+    gets a ready `href` — {% querystring %} can't take a variable key.
+    """
+    def _href(next_sort):
+        if request is None:
+            return ''
+        query = request.GET.copy()
+        query[param] = next_sort
+        query.pop(page_param, None)
+        for key, value in (extra_params or {}).items():
+            query[key] = value
+        return '?' + query.urlencode()
+
+    headers = []
+    for label, first_key, second_key, first_is_ascending, th_class in columns:
+        if first_key is None:
+            headers.append({'label': label, 'sortable': False, 'th_class': th_class})
+            continue
+        first_direction = 'asc' if first_is_ascending else 'desc'
+        second_direction = 'desc' if first_is_ascending else 'asc'
+        if current_sort == first_key:
+            next_sort, direction = second_key, first_direction
+        elif current_sort == second_key:
+            next_sort, direction = first_key, second_direction
+        else:
+            next_sort, direction = first_key, None
+        headers.append({
+            'label': label, 'sortable': True, 'th_class': th_class,
+            'next_sort': next_sort, 'direction': direction,
+            'href': _href(next_sort),
+        })
+    return headers
+
+
+# Active Tickets / Manager Queue table columns, in cell order.
+ACTIVE_LIST_COLUMNS = (
+    ('เลขที่เคส', '-id', 'id', False, 'ps-4'),
+    ('ชื่อเรื่อง', 'name', '-name', True, ''),
+    ('ความรุนแรง', 'severity', 'severity_asc', False, ''),
+    ('ประเภท', 'classification', '-classification', True, ''),
+    ('OLA', 'ola', '-ola', True, ''),
+    ('แหล่งที่มา', 'source', '-source', True, ''),
+    ('ผู้ดูแลระบบ', 'admin', '-admin', True, ''),
+    ('Tier 1 ผู้รับเรื่อง', 'creator', '-creator', True, ''),
+    ('วันที่แจ้ง', 'newest', 'oldest', False, ''),
+    ('สถานะ', 'status', '-status', True, ''),
+    ('', None, None, True, ''),
+)
+# What the results-bar dropdown offers. Any other key came from a header, and
+# the dropdown says so ("ตามคอลัมน์ในตาราง") instead of showing a wrong option.
+ACTIVE_LIST_SORT_OPTIONS = (
+    ('ola', 'OLA ใกล้ครบกำหนด'),
+    ('emergency', 'Emergency ก่อน'),
+    ('severity', 'ความรุนแรง'),
+    ('newest', 'ใหม่สุดก่อน'),
+    ('oldest', 'เก่าสุดก่อน'),
+)
+
+
+def _ticket_search_q(term):
+    """Free-text ticket search shared by Active Tickets and Ticket History."""
+    return (
+        Q(ticket_id__icontains=term)
+        # The lists lead with the case NAME, so it has to be searchable by it —
+        # otherwise the one string on screen is the one you cannot type.
+        | Q(incident_name__icontains=term)
+        | Q(device_name__icontains=term)
+        | Q(ip_address__icontains=term)
+        | Q(issue_description__icontains=term)
+        | Q(destination_ip__icontains=term)
+    )
+
+
 def _render_ticket_list(request, visible, *, page_title, heading, description,
-                        is_manager_queue=False):
-    """Render a filtered, non-terminal ticket list with shared list controls."""
+                        is_manager_queue=False, date_filter=False):
+    """Render a filtered, non-terminal ticket list with shared list controls.
+
+    date_filter adds the วันที่แจ้ง (created_at) range + quick presets. Off by
+    default: the Manager Queue shares this renderer and doesn't get it.
+    """
     tickets_qs = visible.exclude(
         status__in=list(Ticket.TERMINAL_STATUSES)
     ).select_related('assigned_admin', 'created_by', 'project_incident')
@@ -276,16 +523,14 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     sort = request.GET.get('sort', 'ola').strip()
 
     if search:
-        tickets_qs = tickets_qs.filter(
-            Q(ticket_id__icontains=search)
-            # The list leads with the case NAME, so it has to be searchable by
-            # it — otherwise the one string on screen is the one you cannot type.
-            | Q(incident_name__icontains=search)
-            | Q(device_name__icontains=search)
-            | Q(ip_address__icontains=search)
-            | Q(issue_description__icontains=search)
-            | Q(destination_ip__icontains=search)
-        )
+        tickets_qs = tickets_qs.filter(_ticket_search_q(search))
+
+    # No range by default: an open case must never drop out of the work queue
+    # just because it is old. The range only narrows when the user sets one.
+    start_date = end_date = ''
+    if date_filter:
+        start_date, end_date, start_obj, end_obj = _date_range_params(request)
+        tickets_qs = _apply_date_range(tickets_qs, 'created_at', start_obj, end_obj)
 
     active_status_choices = [
         (code, label) for code, label in Ticket.STATUS_CHOICES
@@ -326,15 +571,37 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
     else:
         ola_filter = ''
 
+    # Every ordering ends on the OLA deadline then -pk, so ties stay in a
+    # stable, work-ordered sequence across pages.
+    ola_first = _by(F('ola_contain_deadline'))
+    tie = (ola_first, '-pk')
     sort_map = {
-        'ola':       ('ola_contain_deadline',),
-        'emergency': ('-is_emergency', 'ola_contain_deadline'),
-        'newest':    ('-created_at',),
-        'oldest':    ('created_at',),
+        # Dropdown presets (their keys predate the headers; links rely on them).
+        'ola':       (ola_first, '-pk'),
+        'emergency': ('-is_emergency', *tie),
+        'newest':    ('-created_at', '-pk'),
+        'oldest':    ('created_at', 'pk'),
         # -sev_rank, NOT 'severity': the raw CharField sorts alphabetically,
         # which ranks Low above Medium. See TicketQuerySet.with_severity_rank,
         # which the Tier 2 queue already uses for the same reason.
-        'severity':  ('-sev_rank', 'ola_contain_deadline'),
+        'severity':  ('-sev_rank', *tie),
+        # Column headers (ACTIVE_LIST_COLUMNS).
+        '-id': ('-ticket_id', '-pk'),
+        'id': ('ticket_id', 'pk'),
+        'name': (_by(_ticket_name_expr()), *tie),
+        '-name': (_by(_ticket_name_expr(), descending=True), *tie),
+        'severity_asc': ('sev_rank', *tie),
+        'classification': (_by(_choice_label_expr('classification')), *tie),
+        '-classification': (_by(_choice_label_expr('classification'), descending=True), *tie),
+        '-ola': (_by(F('ola_contain_deadline'), descending=True), '-pk'),
+        'source': (_by(F('issue_type')), *tie),
+        '-source': (_by(F('issue_type'), descending=True), *tie),
+        'admin': (_by(_person_name_expr('assigned_admin__')), *tie),
+        '-admin': (_by(_person_name_expr('assigned_admin__'), descending=True), *tie),
+        'creator': (_by(_person_name_expr('created_by__')), *tie),
+        '-creator': (_by(_person_name_expr('created_by__'), descending=True), *tie),
+        'status': (_status_order_expr(), *tie),
+        '-status': (_status_order_expr().desc(), *tie),
     }
     if is_system_admin_viewer:
         # The OLA deadline remains the primary work-ordering rule. Within the
@@ -345,18 +612,47 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         )
     if sort not in sort_map:
         sort = 'ola'
-    if sort == 'severity':
+    if sort in ('severity', 'severity_asc'):
         tickets_qs = tickets_qs.with_severity_rank()
     tickets_qs = tickets_qs.order_by(*sort_map[sort])
 
     paginator = Paginator(tickets_qs, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
 
+    open_tickets = visible.exclude(status__in=list(Ticket.TERMINAL_STATUSES))
     # Live OLA breach: active ticket already past its contain/resolve deadline
     # (vs now()). Medium/Low have no contain deadline, so they never count here.
-    ola_breach_count = visible.filter(
+    ola_breach_count = open_tickets.filter(
         ola_contain_deadline__lt=timezone.now()
-    ).exclude(status__in=list(Ticket.TERMINAL_STATUSES)).count()
+    ).count()
+
+    date_presets = _date_presets(start_date, end_date) if date_filter else []
+    date_label = _date_range_label(start_date, end_date, date_presets)
+    ola_labels = {code: label for code, label, _ in ola_buckets.OLA_BUCKETS}
+    # One chip per active filter, so a narrowed queue never passes for the whole
+    # queue. Order follows the toolbar.
+    filter_chips = []
+    if search:
+        filter_chips.append(_filter_chip(request, f'ค้นหา: “{search}”', ('q',)))
+    if status_filter:
+        filter_chips.append(_filter_chip(
+            request, f'สถานะ: {dict(active_status_choices)[status_filter]}', ('status',)))
+    if severity_filter:
+        filter_chips.append(_filter_chip(
+            request, f'ความรุนแรง: {dict(Ticket.SEVERITY_CHOICES)[severity_filter]}', ('severity',)))
+    if date_label:
+        filter_chips.append(_filter_chip(
+            request, f'วันที่แจ้ง: {date_label}', ('start_date', 'end_date')))
+    if classification_filter:
+        filter_chips.append(_filter_chip(
+            request, f'ประเภท: {dict(Ticket.CLASSIFICATION_CHOICES)[classification_filter]}',
+            ('classification',)))
+    if emergency_filter:
+        filter_chips.append(_filter_chip(
+            request, 'เฉพาะเคสฉุกเฉิน' if emergency_filter == '1' else 'เฉพาะเคสปกติ',
+            ('emergency',)))
+    if ola_filter:
+        filter_chips.append(_filter_chip(request, f'OLA: {ola_labels[ola_filter]}', ('ola',)))
 
     return render(request, 'incidents/ticket_list.html', {
         'page_title': page_title,
@@ -372,13 +668,28 @@ def _render_ticket_list(request, visible, *, page_title, heading, description,
         'tickets': page_obj,
         'page_obj': page_obj,
         'result_count': paginator.count,
+        'result_total': open_tickets.count(),
         'ola_breach_count': ola_breach_count,
+        'filter_chips': filter_chips,
+        'has_clearable_filters': bool(filter_chips),
+        'more_filter_count': sum(bool(value) for value in (
+            classification_filter, emergency_filter, ola_filter)),
+        'sort_options': ACTIVE_LIST_SORT_OPTIONS,
+        'sort_headers': _column_sort_headers(ACTIVE_LIST_COLUMNS, sort),
+        'sort_is_from_column': sort not in dict(ACTIVE_LIST_SORT_OPTIONS),
         'search': search,
         'status_filter': status_filter,
         'severity_filter': severity_filter,
         'classification_filter': classification_filter,
         'emergency_filter': emergency_filter,
         'ola_filter': ola_filter,
+        'date_filter_enabled': date_filter,
+        'start_date': start_date,
+        'end_date': end_date,
+        'date_presets': date_presets,
+        'date_label': date_label,
+        'date_is_empty': not start_date and not end_date,
+        'date_is_set': bool(date_label),
         'sort': sort,
         'active_status_choices': active_status_choices,
         'severity_choices': Ticket.SEVERITY_CHOICES,

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
 from django.test import override_settings
 from apps.accounts.testing import MFATestCase as TestCase
 
@@ -111,14 +112,12 @@ class TicketUpdatesServiceTest(TestCase):
             previous_status=TicketSubtask.STATUS_OPEN,
             previous_notes='',
             was_done=False,
-            result_upload=SimpleUploadedFile('rca.log', b'forensic findings'),
-            result_description='Final RCA attachment',
         )
 
         subtask.refresh_from_db()
         self.assertEqual(subtask.status, TicketSubtask.STATUS_DONE)
-        self.assertEqual(result.attachments[0].subtask, subtask)
-        self.assertEqual(TicketAttachment.objects.filter(ticket=ticket).count(), 1)
+        self.assertEqual(result.attachments, ())
+        self.assertEqual(TicketAttachment.objects.filter(ticket=ticket).count(), 0)
         self.assertTrue(ticket.field_changes.filter(
             subtask=subtask,
             field_name='status',
@@ -129,6 +128,23 @@ class TicketUpdatesServiceTest(TestCase):
         ).exists())
         self.assertTrue(result.completion_notified)
         notify_completed.assert_called_once_with(subtask)
+
+    def test_response_request_service_rejects_result_file(self):
+        ticket = _ticket(created_by=self.t1)
+        subtask = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=TicketSubtask.TYPE_FORENSIC_RCA,
+            title='Forensic RCA', assigned_to=self.forensic,
+        )
+        with self.assertRaises(ValidationError):
+            save_subtask_update(
+                ticket=ticket, actor=self.forensic,
+                update_form=_SubtaskUpdateForm(subtask, TicketSubtask.STATUS_DONE, ''),
+                previous_status=TicketSubtask.STATUS_OPEN,
+                previous_notes='', was_done=False,
+                result_upload=SimpleUploadedFile('rca.log', b'forensic findings'),
+            )
+        subtask.refresh_from_db()
+        self.assertEqual(subtask.status, TicketSubtask.STATUS_OPEN)
 
     @patch('apps.incidents.ticket_updates.notify_response_request_completed')
     def test_already_done_subtask_does_not_notify_a_second_time(self, notify_completed):

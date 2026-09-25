@@ -3632,13 +3632,9 @@ class AttachmentWorkflowPermissionTest(TestCase):
         subtask.refresh_from_db()
         self.assertEqual(subtask.status, TicketSubtask.STATUS_DONE)
 
-    def test_assignee_can_attach_a_result_even_when_the_ticket_is_elsewhere(self):
-        # The documented exception: for a response request the court that
-        # matters is the REQUEST, not the ticket's workflow status. The
-        # ticket-level rule for PENDING_MGR_TRIAGE answers is_soc_manager,
-        # which would wrongly refuse the assigned responder. (VA/PT, because a
-        # Forensics / RCA request takes no file at all — see
-        # ResponseTeamUiTest.test_rca_update_ignores_an_uploaded_file.)
+    def test_assignee_can_complete_response_when_the_ticket_is_elsewhere(self):
+        # The assigned responder can complete the request independently of
+        # the ticket status, but the response route ignores uploaded files.
         redteam = _make_redteam_manager('attachment_redteam')
         ticket = self._ticket(status=Ticket.STATUS_PENDING_MGR_TRIAGE)
         subtask = TicketSubtask.objects.create(
@@ -3649,10 +3645,11 @@ class AttachmentWorkflowPermissionTest(TestCase):
 
         self._update_subtask(redteam, subtask, filename='scan.log')
 
-        self.assertTrue(TicketAttachment.objects.filter(
-            ticket=ticket, subtask=subtask, uploaded_by=redteam).exists())
+        subtask.refresh_from_db()
+        self.assertEqual(subtask.status, TicketSubtask.STATUS_DONE)
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
 
-    def test_soc_manager_can_attach_a_result(self):
+    def test_soc_manager_cannot_attach_a_result_through_subtask_route(self):
         mgr = _make_user('attachment_sub_mgr', UserProfile.ROLE_SOC_MANAGER)
         ticket = self._ticket(status=Ticket.STATUS_MONITORING)
         subtask = TicketSubtask.objects.create(
@@ -3660,8 +3657,7 @@ class AttachmentWorkflowPermissionTest(TestCase):
             title='Collect logs', assigned_to=self.creator,
         )
         self._update_subtask(mgr, subtask)
-        self.assertTrue(TicketAttachment.objects.filter(
-            ticket=ticket, uploaded_by=mgr).exists())
+        self.assertFalse(TicketAttachment.objects.filter(ticket=ticket).exists())
 
     def test_response_assignee_can_delete_a_response_request_deliverable(self):
         forensic = _make_forensic('delete_response_forensic')
@@ -5247,7 +5243,7 @@ class ResponseRequestRoutingTest(TestCase):
         # DRY: form response-type choices must exactly mirror the model's
         # RESPONSE_TYPES (single source of truth), not a hand-maintained copy.
         form_codes = {code for code, _ in ResponseRequestForm.RESPONSE_TYPE_CHOICES}
-        self.assertEqual(form_codes, set(TicketSubtask.RESPONSE_TYPES))
+        self.assertEqual(form_codes, set(TicketSubtask.NEW_RESPONSE_TYPES))
 
     def test_forensic_rca_routes_to_forensic(self):
         self.assertEqual(

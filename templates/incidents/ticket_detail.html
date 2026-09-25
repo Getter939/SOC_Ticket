@@ -95,7 +95,18 @@
   .subtask-status-history summary { cursor:pointer; color:#64748b; font-size:.75rem; }
   .subtask-status-event { display:flex; align-items:center; gap:.35rem; flex-wrap:wrap; padding:.3rem 0; border-top:1px solid #edf0f4; font-size:.72rem; }
   .subtask-new { background:#f6f8fb; border:1px dashed #c3d0e0; border-radius:.75rem; padding:.9rem 1rem 1rem; margin:0; }
+  .response-type-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(12rem,1fr)); gap:.5rem; }
+  .response-type-option { display:flex; align-items:center; gap:.55rem; min-height:2.6rem; padding:.5rem .7rem; border:1px solid var(--ui-border); border-radius:.55rem; background:var(--ui-surface); cursor:pointer; }
+  .response-type-option label { flex:1; cursor:pointer; font-size:.82rem; font-weight:600; }
+  .response-assignee-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.6rem; }
+  .response-assignee-row { display:block; padding:.7rem; border:1px solid var(--ui-border); border-radius:.55rem; background:var(--ui-surface); }
+  .response-assignee-row[hidden] { display:none; }
   .subtask-update { background:var(--ui-surface-subtle); border:1px solid var(--ui-border); border-radius:.5rem; }
+  .subtask-update-toggle { display:inline-flex; align-items:center; gap:.45rem; min-height:2.35rem; padding-inline:.9rem; font-weight:700; box-shadow:0 .15rem .35rem rgba(13,110,253,.18); transition:transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
+  .subtask-update-toggle:hover { transform:translateY(-1px); box-shadow:0 .3rem .6rem rgba(13,110,253,.24); }
+  .subtask-update-toggle:focus-visible { outline:3px solid rgba(13,110,253,.35); outline-offset:2px; box-shadow:0 .15rem .35rem rgba(13,110,253,.18); }
+  .subtask-update-toggle[aria-expanded="true"] { background:#0a58ca; border-color:#0a53be; }
+  .subtask-update-toggle i { font-size:.95rem; }
   .subtask-empty { text-align:center; color:#8a93a2; font-size:.84rem; padding:1.4rem .5rem; }
   .timeline { position:relative; margin-left:.45rem; padding-left:1.25rem; border-left:2px solid #dce3ec; }
   .timeline-entry { position:relative; margin-bottom:.8rem; border:1px solid #e4e8ee; border-radius:var(--ui-radius-sm); background:#fff; }
@@ -140,7 +151,7 @@
   .action-stack .cancellation-attention { border-left:3px solid #d99a16 !important; }
   .emergency-summary { border:1px solid var(--ui-border); border-radius:var(--ui-radius-sm); padding:.85rem 1rem; background:var(--ui-surface); font-size:.8rem; }
   .response-pending-note { padding:.85rem 1rem; border-bottom:1px solid var(--ui-border); background:var(--ui-surface-subtle); }
-  @media (prefers-reduced-motion:reduce) { .action-chevron { transition:none; } }
+  @media (prefers-reduced-motion:reduce) { .action-chevron { transition:none; } .subtask-update-toggle { transition:none; } .subtask-update-toggle:hover { transform:none; } }
   .closure-card { border:0; border-left:5px solid #23855b; background:#f0faf5; }
   .closure-grid { display:grid; grid-template-columns:110px 1fr; gap:.45rem .7rem; font-size:.8rem; }
   .closure-grid dt { color:#6b7a72; margin:0; }
@@ -381,7 +392,7 @@ onto its own wrapped row, which space-between then left-aligned.
         <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
           <div>
             <h2 class="section-title"><i class="bi bi-shield-shaded section-icon" aria-hidden="true"></i>คำขอทีมตอบสนอง{% if response_subtasks %} <span class="signal-badge signal-neutral align-middle">{{ response_subtasks|length }}</span>{% endif %}</h2>
-            <div class="section-hint">มอบหมายงานเฉพาะทางให้ทีมตอบสนอง — VA / Pentest และความปลอดภัยโครงสร้างพื้นฐานส่งให้ผู้จัดการทีม Red Team ส่วนงานนิติวิทยาศาสตร์ / RCA ส่งให้นักวิเคราะห์ Forensics ทุกคำขอที่ยังไม่เสร็จจะกันไม่ให้อนุมัติปิดเคส</div>
+            <div class="section-hint">มอบหมายงานเฉพาะทางให้ทีมตอบสนอง — VA, PenTest และ Hardening ส่งให้ผู้จัดการ Red Team ที่กำหนดไว้สำหรับแต่ละประเภท ส่วน Forensics / RCA ส่งให้นักวิเคราะห์ Forensics ทุกคำขอที่ยังไม่เสร็จจะกันไม่ให้อนุมัติปิดเคส</div>
           </div>
           {# Manager-only create trigger. The form opens at the top of the section #}
           {# so create and the request list live in one place. #}
@@ -404,24 +415,38 @@ onto its own wrapped row, which space-between then left-aligned.
           <form method="post" action="{% url 'create_response_request' ticket.pk %}" class="subtask-new">{% csrf_token %}
             <div class="row g-2">
             <div class="col-12">
-              <p class="small text-muted mb-0">ระบบจะแจ้งอีเมลผู้รับผิดชอบและมอบหมายอัตโนมัติเมื่อมีผู้รับผิดชอบในบทบาทนั้นเพียงคนเดียว</p>
+              <p class="small text-muted mb-0">เลือกได้หลายประเภท ระบบจะสร้างคำขอแยกสำหรับแต่ละประเภทโดยใช้ชื่องานและขอบเขตงานเดียวกัน พร้อมแจ้งอีเมลผู้รับผิดชอบ</p>
             </div>
-            <div class="col-md-4">
-              <label class="form-label small mb-1" for="{{ response_request_form.subtask_type.id_for_label }}">ประเภทงาน <span class="text-danger">*</span></label>
-              {{ response_request_form.subtask_type }}
-            </div>
-            <div class="col-md-8">
-              <label class="form-label small mb-1" for="{{ response_request_form.title.id_for_label }}">ชื่องาน <span class="text-danger">*</span></label>
+            <fieldset class="col-12 p-0 border-0">
+              <legend class="form-label small mb-1">ประเภทงาน <span class="text-danger">*</span></legend>
+              <div id="resp-type-select" class="response-type-options">
+                {% for choice in response_request_form.subtask_types %}
+                <div class="response-type-option">{{ choice.tag }}<label for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label></div>
+                {% endfor %}
+              </div>
+              {% for error in response_request_form.subtask_types.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </fieldset>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="{{ response_request_form.title.id_for_label }}">ชื่องาน (ใช้กับทุกประเภทที่เลือก) <span class="text-danger">*</span></label>
               {{ response_request_form.title }}
             </div>
-            <div class="col-12">
-              <label class="form-label small mb-1" for="{{ response_request_form.description.id_for_label }}">ขอบเขตงาน <span class="text-muted">(ไม่บังคับ)</span></label>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="{{ response_request_form.description.id_for_label }}">ขอบเขตงาน (ใช้กับทุกประเภทที่เลือก) <span class="text-muted">(ไม่บังคับ)</span></label>
               {{ response_request_form.description }}
             </div>
-            <div class="col-md-8">
-              <label class="form-label small mb-1" for="{{ response_request_form.assigned_to.id_for_label }}">ผู้รับผิดชอบ</label>
-              {{ response_request_form.assigned_to }}
-              <div class="form-text">เว้นว่างเพื่อให้ระบบมอบหมายอัตโนมัติ</div>
+            <div class="col-12">
+              <span class="form-label small mb-1 d-block">ผู้รับผิดชอบแต่ละประเภท</span>
+              <div class="response-assignee-list">
+                {% for subtask_type,type_label,field,eligible_count,requires_choice in response_request_form.assignment_fields %}
+                <div class="response-assignee-row" data-response-assignee-row="{{ subtask_type }}">
+                  <label class="form-label small mb-1" for="{{ field.id_for_label }}">{{ type_label }}</label>
+                  {{ field }}
+                  {% if eligible_count == 0 %}<div class="form-text text-danger">ยังไม่มีผู้รับผิดชอบที่กำหนดสำหรับประเภทนี้</div>
+                  {% elif requires_choice %}<div class="form-text">เลือกผู้รับผิดชอบสำหรับคำขอนี้</div>
+                  {% else %}<div class="form-text">ผู้รับผิดชอบตามที่ผู้ดูแลระบบกำหนดไว้</div>{% endif %}
+                </div>
+                {% endfor %}
+              </div>
             </div>
             <div class="col-12 d-flex justify-content-end gap-2">
               <button class="btn btn-sm btn-light border" type="button" data-bs-toggle="collapse" data-bs-target="#new-response-request">ยกเลิก</button>
@@ -429,25 +454,27 @@ onto its own wrapped row, which space-between then left-aligned.
             </div>
             </div>
           </form>
-          {{ response_routing|json_script:"resp-routing-data" }}
-          {{ response_member_roles|json_script:"resp-member-roles-data" }}
+          {{ response_eligible_assignees|json_script:"resp-eligible-assignees-data" }}
           <script nonce="{{ request.csp_nonce }}">(function(){
-            var typeSel=document.getElementById('resp-type-select');
-            var asgSel=document.getElementById('resp-assignee-select');
-            if(!typeSel||!asgSel)return;
-            var routing=JSON.parse(document.getElementById('resp-routing-data').textContent);
-            var roles=JSON.parse(document.getElementById('resp-member-roles-data').textContent);
+            var typeChoices=document.querySelectorAll('.response-type-choice');
+            var assigneeRows=document.querySelectorAll('[data-response-assignee-row]');
+            if(!assigneeRows.length||!typeChoices.length)return;
+            var eligible=JSON.parse(document.getElementById('resp-eligible-assignees-data').textContent);
             function sync(){
-              var wantRole=routing[typeSel.value];
-              Array.prototype.forEach.call(asgSel.options,function(opt){
-                if(opt.value===''){opt.hidden=false;opt.disabled=false;return;}
-                var ok=roles[opt.value]===wantRole;
-                opt.hidden=!ok;opt.disabled=!ok;
+              var selected=new Set();
+              Array.prototype.forEach.call(typeChoices,function(choice){
+                if(choice.checked)selected.add(choice.value);
               });
-              var cur=asgSel.selectedOptions[0];
-              if(cur&&cur.hidden){asgSel.value='';}
+              Array.prototype.forEach.call(assigneeRows,function(row){
+                var subtaskType=row.dataset.responseAssigneeRow;
+                var active=selected.has(subtaskType);
+                var select=row.querySelector('select');
+                row.hidden=!active;
+                select.disabled=!active;
+                select.required=active&&(eligible[subtaskType]||[]).length>1;
+              });
             }
-            typeSel.addEventListener('change',sync);
+            Array.prototype.forEach.call(typeChoices,function(choice){choice.addEventListener('change',sync);});
             sync();
           })();</script>
         </div>
@@ -519,13 +546,13 @@ onto its own wrapped row, which space-between then left-aligned.
             {# The assignee works this request from the "งานของคุณ" card at the top. #}
             <a class="btn btn-sm btn-outline-primary" href="#my-request{% if subtask.pk != my_response_requests.0.pk %}-{{ subtask.pk }}{% endif %}"><i class="bi bi-arrow-up-circle me-1" aria-hidden="true"></i>ไปที่งานของคุณ</a>
             {% elif subtask.can_update %}
-            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#update-subtask-{{ subtask.pk }}" aria-expanded="false" aria-controls="update-subtask-{{ subtask.pk }}"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>อัปเดตงาน</button>
+            <button class="btn btn-primary btn-sm subtask-update-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#update-subtask-{{ subtask.pk }}" aria-expanded="false" aria-controls="update-subtask-{{ subtask.pk }}"><i class="bi bi-pencil-square" aria-hidden="true"></i><span>อัปเดตงาน</span></button>
             {% endif %}
           </div>
         </div>
         {% if subtask.can_update and not subtask.is_mine %}
         <div class="collapse" id="update-subtask-{{ subtask.pk }}">
-          <form method="post" action="{% url 'update_subtask' subtask.pk %}" enctype="multipart/form-data" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
+          <form method="post" action="{% url 'update_subtask' subtask.pk %}" class="subtask-update row g-2 mb-3 p-3">{% csrf_token %}
             {% if subtask.can_change_status %}
             <div class="col-md-2">{{ subtask_update_form.status.label_tag }}
               <select name="status" class="form-select form-select-sm">{% for code,label in subtask_update_form.fields.status.choices %}<option value="{{ code }}"{% if code == subtask.status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -538,13 +565,7 @@ onto its own wrapped row, which space-between then left-aligned.
             <input type="hidden" name="status" value="{{ subtask.status }}">
             <div class="col-md-11"><label class="form-label small mb-1">ผลการดำเนินการ / หมายเหตุ</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea><div class="form-text">เปลี่ยนสถานะหรือเลขที่รายงานได้เฉพาะผู้รับผิดชอบคำขอหรือผู้จัดการ SOC — คุณเพิ่มหมายเหตุได้</div></div>
             {% endif %}
-            {% if not subtask.can_change_status %}
-            {% elif subtask.accepts_result_file %}
-            {# Forensics / RCA takes no file: that report is a physical document the SOC Manager collects. #}
-            <div class="col-md-4"><label class="form-label small mb-1">ผลการดำเนินการ (ถ้ามี)</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
-            <div class="col-md-4"><label class="form-label small mb-1">แนบไฟล์ผล (ถ้ามี)</label><input type="file" name="result_file" class="form-control form-control-sm"></div>
-            <div class="col-md-3"><label class="form-label small mb-1">คำอธิบายไฟล์</label><input type="text" name="result_file_desc" class="form-control form-control-sm" maxlength="255" placeholder="เช่น รายงานผลการทดสอบ"></div>
-            {% else %}
+            {% if subtask.can_change_status %}
             <div class="col-md-6"><label class="form-label small mb-1">ผลการดำเนินการ (ถ้ามี)</label><textarea name="result_notes" class="form-control form-control-sm" rows="2">{{ subtask.result_notes }}</textarea></div>
             {% endif %}
             <div class="col-md-1 d-flex align-items-end"><button class="btn btn-sm btn-primary w-100" type="submit"><i class="bi bi-save me-1" aria-hidden="true"></i><span class="d-md-none">บันทึก</span><span class="visually-hidden d-none d-md-inline">บันทึกการอัปเดตงาน</span></button></div>

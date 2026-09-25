@@ -1094,8 +1094,8 @@ def _iter_report_evidence_attachments(ticket):
     """
     for attachment in ticket.attachments.all():
         # Section 5 is the incident's own evidence. A response-request
-        # deliverable (VA/PT / InfraSec result file) is a separate report with
-        # its own number and stays with its request, as on the ticket page.
+        # attachment from a historical response request stays with that request
+        # and is excluded from the incident's evidence section.
         # Filtered in Python so the prefetch in _load_ticket is still used.
         if attachment.subtask_id is not None:
             continue

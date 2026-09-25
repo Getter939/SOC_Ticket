@@ -305,6 +305,68 @@
             border-radius: var(--ui-radius-sm);
             box-shadow: none;
         }
+        /* Toolbar quick-filter pills (result / date-range presets). A page may
+           override .level-pill.active's colour (Response Requests does). */
+        .level-pill {
+            display: inline-block; font-size: .75rem; font-weight: 600; padding: .25rem .6rem;
+            border-radius: 20px; border: 1px solid #ced4da; color: #495057; text-decoration: none;
+        }
+        .level-pill:hover { border-color: #1a1a2e; color: #1a1a2e; }
+        .level-pill.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+        .level-pill__count { font-weight: 700; opacity: .7; margin-left: .15rem; }
+        html[data-theme="dark"] .level-pill { border-color: var(--ui-border); color: var(--ui-muted); }
+        html[data-theme="dark"] .level-pill:hover { border-color: var(--ui-text); color: var(--ui-text); }
+        html[data-theme="dark"] .level-pill.active {
+            background: var(--ui-primary); border-color: var(--ui-primary); color: var(--ui-page-bg);
+        }
+        /* List filter bars (Active Tickets, Manager Queue, Ticket History).
+           A control that is narrowing the list gets .is-set, and every active
+           filter also shows as a removable chip — a narrowed queue must never
+           pass for the whole queue. */
+        .filter-bar__label {
+            display: block; font-size: .75rem; font-weight: 600;
+            color: var(--ui-muted); margin-bottom: .25rem;
+        }
+        .filter-bar .form-select.is-set,
+        .filter-bar .form-control.is-set {
+            border-color: var(--ui-primary);
+            box-shadow: inset 0 0 0 1px var(--ui-primary);
+        }
+        .filter-bar .filter-date-toggle { width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .filter-bar .filter-date-menu { min-width: 270px; }
+        .filter-bar .more-filters-toggle .badge { font-size: .7rem; }
+        .filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .75rem; }
+        .filter-chip {
+            display: inline-flex; align-items: center; gap: .15rem;
+            font-size: .75rem; font-weight: 600; padding: .15rem .25rem .15rem .6rem;
+            border-radius: 20px; color: var(--ui-primary);
+            background: rgba(36, 94, 168, .08); border: 1px solid rgba(36, 94, 168, .3);
+        }
+        .filter-chip.is-default { color: var(--ui-muted); background: var(--ui-surface-subtle); border-color: var(--ui-border); }
+        .filter-chip__remove {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 1.15rem; height: 1.15rem; border-radius: 50%;
+            color: inherit; text-decoration: none; font-size: .9rem;
+        }
+        .filter-chip__remove:hover, .filter-chip__remove:focus-visible { background: rgba(36, 94, 168, .15); color: inherit; }
+        html[data-theme="dark"] .filter-chip:not(.is-default) { background: rgba(121, 174, 242, .12); border-color: rgba(121, 174, 242, .4); }
+        html[data-theme="dark"] .filter-chip__remove:hover { background: rgba(121, 174, 242, .2); }
+        .results-bar {
+            display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+            gap: .5rem; padding: .6rem 1rem; border-bottom: 1px solid var(--ui-border); font-size: .85rem;
+        }
+        .results-bar__sort { display: flex; align-items: center; gap: .5rem; }
+        .results-bar__sort .form-select { width: auto; }
+        /* Sortable table headers (incidents/_sortable_headers.html). */
+        .th-sort {
+            display: inline-flex; align-items: center; gap: .3rem;
+            color: inherit; text-decoration: none; white-space: nowrap;
+        }
+        .th-sort:hover, .th-sort:focus-visible { color: var(--ui-primary); text-decoration: underline; }
+        .th-sort.is-active { color: var(--ui-primary); }
+        .th-sort i { font-size: .7rem; }
+        .th-sort__idle { opacity: .4; }
+        .th-sort:hover .th-sort__idle { opacity: .8; }
         .signal-badge {
             display: inline-flex;
             align-items: center;

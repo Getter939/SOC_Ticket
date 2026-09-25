@@ -10,23 +10,19 @@
     </div>
 </div>
 
-<div class="card filter-toolbar mb-3">
-        <div class="card-body py-3">
-            <form method="GET" class="row g-2 align-items-center js-submit-loading">
-                <div class="col-md-10">
-                    <div class="input-group input-group-sm">
-                        <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
-                        <input type="text" name="q" class="form-control" autofocus aria-label="ค้นหา IOC หรือ Ticket"
-                            placeholder="ค้นหา IP, Domain, Hash, เลข Ticket, รายละเอียดเหตุการณ์..."
-                            value="{{ query|default:'' }}">
-                    </div>
-                </div>
-                <div class="col-md-2">
-                    <button type="submit" class="btn btn-dark btn-sm w-100">ค้นหา</button>
-                </div>
-            </form>
+{# Same search control as the other list bars. A new search starts both result #}
+{# tables on their default order and first page, so only q is submitted.       #}
+<form method="GET" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+    <div class="card-body py-3">
+        <label class="filter-bar__label" for="global-search-q">ค้นหา</label>
+        <div class="input-group input-group-sm">
+            <input type="search" id="global-search-q" name="q" class="form-control {% if query %}is-set{% endif %}" autofocus
+                   placeholder="IP, Domain, Hash, เลข Ticket, รายละเอียดเหตุการณ์..."
+                   value="{{ query|default:'' }}">
+            <button type="submit" class="btn btn-outline-secondary" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
         </div>
     </div>
+</form>
 
     {% if query %}
     {# ticket_total, not |length: the latter counts the current page, so a #}
@@ -41,15 +37,7 @@
         <div class="table-responsive">
             <table class="table table-hover align-middle operational-table">
                 <thead>
-                    <tr>
-                        <th>เลข Ticket</th>
-                        <th>IP ต้นทาง</th>
-                        <th>IoC ปลายทาง</th>
-                        <th>รายละเอียด</th>
-                        <th>สถานะ</th>
-                        <th>วันที่แจ้ง</th>
-                        <th></th>
-                    </tr>
+                    <tr>{% include 'incidents/_sortable_headers.html' with sort_headers=ticket_sort_headers %}</tr>
                 </thead>
                 <tbody>
                     {% for ticket in ticket_results %}
@@ -101,14 +89,7 @@
         <div class="table-responsive">
             <table class="table table-hover align-middle operational-table">
                 <thead>
-                    <tr>
-                        <th>แหล่งที่มา</th>
-                        <th>IP ต้นทาง</th>
-                        <th>รายละเอียด Alert</th>
-                        <th>การตัดสินใจ</th>
-                        <th>วันที่</th>
-                        <th></th>
-                    </tr>
+                    <tr>{% include 'incidents/_sortable_headers.html' with sort_headers=triage_sort_headers %}</tr>
                 </thead>
                 <tbody>
                     {% for triage in triage_results %}

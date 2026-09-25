@@ -28,120 +28,58 @@
   </div>
 </form>
 
-<div class="card filter-toolbar mb-3"><div class="card-body py-3">
-  <form method="get" class="mb-3 js-submit-loading">
+{% comment %}
+Filter bar — the same one the ticket lists use. This queue's three scopes stay
+count pills (each counts what clicking it would show, within the other
+filters); the search applies on Enter and shows as a chip; sort and page size
+sit in the results bar and apply on change (.js-autosubmit, no inline JS, and
+the plain form still works with scripting off).
+{% endcomment %}
+<form method="get" id="alert-filters" class="card filter-toolbar filter-bar mb-3 js-submit-loading" role="search">
+  <div class="card-body py-3">
     {% if claim_filter != 'actionable' %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
     {% if ola_filter %}<input type="hidden" name="ola" value="{{ ola_filter }}">{% endif %}
     {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
-    {% if sort != 'ola' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
-    {% if per_page != 25 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
-    <label class="visually-hidden" for="triage-search">ค้นหา Alert ที่เกี่ยวข้อง</label>
-    <div class="input-group input-group-sm">
-      <span class="input-group-text"><i class="bi bi-search"></i></span>
-      <input type="search" class="form-control" id="triage-search" name="q" value="{{ search_query }}"
-             placeholder="ค้นหา Agent / IP / Rule ID / MITRE ID / รายละเอียด">
-      <button class="btn btn-outline-primary" type="submit">ค้นหา</button>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2" role="group" aria-label="งาน">
+      <span class="filter-bar__label mb-0" style="min-width:6.5rem;">งาน</span>
+      {% for facet in claim_facets %}
+      <a href="{% querystring claim=facet.key page=None %}" class="level-pill {% if facet.active %}active{% endif %}"
+         {% if facet.active %}aria-current="true"{% endif %}>{{ facet.label }} <span class="level-pill__count">{{ facet.count }}</span></a>
+      {% endfor %}
     </div>
-  </form>
-
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-    <span class="small fw-bold text-muted" style="min-width:6.5rem;">งาน</span>
-    {% for facet in claim_facets %}
-    <a href="{% querystring claim=facet.key page=None %}"
-       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
-      {{ facet.label }}
-      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
-    </a>
-    {% endfor %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2" role="group" aria-label="OLA">
+      <span class="filter-bar__label mb-0" style="min-width:6.5rem;">OLA</span>
+      {% for facet in ola_facets %}
+      <a href="{% querystring ola=facet.key page=None %}" class="level-pill {% if facet.active %}active{% endif %}"
+         {% if facet.active %}aria-current="true"{% endif %}>{{ facet.label }} <span class="level-pill__count">{{ facet.count }}</span></a>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3" role="group" aria-label="ระดับความอันตรายจาก Wazuh">
+      <span class="filter-bar__label mb-0" style="min-width:6.5rem;">ระดับความอันตรายจาก Wazuh</span>
+      {% for facet in level_facets %}
+      <a href="{% querystring rule_level_filter=facet.key page=None %}" class="level-pill {% if facet.active %}active{% endif %}"
+         {% if facet.active %}aria-current="true"{% endif %}>{{ facet.label }} <span class="level-pill__count">{{ facet.count }}</span></a>
+      {% endfor %}
+    </div>
+    <label class="filter-bar__label" for="triage-search">ค้นหา</label>
+    <div class="input-group input-group-sm">
+      <input type="search" class="form-control {% if search_query %}is-set{% endif %}" id="triage-search" name="q" value="{{ search_query }}"
+             placeholder="Agent, IP, Rule ID, MITRE ID, รายละเอียด...">
+      <button class="btn btn-outline-secondary" type="submit" aria-label="ค้นหา"><i class="bi bi-search" aria-hidden="true"></i></button>
+    </div>
+    {% include 'incidents/_filter_chips.html' %}
   </div>
-
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-    <span class="small fw-bold text-muted" style="min-width:6.5rem;">OLA</span>
-    {% for facet in ola_facets %}
-    <a href="{% querystring ola=facet.key page=None %}"
-       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
-      {{ facet.label }}
-      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
-    </a>
-    {% endfor %}
-  </div>
-
-  <div class="d-flex flex-wrap align-items-center gap-2">
-    <span class="small fw-bold text-muted" style="min-width:6.5rem;">ระดับความอันตรายจาก Wazuh</span>
-    {% for facet in level_facets %}
-    <a href="{% querystring rule_level_filter=facet.key page=None %}"
-       class="btn btn-sm {% if facet.active %}btn-dark{% else %}btn-outline-secondary{% endif %}">
-      {{ facet.label }}
-      <span class="badge rounded-pill {% if facet.active %}bg-light text-dark{% else %}bg-secondary-subtle text-secondary{% endif %} ms-1">{{ facet.count }}</span>
-    </a>
-    {% endfor %}
-    <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
-      {% if claim_filter != 'actionable' %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
-      {% if ola_filter %}<input type="hidden" name="ola" value="{{ ola_filter }}">{% endif %}
-      {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
-      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
-      {% if per_page != 25 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
-      <label class="form-label small fw-bold mb-0" for="triage-sort">เรียงตาม</label>
-      <select name="sort" id="triage-sort" class="form-select form-select-sm js-autosubmit" style="width:auto;">
-        {# A column header can set a sort this list does not offer. Say so #}
-        {# rather than leaving the browser to display the first option as   #}
-        {# though it were active.                                           #}
-        {% if sort_is_from_column %}<option value="{{ sort }}" selected>ตามคอลัมน์ในตาราง</option>{% endif %}
-        <option value="ola" {% if sort == 'ola' %}selected{% endif %}>OLA ใกล้ครบกำหนด</option>
-        <option value="level" {% if sort == 'level' %}selected{% endif %}>Rule level สูงสุด</option>
-        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Alert ล่าสุด</option>
-      </select>
-    </form>
-  </div>
-  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-2">
-    <span class="small text-muted">แสดง {{ filtered_count }} จาก {{ queue_total }} Alert ในคิว</span>
-    {# Same GET-form + .js-autosubmit pattern as the sort control, rather than #}
-    {# new JS: the page ships no inline handlers, and a plain form still works #}
-    {# with scripting off. page is dropped on purpose — page 3 of 25-per-page  #}
-    {# may not exist once the rows are 100 to a page.                          #}
-    <form method="get" class="d-flex align-items-center gap-2 ms-auto js-submit-loading">
-      {% if claim_filter != 'actionable' %}<input type="hidden" name="claim" value="{{ claim_filter }}">{% endif %}
-      {% if ola_filter %}<input type="hidden" name="ola" value="{{ ola_filter }}">{% endif %}
-      {% if rule_level_filter %}<input type="hidden" name="rule_level_filter" value="{{ rule_level_filter }}">{% endif %}
-      {% if search_query %}<input type="hidden" name="q" value="{{ search_query }}">{% endif %}
-      {% if sort != 'ola' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
-      <label class="form-label small fw-bold mb-0" for="triage-per-page">ต่อหน้า</label>
-      <select name="per_page" id="triage-per-page" class="form-select form-select-sm js-autosubmit" style="width:auto;">
-        {% for choice in per_page_choices %}
-        <option value="{{ choice }}" {% if choice == per_page %}selected{% endif %}>{{ choice }}</option>
-        {% endfor %}
-      </select>
-      <noscript><button class="btn btn-sm btn-outline-secondary" type="submit">ใช้</button></noscript>
-    </form>
-    {% if claim_filter != 'actionable' or ola_filter or rule_level_filter or search_query or sort != 'ola' or per_page != 25 %}
-    <a href="{% url 'triage_queue' %}" class="small text-decoration-none"><i class="bi bi-x-circle me-1"></i>ล้างตัวกรองทั้งหมด</a>
-    {% endif %}
-  </div>
-</div></div>
+</form>
 
 <div class="card ops-card">
+  {% include 'incidents/_results_bar.html' with form_id='alert-filters' result_count=filtered_count result_unit='Alert' result_total=queue_total result_total_label='ในคิว' %}
   <div class="table-responsive">
     <table class="table table-hover align-middle operational-table">
       {# Header cells come from the view (_sort_headers) so the arrow drawn and #}
       {# the sort linked to cannot disagree. OLA has no link of its own: it is  #}
       {# timestamp + a flat window, so it sorts with เวลา.                       #}
       <thead class="table-light">
-        <tr>
-          {% for header in sort_headers %}
-          <th {% if forloop.last %}class="text-end"{% endif %}>
-            {% if header.sortable %}
-            <a href="{% querystring sort=header.next_sort page=None %}"
-               class="queue-sort text-reset text-decoration-none"
-               {% if header.direction %}aria-sort="{% if header.direction == 'asc' %}ascending{% else %}descending{% endif %}"{% endif %}>
-              {{ header.label }}
-              {% if header.direction == 'asc' %}<i class="bi bi-caret-up-fill small"></i>
-              {% elif header.direction == 'desc' %}<i class="bi bi-caret-down-fill small"></i>
-              {% else %}<i class="bi bi-arrow-down-up small text-muted opacity-50"></i>{% endif %}
-            </a>
-            {% else %}{{ header.label }}{% endif %}
-          </th>
-          {% endfor %}
-        </tr>
+        <tr>{% include 'incidents/_sortable_headers.html' %}</tr>
       </thead>
       <tbody>
         {% for alert in alerts %}

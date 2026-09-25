@@ -8,7 +8,98 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Changed
+- **Account emails are now in Thai.** The password-reset and password-changed
+  emails were translated. The system name stays "SOC Support System", as in the
+  other emails.
+- **New users get their own welcome email.** A user created in the admin used to
+  get the password-reset email ("We received a request to reset…"). They now get
+  a welcome email with their username, a set-password link (valid for 1 hour, one
+  use only), and the sign-in URL. It also says what to do if the link expires, and
+  mentions MFA setup when MFA is on. Setting that first password no longer
+  triggers the "your password was changed" email; any account that has never
+  signed in skips it.
+- **Active Tickets has a วันที่แจ้ง range filter.** A single dropdown offers
+  presets (วันนี้ / 7 วัน / 30 วัน / เดือนนี้) plus a custom From/To. With no
+  range set it still shows every open ticket. The Manager Queue, which shares
+  the page, doesn't get it.
+- **New filter bar on Active Tickets, Manager Queue and Ticket History.**
+  - One row holds search and the most-used filters. The rest move under
+    ตัวกรองเพิ่มเติม, with a badge counting how many are set; the panel opens by
+    itself while one is.
+  - Dropdowns apply on change, search on Enter, and the กรอง button is gone.
+  - Every active filter shows as a removable chip, plus ล้างทั้งหมด, and each
+    control that is narrowing the list is highlighted.
+  - Sort moved to a results bar above the table, with the count ("13 เคส จาก 89
+    ที่เปิดอยู่").
+  - Clicking a table header sorts the whole list (server-side, so it works
+    across pages), by what the cell shows. The first click uses the most useful
+    direction (newest, Critical first, soonest OLA, A→Z, workflow order for
+    status); a second click reverses. Blank values stay last either way.
+    Free-text columns in History aren't sortable. The dropdown keeps its presets
+    and shows "ตามคอลัมน์ในตาราง" when a header set the order, as in the triage
+    queue.
+  - **Tier 2 Queue** gets the same bar and sortable headers.
+    - The ขั้นตอน / การรับเรื่อง count pills stay on top, with counts that now
+      follow the other filters.
+    - The bar adds search, ความรุนแรง, ประเภท and OLA. There's still no
+      emergency filter (deliberately, so an emergency can't be hidden) and no
+      date range (this queue is worked by time in stage).
+    - Clicking รอมานาน shows the longest wait first. The results bar reads
+      "N เคส จาก M ในคิว".
+  - **The rest of the lists get the same bar and sortable headers:**
+    - **งานของคุณ (My Queue):** one search box filters every work tab, and the
+      tab badges follow it; the alerts above the tabs still describe the whole
+      queue. Each tab's headers sort that tab and reload onto it. Paging now
+      keeps the search and sort.
+    - **เคสของฉัน (System Owner):** the open cases are a full list with paging.
+      Before, it stopped at the newest 10, so an owner with more couldn't reach
+      the rest. It adds search, สถานะ and ความฉุกเฉิน filters, chips and
+      sortable headers, and the table now leads with ชื่อเรื่อง and
+      ความรุนแรง. The stat cards and the latest-closed panel are unchanged, and
+      the filters now apply to the open list only.
+    - **คำขอตอบสนองเหตุการณ์:**
+      - The status pills now show counts.
+      - New search and ประเภท filters.
+      - Sortable headers; blank report numbers stay last.
+      - The default order is now open work first, in workflow order. Before,
+        it sorted the status code alphabetically, which put Cancelled first.
+      - The "ยังไม่เสร็จ" badge counts the whole queue.
+    - **ฐานข้อมูล IOC:** sorting now happens on the server. The old header
+      sort ran in the browser and, since the table is paged 30 at a time, only
+      reordered the page on screen. The toolbar moves to the new bar (filters
+      apply on change, with chips), and the results bar has presets:
+      ยังไม่ได้ตรวจสอบก่อน, กิจกรรมล่าสุด, พบในเคสมากสุด.
+    - **ค้นหา IOC:** both result tables sort by header, each with its own sort
+      and page, so sorting one doesn't reset the other.
+    - **Wazuh triage queue:** restyled to the shared bar. The three count-pill
+      rows stay, the search shows as a chip, and sort plus page size sit in the
+      results bar. `aria-sort` is now on the header cell rather than the link.
+  - In History, the all-time checkbox became the ทุกช่วงเวลา option in the date
+    dropdown. The implied current month shows as a muted chip. An empty month
+    offers "แสดงทุกช่วงเวลา".
+- **Ticket History now matches Active Tickets.**
+  - The search covers the same fields, including the case name.
+  - The result pills show counts within the current filters. They replace the
+    all-time badges in the header, and the header now shows the result count.
+  - It gets the same date presets.
+  - The ID cell, the IP under ชื่อเรื่อง and the column alignment match Active
+    Tickets. Both pages now share the pill styles.
+  - A new วันที่ปิด column replaces วันที่แจ้ง. The range still filters by
+    opening date, and its labels now say so.
+  - Sorting is by close date (newest or oldest first), emergency, or severity.
+
 ### Fixed
+- **Ticket History names who closed every ticket.** The ผู้อนุมัติ/ปิดเคส column
+  and filter were blank for Event and Cancelled tickets, since only the APPROVED
+  path stamps `approved_by`. They now fall back to the author of the ticket's
+  first closing timeline entry. The filter's name list only includes people who
+  closed tickets the viewer can see.
+- **Ticket History links keep your filters.** Clicking a result pill used to drop
+  severity, type, emergency, approver and the date range; ยกเลิกแล้ว also dropped
+  the search. The search wasn't URL-encoded, so `&` or `#` broke paging. A lone
+  From or To date was ignored, and an invalid `?status=` value stuck.
+- **Ticket History no longer runs one query per row** to load the approver.
 - **Ticket forms now handle idle-session expiry before submit.** The default
   timeout is 30 minutes. Active form work keeps the session alive; a two-minute
   warning lets the user extend it. On expiry the page saves a draft and redirects

@@ -96,7 +96,7 @@ A work stream spawned off a single Ticket, tracked independently of the parent T
 _Avoid_: Task, linked ticket
 
 **Response Request**:
-A specialised Subtask the SOC Manager spawns to a response team — VA / Pentest and Infrastructure Security route to the Red Team Manager; Forensics / RCA routes to the Forensic Analyst. It belongs to one Member Ticket, even inside a Project Incident, and runs in parallel to that Ticket's Containment. It is auto-assigned to the sole holder of the target role (or picked when several exist). While any Response Request is still open, its parent Incident cannot be approved (closed) — Event-close is exempt. The assignee accepts it (**รับงาน**: Open → In Progress), does the work outside the system, then marks it Done. No Response Request can be marked Done without the **report number** of the report delivered (SOC-RCA- / SOC-VAPT- / SOC-HARD-YYYYMM-NNNN, prefilled from the case). The report itself is not written in the system. The RCA report is a physical document the SOC Manager collects, so a Forensics / RCA request takes no file; VA/PT and InfraSec may attach an optional result file.
+A specialised Subtask the SOC Manager spawns to a response team. New Red Team requests are separate **VA**, **PenTest**, and **Hardening** types, each assigned to the Red Team Manager account designated for that function in admin; Forensics / RCA routes to the Forensic Analyst. Existing combined VA/PT requests retain their historical type. Open legacy Infrastructure Security requests convert to Hardening and move to the designated manager when that account is configured. A request belongs to one Member Ticket, even inside a Project Incident, and runs in parallel to that Ticket's Containment. While any Response Request is still open, its parent Incident cannot be approved (closed) — Event-close is exempt. The assignee accepts it (**รับงาน**: Open → In Progress), does the work outside the system, then marks it Done. No Response Request can be marked Done without the **report number** of the report delivered. For new Red Team requests the manager enters the actual number; `VA-YYYY-NNNN`, `PT-YYYY-NNNN`, and `BL-YYYY-NNNN` are guidance, with independent numbering for each function. FA retains its case-based `SOC-RCA-YYYYMM-NNNN` suggestion. Reports are written outside the system, and response requests take no file upload.
 _Avoid_: Investigation (that is the SOC-side subtask), escalation, ticket
 
 ## People and roles
@@ -130,7 +130,7 @@ A response-team role that receives Forensics / RCA Response Requests. Not a SOC 
 _Avoid_: Investigator, SOC analyst
 
 **Red Team Manager**:
-A response-team role that receives both VA / Pentest and Infrastructure Security Response Requests and works them directly. Not a SOC member: sees only the Tickets with a Response Request assigned to them.
+A response-team role shared by three designated accounts, one each for VA, PenTest, and Hardening. Each manager receives and works requests for their configured function. Not a SOC member: sees only Tickets with an eligible Response Request assigned to them, plus their own historical combined requests.
 _Avoid_: Pentester, Red Team (bare — this is the receiving manager)
 
 ## Timing and priority

@@ -28,6 +28,10 @@ class TicketSubtask(models.Model):
     # type to a response-team role (see RESPONSE_ROUTING). Unlike the two legacy
     # types above, an open request of these types blocks the parent Incident
     # from being APPROVED (see Ticket.has_open_response_requests).
+    TYPE_VA = 'VA'
+    TYPE_PENTEST = 'PENTEST'
+    TYPE_HARDENING = 'HARDENING'
+    # Historical values remain readable for completed requests.
     TYPE_VA_PT = 'VA_PT'
     TYPE_INFRA_SEC = 'INFRA_SEC'
     TYPE_FORENSIC_RCA = 'FORENSIC_RCA'
@@ -35,13 +39,27 @@ class TicketSubtask(models.Model):
     TYPE_CHOICES = [
         (TYPE_INVESTIGATION, 'การสืบสวน'),
         (TYPE_COUNTERMEASURE, 'มาตรการตอบโต้'),
-        (TYPE_VA_PT, 'ประเมินช่องโหว่ / ทดสอบเจาะระบบ (VA/PT)'),
-        (TYPE_INFRA_SEC, 'ความปลอดภัยโครงสร้างพื้นฐาน (Hardening)'),
+        (TYPE_VA, 'ประเมินช่องโหว่ (VA)'),
+        (TYPE_PENTEST, 'ทดสอบเจาะระบบ (PenTest)'),
+        (TYPE_HARDENING, 'ปรับความมั่นคงปลอดภัย (Hardening)'),
         (TYPE_FORENSIC_RCA, 'Forensics / RCA'),
+        (TYPE_VA_PT, 'VA/PT (เดิม)'),
+        (TYPE_INFRA_SEC, 'Hardening (เดิม)'),
     ]
 
     # Request types that route to a response team and gate final approval.
-    RESPONSE_TYPES = frozenset({TYPE_VA_PT, TYPE_INFRA_SEC, TYPE_FORENSIC_RCA})
+    NEW_RESPONSE_TYPES = frozenset({TYPE_VA, TYPE_PENTEST, TYPE_HARDENING, TYPE_FORENSIC_RCA})
+    RESPONSE_TYPES = NEW_RESPONSE_TYPES | frozenset({TYPE_VA_PT, TYPE_INFRA_SEC})
+    REDTEAM_FUNCTIONS = {
+        TYPE_VA: 'VA',
+        TYPE_PENTEST: 'PENTEST',
+        TYPE_HARDENING: 'HARDENING',
+    }
+    REPORT_PREFIXES = {
+        TYPE_VA: 'VA',
+        TYPE_PENTEST: 'PT',
+        TYPE_HARDENING: 'BL',
+    }
 
     STATUS_OPEN = 'OPEN'
     STATUS_IN_PROGRESS = 'IN_PROGRESS'
@@ -147,7 +165,7 @@ class TicketSubtask(models.Model):
 
     @property
     def is_response_request(self):
-        """True for a response-team request (VA/PT, InfraSec, Forensics)."""
+        """True for a current or historical response-team request."""
         return self.subtask_type in self.RESPONSE_TYPES
 
     # Report kind per response type — the token in its report number
@@ -165,16 +183,15 @@ class TicketSubtask(models.Model):
         return self.is_response_request
 
     @property
-    def accepts_result_file(self):
-        """Whether the responder may attach a result file. Not for Forensics /
-        RCA: that report is a physical document the SOC Manager collects."""
-        return self.subtask_type != self.TYPE_FORENSIC_RCA
+    def uses_manual_report_number(self):
+        return self.subtask_type in self.REDTEAM_FUNCTIONS
 
     @property
     def expected_report_number(self):
-        """The system's report number for this request (e.g. SOC-RCA-YYYYMM-NNNN
-        or SOC-VAPT-YYYYMM-NNNN), used to prefill the report-number field; empty
-        for non-response types."""
+        """FA's suggested number or a format hint for a Red Team request."""
+        prefix = self.REPORT_PREFIXES.get(self.subtask_type)
+        if prefix:
+            return f'{prefix}-YYYY-NNNN'
         kind = self.REPORT_KINDS.get(self.subtask_type)
         if not kind:
             return ''
@@ -187,11 +204,14 @@ class TicketSubtask(models.Model):
 
         Lazily imports UserProfile so the routing always references the
         canonical role constants (no drift) without a circular import at
-        module load. VA/PT and InfraSec both go to the Red Team Manager;
-        Forensics/RCA goes to the Forensic Analyst.
+        module load. Three current Red Team types share one role but are
+        separated by profile function; Forensics/RCA goes to the Forensic Analyst.
         """
         from apps.accounts.models import UserProfile
         return {
+            cls.TYPE_VA:           UserProfile.ROLE_REDTEAM_MANAGER,
+            cls.TYPE_PENTEST:      UserProfile.ROLE_REDTEAM_MANAGER,
+            cls.TYPE_HARDENING:    UserProfile.ROLE_REDTEAM_MANAGER,
             cls.TYPE_VA_PT:        UserProfile.ROLE_REDTEAM_MANAGER,
             cls.TYPE_INFRA_SEC:    UserProfile.ROLE_REDTEAM_MANAGER,
             cls.TYPE_FORENSIC_RCA: UserProfile.ROLE_FORENSIC,
@@ -216,6 +236,19 @@ class TicketSubtask(models.Model):
         return frozenset(t for t, r in cls.response_routing().items() if r == role)
 
     @classmethod
+    def types_for_profile(cls, profile):
+        """Types a responder may see, including their own historical requests."""
+        if profile.is_forensic:
+            return frozenset({cls.TYPE_FORENSIC_RCA})
+        if profile.is_redteam_manager:
+            current = frozenset(
+                t for t, function in cls.REDTEAM_FUNCTIONS.items()
+                if function == profile.redteam_function
+            )
+            return current | frozenset({cls.TYPE_VA_PT, cls.TYPE_INFRA_SEC})
+        return frozenset()
+
+    @classmethod
     def eligible_assignees(cls, subtask_type):
         """Active users who may be auto-assigned a request of ``subtask_type``.
 
@@ -226,7 +259,11 @@ class TicketSubtask(models.Model):
         role = cls.role_for_type(subtask_type)
         if not role:
             return User.objects.none()
-        return User.objects.filter(is_active=True, profile__role=role)
+        eligible = User.objects.filter(is_active=True, profile__role=role)
+        function = cls.REDTEAM_FUNCTIONS.get(subtask_type)
+        if function:
+            eligible = eligible.filter(profile__redteam_function=function)
+        return eligible
 
     def clean(self):
         """Reject a response request handed to someone the type doesn't route to.
@@ -255,7 +292,11 @@ class TicketSubtask(models.Model):
         profile = getattr(self.assigned_to, 'profile', None)
         # No profile → fail closed, matching visible_to()'s treatment of the
         # profile-less account that can exist between creation and setup.
-        if profile is None or profile.role != expected_role:
+        function = self.REDTEAM_FUNCTIONS.get(self.subtask_type)
+        if (
+            profile is None or profile.role != expected_role
+            or (function and profile.redteam_function != function)
+        ):
             raise ValidationError({
                 'assigned_to': (
                     f'คำขอประเภท "{self.get_subtask_type_display()}" '

@@ -56,11 +56,16 @@ class AccountPasswordResetConfirmView(auth_views.PasswordResetConfirmView):
     success_url = reverse_lazy('password_reset_complete')
 
     def form_valid(self, form):
+        # A user who has never signed in is setting their first password from
+        # the welcome email; a "your password was changed" notice would only
+        # confuse them.
+        is_first_password = form.user.last_login is None
         with password_audit_context(
             source=PasswordChangeAudit.SOURCE_SELF_SERVICE_RESET,
         ):
             response = super().form_valid(form)
-        send_password_changed_notification(user=form.user)
+        if not is_first_password:
+            send_password_changed_notification(user=form.user)
         return response
 
 

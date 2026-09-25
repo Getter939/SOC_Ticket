@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
+from . import mfa
 from .models import PasswordResetRateLimit
 
 
@@ -94,8 +95,8 @@ def password_reset_request_allowed(request, email):
     return email_allowed and ip_allowed
 
 
-def send_password_reset_email(*, user, request):
-    """Send a one-time, time-limited reset link without exposing a password."""
+def _send_password_link_email(*, user, request, subject_template, body_template):
+    """Email a one-time, time-limited set-password link without exposing a password."""
     site = get_current_site(request)
     context = {
         'email': user.email,
@@ -107,11 +108,10 @@ def send_password_reset_email(*, user, request):
         'protocol': 'https' if (
             settings.PASSWORD_RESET_USE_HTTPS or request.is_secure()
         ) else 'http',
+        'mfa_enabled': mfa.enforcement_enabled(),
     }
-    subject = ''.join(
-        render_to_string('registration/password_reset_subject.txt', context).splitlines()
-    )
-    body = render_to_string('registration/password_reset_email.txt', context)
+    subject = ''.join(render_to_string(subject_template, context).splitlines())
+    body = render_to_string(body_template, context)
     message = EmailMultiAlternatives(
         subject=subject,
         body=body,
@@ -121,6 +121,26 @@ def send_password_reset_email(*, user, request):
     message.send()
 
 
+def send_password_reset_email(*, user, request):
+    """Send a reset link to an existing user."""
+    _send_password_link_email(
+        user=user,
+        request=request,
+        subject_template='registration/password_reset_subject.txt',
+        body_template='registration/password_reset_email.txt',
+    )
+
+
+def send_new_user_email(*, user, request):
+    """Welcome a newly created user with their username and a first-password link."""
+    _send_password_link_email(
+        user=user,
+        request=request,
+        subject_template='registration/new_user_subject.txt',
+        body_template='registration/new_user_email.txt',
+    )
+
+
 def send_password_changed_notification(*, user):
     """Notify the account owner after any successful password change."""
     if not user.email:
@@ -128,7 +148,7 @@ def send_password_changed_notification(*, user):
 
     body = render_to_string('registration/password_changed_email.txt', {'user': user})
     message = EmailMultiAlternatives(
-        subject='SOC Support System password changed',
+        subject='รหัสผ่าน SOC Support System ถูกเปลี่ยนแล้ว',
         body=body,
         from_email=settings.DEFAULT_FROM_EMAIL or None,
         to=[user.email],

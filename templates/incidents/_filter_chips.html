@@ -1,0 +1,20 @@
+{% comment %}
+Removable chips for every active filter (built by views._helpers._filter_chip).
+A default chip (History's implied current month) is muted and doesn't bring up
+"ล้างทั้งหมด" on its own; has_clearable_filters says whether anything else is set.
+{% endcomment %}
+{% if filter_chips or has_clearable_filters %}
+<div class="filter-chips" aria-label="ตัวกรองที่ใช้อยู่">
+    {% for chip in filter_chips %}
+    <span class="filter-chip {% if chip.is_default %}is-default{% endif %}">
+        {{ chip.label }}
+        <a href="{{ chip.remove_url }}" class="filter-chip__remove" aria-label="ลบตัวกรอง {{ chip.label }}" title="ลบตัวกรองนี้"><i class="bi bi-x" aria-hidden="true"></i></a>
+    </span>
+    {% endfor %}
+    {% if has_clearable_filters %}
+    <a href="{{ request.path }}" class="small text-decoration-none ms-1">
+        <i class="bi bi-x-circle me-1" aria-hidden="true"></i>ล้างทั้งหมด
+    </a>
+    {% endif %}
+</div>
+{% endif %}

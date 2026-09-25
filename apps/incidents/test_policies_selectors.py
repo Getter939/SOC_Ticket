@@ -342,8 +342,8 @@ class TicketDetailSelectorTest(TestCase):
         )
         self.assertTrue(read_model['can_restore_attachment'])
         self.assertEqual(
-            read_model['response_member_roles'][str(self.forensic.pk)],
-            UserProfile.ROLE_FORENSIC,
+            read_model['response_eligible_assignees'][TicketSubtask.TYPE_FORENSIC_RCA],
+            [str(self.forensic.pk)],
         )
         self.assertEqual(
             list(read_model['logs'])[0].revisions.all()[0].previous_note,
@@ -360,5 +360,4 @@ class TicketDetailSelectorTest(TestCase):
 
         self.assertFalse(read_model['can_restore_attachment'])
         self.assertEqual(read_model['deleted_attachments'], [])
-        self.assertEqual(read_model['response_routing'], {})
-        self.assertEqual(read_model['response_member_roles'], {})
+        self.assertEqual(read_model['response_eligible_assignees'], {})

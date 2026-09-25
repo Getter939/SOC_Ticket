@@ -13,7 +13,7 @@ from axes.utils import reset as reset_axes_attempts
 
 from .models import AccountLockoutAudit, PasswordChangeAudit, UserProfile, MFAAudit
 from .password_audit import password_audit_context
-from .passwords import send_password_reset_email
+from .passwords import send_new_user_email, send_password_reset_email
 
 
 class UserProfileInline(admin.StackedInline):
@@ -160,7 +160,7 @@ class UserAdmin(BaseUserAdmin):
         grant_acting_tier, revoke_acting_tier,
     ]
     list_display = (
-        'username', 'email', 'first_name', 'last_name', 'role', 'tier',
+        'username', 'email', 'first_name', 'last_name', 'role', 'redteam_function', 'tier',
         'acting_tier', 'is_staff',
     )
     list_select_related = ('profile',)
@@ -176,6 +176,13 @@ class UserAdmin(BaseUserAdmin):
         """Show the profile's human-readable role in the user changelist."""
         try:
             return obj.profile.get_role_display()
+        except UserProfile.DoesNotExist:
+            return '—'
+
+    @admin.display(description='Red Team function', ordering='profile__redteam_function')
+    def redteam_function(self, obj):
+        try:
+            return obj.profile.get_redteam_function_display() or '—'
         except UserProfile.DoesNotExist:
             return '—'
 
@@ -202,6 +209,22 @@ class UserAdmin(BaseUserAdmin):
             actions.pop('revoke_acting_tier', None)
         return actions
 
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        profile = UserProfile.objects.filter(user=form.instance).first()
+        if (
+            form.instance.is_active and profile
+            and profile.role == UserProfile.ROLE_REDTEAM_MANAGER
+            and profile.redteam_function == UserProfile.REDTEAM_HARDENING
+        ):
+            from apps.incidents.redteam_assignment import assign_open_hardening_requests
+
+            count = assign_open_hardening_requests(
+                manager=form.instance, actor=request.user,
+            )
+            if count:
+                messages.info(request, f'มอบหมายคำขอ Hardening ที่ยังเปิดอยู่ {count} รายการแล้ว')
+
     def save_model(self, request, obj, form, change):
         is_new_user = not change and obj.pk is None
         with password_audit_context(
@@ -212,8 +235,8 @@ class UserAdmin(BaseUserAdmin):
 
         if is_new_user and obj.email:
             try:
-                send_password_reset_email(user=obj, request=request)
-                messages.success(request, f'ส่งลิงก์ตั้งรหัสผ่านครั้งแรกไปที่ {obj.email} แล้ว')
+                send_new_user_email(user=obj, request=request)
+                messages.success(request, f'ส่งอีเมลต้อนรับพร้อมลิงก์ตั้งรหัสผ่านไปที่ {obj.email} แล้ว')
             except Exception:
                 messages.error(
                     request,

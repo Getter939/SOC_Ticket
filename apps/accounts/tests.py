@@ -29,6 +29,7 @@ from django.test import Client, RequestFactory, override_settings
 from .testing import MFATestCase as TestCase
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.urls import reverse
+from django.utils import timezone
 
 from axes.models import AccessAttempt
 
@@ -280,6 +281,90 @@ class PasswordManagementSecurityTest(TestCase):
             self.assertRedirects(response, reverse('password_reset_done'))
 
         self.assertEqual(len(mail.outbox), 3)
+
+    def test_reset_email_is_in_thai(self):
+        self._request_reset()
+
+        message = mail.outbox[-1]
+        self.assertEqual(message.subject, 'รีเซ็ตรหัสผ่าน SOC Support System')
+        self.assertIn('เราได้รับคำขอรีเซ็ตรหัสผ่าน', message.body)
+
+
+class NewUserEmailTest(TestCase):
+    """Creating a user in the admin sends a welcome email, not a reset email."""
+
+    def _create_via_admin(self, user):
+        request = RequestFactory().post('/admin/auth/user/add/')
+        request.user = User.objects.create_superuser(
+            'welcome_admin', 'welcome-admin@example.test', 'AdminPassword!123',
+        )
+        request.session = {}
+        request._messages = FallbackStorage(request)
+        admin.site._registry[User].save_model(request, user, form=None, change=False)
+        return request
+
+    def test_new_user_gets_welcome_email_with_username_and_working_link(self):
+        user = User(
+            username='new_analyst', email='new.analyst@example.test',
+            first_name='Somchai', last_name='Jaidee',
+        )
+        user.set_password('Initial!Password123')
+        self._create_via_admin(user)
+
+        self.assertEqual(len(mail.outbox), 1)
+        message = mail.outbox[0]
+        self.assertEqual(message.to, ['new.analyst@example.test'])
+        self.assertIn('ยินดีต้อนรับ', message.subject)
+        self.assertIn('สวัสดีคุณ Somchai Jaidee', message.body)
+        self.assertIn('ชื่อผู้ใช้ (Username): new_analyst', message.body)
+        self.assertNotIn('เราได้รับคำขอรีเซ็ตรหัสผ่าน', message.body)
+
+        links = re.findall(r'https?://[^\s]+', message.body)
+        self.assertEqual(urlsplit(links[1]).path, reverse('login'))
+        response = Client().get(urlsplit(links[0]).path)
+        self.assertEqual(response.status_code, 302)
+
+    def _set_password_from_link(self, body):
+        link_path = urlsplit(re.search(r'https?://[^\s]+', body).group()).path
+        client = Client()
+        start = client.get(link_path)
+        finish = client.post(
+            start['Location'],
+            {'new_password1': 'MyFirst!Password456', 'new_password2': 'MyFirst!Password456'},
+        )
+        self.assertRedirects(finish, reverse('password_reset_complete'))
+
+    def test_setting_the_first_password_sends_no_password_changed_email(self):
+        user = User(username='first_timer', email='first.timer@example.test')
+        user.set_password('Initial!Password123')
+        self._create_via_admin(user)
+
+        self._set_password_from_link(mail.outbox[0].body)
+
+        self.assertEqual(len(mail.outbox), 1)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password('MyFirst!Password456'))
+
+    def test_reset_after_first_sign_in_still_sends_password_changed_email(self):
+        user = User.objects.create_user(
+            'returning_user', 'returning@example.test', 'Initial!Password123',
+        )
+        user.last_login = timezone.now()
+        user.save(update_fields=['last_login'])
+        Client().post(reverse('password_reset'), {'email': user.email})
+
+        self._set_password_from_link(mail.outbox[-1].body)
+
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(mail.outbox[-1].subject, 'รหัสผ่าน SOC Support System ถูกเปลี่ยนแล้ว')
+
+    @override_settings(MFA_ENABLED=False)
+    def test_mfa_line_is_omitted_when_mfa_is_off(self):
+        user = User(username='no_mfa_user', email='no.mfa@example.test')
+        user.set_password('Initial!Password123')
+        self._create_via_admin(user)
+
+        self.assertNotIn('MFA', mail.outbox[0].body)
 
 
 class PasswordChangeAuditTest(TestCase):

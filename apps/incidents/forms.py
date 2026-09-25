@@ -954,27 +954,43 @@ class TriageForm(forms.ModelForm):
 # label. All new subtasks are response-team requests spawned via ResponseRequestForm.
 
 
-class ResponseRequestForm(forms.ModelForm):
-    """SOC Manager spawn form for a response-team request (VA/PT, InfraSec,
-    Forensics). The type determines the receiving role; the assignee is
-    resolved in the view (auto-assign when a single role-holder exists, picker
-    when several, blocked when none)."""
+class ResponseRequestForm(forms.Form):
+    """SOC Manager form for one or more independently routed response requests."""
 
     # Derived from the model's single source of truth so a future response-type
     # change (add/rename/reorder) needs editing only TicketSubtask.TYPE_CHOICES.
     RESPONSE_TYPE_CHOICES = [
         (code, label) for code, label in TicketSubtask.TYPE_CHOICES
-        if code in TicketSubtask.RESPONSE_TYPES
+        if code in TicketSubtask.NEW_RESPONSE_TYPES
     ]
 
-    subtask_type = forms.ChoiceField(
+    subtask_types = forms.MultipleChoiceField(
         choices=RESPONSE_TYPE_CHOICES,
-        label='ประเภทคำขอ',
-        # Stable id so the detail-page script can filter the assignee list by the
-        # chosen type (the two forms on the page would otherwise collide on the
-        # Django-default id_subtask_type).
-        widget=forms.Select(attrs={
-            'class': 'form-select form-select-sm', 'id': 'resp-type-select',
+        label='ประเภทงาน',
+        required=False,
+        widget=forms.CheckboxSelectMultiple(attrs={
+            'class': 'form-check-input response-type-choice',
+        }),
+    )
+    # Keep accepting the former single-select POST while old pages or clients
+    # are still in circulation. The current page submits ``subtask_types``.
+    subtask_type = forms.ChoiceField(choices=RESPONSE_TYPE_CHOICES, required=False)
+    title = forms.CharField(
+        max_length=TicketSubtask._meta.get_field('title').max_length,
+        label='ชื่องาน',
+        widget=forms.TextInput(attrs={
+            'class': 'form-control form-control-sm',
+            'id': 'resp-title',
+            'placeholder': 'เช่น ตรวจสอบช่องโหว่ของระบบที่ได้รับผลกระทบ',
+        }),
+    )
+    description = forms.CharField(
+        required=False,
+        label='ขอบเขตงาน',
+        widget=forms.Textarea(attrs={
+            'class': 'form-control form-control-sm', 'rows': 2,
+            'id': 'resp-description',
+            'placeholder': 'ขอบเขตงานที่ต้องการให้ทีมตอบสนองดำเนินการ...',
         }),
     )
     assigned_to = UserChoiceField(
@@ -985,28 +1001,65 @@ class ResponseRequestForm(forms.ModelForm):
             ),
         ).order_by('first_name', 'username'),
         required=False,
-        label='ผู้รับผิดชอบ (เว้นว่างเพื่อมอบหมายอัตโนมัติ)',
+        label='ผู้รับผิดชอบ (ถ้าจำเป็น)',
         empty_label='-- มอบหมายอัตโนมัติ --',
         widget=forms.Select(attrs={
             'class': 'form-select form-select-sm', 'id': 'resp-assignee-select',
         }),
     )
 
-    class Meta:
-        model = TicketSubtask
-        fields = ['subtask_type', 'title', 'description', 'assigned_to']
-        widgets = {
-            'title': forms.TextInput(attrs={
-                'class': 'form-control form-control-sm',
-                'id': 'resp-title',
-                'placeholder': 'เช่น เก็บ memory image / สแกนช่องโหว่ระบบที่ถูกโจมตี',
-            }),
-            'description': forms.Textarea(attrs={
-                'class': 'form-control form-control-sm', 'rows': 2,
-                'id': 'resp-description',
-                'placeholder': 'ขอบเขตงานที่ต้องการให้ทีมตอบสนองดำเนินการ...',
-            }),
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.assignment_fields = []
+        self.eligible_assignee_counts = {}
+        for subtask_type, type_label in self.RESPONSE_TYPE_CHOICES:
+            eligible = list(
+                TicketSubtask.eligible_assignees(subtask_type)
+                .select_related('profile')
+                .order_by('first_name', 'username')
+            )
+            self.eligible_assignee_counts[subtask_type] = len(eligible)
+            field_name = f'assigned_to_{subtask_type}'
+            self.fields[field_name] = UserChoiceField(
+                queryset=User.objects.filter(pk__in=[user.pk for user in eligible])
+                .order_by('first_name', 'username'),
+                required=False,
+                label=f'ผู้รับผิดชอบ — {type_label}',
+                empty_label='-- มอบหมายอัตโนมัติ --',
+                initial=eligible[0].pk if len(eligible) == 1 else None,
+                widget=forms.Select(attrs={
+                    'class': 'form-select form-select-sm response-assignee-select',
+                    'data-response-assignee-type': subtask_type,
+                }),
+            )
+            self.assignment_fields.append((
+                subtask_type,
+                type_label,
+                self[field_name],
+                len(eligible),
+                len(eligible) > 1,
+            ))
+
+    def clean(self):
+        cleaned = super().clean()
+        selected_types = cleaned.get('subtask_types') or []
+        if not selected_types and cleaned.get('subtask_type'):
+            selected_types = [cleaned['subtask_type']]
+        if not selected_types:
+            self.add_error('subtask_types', 'กรุณาเลือกอย่างน้อยหนึ่งประเภทงาน')
+        for subtask_type in selected_types:
+            field_name = f'assigned_to_{subtask_type}'
+            if (
+                self.eligible_assignee_counts.get(subtask_type, 0) > 1
+                and not cleaned.get(field_name)
+            ):
+                self.add_error(field_name, 'กรุณาเลือกผู้รับผิดชอบสำหรับประเภทงานนี้')
+        cleaned['selected_subtask_types'] = selected_types
+        cleaned['selected_assignees'] = {
+            subtask_type: cleaned.get(f'assigned_to_{subtask_type}')
+            for subtask_type in selected_types
         }
+        return cleaned
 
 
 class SubtaskUpdateForm(forms.ModelForm):
@@ -1020,6 +1073,10 @@ class SubtaskUpdateForm(forms.ModelForm):
         # legacy types the field is dropped so a crafted POST cannot set it.
         if not self.instance.requires_report_number:
             del self.fields['report_number']
+        elif self.instance.uses_manual_report_number:
+            self.fields['report_number'].widget.attrs['placeholder'] = (
+                self.instance.expected_report_number
+            )
 
     def clean_report_number(self):
         return (self.cleaned_data.get('report_number') or '').strip()

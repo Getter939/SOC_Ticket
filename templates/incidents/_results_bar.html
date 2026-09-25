@@ -1,0 +1,44 @@
+{% comment %}
+Count + sort, above a list table. Sort is ordering, not a filter, so it lives
+with the results; the selects join the filter form through form="{{ form_id }}"
+and apply on change (.js-autosubmit in base.html).
+
+  result_count        rows after filtering
+  result_unit         optional noun for the count, default 'เคส' (e.g. 'Alert', 'รายการ', 'คำขอ')
+  result_total        optional: rows before filtering ("จาก N ..."), shown only when narrowed
+  result_total_label  e.g. 'ที่เปิดอยู่'
+  sort_options, sort, form_id
+  sort_is_from_column  the current sort came from a column header, not a preset
+  per_page, per_page_choices  optional page-size select (the Wazuh triage queue);
+                      submitting the form drops the page number on purpose —
+                      page 3 of 25-per-page may not exist at 100 to a page
+{% endcomment %}
+<div class="results-bar">
+    <div>
+        <span class="fw-semibold">{{ result_count }} {{ result_unit|default:'เคส' }}</span>
+        {% if result_total and result_total != result_count %}
+        <span class="text-muted">จาก {{ result_total }} {{ result_total_label }}</span>
+        {% endif %}
+    </div>
+    <div class="results-bar__sort">
+        {% if sort_options %}
+        <label for="filter-sort" class="text-muted mb-0">เรียงตาม</label>
+        <select id="filter-sort" name="sort" form="{{ form_id }}" class="form-select form-select-sm js-autosubmit">
+            {# A column header can set a sort this list doesn't offer. Say so rather #}
+            {# than leave the browser showing the first option as if it were active. #}
+            {% if sort_is_from_column %}<option value="{{ sort }}" selected>ตามคอลัมน์ในตาราง</option>{% endif %}
+            {% for value, label in sort_options %}
+            <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        {% if per_page_choices %}
+        <label for="filter-per-page" class="text-muted mb-0 ms-2">ต่อหน้า</label>
+        <select id="filter-per-page" name="per_page" form="{{ form_id }}" class="form-select form-select-sm js-autosubmit">
+            {% for choice in per_page_choices %}
+            <option value="{{ choice }}" {% if choice == per_page %}selected{% endif %}>{{ choice }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </div>
+</div>
