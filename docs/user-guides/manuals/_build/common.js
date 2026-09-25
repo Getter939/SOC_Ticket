@@ -144,9 +144,57 @@ function dataTable(headers, rows, widths) {
   });
 }
 
+// ── Shared "ค้นหา กรอง และเรียงลำดับรายการ" body (v1.7.8) ──
+// Every list page shares one filter bar and server-side sortable headers, so
+// the explanation is written once here and each manual adds its own H2, its own
+// role-specific page rows (`pages`: [[label runs], text-or-runs] pairs, listed
+// first) and its own shot(). Set `ticketLists: false` for a persona that does
+// not see เคสที่กำลังดำเนินการอยู่ / ประวัติเคสที่ปิดไปแล้ว / ค้นหา IOC.
+// build-tier1.js keeps its own inline copy (it predates this file).
+function listControls({ pages = [], ticketLists = true } = {}) {
+  const out = [];
+  out.push(P("ทุกหน้าที่เป็นรายการใช้แถบค้นหาและการเรียงลำดับแบบเดียวกัน:"));
+  out.push(bullet([r("ค้นหา: ", { bold: true }), r("พิมพ์คำค้นแล้วกด Enter หรือกดปุ่มแว่นขยาย โดยทั่วไปค้นได้จากเลข Ticket ชื่อเรื่อง ระบบ/บริการ IP และรายละเอียด")]));
+  out.push(bullet([r("ตัวเลือกกรอง ", { bold: true }), r("เช่น ความรุนแรง หรือสถานะ มีผลทันทีที่เลือก "), r("ไม่มีปุ่ม “กรอง” แล้ว", { bold: true })]));
+  out.push(bullet([r("ป้ายตัวกรอง: ", { bold: true }), r("ทุกเงื่อนไขที่ใช้อยู่แสดงเป็นป้ายใต้แถบ กด × บนป้ายเพื่อเอาเงื่อนไขนั้นออก หรือกด "), ui("ล้างทั้งหมด"),
+    r(" ช่องที่กำลังกรองอยู่จะมีกรอบสีน้ำเงิน — ถ้ารายการดูสั้นผิดปกติ ให้ดูป้ายก่อน")]));
+  out.push(bullet([r("ตัวกรองเพิ่มเติม: ", { bold: true }), r("ในบางหน้า ตัวกรองที่ใช้ไม่บ่อยซ่อนอยู่ใต้ปุ่ม "), ui("ตัวกรองเพิ่มเติม"),
+    r(" ตัวเลขบนปุ่มบอกว่าตั้งไว้กี่รายการ และส่วนนี้จะเปิดค้างไว้เองเมื่อมีรายการที่ตั้งอยู่")]));
+  out.push(bullet([r("แถบผลลัพธ์ ", { bold: true }), r("เหนือตารางบอกจำนวนที่พบ เช่น “13 เคส จาก 89 ที่เปิดอยู่” และมีตัวเลือก "), ui("เรียงตาม"), r(" แบบสำเร็จรูป")]));
+  out.push(bullet([r("กดหัวคอลัมน์ ", { bold: true }),
+    r("เพื่อเรียงทั้งรายการ ไม่ใช่เฉพาะหน้าที่เห็นอยู่ กดครั้งแรกจะเรียงแบบที่ใช้บ่อยที่สุด — ใหม่สุดก่อน, Critical ก่อน, OLA ใกล้ครบกำหนดก่อน, ชื่อตามตัวอักษร, สถานะตามลำดับขั้นตอนงาน — กดซ้ำเพื่อกลับด้าน ลูกศร ▲ ▼ ชี้คอลัมน์ที่ใช้เรียงอยู่ แถวที่ไม่มีค่าอยู่ท้ายเสมอ และช่อง เรียงตาม จะขึ้นว่า "),
+    ui("ตามคอลัมน์ในตาราง"), r(" คอลัมน์ข้อความยาว เช่น รายละเอียด เรียงไม่ได้")]));
+  out.push(bullet([r("ลิงก์ ", { bold: true }), r("ของป้าย หน้าถัดไป และหัวคอลัมน์ คงเงื่อนไขทั้งหมดไว้ คัดลอกที่อยู่ในเบราว์เซอร์ส่งให้เพื่อนร่วมทีมเพื่อเปิดมุมมองเดียวกันได้")]));
+  const rows = [...pages];
+  if (ticketLists) {
+    rows.push(
+      [[menuTag("เคสที่กำลังดำเนินการอยู่")], [r("ค้นหา สถานะ ความรุนแรง และ วันที่แจ้ง — ใต้ "), ui("ตัวกรองเพิ่มเติม"),
+        r(" มี ประเภท ความฉุกเฉิน และ OLA หากไม่เลือกช่วงวันที่จะแสดงเคสเปิดทั้งหมด ช่องวันที่แจ้งมีทางลัด วันนี้ / 7 วัน / 30 วัน / เดือนนี้ หรือกำหนดวันเอง", { size: 28 })]],
+      [[menuTag("ประวัติเคสที่ปิดไปแล้ว")], [r("ป้ายผลลัพธ์ ทั้งหมด / อนุมัติแล้ว / Event / ยกเลิกแล้ว พร้อมจำนวน, ค้นหา ความรุนแรง ผู้อนุมัติ/ปิดเคส และ วันที่แจ้ง — ใต้ ", { size: 28 }), ui("ตัวกรองเพิ่มเติม"),
+        r(" มี ประเภท และ ความฉุกเฉิน ค่าเริ่มต้นแสดงเคสที่แจ้งในเดือนนี้ (ป้ายสีเทา) เลือก ทุกช่วงเวลา เพื่อดูทั้งหมด และเรียงปิดล่าสุดก่อน", { size: 28 })]],
+      [[menuTag("ค้นหา IOC")], "การ์ดเคสและการ์ดบันทึกการคัดกรองเรียงตามหัวคอลัมน์ได้แยกกัน เรียงการ์ดหนึ่งไม่ทำให้อีกการ์ดกลับไปหน้าแรก"],
+    );
+  }
+  if (rows.length) {
+    out.push(spacer(80));
+    out.push(dataTable(["หน้า", "ตัวกรองบนแถบ และข้อสังเกต"], rows, [3000, 6600]));
+    out.push(spacer(140));
+  }
+  if (ticketLists) {
+    out.push(callout("note", [
+      [r("ช่วงวันที่ในหน้า ", {}), menuTag("ประวัติเคสที่ปิดไปแล้ว"), r(" นับจาก ", {}), r("วันที่แจ้ง", { bold: true }),
+       r(" ไม่ใช่วันที่ปิด — เคสที่เปิดเดือนก่อนแต่ปิดเดือนนี้จะไม่อยู่ในมุมมองเริ่มต้น ให้เลือก ทุกช่วงเวลา หรือขยายช่วงวันที่ คอลัมน์ วันที่ปิด ในตารางบอกวันที่ปิดจริง และคอลัมน์ ผู้อนุมัติ/ปิดเคส แสดงชื่อผู้ปิดของเคส Event และเคสที่ยกเลิกด้วย", {})],
+    ]));
+    out.push(spacer(80));
+  }
+  return out;
+}
+
 // ── Assemble & write a manual ──
 function buildManual(cfg) {
   // cfg: { outPath, roleBandTh, roleEn, headerRight, subtitleTh, body, stepRefs }
+  const manualVersion = cfg.version || "v1.7.8";
+  const manualUpdatedTh = cfg.updatedTh || "25 กันยายน 2026";
   const logoData = fs.readFileSync(LOGO);
   const cover = [
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 900, after: 200 },
@@ -173,9 +221,9 @@ function buildManual(cfg) {
     }),
     spacer(360),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("เวอร์ชันระบบ v1.7.6", { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r("ปรับปรุงล่าสุด 25 กันยายน 2026", { color: INK, size: 28 })] }),
+      children: [r(`เวอร์ชันระบบ ${manualVersion}`, { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r(`ปรับปรุงล่าสุด ${manualUpdatedTh}`, { color: INK, size: 28 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("คู่มือฉบับที่ 1.4", { color: MUTED, size: 28 })] }),
+      children: [r("คู่มือฉบับที่ 1.5", { color: MUTED, size: 28 })] }),
     spacer(700),
     new Paragraph({ alignment: AlignmentType.CENTER,
       children: [r("เอกสารใช้ภายในองค์กร — บริษัท โทรคมนาคมแห่งชาติ จำกัด (มหาชน)", { italics: true, color: MUTED, size: 26 })] }),
@@ -239,4 +287,4 @@ function buildManual(cfg) {
 }
 
 module.exports = { r, P, H1, H2, H3, bullet, step, spacer, stateName, menuTag, ui, callout, shot, resetFigures, dataTable, buildManual,
-  colors: { NAVY, BLUE, RED, INK, MUTED } };
+  listControls, colors: { NAVY, BLUE, RED, INK, MUTED } };

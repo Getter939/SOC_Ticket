@@ -64,10 +64,23 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
 
 ## Notes
 
-- Cover version string and date are set in `common.js` (`buildManual`, cover block)
-  and inline in `build-tier1.js` — **two places, keep them in step**. Currently
-  `v1.7.6` / 25 Sep 2026 (manual edition 1.4). Before the v1.7.1 pass the two had drifted
+- Cover version string and date default in `common.js` (`buildManual`, cover block)
+  and are inline in `build-tier1.js`. Individual manuals can override the common
+  defaults in their `buildManual()` config (the SOC Manager manual passes its own
+  `version` / `updatedTh`). All manuals are now `v1.7.8` / 25 Sep 2026, manual
+  edition **1.5** — the edition number is hardcoded in both `common.js` and
+  `build-tier1.js`, so bump it in both. Before the v1.7.1 pass the two had drifted
   apart (1.1 vs 1.2); if you ever see them disagree again, that is the cause.
+- **List filter bar + sortable headers (v1.7.8).** Every list page shares one
+  filter bar (search on Enter, selects apply on change, removable chips, a
+  results bar with count and sort presets) and server-side sortable headers.
+  The explanation lives once in `common.js` `listControls()`: each manual adds its
+  own H2, its role-specific page rows (`pages`) and its own `shot()`.
+  `build-tier1.js` carries an inline copy — keep the two in step. Things the text
+  deliberately states, because users will ask: the Tier 2 Queue has **no emergency
+  filter** (so an emergency can't be hidden); History's date range counts from the
+  **opening** date (วันที่แจ้ง), not the close date; the Manager Queue has no date
+  range; the System Owner's open list is full and paged (it stopped at 10).
 - Content is written against
   [`docs/architecture/ticket-lifecycle-states.md`](../../../architecture/ticket-lifecycle-states.md),
   which is the authority for the state machine. When a release changes the workflow,
@@ -117,6 +130,7 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   | Central evidence + preview (v1.7.0) | tier1 §5.7.1, admin §5.4, tier2 §5.7 |
   | Redesigned **SOC** dashboard (v1.7.0) | manager §4.1 — see the caveat below |
   | Executive dashboard, as-built | `build-exec.js` §5 |
+  | List filter bar + sortable headers (v1.7.8) | tier1 §4.1 (+ §5.1 Wazuh triage, §5.10, FAQ), tier2 §4.1 (+ §5.1 tip, §5.10, FAQ), manager §4.2 (+ §5.9, §5.12 tip, FAQ), admin §4.1 (+ §5.5, FAQ), owner §4 + §4.1 + FAQ, response-teams หน้าจอของคุณ subsection + IOC Database section |
 - **Two changelog claims that do not match the code** — both already handled in the text,
   do not "fix" them back:
   1. v1.7.0's *"redesigned SOC executive dashboard"* actually landed in
@@ -172,14 +186,14 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 
 | Manual | SHOT ids |
 | --- | --- |
-| Tier 1 | `T1-login`, `T1-sidebar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
-| Tier 2 | `T2-login`, `T2-queue`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-monitoring-conclude`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
-| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
+| Tier 1 | `T1-login`, `T1-sidebar`, `T1-list-filter-bar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
+| Tier 2 | `T2-login`, `T2-queue`, `T2-list-filter-bar`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-monitoring-conclude`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
+| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-list-filter-bar`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |
 | Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-situation-panel`, `EXE-kpi-cards`, `EXE-pipeline-chart`, `EXE-ticket-table` |
-| Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
-| Red Team Manager | `RED-login`, `RED-queue`, `RED-my-request`, `RED-my-request-submit` |
+| Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-list-filter-bar`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
+| Red Team Manager | `RED-login`, `RED-queue`, `RED-list-filter-bar`, `RED-my-request`, `RED-my-request-submit` |
 
 **New and pending after the "งานของคุณ" card:**
 
@@ -206,3 +220,11 @@ Dropped ids, which need no capture: `FOR-rca-start`, `FOR-rca-stepper`,
 what is on screen: `T1-sidebar`, `T1-wazuh-triage`, `T1-create-form`, `T2-queue`,
 `MGR-sidebar`, `MGR-response-request`, `ADM-active-tickets`, `OWN-my-tickets`,
 `EXE-dashboard`, `FOR-queue`, `RED-queue`.
+
+**Re-capture after v1.7.8** — the list filter bar and sortable headers changed these
+screens: `T1-wazuh-triage`, `T1-ioc-search`, `T2-queue`, `T2-ioc-search`,
+`MGR-ioc-search`, `ADM-active-tickets`, `ADM-ioc-search`, `OWN-my-tickets` (now a
+full paged list with its own bar), `FOR-queue`, `RED-queue` and `FOR-ioc-database`.
+New ids to capture: `T1-list-filter-bar`, `T2-list-filter-bar`, `MGR-list-filter-bar`,
+`FOR-list-filter-bar`, `RED-list-filter-bar` — take each with a filter set, so the
+chips, the outlined control and an active column caret all show.
