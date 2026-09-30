@@ -577,15 +577,24 @@ class DashboardManagementViewTest(TestCase):
         self.assertLess(html.index('id="recent-cases"'), html.index('id="chartDaily"'))
 
     def test_dashboard_auto_refresh_script_renders_with_visibility_guard(self):
-        """The dashboard refreshes periodically without interrupting hidden tabs."""
+        """The dashboard refreshes periodically without interrupting hidden
+        tabs — now in place, through the script shared with the executive
+        dashboard."""
+        from django.contrib.staticfiles import finders
         _make_ticket(status=Ticket.STATUS_NEW)
         html = self._get().content.decode()
-        self.assertIn('const AUTO_REFRESH_MS = 300000', html)
-        self.assertIn("document.visibilityState !== 'visible'", html)
-        self.assertIn('window.location.reload()', html)
+        self.assertIn('js/dashboard-inplace.js', html)
+        self.assertIn("rootId: 'dash-root'", html)
+        self.assertIn('id="dash-root" data-inplace-root', html)
+        with open(finders.find('js/dashboard-inplace.js'), encoding='utf-8') as fh:
+            script = fh.read()
+        self.assertIn('var AUTO_REFRESH_MS = 300000', script)
+        self.assertIn("document.visibilityState !== 'visible'", script)
+        # Falls back to a real page load when the fetch cannot be used.
+        self.assertIn('window.location.href = target.href', script)
 
     def test_recent_cases_sort_survives_reload_and_filtering(self):
-        """Sort and page live in the URL, so the auto-refresh reload keeps the
+        """Sort and page live in the URL, so the auto-refresh keeps the
         manager's view; the filter form carries the sort through a re-filter."""
         _make_ticket(status=Ticket.STATUS_NEW)
         resp = self._get(sort='created', dir='asc')
@@ -594,7 +603,28 @@ class DashboardManagementViewTest(TestCase):
         html = resp.content.decode()
         self.assertIn('name="sort" value="created"', html)
         self.assertIn('name="dir" value="asc"', html)
-        self.assertIn('window.location.reload()', html)
+        # Sort headers and pagination re-render the table in place.
+        self.assertIn('id="recent-cases" data-flash-range data-flash-scope', html)
+
+    def test_headline_kpis_are_a_quiet_strip(self):
+        """2026-09-30: the five stat cards became one strip, like the
+        executive dashboard — no coloured top rules, red only as an alert."""
+        html = self._get().content.decode()
+        self.assertIn('class="panel kpi-strip mb-3" style="--kpi-cols: 5"', html)
+        self.assertNotIn('class="stat-card', html)
+        self.assertNotIn('class="kpi-cell is-alert"', html)   # nothing unassigned yet
+
+        _make_ticket(status=Ticket.STATUS_NEW)                 # unassigned
+        html = self._get().content.decode()
+        self.assertIn('class="kpi-cell is-alert"', html)
+
+    def test_filter_bar_says_what_the_page_shows(self):
+        ctx = self._get().context
+        self.assertEqual(ctx['filter_summary'], 'ทุกช่วงเวลา · ทุกสถานะ · ทุกระดับความรุนแรง')
+        ctx = self._get(date_range='month', status=Ticket.STATUS_NEW, severity='High').context
+        self.assertEqual(
+            ctx['filter_summary'],
+            'เปิดเดือนนี้ · ' + dict(Ticket.STATUS_CHOICES)[Ticket.STATUS_NEW] + ' · High')
 
     def test_pipeline_chart_renders(self):
         """Pipeline remains available after moving beside analyst workload."""

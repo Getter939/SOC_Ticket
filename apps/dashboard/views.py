@@ -673,16 +673,37 @@ def dashboard(request):
 
     daily_trend_data = [d['count'] for d in daily_trend_filtered]
     if date_range == 'today':
-        volume_title = 'Hourly Case Volume (วันนี้) — ปริมาณคดีรายชั่วโมง'
+        volume_title = 'Hourly Case Volume (วันนี้) — ปริมาณเคสรายชั่วโมง'
     elif date_range == 'week':
-        volume_title = 'Daily Case Volume (สัปดาห์นี้) — ปริมาณคดีรายวัน'
+        volume_title = 'Daily Case Volume (สัปดาห์นี้) — ปริมาณเคสรายวัน'
     elif date_range == 'custom':
-        volume_title = 'Daily Case Volume (ช่วงวันที่เลือก) — ปริมาณคดีรายวัน'
+        volume_title = 'Daily Case Volume (ช่วงวันที่เลือก) — ปริมาณเคสรายวัน'
     else:
-        volume_title = 'Daily Case Volume (30 วัน) — ปริมาณคดีรายวัน'
+        volume_title = 'Daily Case Volume (30 วัน) — ปริมาณเคสรายวัน'
     volume_window = f"{daily_trend_filtered[0]['date']} – {daily_trend_filtered[-1]['date']}"
 
+    # One line for the filter bar saying what the whole page is showing —
+    # every figure on it follows these three filters.
+    if date_range == 'custom':
+        if date_from and date_to:
+            range_text = f'เปิด {date_from:%d %b %Y} – {date_to:%d %b %Y}'
+        elif date_from:
+            range_text = f'เปิดตั้งแต่ {date_from:%d %b %Y}'
+        else:
+            range_text = f'เปิดถึง {date_to:%d %b %Y}'
+    else:
+        range_text = {
+            'today': 'เปิดวันนี้', 'week': 'เปิดสัปดาห์นี้',
+            'month': 'เปิดเดือนนี้', 'all': 'ทุกช่วงเวลา',
+        }[date_range]
+    filter_summary = ' · '.join([
+        range_text,
+        dict(Ticket.STATUS_CHOICES).get(status_filter, 'ทุกสถานะ'),
+        dict(Ticket.SEVERITY_CHOICES).get(severity_filter, 'ทุกระดับความรุนแรง'),
+    ])
+
     return render(request, 'dashboard/dashboard.html', {
+        'filter_summary':      filter_summary,
         'stats':               stats,
         'now':                 now,
         'wazuh_ingest_freshness': wazuh_ingest_freshness,

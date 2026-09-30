@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load humanize %}
+{% load humanize static %}
 
 {% block title %}แดชบอร์ด SOC สำหรับผู้บริหาร — ระบบสนับสนุนงาน SOC{% endblock %}
 
@@ -27,9 +27,7 @@
 
     /* Visual rules for this page: one accent (--ui-primary); red only as an
        alert (a count > 0 that needs action); no green "all good"; scope is a
-       quiet grey caption, never a coloured pill. */
-    .scope-note { font-size: 12px; color: var(--ui-muted); white-space: nowrap; }
-    .scope-note .live { font-weight: 700; letter-spacing: .03em; color: var(--ui-text-strong); }
+       quiet grey caption (.scope-note, base.html), never a coloured pill. */
 
     /* Answer cards */
     .answer-card { display: flex; flex-direction: column; gap: .5rem; height: 100%;
@@ -47,42 +45,7 @@
     .card-chevron, .kpi-chevron { color: var(--ui-muted); font-size: 12px; }
     a.answer-card:hover .card-chevron, a.kpi-cell:hover .kpi-chevron { color: var(--ui-primary); }
 
-    /* Headline KPI strip — one panel, four cells split by hairlines (2×2 on
-       narrow screens). Numbers stay in the text colour; a cell turns red
-       only while its count needs action. */
-    .kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; }
-    .kpi-cell { display: flex; flex-direction: column; gap: .15rem; padding: .85rem 1.1rem;
-                color: var(--ui-text); text-decoration: none; min-width: 0; }
-    .kpi-cell + .kpi-cell { border-left: 1px solid var(--ui-border); }
-    a.kpi-cell:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
-    .kpi-cell .kpi-label { display: flex; align-items: center; gap: .4rem; font-size: 13px; font-weight: 600;
-                           color: var(--ui-text-strong); line-height: 1.35; }
-    .kpi-cell .kpi-chevron { margin-left: auto; }
-    .kpi-cell .kpi-value { white-space: nowrap; font-size: 1.75rem; font-weight: 600; line-height: 1.2;
-                           margin-top: .1rem; font-variant-numeric: tabular-nums; }
-    .kpi-cell .kpi-unit { font-size: 13px; font-weight: 500; color: var(--ui-muted); }
-    .kpi-cell .kpi-caption { font-size: 12px; color: var(--ui-muted); }
-    .kpi-cell .kpi-caption .live { font-weight: 700; letter-spacing: .03em; color: var(--ui-text-strong); }
-    .kpi-cell .alert-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: #b02a37; flex-shrink: 0; }
-    .kpi-cell.is-alert .alert-dot { display: inline-block; }
-    .kpi-cell.is-alert .kpi-value { color: #b02a37; }
-    .kpi-delta-up { color: #b02a37; font-weight: 600; }
-    html[data-theme="dark"] .kpi-cell.is-alert .kpi-value,
-    html[data-theme="dark"] .kpi-delta-up { color: #f1aeb5; }
-    html[data-theme="dark"] .kpi-cell .alert-dot { background: #f1aeb5; }
-    @media (max-width: 991.98px) {
-        .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .kpi-cell:nth-child(3) { border-left: 0; }
-        .kpi-cell:nth-child(n+3) { border-top: 1px solid var(--ui-border); }
-    }
-    @media (max-width: 575.98px) {
-        .kpi-cell { padding: .7rem .75rem; }
-        /* Labels may wrap to two lines here; reserve both so the numbers in
-           a row still line up. */
-        .kpi-cell .kpi-label { min-height: 2.7em; align-items: flex-start; }
-        .kpi-cell .alert-dot { margin-top: .5em; }
-        .kpi-cell .kpi-value { font-size: 1.45rem; white-space: normal; }
-    }
+    /* The KPI strip (.kpi-strip / .kpi-cell) is shared, in base.html. */
 
     .mini-bars { display: flex; flex-direction: column; gap: 4px; }
     .mini-bar { display: grid; grid-template-columns: 8rem minmax(0, 1fr) 1.8rem; gap: .5rem;
@@ -194,34 +157,13 @@
         .ticket-table td:nth-child(9)::before { content: "อัปเดตล่าสุด"; }
         .exec-filterbar .btn-group .btn, .exec-filterbar .custom-range > summary { min-height: 44px; display: inline-flex; align-items: center; }
     }
-    /* In-place updates: dim while the next view loads, then ring whatever
-       the filter changed so the eye knows where to look. */
-    #exec-root[aria-busy="true"] { opacity: .6; transition: opacity .15s; pointer-events: none; }
-    .exec-flash { position: relative; border-radius: 8px; animation: exec-flash 2.2s ease-out; }
-    .exec-flash-tag {
-        position: absolute; top: -.7rem; left: .75rem; z-index: 2;
-        padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
-        background: var(--ui-primary); color: #fff; box-shadow: var(--ui-shadow-sm);
-        pointer-events: none; animation: exec-flash-tag 2.2s ease-out forwards;
-    }
-    html[data-theme="dark"] .exec-flash-tag { color: #0f141c; }
-    @keyframes exec-flash {
-        0%, 45% { box-shadow: 0 0 0 3px var(--ui-primary), 0 0 0 9px rgba(36,94,168,.18); }
-        100%    { box-shadow: 0 0 0 3px transparent, 0 0 0 9px transparent; }
-    }
-    @keyframes exec-flash-tag { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-    @media (prefers-reduced-motion: reduce) {
-        #exec-root[aria-busy="true"] { transition: none; }
-        /* No pulse: a steady ring that simply goes away. */
-        .exec-flash { animation: none; box-shadow: 0 0 0 3px var(--ui-primary); }
-        .exec-flash-tag { animation: none; }
-    }
+    /* The in-place update ring (.inplace-flash) is shared, in base.html. */
 </style>
 
 <div class="visually-hidden" role="status" aria-live="polite" id="exec-live"></div>
 {# Everything inside #exec-root is swapped in place when a filter changes #}
 {# (see the script at the bottom), so the page keeps its scroll position. #}
-<div id="exec-root">
+<div id="exec-root" data-inplace-root>
 
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
 <div class="page-header">
@@ -289,7 +231,7 @@
                 {% endif %}
             </form>
         </details>
-        <span class="scope-note ms-md-auto">ช่วงเวลา: <span class="scope-range fw-semibold">{{ filters.range_label }}</span>
+        <span class="scope-note ms-md-auto" data-range-scope data-flash-label="ช่วงเวลา: {{ filters.range_label }}">ช่วงเวลา: <span class="scope-range fw-semibold">{{ filters.range_label }}</span>
             · <span class="live">LIVE</span> = คิวปัจจุบัน ไม่ขึ้นกับช่วงเวลา</span>
     </div>
 </div>
@@ -732,216 +674,32 @@
 <p class="text-muted mt-3 mb-0" style="font-size:12px;">ผู้บริหารมีสิทธิ์ดูอย่างเดียว · เลขที่ Ticket แสดงเป็นข้อความ ไม่เปิดหน้ารายละเอียด</p>
 </div>{# /#exec-root #}
 
-<!-- Quiet auto-refresh + in-place filtering.
-     Every filter on this page is a plain ?query link, so without script it
-     still works as a normal page load. With script, the next view is fetched
-     and swapped into #exec-root instead: the page keeps its scroll position,
-     keeps every section the viewer opened, and rings the results that
-     changed so the eye knows where to look. -->
+<!-- Quiet auto-refresh + in-place filtering (static/js/dashboard-inplace.js,
+     shared with the SOC dashboard). Every filter on this page is a plain
+     ?query link, so without script it still works as a normal page load.
+     With script the next view is swapped into #exec-root: the page keeps its
+     scroll position and open sections, and the results that changed get a
+     ring so the eye knows where to look. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/dashboard-inplace.js' %}"></script>
 <script nonce="{{ request.csp_nonce }}">
 (function () {
-    const ROOT_ID = 'exec-root';
-    const SECTION_KEYS = { 'exec-crit': 'crit', 'response-progress': 'resp', 'exec-tickets': 'tickets' };
-    const SECTION_ORDER = ['crit', 'resp', 'tickets'];
-    const FLASH_MS = 2300;
-    const live = document.getElementById('exec-live');
-    const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let inflight = null;
-
-    // ── Open sections ────────────────────────────────────────────────── //
-    // Sections are independent: the viewer may open any number, and every
-    // update sends exactly that set (?open=crit,tickets) so none gets closed
-    // behind their back. A link into a closed section opens it too.
-    function sectionOf(id) {
-        const el = id && document.getElementById(id);
-        const box = el && el.closest('details.exec-details');
-        return box ? SECTION_KEYS[box.id] || '' : '';
-    }
-
-    function openSections(extra) {
-        const keys = [...document.querySelectorAll('#' + ROOT_ID + ' details.exec-details[open]')]
-            .map(d => SECTION_KEYS[d.id]);
-        if (extra) keys.push(extra);
-        return SECTION_ORDER.filter(k => keys.includes(k));
-    }
-
-    function withOpenSections(href, hash) {
-        const u = new URL(href, window.location.href);
-        u.searchParams.set('open', openSections(sectionOf(hash)).join(','));
-        return u;
-    }
-
-    // Keep the address bar in step when a section is opened or closed by
-    // hand, so reload, back/forward and auto-refresh keep it the same way.
-    function syncOpenParam() {
-        const u = new URL(window.location.href);
-        u.searchParams.set('open', openSections().join(','));
-        history.replaceState(history.state, '', u.href);
-        refreshToggleAll();
-    }
-
-    function refreshToggleAll() {
-        const all = document.querySelectorAll('#' + ROOT_ID + ' details.exec-details');
-        const open = document.querySelectorAll('#' + ROOT_ID + ' details.exec-details[open]');
-        document.querySelectorAll('[data-details-all]').forEach(btn => {
-            btn.hidden = false;
-            btn.disabled = btn.dataset.detailsAll === 'open'
-                ? open.length === all.length : open.length === 0;
-        });
-    }
-
-    // ── Focus effect ─────────────────────────────────────────────────── //
-    function flash(el, label) {
-        el.classList.remove('exec-flash');
-        el.querySelectorAll(':scope > .exec-flash-tag').forEach(t => t.remove());
-        void el.offsetWidth;  // restart the animation if it is still running
-        el.classList.add('exec-flash');
-        if (label) {
-            const tag = document.createElement('span');
-            tag.className = 'exec-flash-tag';
-            tag.setAttribute('aria-hidden', 'true');  // the live region reads it
-            tag.textContent = label;
-            el.prepend(tag);
-        }
-        setTimeout(() => {
-            el.classList.remove('exec-flash');
-            el.querySelectorAll(':scope > .exec-flash-tag').forEach(t => t.remove());
-        }, FLASH_MS);
-    }
-
-    // Rendered (not inside a closed section) and at least partly on screen.
-    function onScreen(el) {
-        if (!el) return false;
-        const closed = el.closest('details:not([open])');
-        if (closed && closed !== el) return false;
-        const r = el.getBoundingClientRect();
-        return r.bottom > 0 && r.top < window.innerHeight;
-    }
-
-    function rendered(el) {
-        const closed = el.closest('details:not([open])');
-        return !closed || closed === el;
-    }
-
-    // ── In-place navigation ──────────────────────────────────────────── //
-    async function swapTo(url, opts) {
-        opts = opts || {};
-        const target = new URL(url, window.location.href);
-        const hash = target.hash.slice(1);
-        target.hash = '';
-        const root = document.getElementById(ROOT_ID);
-        if (!root) { window.location.href = url; return; }
-
-        // Remember where the destination sits on screen now, so it can stay put.
-        const before = hash ? document.getElementById(hash) : null;
-        const anchorOffset = onScreen(before) ? before.getBoundingClientRect().top : null;
-        const scrollY = window.scrollY;
-
-        if (inflight) inflight.abort();
-        inflight = new AbortController();
-        root.setAttribute('aria-busy', 'true');
-        // Anything unexpected (session expired → login redirect, error page)
-        // falls back to a normal page load so the browser shows it properly.
-        const fullLoad = () => { window.location.href = target.href + (hash ? '#' + hash : ''); };
-        let res;
-        try {
-            res = await fetch(target.href, {
-                credentials: 'same-origin',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                signal: inflight.signal,
-            });
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            root.removeAttribute('aria-busy');
-            // Network down: a background refresh just tries again next time.
-            if (!opts.quiet) fullLoad();
-            return;
-        }
-        const fresh = res.ok && new URL(res.url).pathname === target.pathname
-            ? new DOMParser().parseFromString(await res.text(), 'text/html').getElementById(ROOT_ID)
-            : null;
-        if (!fresh) { fullLoad(); return; }
-        root.replaceWith(fresh);
+    let initPipelineChart = () => {};
+    // If the shared script failed to load (e.g. collectstatic not run yet),
+    // fall back to plain page loads so the chart still draws.
+    const nav = !window.DashboardInplace ? {
+        go: (href) => { window.location.href = href; },
+        withOpenSections: (href) => new URL(href, window.location.href),
+    } : window.DashboardInplace.init({
+        rootId: 'exec-root',
+        filterBarSelector: '.exec-filterbar',
+        sections: { 'exec-crit': 'crit', 'response-progress': 'resp', 'exec-tickets': 'tickets' },
+        liveRegionId: 'exec-live',
         // New data can only come from a date change; otherwise redraw still.
-        initPipelineChart(!!opts.flashRange);
-        if (opts.push) history.pushState({ exec: true }, '', target.href);
-        refreshToggleAll();
-
-        // Bootstrap sets `scroll-behavior: smooth` on :root, so the corrective
-        // scrolls must say 'instant' or the page visibly glides after a swap.
-        const after = hash ? document.getElementById(hash) : null;
-        if (after && anchorOffset !== null) {
-            // Same region was already on screen: keep it exactly where it was.
-            window.scrollBy({ top: after.getBoundingClientRect().top - anchorOffset, behavior: 'instant' });
-        } else if (after && !opts.keepScroll) {
-            // The link points somewhere that was off-screen or collapsed: go there.
-            window.scrollTo({ top: scrollY, behavior: 'instant' });
-            after.scrollIntoView({ behavior: reducedMotion() ? 'instant' : 'smooth', block: 'start' });
-        } else {
-            window.scrollTo({ top: scrollY, behavior: 'instant' });
-        }
-
-        // Point the eye at what changed: the link's destination, or — for a
-        // date change — every period-scoped block that is showing.
-        let message = '';
-        if (!opts.quiet) {
-            if (after) {
-                message = after.dataset.flashLabel || '';
-                flash(after, message);
-            } else if (opts.flashRange) {
-                const scope = fresh.querySelector('.exec-filterbar .scope-range');
-                message = scope ? 'ช่วงเวลา: ' + scope.textContent.trim() : '';
-                // The sticky bar's range badge is always on screen: ring it too.
-                if (scope) flash(scope, '');
-                const blocks = [...fresh.querySelectorAll('[data-flash-range]')].filter(rendered);
-                const firstVisible = blocks.find(onScreen);
-                blocks.forEach(el => flash(el, el === firstVisible ? message : ''));
-            }
-            if (live) live.textContent = 'อัปเดตแล้ว' + (message ? ': ' + message : '');
-        }
-
-        // Keyboard users keep their place: refocus the equivalent control.
-        if (opts.focusHref) {
-            const same = [...fresh.querySelectorAll('a[href]')]
-                .find(a => a.getAttribute('href') === opts.focusHref);
-            if (same) same.focus({ preventScroll: true });
-            else if (after) { after.setAttribute('tabindex', '-1'); after.focus({ preventScroll: true }); }
-        }
-    }
-
-    document.addEventListener('click', (e) => {
-        const allBtn = e.target.closest('[data-details-all]');
-        if (allBtn) {
-            const open = allBtn.dataset.detailsAll === 'open';
-            document.querySelectorAll('#' + ROOT_ID + ' details.exec-details').forEach(d => { d.open = open; });
-            syncOpenParam();
-            return;
-        }
-        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        const a = e.target.closest('#' + ROOT_ID + ' a[href^="?"]');
-        if (!a || a.target) return;
-        e.preventDefault();
-        const raw = a.getAttribute('href');
-        const hash = raw.includes('#') ? raw.split('#')[1] : '';
-        const next = withOpenSections(raw, hash);
-        swapTo(next.href, { push: true, focusHref: raw, flashRange: !hash && !!a.closest('.exec-filterbar') });
+        onSwap: (opts) => initPipelineChart(!!opts.flashRange),
     });
-
-    document.addEventListener('submit', (e) => {
-        const form = e.target.closest('#' + ROOT_ID + ' .exec-filterbar form');
-        if (!form) return;
-        e.preventDefault();
-        const params = new URLSearchParams(new FormData(form));
-        swapTo(withOpenSections('?' + params.toString()).href, { push: true, flashRange: true });
-    });
-
-    // `toggle` does not bubble, so listen in the capture phase.
-    document.addEventListener('toggle', (e) => {
-        if (e.target.matches && e.target.matches('#' + ROOT_ID + ' details.exec-details')) syncOpenParam();
-    }, true);
-
-    window.addEventListener('popstate', () => swapTo(window.location.href, { keepScroll: true, quiet: true }));
+    const withOpenSections = nav.withOpenSections;
+    const swapTo = nav.go;
 
     // ── Pipeline chart (stacked bars, click-to-filter) ───────────────── //
     // Same chart as before the redesign; it now filters in place and takes
@@ -954,7 +712,7 @@
     const cssVar = (name, fallback) =>
         getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 
-    function initPipelineChart(animate) {
+    initPipelineChart = function (animate) {
         if (pipelineChart) { pipelineChart.destroy(); pipelineChart = null; }
         const canvas = document.getElementById('chartPipelineExec');
         const dataEl = document.getElementById('pipeline-by-severity-exec');
@@ -1072,30 +830,11 @@
             },
             plugins: [totalLabelPlugin],
         });
-    }
+    };
     initPipelineChart(true);
     // Light/dark switch: redraw with the new theme colours.
     new MutationObserver(() => initPipelineChart(false))
         .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-    refreshToggleAll();
-
-    // Quiet auto-refresh, same idle rules as the management dashboard, but
-    // refreshed in place so the viewer's scroll position and sections stay.
-    const AUTO_REFRESH_MS = 300000;
-    const IDLE_GRACE_MS = 15000;
-    let userActiveUntil = 0;
-    ['pointerdown', 'keydown', 'input', 'change', 'focusin'].forEach(name => {
-        document.addEventListener(
-            name, () => { userActiveUntil = Date.now() + IDLE_GRACE_MS; },
-            { capture: true, passive: true });
-    });
-    setInterval(() => {
-        if (document.visibilityState !== 'visible') return;
-        if (Date.now() < userActiveUntil) return;
-        if (navigator.onLine === false) return;
-        swapTo(withOpenSections(window.location.href).href, { keepScroll: true, quiet: true });
-    }, AUTO_REFRESH_MS);
 })();
 </script>
 {% endblock %}

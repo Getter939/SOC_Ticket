@@ -76,6 +76,27 @@ release (tag) dates.
   - The detail sections are independent: open any number, and filtering keeps
     them open (`?open=crit,resp,tickets`). "ขยายทั้งหมด" / "ย่อทั้งหมด" open or
     close all three.
+  - Quieter visual style. The four headline numbers are one strip split by
+    hairlines instead of four cards with coloured top rules. LIVE / period
+    labels are grey captions instead of coloured pills, and numbers sit in the
+    text colour. Red marks only an Emergency or OLA count above 0, and nothing
+    is green for zero. The rest of the page uses one blue accent (closure bar,
+    in-vs-out bars), keeping amber for requests older than 7 days. The pipeline
+    chart is unchanged.
+  - **The SOC dashboard got the same treatment.**
+    - Its five stat cards are one quiet strip. Red now marks only unassigned
+      work, or a Critical case past or within an hour of its contain deadline.
+      "Closed This Month" is no longer always green, and MTTR no longer always
+      orange.
+    - Under the filter bar, a new "แสดง: …" line says what the page is
+      showing (opened date · status · severity).
+    - Filters, pipeline clicks, sort headers and pagination update in place
+      with the same highlight, and the 5-minute auto-refresh keeps your
+      scroll position.
+    - Workload chips and tables no longer show light rows in dark mode.
+    - Both dashboards now share one script, `static/js/dashboard-inplace.js`,
+      with the strip and highlight styles in `base.html`. The SOC Manager
+      manual §4.1 was updated to match.
   - The Executive manual (`user-manual-executive.th.docx`) was rewritten and
     rebuilt to match: sections 4–8 now walk the new layout, the LIVE badge,
     the in-place highlight and the Ticket / case / request units. Its cover

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load humanize %}
+{% load humanize static %}
 
 {% block title %}แดชบอร์ด — ระบบสนับสนุนงาน SOC{% endblock %}
 
@@ -49,22 +49,7 @@
         .dash-filterbar input[type="date"] { min-width: 0; width: 100%; }
     }
 
-    /* ── Flat bordered stat cards (border-only, top accent, no shadow) ── */
-    .stat-card {
-        background: #fff;
-        border: 1px solid #e3e6ea;
-        border-top-width: 3px;
-        border-radius: 6px;
-        padding: 0.7rem 0.9rem;
-        height: 100%;
-    }
-    .stat-card.b-blue   { border-top-color: #0d6efd; }
-    .stat-card.b-red    { border-top-color: #dc3545; }
-    .stat-card.b-green  { border-top-color: #198754; }
-    .stat-card.b-orange { border-top-color: #fd7e14; }
-    .stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
-    .stat-card .stat-label { font-size: 13px; color: #6c757d; font-weight: 600; }
-    .stat-card .stat-sub   { font-size: 13px; margin-top: 0.15rem; }
+    /* Headline KPIs use the shared quiet strip (.kpi-strip, base.html). */
 
     /* ── Section card / titles ── */
     .panel { background:#fff; border:1px solid #e3e6ea; border-radius:6px; }
@@ -136,6 +121,21 @@
     .workload-scroll { max-height: 440px; overflow: auto; }
     .workload-table thead th { position: sticky; top: 0; z-index: 1; }
     .workload-note { color: var(--ui-muted); font-size: 12px; }
+    /* Dark theme: tables otherwise keep light rows/borders from Bootstrap
+       and the light-only colours above. */
+    html[data-theme="dark"] .detail-table {
+        --bs-table-bg: var(--ui-surface); --bs-table-color: var(--ui-text);
+        --bs-table-border-color: var(--ui-border);
+    }
+    html[data-theme="dark"] .heat-table td { border-color: var(--ui-border-subtle); }
+    html[data-theme="dark"] .heat-table th { background: var(--ui-surface-subtle); color: var(--ui-text); }
+    html[data-theme="dark"] .wl-detail > td { background: var(--ui-surface-subtle); }
+    html[data-theme="dark"] .wl-chip { background: var(--ui-surface-hover); color: var(--ui-text); }
+    html[data-theme="dark"] .wl-chip strong { color: var(--ui-text-strong); }
+    html[data-theme="dark"] .wl-chip-waiting { background: var(--ui-surface-subtle); color: var(--ui-muted); }
+    html[data-theme="dark"] .wl-chip-claimed,
+    html[data-theme="dark"] .wl-claimed-badge { background: rgba(121,174,242,.16); color: #9cc3f5; }
+    html[data-theme="dark"] .wl-row:hover { background: var(--ui-surface-hover); }
     .pipeline-chart { position: relative; height: 460px; }
     .pipeline-panel .panel-title,
     .pipeline-panel .chart-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -144,6 +144,12 @@
         .pipeline-chart { height: 620px; }
     }
 </style>
+
+<div class="visually-hidden" role="status" aria-live="polite" id="dash-live"></div>
+{# Everything inside #dash-root is swapped in place when a filter, sort or #}
+{# page changes (static/js/dashboard-inplace.js), so the view keeps its    #}
+{# scroll position instead of jumping to the top.                          #}
+<div id="dash-root" data-inplace-root>
 
 <!-- ── Header + live data freshness ─────────────────────────────────────────── -->
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
@@ -217,81 +223,75 @@
             </div>
             <button type="submit" class="btn btn-sm btn-primary">ใช้ตัวกรอง</button>
         </form>
-        <span class="small text-muted w-100">ช่วงวันที่ใช้วันที่เปิดเคส และมีผลกับทั้งแดชบอร์ด</span>
+        {# One line saying what the whole page is showing — every figure below #}
+        {# follows these filters (opened date, status, severity).            #}
+        <span class="scope-note w-100" style="white-space: normal;" data-range-scope
+              data-flash-label="แสดง: {{ filter_summary }}">แสดง: <span class="fw-semibold">{{ filter_summary }}</span>
+            · ช่วงวันที่ใช้วันที่เปิดเคส และมีผลกับทั้งแดชบอร์ด</span>
     </div>
 </div>
 
-<!-- ══ ROW 1: Stat cards ════════════════════════════════════════════════════ -->
-<div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-3 mb-3">
+<!-- ══ ROW 1: Headline KPIs — one quiet strip, five cells ═══════════════════ -->
+{# Numbers stay in the text colour; a cell turns red only while it needs   #}
+{# action (unassigned work, a Critical case at/near its contain deadline). #}
+<section class="panel kpi-strip mb-3" style="--kpi-cols: 5" aria-label="ตัวชี้วัดหลัก" data-flash-range>
 
     <!-- 1. Total Active Cases -->
-    <div class="col">
-        <div class="stat-card b-blue">
-            <div class="stat-value">{{ active_total|intcomma }}</div>
-            <div class="stat-label">Total Active Cases / คดีที่กำลังดำเนินการ</div>
-        </div>
+    <div class="kpi-cell">
+        <span class="kpi-label">Total Active Cases / เคสที่กำลังดำเนินการ</span>
+        <span class="kpi-value">{{ active_total|intcomma }} <span class="kpi-unit">เคส</span></span>
+        <span class="kpi-caption">ยังไม่ปิด · ตามตัวกรอง</span>
     </div>
 
     <!-- 2. Unassigned cases need a clear live-queue signal. -->
-    <div class="col">
-        <div class="stat-card b-orange">
-            <div class="stat-value text-warning">{{ unassigned_active|intcomma }}</div>
-            <div class="stat-label">Unassigned Active / ยังไม่มอบหมาย</div>
-            <div class="stat-sub text-muted">ต้องจัดสรรในคิวปัจจุบัน</div>
-        </div>
+    <div class="kpi-cell {% if unassigned_active %}is-alert{% endif %}">
+        <span class="kpi-label"><span class="alert-dot" aria-hidden="true"></span>Unassigned Active / ยังไม่มอบหมาย</span>
+        <span class="kpi-value">{{ unassigned_active|intcomma }} <span class="kpi-unit">เคส</span></span>
+        <span class="kpi-caption">ต้องจัดสรรในคิวปัจจุบัน</span>
     </div>
 
     <!-- 3. Critical Cases -->
-    <div class="col">
-        <div class="stat-card b-red">
-            <div class="stat-value text-danger">{{ active_critical|intcomma }}</div>
-            <div class="stat-label">ความรุนแรงระดับวิกฤต</div>
-            {% if critical_soonest_deadline %}
-            {% with d=critical_soonest_deadline %}
-            <div class="stat-sub fw-bold
-                {% if d.overdue or d.minutes_remaining < 60 %}text-danger{% elif d.minutes_remaining < 240 %}text-warning{% else %}text-success{% endif %}">
-                {% if d.overdue %}ใกล้ครบกำหนดที่สุด: เกินกำหนด {{ d.label }}{% else %}ใกล้ครบกำหนดที่สุด: เหลือ {{ d.label }}{% endif %}
-            </div>
-            {% endwith %}
-            {% endif %}
-        </div>
+    {% with d=critical_soonest_deadline %}
+    <div class="kpi-cell {% if d and d.overdue or d and d.minutes_remaining < 60 %}is-alert{% endif %}">
+        <span class="kpi-label"><span class="alert-dot" aria-hidden="true"></span>ความรุนแรงระดับวิกฤต</span>
+        <span class="kpi-value">{{ active_critical|intcomma }} <span class="kpi-unit">เคส</span></span>
+        {% if d %}
+        <span class="kpi-caption {% if d.overdue or d.minutes_remaining < 60 %}kpi-alert-text fw-semibold{% endif %}">
+            {% if d.overdue %}ใกล้ครบกำหนดที่สุด: เกินกำหนด {{ d.label }}{% else %}ใกล้ครบกำหนดที่สุด: เหลือ {{ d.label }}{% endif %}
+        </span>
+        {% else %}
+        <span class="kpi-caption">ยังไม่ปิด · ตามตัวกรอง</span>
+        {% endif %}
     </div>
+    {% endwith %}
 
     <!-- 4. Closed This Month -->
-    <div class="col">
-        <div class="stat-card b-green">
-            <div class="stat-value text-success">{{ closed_this_month|intcomma }}</div>
-            <div class="stat-label">Closed This Month / ปิดเดือนนี้</div>
-            {% if closed_delta > 0 %}
-            <div class="stat-sub text-success">+{{ closed_delta|intcomma }} เทียบกับเดือนก่อน</div>
-            {% elif closed_delta < 0 %}
-            <div class="stat-sub text-danger">{{ closed_delta|intcomma }} เทียบกับเดือนก่อน</div>
-            {% else %}
-            <div class="stat-sub text-muted">เท่ากับเดือนก่อน</div>
-            {% endif %}
-            <div class="stat-sub text-muted">นับเคสที่เปิดในช่วงตัวกรอง</div>
-        </div>
+    <div class="kpi-cell">
+        <span class="kpi-label">Closed This Month / ปิดเดือนนี้</span>
+        <span class="kpi-value">{{ closed_this_month|intcomma }} <span class="kpi-unit">เคส</span></span>
+        <span class="kpi-caption">
+            {% if closed_delta > 0 %}+{{ closed_delta|intcomma }} เทียบกับเดือนก่อน{% elif closed_delta < 0 %}{{ closed_delta|intcomma }} เทียบกับเดือนก่อน{% else %}เท่ากับเดือนก่อน{% endif %}
+            · นับเคสที่เปิดในช่วงตัวกรอง
+        </span>
     </div>
 
     <!-- 5. MTTR -->
-    <div class="col">
-        <div class="stat-card b-orange">
-            <div class="stat-value text-warning">{{ stats.mttr_median|default:"—" }} ชม.</div>
-            {# The headline figure is the median; the mean is in the sub-line. #}
-            <div class="stat-label">เวลามัธยฐานในการแก้ไข (MTTR)</div>
-            <div class="stat-sub text-muted">
-                เฉลี่ย {{ stats.mttr_mean|default:"—" }} ชม. · n={{ stats.mttr_n|default:0 }} · ปิดใน 30 วันล่าสุด จากเคสที่เปิดตามตัวกรอง
-            </div>
-        </div>
+    {# The headline figure is the median; the mean is in the caption. #}
+    <div class="kpi-cell">
+        <span class="kpi-label" title="เวลามัธยฐานในการแก้ไข">เวลามัธยฐานในการแก้ไข (MTTR)</span>
+        <span class="kpi-value">{{ stats.mttr_median|default:"—" }} <span class="kpi-unit">ชม.</span></span>
+        <span class="kpi-caption">
+            ปิดใน 30 วันล่าสุด · เฉลี่ย {{ stats.mttr_mean|default:"—" }} ชม. · n={{ stats.mttr_n|default:0 }} · จากเคสที่เปิดตามตัวกรอง
+        </span>
     </div>
-</div>
+</section>
 
 <!-- ══ ROW 2: Analyst workload + expanded Pipeline ═══════════ -->
 <div class="row g-3 mb-3 align-items-stretch">
 
     <!-- 2L — Analyst workload heatmap -->
     <div class="col-xl-5">
-        <div class="panel p-3 h-100">
+        <div class="panel p-3 h-100" data-flash-range>
             <div class="panel-title mb-2">
                 <i class="bi bi-people me-1"></i>Analyst Workload — งานที่ต้องดำเนินการเอง
             </div>
@@ -375,7 +375,7 @@
 
     <!-- 2R — Pipeline by status × severity (horizontal stacked bars) -->
     <div class="col-xl-7">
-        <div class="panel p-3 h-100 pipeline-panel">
+        <div class="panel p-3 h-100 pipeline-panel" data-flash-range>
             <h6 class="panel-title mb-2" title="Pipeline — สถานะที่กำลังดำเนินการ">
                 <i class="bi bi-diagram-3 me-1"></i>Pipeline — สถานะที่กำลังดำเนินการ
             </h6>
@@ -427,9 +427,12 @@
 </style>
 <div class="row g-3 mb-3">
     <div class="col-12">
-        <div class="panel" id="recent-cases">
+        {# data-flash-scope: its own sort headers and pagination re-render #}
+        {# it in place, keep it where it is on screen and ring it.         #}
+        <div class="panel" id="recent-cases" data-flash-range data-flash-scope
+             data-flash-label="Active Cases · {{ recent_total|intcomma }} เคส{% if recent_page.has_other_pages %} · หน้า {{ recent_page.number }}/{{ recent_page.paginator.num_pages }}{% endif %}">
             <div class="p-3 pb-2 panel-title">
-                <i class="bi bi-list-ul me-1"></i>Active Cases — รายละเอียดคดี
+                <i class="bi bi-list-ul me-1"></i>Active Cases — รายละเอียดเคส
             </div>
             <div class="table-responsive">
                 <table class="table table-sm detail-table mb-0 align-middle">
@@ -497,7 +500,7 @@
                             </td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="11" class="text-center text-muted py-4">ไม่มีคดีที่กำลังดำเนินการ</td></tr>
+                        <tr><td colspan="11" class="text-center text-muted py-4">ไม่มีเคสที่กำลังดำเนินการ</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -539,11 +542,11 @@
 <!-- ══ ROW 4: Case volume trend (full width) ════════════════════════════════════ -->
 <div class="row g-3 mb-3">
     <div class="col-12">
-        <div class="panel p-3">
+        <div class="panel p-3" data-flash-range>
             <div class="panel-title mb-2">
                 <i class="bi bi-graph-up me-1"></i>{{ volume_title }}
             </div>
-            <p class="chart-hint">{{ volume_window }} ICT · จำนวนคดีที่สร้างตามตัวกรองที่เลือก</p>
+            <p class="chart-hint">{{ volume_window }} ICT · จำนวนเคสที่สร้างตามตัวกรองที่เลือก</p>
             <p class="chart-hint"><i class="bi bi-cursor-fill me-1"></i>คลิกที่จุดเพื่อแสดงวันที่และยอดรวมค้างไว้</p>
             <div style="height:200px;">
                 <canvas id="chartDaily" role="img" aria-label="{{ volume_title }}"></canvas>
@@ -552,7 +555,7 @@
             <div class="visually-hidden">
             <table>
                 <caption>จำนวนเคสรายวัน</caption>
-                <thead><tr><th>วันที่</th><th>จำนวนคดี</th></tr></thead>
+                <thead><tr><th>วันที่</th><th>จำนวนเคส</th></tr></thead>
                 <tbody>
                     {% for row in daily_trend_filtered %}
                     <tr><td>{{ row.date }}</td><td>{{ row.count }}</td></tr>
@@ -564,87 +567,81 @@
     </div>
 </div>
 
-<!-- Quiet dashboard auto-refresh. Skips hidden tabs and active interactions. -->
-<script nonce="{{ request.csp_nonce }}">
-(function () {
-    const AUTO_REFRESH_MS = 300000;
-    const IDLE_GRACE_MS = 15000;
-    const interactiveSelector = [
-        'a', 'button', 'input', 'select', 'textarea',
-        '[role="button"]', '[contenteditable="true"]',
-    ].join(',');
-    let userActiveUntil = 0;
-    let formSubmitting = false;
-
-    function markUserActive() {
-        userActiveUntil = Date.now() + IDLE_GRACE_MS;
-    }
-
-    ['pointerdown', 'keydown', 'input', 'change', 'focusin'].forEach(eventName => {
-        document.addEventListener(eventName, markUserActive, { capture: true, passive: true });
-    });
-    document.addEventListener('submit', () => { formSubmitting = true; }, { capture: true });
-
-    setInterval(() => {
-        if (formSubmitting) return;
-        if (document.visibilityState !== 'visible') return;
-        if (Date.now() < userActiveUntil) return;
-        if (navigator.onLine === false) return;
-
-        const active = document.activeElement;
-        if (active && active !== document.body && active.matches(interactiveSelector)) return;
-
-        window.location.reload();
-    }, AUTO_REFRESH_MS);
-})();
-</script>
-
-<!-- ── Analyst Workload: expand a row to reveal its status breakdown ────────── -->
-<script nonce="{{ request.csp_nonce }}">
-(function () {
-    document.querySelectorAll('.wl-row[data-wl-toggle]').forEach(function (row) {
-        function toggle() {
-            var detail = document.getElementById(row.getAttribute('data-wl-toggle'));
-            if (!detail) return;
-            var opening = detail.hasAttribute('hidden');
-            if (opening) { detail.removeAttribute('hidden'); }
-            else { detail.setAttribute('hidden', ''); }
-            row.setAttribute('aria-expanded', opening ? 'true' : 'false');
-        }
-        row.addEventListener('click', toggle);
-        row.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-        });
-    });
-})();
-</script>
-
-<!-- ── Chart.js data + rendering ───────────────────────────────────────────── -->
+<!-- ── Chart.js data (inside the root so an in-place update refreshes it) ── -->
 {{ pipeline_by_severity|json_script:"pipeline-by-severity" }}
 {{ daily_trend_labels|json_script:"daily-labels" }}
 {{ daily_trend_data|json_script:"daily-data" }}
+</div>{# /#dash-root #}
+
+<!-- Quiet dashboard auto-refresh + in-place filtering, shared with the
+     executive dashboard (static/js/dashboard-inplace.js). Filters, pipeline
+     clicks, sort headers and pagination update the page without a reload;
+     the auto-refresh (idle viewer, visible tab, no focused form control)
+     updates in place too, keeping the scroll position. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/dashboard-inplace.js' %}"></script>
 <script nonce="{{ request.csp_nonce }}">
 
 // Legibility floor: every chart label ≥ 13px.
 Chart.defaults.font.size = 13;
-Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--ui-text').trim();
-Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue('--ui-border').trim();
 Chart.defaults.plugins.legend.labels.font = { size: 13 };
 Chart.defaults.plugins.tooltip.bodyFont   = { size: 13 };
 Chart.defaults.maintainAspectRatio = false;
+const DEFAULT_CHART_ANIMATION = Chart.defaults.animation;
 const dashboardCharts = [];
 
 function readJSON(id) { return JSON.parse(document.getElementById(id).textContent); }
 
+// If the shared script failed to load (e.g. collectstatic not run yet),
+// fall back to plain page loads so the charts still draw.
+const dashNav = !window.DashboardInplace ? {
+    go: (href) => { window.location.href = href; },
+} : window.DashboardInplace.init({
+    rootId: 'dash-root',
+    filterBarSelector: '.dash-filterbar',
+    liveRegionId: 'dash-live',
+    // Charts sit inside the swapped root: rebuild them. Only a filter change
+    // brings new numbers, so only then do they animate.
+    onSwap: (opts) => initDashboardCharts(!!opts.flashRange),
+});
+
+// Pipeline clicks filter the whole dashboard (same as the filter bar).
 function applyDashboardFilters(filters) {
     const params = new URLSearchParams(window.location.search);
     Object.entries(filters).forEach(([key, value]) => {
         if (value) params.set(key, value);
         else params.delete(key);
     });
-    window.location.search = params.toString();
+    params.delete('page');
+    dashNav.go('?' + params.toString(), { push: true, flashRange: true });
 }
+
+// ── Analyst Workload: expand a row to reveal its status breakdown ──
+// Delegated, so rows swapped in by an in-place update keep working.
+function toggleWorkloadRow(row) {
+    const detail = document.getElementById(row.getAttribute('data-wl-toggle'));
+    if (!detail) return;
+    const opening = detail.hasAttribute('hidden');
+    if (opening) detail.removeAttribute('hidden');
+    else detail.setAttribute('hidden', '');
+    row.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
+document.addEventListener('click', (e) => {
+    const row = e.target.closest('#dash-root .wl-row[data-wl-toggle]');
+    if (row) toggleWorkloadRow(row);
+});
+document.addEventListener('keydown', (e) => {
+    const row = e.target.closest && e.target.closest('#dash-root .wl-row[data-wl-toggle]');
+    if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleWorkloadRow(row); }
+});
+
+function initDashboardCharts(animate) {
+    dashboardCharts.forEach(chart => chart.destroy());
+    dashboardCharts.length = 0;
+    const style = getComputedStyle(document.documentElement);
+    Chart.defaults.color = style.getPropertyValue('--ui-text').trim();
+    Chart.defaults.borderColor = style.getPropertyValue('--ui-border').trim();
+    Chart.defaults.animation = animate === false ? false : DEFAULT_CHART_ANIMATION;
 
 // ── Pipeline by status × severity (horizontal stacked bars) ──
 (function () {
@@ -725,7 +722,7 @@ function applyDashboardFilters(filters) {
                     suggestedMax: maxTotal + 1,
                     grid: { color: Chart.defaults.borderColor },
                     ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
-                    title: { display: true, text: 'จำนวนคดี', font: { size: 13 } },
+                    title: { display: true, text: 'จำนวนเคส', font: { size: 13 } },
                 },
                 y: {
                     stacked: true,
@@ -779,7 +776,7 @@ function applyDashboardFilters(filters) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'จำนวนคดี', data: data,
+                label: 'จำนวนเคส', data: data,
                 borderColor: '#0d6efd', backgroundColor: grad,
                 fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6,
             }]
@@ -799,7 +796,7 @@ function applyDashboardFilters(filters) {
                 tooltip: {
                     callbacks: {
                         title: items => items[0].label,
-                        label: item => 'จำนวนคดี: ' + item.parsed.y,
+                        label: item => 'จำนวนเคส: ' + item.parsed.y,
                     }
                 }
             },
@@ -808,13 +805,15 @@ function applyDashboardFilters(filters) {
                 x: { ticks: { autoSkip: true,
                               maxTicksLimit: labels.length > 20 ? 10 : undefined } },
                 y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 },
-                     title: { display: true, text: 'จำนวนคดี', font: { size: 13 } } },
+                     title: { display: true, text: 'จำนวนเคส', font: { size: 13 } } },
             },
             responsive: true,
         }
     });
     dashboardCharts.push(chart);
 })();
+}
+initDashboardCharts(true);
 
 window.addEventListener('themechange', () => {
     const style = getComputedStyle(document.documentElement);

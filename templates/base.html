@@ -509,6 +509,80 @@
             .page-loading-indicator::after { animation-duration: 2s; }
         }
 
+        /* Dashboard headline KPIs (SOC + Executive) — one panel split into
+           cells by hairlines. Numbers stay in the text colour; a cell turns
+           red only while its count needs action (.is-alert). Scope (LIVE /
+           period / fixed window) is a quiet grey caption, never a pill.
+           Column count: style="--kpi-cols: 5" on the strip (default 4). */
+        .scope-note { font-size: 12px; color: var(--ui-muted); white-space: nowrap; }
+        .scope-note .live, .kpi-caption .live { font-weight: 700; letter-spacing: .03em; color: var(--ui-text-strong); }
+        .kpi-strip { display: grid; grid-template-columns: repeat(var(--kpi-cols, 4), minmax(0, 1fr)); overflow: hidden; }
+        .kpi-cell { display: flex; flex-direction: column; gap: .15rem; padding: .85rem 1.1rem;
+                    color: var(--ui-text); text-decoration: none; min-width: 0; }
+        .kpi-cell + .kpi-cell { border-left: 1px solid var(--ui-border); }
+        /* Line up label / value / caption across the cells of a row even when
+           one label wraps (each cell is exactly those three children). */
+        @supports (grid-template-rows: subgrid) {
+            .kpi-cell { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: .15rem; align-items: start; }
+            .kpi-cell .kpi-label { align-self: start; }
+            .kpi-cell .kpi-value { align-self: end; }
+        }
+        a.kpi-cell:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
+        a.kpi-cell:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: -2px; }
+        .kpi-cell .kpi-label { display: flex; align-items: center; gap: .4rem; font-size: 13px; font-weight: 600;
+                               color: var(--ui-text-strong); line-height: 1.35; }
+        .kpi-cell .kpi-chevron { margin-left: auto; color: var(--ui-muted); font-size: 12px; }
+        a.kpi-cell:hover .kpi-chevron { color: var(--ui-primary); }
+        .kpi-cell .kpi-value { white-space: nowrap; font-size: 1.75rem; font-weight: 600; line-height: 1.2;
+                               margin-top: .1rem; font-variant-numeric: tabular-nums; }
+        .kpi-cell .kpi-unit { font-size: 13px; font-weight: 500; color: var(--ui-muted); }
+        .kpi-cell .kpi-caption { font-size: 12px; color: var(--ui-muted); }
+        .kpi-cell .alert-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: #b02a37; flex-shrink: 0; }
+        .kpi-cell.is-alert .alert-dot { display: inline-block; }
+        .kpi-cell.is-alert .kpi-value, .kpi-alert-text { color: #b02a37; }
+        .kpi-delta-up { color: #b02a37; font-weight: 600; }
+        html[data-theme="dark"] .kpi-cell.is-alert .kpi-value,
+        html[data-theme="dark"] .kpi-alert-text,
+        html[data-theme="dark"] .kpi-delta-up { color: #f1aeb5; }
+        html[data-theme="dark"] .kpi-cell .alert-dot { background: #f1aeb5; }
+        @media (max-width: 991.98px) {
+            .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .kpi-cell:nth-child(odd) { border-left: 0; }
+            .kpi-cell:nth-child(n+3) { border-top: 1px solid var(--ui-border); }
+            /* An odd cell out (5-cell strip) spans the last row. */
+            .kpi-cell:last-child:nth-child(odd) { grid-column: 1 / -1; }
+        }
+        @media (max-width: 575.98px) {
+            .kpi-cell { padding: .7rem .75rem; }
+            /* Labels may wrap to two lines here; reserve both so the numbers
+               in a row still line up. */
+            .kpi-cell .kpi-label { min-height: 2.7em; align-items: flex-start; }
+            .kpi-cell .alert-dot { margin-top: .5em; }
+            .kpi-cell .kpi-value { font-size: 1.45rem; white-space: normal; }
+        }
+
+        /* In-place dashboard updates (static/js/dashboard-inplace.js): dim
+           the swapped root while loading, then ring what the filter changed. */
+        [data-inplace-root][aria-busy="true"] { opacity: .6; transition: opacity .15s; pointer-events: none; }
+        .inplace-flash { position: relative; border-radius: 8px; animation: inplace-flash 2.2s ease-out; }
+        .inplace-flash-tag {
+            position: absolute; top: -.7rem; left: .75rem; z-index: 2;
+            padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+            background: var(--ui-primary); color: #fff; box-shadow: var(--ui-shadow-sm);
+            pointer-events: none; animation: inplace-flash-tag 2.2s ease-out forwards;
+        }
+        html[data-theme="dark"] .inplace-flash-tag { color: #0f141c; }
+        @keyframes inplace-flash {
+            0%, 45% { box-shadow: 0 0 0 3px var(--ui-primary), 0 0 0 9px rgba(36,94,168,.18); }
+            100%    { box-shadow: 0 0 0 3px transparent, 0 0 0 9px transparent; }
+        }
+        @keyframes inplace-flash-tag { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+        @media (prefers-reduced-motion: reduce) {
+            [data-inplace-root][aria-busy="true"] { transition: none; }
+            .inplace-flash { animation: none; box-shadow: 0 0 0 3px var(--ui-primary); }
+            .inplace-flash-tag { animation: none; }
+        }
+
         /* ── Collapsed state (desktop) ── */
         body.sidebar-collapsed #sidebar {
             width: var(--sidebar-collapsed-width);
