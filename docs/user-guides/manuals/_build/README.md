@@ -68,7 +68,7 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   and are inline in `build-tier1.js`. Individual manuals can override the common
   defaults in their `buildManual()` config (the SOC Manager manual passes its own
   `version` / `updatedTh`). All manuals are now `v1.7.8` / 25 Sep 2026, manual
-  edition **1.5** — the edition number is hardcoded in both `common.js` and
+  edition **1.6** — the edition number is hardcoded in both `common.js` and
   `build-tier1.js`, so bump it in both. Before the v1.7.1 pass the two had drifted
   apart (1.1 vs 1.2); if you ever see them disagree again, that is the cause.
 - **List filter bar + sortable headers (v1.7.8).** Every list page shares one
@@ -109,7 +109,23 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   so it belongs to `build-response-teams.js` alone. `ค้นหา IOC` is visible to everyone
   **except** Executive and System Owner. The **ticket editor** requires SOC membership
   (`can_edit_ticket`), so it goes in tier1/tier2/manager only — *not* System Admin.
-  A System Owner sees exactly one menu item; an Executive sees exactly one.
+  A System Owner sees exactly one menu item. An Executive sees **two** (แดชบอร์ด SOC
+  and แดชบอร์ดผู้บริหาร) and lands on แดชบอร์ด SOC after login. Tier 2 also sees
+  **เปิดเคสใหม่** (marked TEMP in `base.html` / `views/tickets.py`); if that is reverted,
+  remove the Tier 2 menu row, the section 4 note and the FAQ from `build-tier2.js`. The
+  Red Team Manager sees the two ticket lists too, scoped to their own requests.
+- **Emails — check `apps/incidents/notifications.py` before writing an email table.**
+  The containment report goes to **every Tier 2 analyst**, not the Tier 1 opener.
+  Nothing is emailed when a ticket reaches PENDING_MANAGER or PENDING_MGR_EVENT_REVIEW,
+  or when the manager sends a ticket back. Response-request completion goes to every
+  SOC Manager. A cancellation request emails the managers; a decision or withdrawal
+  also emails the requester, opener, assigned admin, system owner and response-request
+  assignees.
+- **Cancellation button labels** (`templates/incidents/_ticket_cancellation.html`):
+  the section is การยกเลิกรายการ (manager: พิจารณาคำขอยกเลิกรายการ); buttons are
+  ยืนยันยกเลิกรายการ (direct), ส่งคำขอยกเลิกให้ผู้จัดการ SOC / ส่งคำขอให้ผู้จัดการ SOC
+  พิจารณา (request), อนุมัติยกเลิกรายการ / ไม่อนุมัติ (manager), ถอนคำขอยกเลิก.
+  Direct cancel is Tier 1 only, on a draft that was **never** submitted.
 - **Section numbers are hardcoded in 7 of the 8 scripts** — they live inside the heading
   string (`H1("5. …")`, `H2("5.7 …")`), so inserting a section means rewriting every
   later heading by hand, plus any `(ดู 5.x)` cross-references in the status table and
@@ -117,10 +133,8 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   itself, which is why the big RCA section went there first. Figure numbers always
   self-heal (`shot()` counts per section), so an inserted figure needs no edits
   downstream — but the section argument must match the H1 it sits under.
-- `CHANGELOG.md` stops at **v1.7.0**. Three shipped tags have no entry — v1.6.1, v1.6.2
-  and **v1.7.1 (the Thai Patch)** — so the manuals' cover version is deliberately ahead
-  of the changelog until someone writes those entries. Do not "correct" the cover back
-  to v1.7.0.
+- `CHANGELOG.md` now runs through **v1.7.8** plus `[Unreleased]`, so the cover version
+  and the changelog agree again.
 - **Feature coverage, v1.6.0 – v1.7.1** (which script owns what):
   | Feature | Script(s) |
   | --- | --- |
@@ -141,9 +155,13 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
 - **Two changelog claims that do not match the code** — both already handled in the text,
   do not "fix" them back:
   1. v1.7.0's *"redesigned SOC executive dashboard"* actually landed in
-     `templates/dashboard/dashboard.html` (the **SOC** dashboard, which Executives never
-     see). `executive.html` only got Thai labels in v1.7.1. The redesign is therefore
-     documented in the **manager** manual, not the executive one.
+     `templates/dashboard/dashboard.html` (the **SOC** dashboard). Executives can open
+     it (it is their landing page), but it is built for the manager's daily work, so
+     the redesign is documented in the **manager** manual; the executive manual only
+     names it. `executive.html` only got Thai labels in v1.7.1. On `executive.html`,
+     the situation panel and the High/Critical KPI are **all-time** (their badges say
+     ทุกช่วงเวลา); only the closure bar, the phase pipeline and the table follow the
+     date filter.
   2. The RCA report has **no upload** anywhere. The workspace is retired; a Forensics /
      RCA request's update form takes a report number and an optional note, no file. The
      finished report is handed to the SOC Manager as a physical document and the system
@@ -198,7 +216,7 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 | SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-list-filter-bar`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |
-| Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-situation-panel`, `EXE-kpi-cards`, `EXE-pipeline-chart`, `EXE-ticket-table` |
+| Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-situation-panel`, `EXE-kpi-cards`, `EXE-pipeline-chart`, `EXE-response-progress`, `EXE-ticket-table` |
 | Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-list-filter-bar`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
 | Red Team Manager | `RED-login`, `RED-queue`, `RED-list-filter-bar`, `RED-my-request`, `RED-my-request-submit` |
 

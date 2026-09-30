@@ -20,7 +20,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import UserProfile
-from apps.incidents.models import Ticket
+from apps.incidents.models import Ticket, TicketSubtask
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────── #
@@ -61,6 +61,154 @@ def _make_ticket(
 
 DASHBOARD_URL = reverse('home')
 EXECUTIVE_URL = reverse('executive_dashboard')
+
+
+class ExecutiveResponseProgressTest(TestCase):
+    """Request metrics and interactive filters use request dates and grain."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.executive = _make_user('exec_response', UserProfile.ROLE_EXECUTIVE)
+        cls.soc = _make_user('soc_response', UserProfile.ROLE_SOC_STAFF)
+
+    def setUp(self):
+        self.client.force_login(self.executive)
+
+    def _request(self, ticket, kind, status, created_at=None, changed_at=None):
+        item = TicketSubtask.objects.create(
+            ticket=ticket, subtask_type=kind, title=kind, status=status,
+        )
+        changes = {}
+        if created_at:
+            changes['created_at'] = created_at
+        if changed_at:
+            changes['status_changed_at'] = changed_at
+        if changes:
+            TicketSubtask.objects.filter(pk=item.pk).update(**changes)
+        return item
+
+    def test_rollup_keeps_request_and_ticket_counts_distinct(self):
+        now = timezone.now()
+        va_manager = _make_user('rt_va_exec', UserProfile.ROLE_REDTEAM_MANAGER)
+        va_manager.profile.redteam_function = UserProfile.REDTEAM_VA
+        va_manager.profile.save(update_fields=['redteam_function'])
+        critical = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        critical.severity = 'Critical'
+        critical.save(update_fields=['severity'])
+        medium = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        medium.severity = 'Medium'
+        medium.save(update_fields=['severity'])
+        self._request(critical, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN,
+                      created_at=now - timedelta(days=8))
+        self._request(critical, TicketSubtask.TYPE_PENTEST, TicketSubtask.STATUS_IN_PROGRESS)
+        self._request(medium, TicketSubtask.TYPE_VA_PT, TicketSubtask.STATUS_OPEN)
+        self._request(medium, TicketSubtask.TYPE_HARDENING, TicketSubtask.STATUS_DONE,
+                      changed_at=now)
+        self._request(medium, TicketSubtask.TYPE_FORENSIC_RCA, TicketSubtask.STATUS_DONE,
+                      changed_at=now - timedelta(days=20))
+        closed = _make_ticket(status=Ticket.STATUS_APPROVED)
+        self._request(closed, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+
+        response = self.client.get(EXECUTIVE_URL, {'date_range': 'today'})
+        rows = {row['type']: row for row in response.context['response_functions']}
+        self.assertEqual(response.context['response_totals']['active'], 3)
+        self.assertEqual(response.context['response_totals']['aged'], 1)
+        self.assertEqual(response.context['response_totals']['completed'], 1)
+        self.assertEqual(response.context['response_hc_tickets'], 1)
+        self.assertEqual(rows[TicketSubtask.TYPE_VA]['active'], 1)
+        self.assertEqual(rows[TicketSubtask.TYPE_VA]['manager'], va_manager.username)
+        self.assertEqual(rows[TicketSubtask.TYPE_PENTEST]['active'], 1)
+        self.assertEqual(rows[TicketSubtask.TYPE_VA_PT]['active'], 1)
+        self.assertEqual(rows[TicketSubtask.TYPE_VA_PT]['label'], 'VA/PT (เดิม)')
+        self.assertEqual(rows[TicketSubtask.TYPE_HARDENING]['completed'], 1)
+        self.assertEqual(rows[TicketSubtask.TYPE_FORENSIC_RCA]['completed'], 0)
+
+    def test_function_status_and_period_filters_change_request_rows(self):
+        now = timezone.now()
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        va = self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        pentest = self._request(ticket, TicketSubtask.TYPE_PENTEST,
+                                TicketSubtask.STATUS_IN_PROGRESS)
+        done = self._request(ticket, TicketSubtask.TYPE_HARDENING,
+                             TicketSubtask.STATUS_DONE,
+                             created_at=now - timedelta(days=2), changed_at=now)
+        self._request(ticket, TicketSubtask.TYPE_FORENSIC_RCA,
+                      TicketSubtask.STATUS_DONE,
+                      changed_at=now - timedelta(days=15))
+        cancelled = self._request(ticket, TicketSubtask.TYPE_VA_PT,
+                                  TicketSubtask.STATUS_OPEN)
+        TicketSubtask.objects.filter(pk=cancelled.pk).update(
+            status=TicketSubtask.STATUS_CANCELLED,
+            status_changed_at=now,
+        )
+
+        filtered = self.client.get(EXECUTIVE_URL, {
+            'date_range': 'today', 'response_type': TicketSubtask.TYPE_PENTEST,
+            'response_status': 'IN_PROGRESS',
+        })
+        self.assertEqual([item.pk for item in filtered.context['response_requests']],
+                         [pentest.pk])
+        self.assertContains(filtered, 'response_type=PENTEST')
+        done_today = self.client.get(EXECUTIVE_URL, {
+            'date_range': 'today', 'response_status': 'DONE',
+        })
+        self.assertEqual([item.pk for item in done_today.context['response_requests']],
+                         [done.pk])
+        self.assertEqual(done_today.context['response_requests'][0].age_days, 2)
+        received = self.client.get(EXECUTIVE_URL, {
+            'date_range': 'today', 'response_status': 'RECEIVED',
+        })
+        self.assertIn(cancelled.pk, [item.pk for item in received.context['response_requests']])
+        aged = self.client.get(EXECUTIVE_URL, {'response_status': 'AGED'})
+        self.assertEqual(list(aged.context['response_requests']), [])
+        invalid = self.client.get(EXECUTIVE_URL, {
+            'response_type': 'INVESTIGATION', 'response_status': 'BOGUS',
+        })
+        self.assertEqual(invalid.context['response_type'], '')
+        self.assertEqual(invalid.context['response_status'], 'ACTIVE')
+        self.assertEqual({item.pk for item in invalid.context['response_requests']},
+                         {va.pk, pentest.pk})
+
+    def test_response_section_stays_on_executive_page(self):
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        response = self.client.get(EXECUTIVE_URL)
+        html = response.content.decode()
+        section = html.split('id="response-progress"', 1)[1].split(
+            '<!-- ══ ROW 3:', 1)[0]
+        self.assertIn(ticket.ticket_id, section)
+        self.assertNotIn(reverse('ticket_detail', args=[ticket.pk]), section)
+
+    def test_request_and_ticket_tables_show_name_and_form_summary(self):
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        ticket.incident_name = 'Incident Name Example'
+        ticket.event_summary = 'Short Event Summary Example'
+        ticket.issue_description = 'Long Event Description Example'
+        ticket.save(update_fields=['incident_name', 'event_summary', 'issue_description'])
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+
+        legacy = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        legacy.issue_description = 'Legacy Description Fallback Example'
+        legacy.save(update_fields=['issue_description'])
+
+        html = self.client.get(EXECUTIVE_URL).content.decode()
+        request_table = html.split('id="response-requests"', 1)[1].split(
+            '<!-- ══ ROW 3:', 1)[0]
+        ticket_table = html.split('id="detail-table"', 1)[1].split(
+            '<!-- Quiet auto-refresh', 1)[0]
+        self.assertIn(
+            '<th scope="col">เลขที่ Ticket</th><th scope="col">ชื่อเรื่อง</th>',
+            request_table,
+        )
+        self.assertIn('<th>เลขที่ Ticket</th>', ticket_table)
+        self.assertIn('<th>ชื่อเรื่อง</th>', ticket_table)
+        for section in (request_table, ticket_table):
+            self.assertIn(ticket.ticket_id, section)
+            self.assertIn('<td>Incident Name Example</td>', section)
+            self.assertLess(section.index(ticket.ticket_id), section.index('Incident Name Example'))
+        self.assertIn('Short Event Summary Example', ticket_table)
+        self.assertIn('Legacy Description Fallback Example', ticket_table)
+        self.assertNotIn('Long Event Description Example', ticket_table)
 
 
 # ── Access-control tests ─────────────────────────────────────────────────── #

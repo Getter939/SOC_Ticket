@@ -12,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
+from apps.accounts.models import UserProfile
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 from apps.wazuh_ingest.models import IngestWatermark
 
@@ -919,6 +920,139 @@ def executive_dashboard(request):
         }[date_range]
     range_active_qs = range_tickets.exclude(status__in=terminal)
 
+    # Response requests have their own dates. The selected period applies to
+    # requests received/completed; outstanding work is always the live queue.
+    response_date_q = Q()
+    if date_range == 'custom':
+        if date_from:
+            response_date_q &= Q(created_at__date__gte=date_from)
+        if date_to:
+            response_date_q &= Q(created_at__date__lte=date_to)
+    elif date_range == 'today':
+        response_date_q = Q(created_at__date=local_now.date())
+    elif date_range == 'week':
+        response_date_q = Q(created_at__gte=week_start)
+    elif date_range == 'month':
+        response_date_q = Q(created_at__gte=month_start)
+
+    # Reuse the same boundaries for completion. status_changed_at records the
+    # transition into DONE for current rows; the legacy migration seeded it
+    # from updated_at, so historical completion dates are approximate.
+    completed_date_q = Q()
+    if date_range == 'custom':
+        if date_from:
+            completed_date_q &= Q(status_changed_at__date__gte=date_from)
+        if date_to:
+            completed_date_q &= Q(status_changed_at__date__lte=date_to)
+    elif date_range == 'today':
+        completed_date_q = Q(status_changed_at__date=local_now.date())
+    elif date_range == 'week':
+        completed_date_q = Q(status_changed_at__gte=week_start)
+    elif date_range == 'month':
+        completed_date_q = Q(status_changed_at__gte=month_start)
+
+    response_types = [
+        (TicketSubtask.TYPE_VA, 'VA'),
+        (TicketSubtask.TYPE_PENTEST, 'PenTest'),
+        (TicketSubtask.TYPE_HARDENING, 'Hardening'),
+        (TicketSubtask.TYPE_FORENSIC_RCA, 'Forensics / RCA'),
+        (TicketSubtask.TYPE_VA_PT, 'VA/PT (เดิม)'),
+        (TicketSubtask.TYPE_INFRA_SEC, 'Hardening (เดิม)'),
+    ]
+    active_response_q = (
+        Q(status__in=(TicketSubtask.STATUS_OPEN, TicketSubtask.STATUS_IN_PROGRESS))
+        & ~Q(ticket__status__in=terminal)
+    )
+    response_qs = TicketSubtask.objects.filter(
+        subtask_type__in=TicketSubtask.RESPONSE_TYPES)
+    aged_before = now - timedelta(days=7)
+    response_counts = {
+        row['subtask_type']: row for row in response_qs.values('subtask_type').annotate(
+            active=Count('pk', filter=active_response_q),
+            received=Count('pk', filter=response_date_q),
+            completed=Count('pk', filter=Q(status=TicketSubtask.STATUS_DONE) & completed_date_q),
+            aged=Count('pk', filter=active_response_q & Q(created_at__lt=aged_before)),
+        )
+    }
+    configured_managers = {
+        p.redteam_function: p.user.get_full_name() or p.user.username
+        for p in UserProfile.objects.filter(
+            role=UserProfile.ROLE_REDTEAM_MANAGER,
+            redteam_function__in=(
+                UserProfile.REDTEAM_VA, UserProfile.REDTEAM_PENTEST,
+                UserProfile.REDTEAM_HARDENING,
+            ),
+        ).select_related('user')
+    }
+    response_functions = []
+    for type_key, label in response_types:
+        counts = response_counts.get(type_key, {})
+        if type_key in (TicketSubtask.TYPE_VA_PT, TicketSubtask.TYPE_INFRA_SEC) and not counts:
+            continue
+        manager = configured_managers.get(type_key, 'ยังไม่กำหนด')
+        if type_key == TicketSubtask.TYPE_FORENSIC_RCA:
+            manager = 'Forensic Analyst'
+        elif type_key in (TicketSubtask.TYPE_VA_PT, TicketSubtask.TYPE_INFRA_SEC):
+            manager = 'ตามคำขอเดิม'
+        response_functions.append({
+            'type': type_key, 'label': label, 'manager': manager,
+            'active': counts.get('active', 0), 'received': counts.get('received', 0),
+            'completed': counts.get('completed', 0), 'aged': counts.get('aged', 0),
+        })
+    response_totals = {
+        key: sum(row[key] for row in response_functions)
+        for key in ('active', 'received', 'completed', 'aged')
+    }
+    response_hc_tickets = response_qs.filter(
+        active_response_q, ticket__severity__in=('Critical', 'High'),
+    ).values('ticket_id').distinct().count()
+
+    response_type = request.GET.get('response_type', '')
+    if response_type not in {key for key, _ in response_types}:
+        response_type = ''
+    response_status = request.GET.get('response_status', 'ACTIVE')
+    if response_status not in {
+        'ACTIVE', 'OPEN', 'IN_PROGRESS', 'DONE', 'RECEIVED', 'AGED', 'HIGH_CRIT',
+    }:
+        response_status = 'ACTIVE'
+    response_detail_qs = response_qs.select_related('ticket', 'assigned_to')
+    if response_type:
+        response_detail_qs = response_detail_qs.filter(subtask_type=response_type)
+    if response_status == 'DONE':
+        response_detail_qs = response_detail_qs.filter(
+            status=TicketSubtask.STATUS_DONE).filter(completed_date_q)
+        response_detail_qs = response_detail_qs.order_by('-status_changed_at', '-pk')
+    elif response_status == 'RECEIVED':
+        response_detail_qs = response_detail_qs.filter(response_date_q).order_by('-created_at', '-pk')
+    else:
+        response_detail_qs = response_detail_qs.filter(active_response_q)
+        if response_status in {'OPEN', 'IN_PROGRESS'}:
+            response_detail_qs = response_detail_qs.filter(status=response_status)
+        elif response_status == 'AGED':
+            response_detail_qs = response_detail_qs.filter(created_at__lt=aged_before)
+        elif response_status == 'HIGH_CRIT':
+            response_detail_qs = response_detail_qs.filter(ticket__severity__in=('Critical', 'High'))
+        # High/Critical and older outstanding requests surface first.
+        response_detail_qs = response_detail_qs.annotate(
+            severity_rank=Case(
+                When(ticket__severity='Critical', then=Value(0)),
+                When(ticket__severity='High', then=Value(1)),
+                default=Value(2),
+            ),
+        ).order_by('severity_rank', 'created_at', 'pk')
+    response_page_obj = Paginator(response_detail_qs, 8).get_page(
+        request.GET.get('response_page'))
+    response_requests = list(response_page_obj.object_list)
+    for item in response_requests:
+        age_end = (
+            item.status_changed_at
+            if item.status in TicketSubtask.TERMINAL_STATUSES and item.status_changed_at
+            else now
+        )
+        item.age_days = max(0, (
+            timezone.localtime(age_end).date() - timezone.localtime(item.created_at).date()
+        ).days)
+
     # MTTR intentionally stays on a fixed rolling 30-day window rather than
     # following the dashboard's date-range control. This matches the SOC
     # dashboard definition and keeps the executive KPI comparable over time.
@@ -1174,6 +1308,13 @@ def executive_dashboard(request):
         'pipeline_by_severity': pipeline_by_severity,
         'pipeline_rows': pipeline_rows,
         'pipeline_emergency_row': pipeline_emergency_row,
+        'response_functions': response_functions,
+        'response_totals': response_totals,
+        'response_hc_tickets': response_hc_tickets,
+        'response_type': response_type,
+        'response_status': response_status,
+        'response_requests': response_requests,
+        'response_page_obj': response_page_obj,
         'table_tickets': table_tickets,
         'page_obj': page_obj,
         'filter_f': f,

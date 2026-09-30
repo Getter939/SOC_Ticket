@@ -238,7 +238,7 @@ function buildManual(cfg) {
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
       children: [r(`เวอร์ชันระบบ ${manualVersion}`, { color: INK, size: 28 }), r("   ·   ", { color: HAIR, size: 28 }), r(`ปรับปรุงล่าสุด ${manualUpdatedTh}`, { color: INK, size: 28 })] }),
     new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-      children: [r("คู่มือฉบับที่ 1.5", { color: MUTED, size: 28 })] }),
+      children: [r("คู่มือฉบับที่ 1.6", { color: MUTED, size: 28 })] }),
     spacer(700),
     new Paragraph({ alignment: AlignmentType.CENTER,
       children: [r("เอกสารใช้ภายในองค์กร — บริษัท โทรคมนาคมแห่งชาติ จำกัด (มหาชน)", { italics: true, color: MUTED, size: 26 })] }),

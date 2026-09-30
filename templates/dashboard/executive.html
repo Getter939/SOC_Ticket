@@ -89,6 +89,15 @@
                      border-radius:10px; white-space:nowrap; }
     .priority-emergency { background:#dc3545; color:#fff; }
     .priority-normal { background:#e9ecef; color:#495057; }
+    .response-metric { display:block; color:inherit; text-decoration:none; }
+    .response-metric:hover { color:inherit; background:#f8f9fa; }
+    .response-metric:focus-visible, .response-link:focus-visible { outline:2px solid #0d6efd; outline-offset:2px; }
+    .response-function-table { font-size:13px; }
+    .response-function-table th { color:#6c757d; font-weight:600; white-space:nowrap; }
+    .response-function-table td { vertical-align:middle; }
+    .response-function-table .is-selected { background:#eaf2ff; }
+    .response-function-table .response-link { font-weight:600; text-decoration:none; }
+    #response-progress, #response-requests { scroll-margin-top:110px; }
 </style>
 
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
@@ -123,13 +132,13 @@
             <i class="bi bi-calendar3 me-1"></i>ช่วงเวลา
         </span>
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
-            <a href="?date_range=today{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+            <a href="?date_range=today{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
                class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">วันนี้</a>
-            <a href="?date_range=week{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+            <a href="?date_range=week{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
                class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">สัปดาห์นี้</a>
-            <a href="?date_range=month{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+            <a href="?date_range=month{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
                class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">เดือนนี้</a>
-            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
                class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">ทั้งหมด</a>
         </div>
 
@@ -138,6 +147,8 @@
         <!-- Custom from–to range (overrides the presets when applied) -->
         <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-0">
             {% if filter_f %}<input type="hidden" name="f" value="{{ filter_f }}">{% endif %}
+            {% if response_type %}<input type="hidden" name="response_type" value="{{ response_type }}">{% endif %}
+            <input type="hidden" name="response_status" value="{{ response_status }}">
             <span class="mini-label text-muted">กำหนดเอง</span>
             <input type="date" name="date_from" value="{{ filters.date_from }}"
                    class="form-control form-control-sm" style="width:150px;"
@@ -148,7 +159,7 @@
                    aria-label="ถึงวันที่">
             <button type="submit" class="btn btn-sm btn-primary">ใช้ช่วงเวลา</button>
             {% if filters.date_range == 'custom' %}
-            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}"
+            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
                class="btn btn-sm btn-outline-secondary">ล้าง</a>
             {% endif %}
         </form>
@@ -318,6 +329,101 @@
     </div>
 </div>
 
+<!-- ══ Response Request progress: live queue + period activity ══════════ -->
+<section class="panel p-3 mb-3" id="response-progress" aria-labelledby="response-progress-title">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <div>
+            <h2 class="panel-title mb-1" id="response-progress-title">
+                <i class="bi bi-shield-check me-1"></i>ความคืบหน้าทีมตอบสนองเหตุการณ์
+            </h2>
+            <div class="text-muted" style="font-size:12px;">งานค้างเป็นคิวปัจจุบัน · รับเข้าและส่งงานอิงช่วงเวลา {{ filters.range_label }}</div>
+        </div>
+        <a href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_status=ACTIVE#response-requests"
+           class="btn btn-sm btn-outline-primary">ดูคำขอที่ค้างทั้งหมด <i class="bi bi-arrow-right ms-1"></i></a>
+    </div>
+
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-lg-3"><a class="stat-card b-blue response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=ACTIVE#response-requests">
+            <div class="stat-value">{{ response_totals.active|intcomma }}</div><div class="stat-label">คำขอที่ค้างอยู่</div>
+            <div class="stat-sub text-muted">{{ response_totals.aged|intcomma }} คำขอค้างเกิน 7 วัน</div>
+        </a></div>
+        <div class="col-6 col-lg-3"><a class="stat-card b-orange response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=RECEIVED#response-requests">
+            <div class="stat-value">{{ response_totals.received|intcomma }}</div><div class="stat-label">รับเข้าช่วงเวลานี้</div>
+            <div class="stat-sub text-muted">วันที่สร้างคำขอ</div>
+        </a></div>
+        <div class="col-6 col-lg-3"><a class="stat-card b-green response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=DONE#response-requests">
+            <div class="stat-value">{{ response_totals.completed|intcomma }}</div><div class="stat-label">ส่งงานช่วงเวลานี้</div>
+            <div class="stat-sub text-muted">วันที่เปลี่ยนเป็นเสร็จสิ้น</div>
+        </a></div>
+        <div class="col-6 col-lg-3"><a class="stat-card b-red response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=HIGH_CRIT#response-requests">
+            <div class="stat-value">{{ response_hc_tickets|intcomma }}</div><div class="stat-label">Ticket High/Critical ที่รอทีมตอบสนอง</div>
+            <div class="stat-sub text-muted">นับ Ticket ไม่ซ้ำ</div>
+        </a></div>
+    </div>
+
+    <div class="table-responsive mb-3">
+        <table class="table table-sm response-function-table mb-0">
+            <thead><tr><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้จัดการที่กำหนด</th>
+                <th scope="col" class="text-end">ค้างอยู่</th><th scope="col" class="text-end">เกิน 7 วัน</th>
+                <th scope="col" class="text-end">รับเข้า</th><th scope="col" class="text-end">ส่งงาน</th></tr></thead>
+            <tbody>
+                {% for row in response_functions %}
+                <tr class="{% if response_type == row.type %}is-selected{% endif %}">
+                    <td><a class="response-link" {% if response_type == row.type %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status={{ response_status|urlencode }}#response-requests">{{ row.label }}</a></td>
+                    <td>{{ row.manager }}</td>
+                    <td class="text-end"><a aria-label="{{ row.label }} ค้างอยู่ {{ row.active }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=ACTIVE#response-requests">{{ row.active|intcomma }}</a></td>
+                    <td class="text-end"><a aria-label="{{ row.label }} ค้างเกิน 7 วัน {{ row.aged }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=AGED#response-requests">{{ row.aged|intcomma }}</a></td>
+                    <td class="text-end"><a aria-label="{{ row.label }} รับเข้า {{ row.received }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=RECEIVED#response-requests">{{ row.received|intcomma }}</a></td>
+                    <td class="text-end"><a aria-label="{{ row.label }} ส่งงาน {{ row.completed }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=DONE#response-requests">{{ row.completed|intcomma }}</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div id="response-requests">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <div class="panel-title">รายการคำขอ <span class="badge text-bg-light">{{ response_page_obj.paginator.count|intcomma }}</span></div>
+            <div class="d-flex flex-wrap gap-1" role="group" aria-label="กรองคำขอทีมตอบสนอง">
+                <a class="btn btn-sm {% if response_status == 'ACTIVE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'ACTIVE' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=ACTIVE#response-requests">ค้างทั้งหมด</a>
+                <a class="btn btn-sm {% if response_status == 'OPEN' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'OPEN' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=OPEN#response-requests">รอรับงาน</a>
+                <a class="btn btn-sm {% if response_status == 'IN_PROGRESS' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'IN_PROGRESS' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=IN_PROGRESS#response-requests">กำลังทำ</a>
+                <a class="btn btn-sm {% if response_status == 'DONE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'DONE' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=DONE#response-requests">ส่งงานแล้ว</a>
+                {% if response_type %}<a class="btn btn-sm btn-outline-primary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_status={{ response_status|urlencode }}#response-requests">ทุกฟังก์ชัน ×</a>{% endif %}
+            </div>
+        </div>
+        {% if response_status == 'AGED' %}<div class="small text-muted mb-2">แสดงคำขอที่ค้างเกิน 7 วันนับจากวันที่สร้าง</div>{% endif %}
+        {% if response_status == 'HIGH_CRIT' %}<div class="small text-muted mb-2">แสดงคำขอที่ค้างของ Ticket High/Critical</div>{% endif %}
+        {% if response_status == 'RECEIVED' %}<div class="small text-muted mb-2">แสดงคำขอที่สร้างในช่วงเวลา {{ filters.range_label }} รวมคำขอที่เสร็จหรือยกเลิกแล้ว</div>{% endif %}
+        <div class="table-responsive">
+            <table class="table table-sm detail-table mb-0">
+                <thead><tr><th scope="col">เลขที่ Ticket</th><th scope="col">ชื่อเรื่อง</th><th scope="col">ความรุนแรง</th><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้รับผิดชอบ</th><th scope="col">สถานะ</th><th scope="col">อายุคำขอ</th><th scope="col">รับเข้า / ส่งงาน</th></tr></thead>
+                <tbody>
+                {% for item in response_requests %}
+                    <tr>
+                        <td class="font-monospace fw-semibold text-nowrap">#{{ item.ticket.ticket_id }}</td>
+                        <td>{{ item.ticket.display_name }}</td>
+                        <td>{{ item.ticket.get_severity_display }}</td>
+                        <td>{{ item.get_subtask_type_display }}</td>
+                        <td>{% if item.assigned_to %}{{ item.assigned_to.get_full_name|default:item.assigned_to.username }}{% else %}<span class="text-muted">ยังไม่กำหนด</span>{% endif %}</td>
+                        <td>{{ item.get_status_display }}</td>
+                        <td>{{ item.age_days }} วัน</td>
+                        <td class="text-nowrap">{{ item.created_at|date:"d M Y" }}{% if item.status == 'DONE' %}<span class="text-success"> / {{ item.status_changed_at|date:"d M Y" }}</span>{% endif %}</td>
+                    </tr>
+                {% empty %}<tr><td colspan="8" class="text-center text-muted py-3">ไม่มีคำขอในตัวกรองนี้</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if response_page_obj.paginator.num_pages > 1 %}
+        <nav class="d-flex justify-content-end align-items-center gap-2 mt-2" aria-label="หน้ารายการคำขอทีมตอบสนอง">
+            {% if response_page_obj.has_previous %}<a class="btn btn-sm btn-outline-secondary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.previous_page_number }}#response-requests">ก่อนหน้า</a>{% endif %}
+            <span class="small text-muted">{{ response_page_obj.number }} / {{ response_page_obj.paginator.num_pages }}</span>
+            {% if response_page_obj.has_next %}<a class="btn btn-sm btn-outline-secondary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.next_page_number }}#response-requests">ถัดไป</a>{% endif %}
+        </nav>
+        {% endif %}
+    </div>
+</section>
+
 <!-- ══ ROW 3: Ticket detail table ════════════════════════════════════════ -->
 <div class="row g-3">
     <div class="col-12">
@@ -337,8 +443,9 @@
                 <table class="table table-sm detail-table mb-0 align-middle">
                     <thead>
                         <tr>
-                            <th>เลขที่เคส (ID)</th>
-                            <th>รายละเอียด</th>
+                            <th>เลขที่ Ticket</th>
+                            <th>ชื่อเรื่อง</th>
+                            <th>สรุปเหตุการณ์</th>
                             <th>ผู้รับผิดชอบ</th>
                             <th>สถานะ Emergency</th>
                             <th>สถานะ</th>
@@ -351,7 +458,7 @@
                         <tr>
                             <td>
                                 <a href="{% url 'ticket_detail' t.pk %}"
-                                   class="font-monospace fw-bold text-decoration-none">#{{ t.ticket_id }}</a>
+                                   class="font-monospace fw-bold text-decoration-none text-nowrap">#{{ t.ticket_id }}</a>
                                 {# The rows stay ticket-grain, so flag which ones are #}
                                 {# members of one multi-system incident — the KPI     #}
                                 {# counts above collapse them, this table does not.   #}
@@ -359,7 +466,8 @@
                                 <div class="mt-1"><a href="{% url 'project_incident_detail' t.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ t.bundle_ref }}</a></div>
                                 {% endif %}
                             </td>
-                            <td>{{ t.issue_description|truncatechars:70 }}</td>
+                            <td>{{ t.display_name }}</td>
+                            <td>{{ t.event_summary|default:t.issue_description|truncatechars:70 }}</td>
                             <td>
                                 {# Whoever actually holds the ticket right now, per     #}
                                 {# Ticket.ALLOWED_TRANSITIONS — not always the opening  #}
@@ -401,7 +509,7 @@
                             <td class="text-nowrap">{{ t.updated_at|date:"d M Y H:i" }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="7" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

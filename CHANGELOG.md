@@ -39,10 +39,50 @@ release (tag) dates.
   mentions MFA setup when MFA is on. Setting that first password no longer
   triggers the "your password was changed" email; any account that has never
   signed in skips it.
+- **Role manuals re-audited against the code (edition 1.6).** All eight Thai
+  manuals were rebuilt after an audit found claims the system doesn't match:
+  - Executive: they land on the SOC dashboard and see two menu items. The
+    situation panel and the High/Critical total are all-time, not filtered. The
+    pipeline groups by response phase and its bars filter the table. The table
+    has an อยู่สถานะนี้ column.
+  - Tier 2: they can open cases (เปิดเคสใหม่). Confirming an Incident goes to the
+    SOC Manager, not back to Tier 1. A manager "send back" returns the ticket to
+    the Tier 2 queue.
+  - SOC Manager: the "send back" action (to Tier 2 or to the opener's draft) is
+    now documented.
+  - Email tables, all roles: the containment report goes to every Tier 2 analyst,
+    not the Tier 1 opener. Nothing is emailed for PENDING_MANAGER or
+    PENDING_MGR_EVENT_REVIEW. Cancellation decisions are emailed to the parties
+    of the ticket.
+  - Cancellation steps, all roles: they use the real button names, and direct
+    cancel is limited to a draft that was never submitted.
+
+### Fixed
+- **SOC Managers now see แผงควบคุมผู้ดูแลระบบ in the sidebar.** The link checked
+  `profile` after the `{% with %}` block that defines it had closed, so only
+  superusers ever saw it; managers had to type `/admin/`. A regression test covers
+  it.
 
 ## [v1.7.8] — 2026-09-25
 
+### Added
+- **Executive Dashboard response-team progress.** Live outstanding requests,
+  requests received and completed in the selected period, requests older than
+  seven days, and the number of distinct High/Critical Tickets waiting for a
+  response team appear below the existing pipeline. The function table keeps
+  VA, PenTest, Hardening, Forensics / RCA, and historical VA/PT separate and
+  shows the designated Red Team Manager. Executives can filter a paginated,
+  read-only request list by function, status, age, and period without leaving
+  the dashboard. Completion uses the request's status-change date (historical
+  rows backfilled from their last update may be approximate); the seven-day
+  marker measures age since request creation and is not an OLA breach.
+
 ### Changed
+- **Executive Dashboard Ticket labels and summaries.** The response request
+  list and Ticket detail table show the Ticket name in a separate column
+  immediately after its reference. The Ticket table's summary column now
+  displays the form's สรุปเหตุการณ์ field,
+  falling back to รายละเอียดเหตุการณ์ for older Tickets without a summary.
 - **Response request assignees are selected per function.** When a SOC Manager
   selects multiple response functions, each function has its own assignee field.
   The configured Red Team Manager is preselected; when more than one eligible

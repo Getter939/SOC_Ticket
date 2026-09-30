@@ -58,6 +58,15 @@ class UiSmokeTest(TestCase):
         self.assertContains(resp, "prefers-color-scheme: dark")
         self.assertContains(resp, "localStorage.setItem(storageKey, theme)")
 
+    def test_sidebar_admin_panel_link_is_manager_only(self):
+        # The link used to sit after {% endwith %}, where `profile` is
+        # undefined, so SOC Managers never saw it.
+        link = 'data-label="แผงควบคุมผู้ดูแลระบบ"'
+        self.client.force_login(self.soc_manager)
+        self.assertContains(self.client.get(reverse('ticket_list')), link)
+        self.client.force_login(self.soc_staff)
+        self.assertNotContains(self.client.get(reverse('ticket_list')), link)
+
     def test_ticket_list_renders_with_filters(self):
         self.client.force_login(self.soc_staff)
         resp = self.client.get(reverse('ticket_list'), {

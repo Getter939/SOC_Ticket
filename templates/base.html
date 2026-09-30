@@ -814,14 +814,15 @@
     {% endif %}
     {% endif %}
 
-    {% endwith %}
-
+    {# Inside the with: `profile` is undefined after endwith, which hid this #}
+    {# link from every SOC Manager (only superusers ever saw it).            #}
     {% if request.user.is_superuser or profile.is_soc_manager %}
     <div class="nav-section-label">ตั้งค่าระบบ</div>
     <a href="/admin/" data-label="แผงควบคุมผู้ดูแลระบบ" class="nav-link">
         <i class="bi bi-gear-fill"></i> <span class="nav-label">แผงควบคุมผู้ดูแลระบบ</span>
     </a>
     {% endif %}
+    {% endwith %}
 
     <div class="sidebar-footer">
         &copy; 2026 NT SOC System
