@@ -27,6 +27,25 @@ release (tag) dates.
     ticket page, but a bulk export restamps up to 100 tickets' report provenance
     and pulls their full reports into one file, so it gets a narrower rule. The
     Manager Queue doesn't get it.
+- **Two new dashboard charts.**
+  - Executive: the "งานเข้า เทียบ งานเสร็จ" card now draws running totals of
+    requests received vs completed across the period (daily up to ~2 months,
+    weekly beyond). The shaded gap shows whether intake is pulling ahead.
+    "วันนี้", and a range with no requests at all, keep the two bars. Same
+    counts as before; no new metric. The
+    card is no longer one big link; its chevron opens the received requests.
+  - SOC: a "Containment Runway" panel, between the Workload/Pipeline row and
+    the Active Cases table it filters, places every open
+    case that has a contain deadline by the time left (one lane per severity,
+    red once overdue; days-to-months overdue sit on a compressed left strip,
+    past 180 days they're counted as +N). Its band links (เกินกำหนด / ≤ 1 ชม. /
+    1–4 ชม. / มากกว่า 4 ชม.) filter the Active Cases table with a new `?ola=`
+    parameter, using the same buckets as the table's OLA column
+    (`apps/incidents/ola.py`). Each severity lane shows its case count and
+    contain target; hovering a dot shows the case at once; dots open the ticket.
+  - Executive and SOC Manager manuals describe both and are rebuilt; the
+    screenshot checklist gains `MGR-runway` and asks for `EXE-backlog-row` and
+    `MGR-dashboard` to be re-captured.
 
 ### Changed
 - **Executive dashboard simplified to four answers first.** The page used to
@@ -97,10 +116,16 @@ release (tag) dates.
     - Both dashboards now share one script, `static/js/dashboard-inplace.js`,
       with the strip and highlight styles in `base.html`. The SOC Manager
       manual §4.1 was updated to match.
+    - If that script can't load (for example on a `DEBUG=False` server before
+      `collectstatic` has run), both pages fall back to normal page loads and
+      their charts still draw. Before this, every chart on both pages went
+      blank. Deploys must run `collectstatic` to get in-place updates.
   - The Executive manual (`user-manual-executive.th.docx`) was rewritten and
     rebuilt to match: sections 4–8 now walk the new layout, the LIVE badge,
     the in-place highlight and the Ticket / case / request units. Its cover
-    date is 30 Sep 2026; the other seven manuals were not changed.
+    date is 30 Sep 2026. The SOC Manager manual §4.1 was also updated (quiet
+    strip, "แสดง:" line, Containment Runway); the other six manuals were not
+    changed.
 - **Account emails are now in Thai.** The password-reset and password-changed
   emails were translated. The system name stays "SOC Support System", as in the
   other emails.

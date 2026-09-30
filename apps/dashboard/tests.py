@@ -202,6 +202,57 @@ class ExecutiveResponseProgressTest(TestCase):
         self.assertEqual(ctx['response_status_counts']['RECEIVED'], 3)
         self.assertEqual(ctx['response_status_counts']['DONE'], 1)
 
+    def test_flow_series_spreads_the_period_totals_over_days(self):
+        now = timezone.now()
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN,
+                      created_at=now - timedelta(days=20))
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        self._request(ticket, TicketSubtask.TYPE_HARDENING, TicketSubtask.STATUS_DONE,
+                      created_at=now - timedelta(days=20), changed_at=now - timedelta(days=5))
+
+        response = self.client.get(EXECUTIVE_URL, {'date_range': 'all'})
+        series = response.context['response_flow_series']
+        totals = response.context['response_totals']
+        self.assertEqual(series['unit'], 'day')
+        self.assertEqual(len(series['labels']), 21)   # first request's day → today
+        self.assertEqual(series['received_cum'][-1], totals['received'])
+        self.assertEqual(series['completed_cum'][-1], totals['completed'])
+        self.assertEqual(series['received'][0], 2)
+        self.assertEqual(sum(series['completed']), 1)
+        html = response.content.decode()
+        self.assertIn('id="chartFlowExec"', html)
+        self.assertIn('id="flow-series-exec"', html)
+        self.assertNotIn('class="flow-bars"', html)
+
+    def test_flow_series_groups_by_week_over_long_periods(self):
+        now = timezone.now()
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN,
+                      created_at=now - timedelta(days=100))
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+
+        series = self.client.get(EXECUTIVE_URL).context['response_flow_series']
+        self.assertEqual(series['unit'], 'week')
+        self.assertEqual(series['received_cum'][-1], 2)
+        self.assertLessEqual(len(series['labels']), 16)
+
+    def test_today_keeps_the_two_bars_instead_of_a_trend(self):
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        response = self.client.get(EXECUTIVE_URL, {'date_range': 'today'})
+        self.assertIsNone(response.context['response_flow_series'])
+        html = response.content.decode()
+        self.assertIn('class="flow-bars"', html)
+        self.assertNotIn('id="chartFlowExec"', html)
+
+    def test_flow_series_is_none_without_any_requests(self):
+        self.assertIsNone(self.client.get(EXECUTIVE_URL).context['response_flow_series'])
+        # A fixed range with nothing in it keeps the bars, not two flat lines.
+        self.assertIsNone(self.client.get(EXECUTIVE_URL, {
+            'date_from': '2026-06-01', 'date_to': '2026-06-15',
+        }).context['response_flow_series'])
+
     def test_response_section_stays_on_executive_page(self):
         ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
         self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
@@ -1709,6 +1760,111 @@ class ChartAccessibilityTableMarkupTest(TestCase):
 
     def test_executive_hidden_tables_are_wrapped(self):
         self._assert_no_bare_hidden_table('dashboard/executive.html')
+
+
+class ContainmentRunwayTest(TestCase):
+    """SOC dashboard runway: active cases placed by time to contain deadline."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.soc = _make_user('soc_runway', UserProfile.ROLE_SOC_MANAGER)
+
+    def setUp(self):
+        self.client.force_login(self.soc)
+
+    def _case(self, severity, hours, status=Ticket.STATUS_AWAITING_CONTAINMENT):
+        ticket = _make_ticket(status=status)
+        Ticket.objects.filter(pk=ticket.pk).update(
+            severity=severity,
+            ola_contain_deadline=(
+                None if hours is None else timezone.now() + timedelta(hours=hours)),
+        )
+        return ticket
+
+    def test_bands_follow_the_shared_ola_buckets(self):
+        self._case('Critical', -2)
+        self._case('Critical', 0.5)
+        self._case('High', 3)
+        self._case('High', 10)
+        self._case('High', -200 * 24)     # beyond the left edge: summarised
+        self._case('Medium', None)        # no contain deadline: never shown
+        self._case('Critical', -1, status=Ticket.STATUS_APPROVED)   # closed
+
+        runway = self.client.get(DASHBOARD_URL).context['runway']
+        counts = {band['key']: band['count'] for band in runway['bands']}
+        self.assertEqual(counts, {'overdue': 2, 'due_1h': 1, 'due_4h': 1, 'on_track': 1})
+        self.assertEqual(runway['total'], 5)
+        self.assertEqual(runway['late'], 2)
+        lanes = {lane['severity']: lane for lane in runway['lanes']}
+        self.assertEqual([lane['severity'] for lane in runway['lanes']], ['Critical', 'High'])
+        self.assertEqual(len(lanes['Critical']['dots']), 2)
+        self.assertEqual(len(lanes['High']['dots']), 2)
+        self.assertEqual(lanes['High']['far'], 1)
+        self.assertTrue(lanes['Critical']['filled'])
+        self.assertFalse(lanes['High']['filled'])
+        self.assertEqual(lanes['Critical']['target'], 'เป้า 4 ชม.')
+
+    def test_deadline_sits_left_of_due_soon_on_the_axis(self):
+        from apps.dashboard.views import _runway_pct
+        self.assertEqual(_runway_pct(-300 * 24), 0)
+        self.assertEqual(_runway_pct(-72), 20)
+        self.assertEqual(_runway_pct(0), 44)
+        self.assertEqual(_runway_pct(1), 57)
+        self.assertEqual(_runway_pct(4), 76)
+        self.assertEqual(_runway_pct(99), 100)
+        # Days-to-months overdue still spread out, in order.
+        self.assertLess(_runway_pct(-100 * 24), _runway_pct(-10 * 24))
+        self.assertLess(_runway_pct(-10 * 24), _runway_pct(-72))
+        self.assertLess(_runway_pct(-2), _runway_pct(0.5))
+
+    def test_band_link_filters_only_the_table(self):
+        late = self._case('Critical', -2)
+        on_time = self._case('High', 10)
+
+        response = self.client.get(DASHBOARD_URL, {'ola': 'overdue'})
+        ctx = response.context
+        self.assertEqual([t.pk for t in ctx['recent_tickets']], [late.pk])
+        self.assertEqual(ctx['active_total'], 2)          # KPIs keep the whole queue
+        self.assertEqual(ctx['runway']['total'], 2)
+        dots = {d['pk']: d for lane in ctx['runway']['lanes'] for d in lane['dots']}
+        self.assertFalse(dots[late.pk]['dim'])
+        self.assertTrue(dots[on_time.pk]['dim'])
+        html = response.content.decode()
+        self.assertIn('กรองตาราง: OLA ควบคุม เกินกำหนด', html)
+        selected = next(b for b in ctx['runway']['bands'] if b['key'] == 'overdue')
+        self.assertTrue(selected['selected'])
+        self.assertNotIn('ola=', selected['url'])        # clicking again clears
+
+    def test_band_links_keep_the_page_filters(self):
+        self._case('High', 10)
+        runway = self.client.get(DASHBOARD_URL, {
+            'severity': 'High', 'page': '2', 'ola': 'bogus',
+        }).context['runway']
+        url = next(b['url'] for b in runway['bands'] if b['key'] == 'on_track')
+        self.assertIn('severity=High', url)
+        self.assertIn('ola=on_track', url)
+        self.assertNotIn('page=', url)
+        self.assertTrue(url.endswith('#recent-cases'))
+
+    def test_panel_renders_and_empty_state(self):
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn('id="containment-runway"', html)
+        self.assertIn('ไม่มีเคสที่ยังไม่ปิดและมีกำหนดควบคุม', html)
+        ticket = self._case('Critical', -2)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertIn(f'href="{reverse("ticket_detail", args=[ticket.pk])}"', html)
+        self.assertIn('runway-dot is-filled is-late', html)
+        # Instant hover card reads these; no slow native title tooltip.
+        self.assertIn(f'data-tip-title="#{ticket.ticket_id} ', html)
+        self.assertIn('data-tip-left="เกิน', html)
+        self.assertIn('ความรุนแรง</div>', html)                 # Y-axis title
+        self.assertIn('1 เคส · เป้า 4 ชม.', html)                # lane count + target
+
+    def test_runway_sits_between_the_pipeline_and_the_table_it_filters(self):
+        self._case('High', 10)
+        html = self.client.get(DASHBOARD_URL).content.decode()
+        self.assertLess(html.index('id="chartPipeline"'), html.index('id="containment-runway"'))
+        self.assertLess(html.index('id="containment-runway"'), html.index('id="recent-cases"'))
 
 
 class HealthzTest(TestCase):

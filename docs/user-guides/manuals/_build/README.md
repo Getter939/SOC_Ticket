@@ -170,8 +170,16 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
   banner (the verdict word now leads the เกณฑ์สรุปสถานการณ์ summary), the small
   ตัวชี้วัดอ้างอิง strip, and the top-5 "High/Critical ที่ค้างนานที่สุด" list (executives
   don't chase individual tickets). Ticket numbers are plain text now, not dead links.
-  Filters update the page in place with a blue highlight (§5.6). This manual passes
-  its own `updatedTh` (30 Sep 2026); the others keep the shared 25 Sep date.
+  Filters update the page in place with a blue highlight (§5.6). The งานเข้า เทียบ
+  งานเสร็จ card is a running-totals line chart (daily, weekly past ~2 months; วันนี้
+  keeps the two bars). This manual passes its own `updatedTh` (30 Sep 2026); the
+  manager manual also passes 30 Sep; the others keep the shared 25 Sep date.
+- **SOC dashboard (Unreleased, 2026-09-30).** `build-manager.js` §4.1 describes, top
+  to bottom: the five-cell KPI strip → the "แสดง:" line → Analyst Workload + Pipeline →
+  **Containment Runway** (one dot per open case with a contain deadline, lanes by
+  severity with count and target, compressed days–months overdue strip, +N past 180
+  days, instant hover card, band buttons that filter Active Cases via `?ola=`) →
+  Active Cases → the volume trend.
   2. The RCA report has **no upload** anywhere. The workspace is retired; a Forensics /
      RCA request's update form takes a report number and an optional note, no file. The
      finished report is handed to the SOC Manager as a physical document and the system
@@ -223,12 +231,17 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 | --- | --- |
 | Tier 1 | `T1-login`, `T1-sidebar`, `T1-list-filter-bar`, `T1-wazuh-triage`, `T1-manual-intake`, `T1-create-form`, `T1-ioc-fields`, `T1-draft-buttons`, `T1-draft-tab`, `T1-ticket-detail`, `T1-ticket-edit-form`, `T1-edit-history`, `T1-ioc-search`, `T1-project-add-member` |
 | Tier 2 | `T2-login`, `T2-queue`, `T2-list-filter-bar`, `T2-escalation-review`, `T2-bundle-event-confirm`, `T2-monitoring-conclude`, `T2-containment-review`, `T2-owner-review`, `T2-notified-date`, `T2-ticket-edit`, `T2-ioc-search` |
-| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-list-filter-bar`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
+| SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-runway`, `MGR-list-filter-bar`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |
 | Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-kpi-cards`, `EXE-backlog-row`, `EXE-pipeline-chart`, `EXE-details`, `EXE-response-progress`, `EXE-ticket-table` |
 | Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-list-filter-bar`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
 | Red Team Manager | `RED-login`, `RED-queue`, `RED-list-filter-bar`, `RED-my-request`, `RED-my-request-submit` |
+
+**Pending after the 30 Sep 2026 dashboard charts:** capture `MGR-runway` (the
+Containment Runway with a band selected, so the table chip shows too, and the hover
+card open on one dot) and re-capture `EXE-backlog-row` (the flow card is now a line
+chart; take it on เดือนนี้) and `MGR-dashboard` (the runway moved the panels).
 
 **New and pending after the "งานของคุณ" card:**
 

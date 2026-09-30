@@ -1,3 +1,4 @@
+import math
 from datetime import timedelta
 from urllib.parse import urlencode
 from statistics import mean as _mean, median as _median
@@ -14,6 +15,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from apps.accounts.models import UserProfile
+from apps.incidents import ola as ola_buckets
 from apps.incidents.models import Ticket, TicketLog, TicketSubtask
 from apps.wazuh_ingest.models import IngestWatermark
 
@@ -330,6 +332,15 @@ def dashboard(request):
         output_field=CharField(),
     )
     table_qs = active_qs.select_related('created_by').with_severity_rank()
+    # ?ola=<bucket> narrows the table only (the runway's band links set it);
+    # the rest of the page keeps showing the whole filtered queue.
+    ola_filter = request.GET.get('ola', '')
+    if ola_filter not in ola_buckets.BUCKET_KEYS:
+        ola_filter = ''
+    if ola_filter:
+        table_qs = table_qs.filter(
+            ola_contain_deadline__isnull=False,
+        ).filter(ola_buckets.bucket_filter(ola_filter, now))
     if sort_key == 'caseName':
         table_qs = table_qs.annotate(
             case_name_sort=Lower(Coalesce(
@@ -437,6 +448,10 @@ def dashboard(request):
         }
     else:
         critical_soonest_deadline = None
+
+    runway = _containment_runway(active_qs, now, request.GET, ola_filter)
+    ola_filter_label = next(
+        (b['label'] for b in runway['bands'] if b['key'] == ola_filter), '')
 
     # Closed this / last calendar month — terminal-entry time from the log.
     this_month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -734,7 +749,10 @@ def dashboard(request):
         'active_total':              active_total,
         'active_critical':           active_critical,
         'critical_soonest_deadline': critical_soonest_deadline,
-        'closed_this_month':         closed_this_month,
+        'runway':                    runway,
+        'ola_filter':                ola_filter,
+        'ola_filter_label':          ola_filter_label,
+        'closed_this_month':        closed_this_month,
         'closed_last_month':         closed_last_month,
         'closed_delta':              closed_delta,
         'unassigned_active':         unassigned_active,
@@ -856,6 +874,229 @@ _IR_PHASES = [
                                                    Ticket.STATUS_CLOSED_EVENT]),
     ('CANCELLED',      'ยกเลิกแล้ว',              [Ticket.STATUS_CANCELLED]),
 ]
+
+
+# Containment runway: a piecewise time axis (hours to the contain deadline →
+# % across the track) so the hours right around the deadline get most of the
+# width. Days-to-months overdue share a compressed (log) strip on the left;
+# past 180 days a case is summarised per lane, not drawn.
+_RUNWAY_FAR_HOURS = -180 * 24
+_RUNWAY_LOG_EDGE = -72          # the log strip runs from _RUNWAY_FAR_HOURS to here
+_RUNWAY_LOG_PCT = 20
+_RUNWAY_SEGMENTS = (
+    (-72, -24, 20, 30), (-24, 0, 30, 44), (0, 1, 44, 57), (1, 4, 57, 76), (4, 24, 76, 100),
+)
+_RUNWAY_TICKS = (
+    # (hours, label, minor) — minor ticks are hidden on phones.
+    (_RUNWAY_FAR_HOURS, '−180 วัน', True), (-30 * 24, '−30 วัน', True),
+    (-7 * 24, '−7 วัน', True), (-72, '−3 วัน', False), (-24, '−24 ชม.', True),
+    (0, 'ครบกำหนด', False), (1, '1 ชม.', True), (4, '4 ชม.', False),
+    (12, '12 ชม.', True), (24, '24 ชม.', False),
+)
+# Band labels follow apps/incidents/ola.py's buckets, in the same order.
+_RUNWAY_BANDS = (
+    (ola_buckets.OVERDUE, 'เกินกำหนด', _RUNWAY_FAR_HOURS, 0),
+    (ola_buckets.DUE_1H, '≤ 1 ชม.', 0, ola_buckets.URGENT_HOURS),
+    (ola_buckets.DUE_4H, '1–4 ชม.', ola_buckets.URGENT_HOURS, ola_buckets.DUE_SOON_HOURS),
+    (ola_buckets.ON_TRACK, 'มากกว่า 4 ชม.', ola_buckets.DUE_SOON_HOURS, 24),
+)
+
+
+def _runway_pct(hours):
+    hours = max(float(_RUNWAY_FAR_HOURS), min(24.0, hours))
+    if hours < _RUNWAY_LOG_EDGE:
+        span = math.log(_RUNWAY_FAR_HOURS / _RUNWAY_LOG_EDGE)
+        return round(_RUNWAY_LOG_PCT * (1 - math.log(hours / _RUNWAY_LOG_EDGE) / span), 2)
+    for lo, hi, left, right in _RUNWAY_SEGMENTS:
+        if hours <= hi:
+            return round(left + (hours - lo) / (hi - lo) * (right - left), 2)
+    return 100.0
+
+
+def _containment_runway(active_qs, now, query, ola_filter):
+    """Every active case with a contain deadline, placed by time left.
+
+    Same population and buckets as the OLA ควบคุม column and the ?ola= table
+    filter (apps/incidents/ola.py): the deadline counts until the case closes.
+    Medium/Low have no contain deadline, so they never appear.
+    """
+    issue_labels = dict(Ticket.DETAILED_ISSUE_CHOICES2)
+    status_labels = dict(Ticket.STATUS_CHOICES)
+    sev_labels = dict(Ticket.SEVERITY_CHOICES)
+    rows = list(
+        active_qs.filter(ola_contain_deadline__isnull=False)
+        .values('pk', 'ticket_id', 'incident_name', 'detailed_issue2',
+                'severity', 'status', 'ola_contain_deadline')
+    )
+
+    band_counts = {key: 0 for key, *_ in _RUNWAY_BANDS}
+    lanes = {}
+    for row in rows:
+        deadline = row['ola_contain_deadline']
+        hours = (deadline - now).total_seconds() / 3600
+        bucket = ola_buckets.bucket_for(deadline, now)
+        band_counts[bucket] += 1
+        lane = lanes.setdefault(row['severity'], {'dots': [], 'far': 0})
+        if hours < _RUNWAY_FAR_HOURS:
+            lane['far'] += 1
+            continue
+        badge = ola_buckets.badge_for(deadline, now=now)
+        name = (row['incident_name'] or '').strip() or issue_labels.get(
+            row['detailed_issue2'], row['detailed_issue2'] or '')
+        lane['dots'].append({
+            'pk': row['pk'],
+            'pct': _runway_pct(hours),
+            'late': hours < 0,
+            'dim': bool(ola_filter) and bucket != ola_filter,
+            # Hover card lines (the template renders them; see the page script).
+            'ticket_id': row['ticket_id'],
+            'name': name,
+            'sev_label': sev_labels.get(row['severity'], row['severity']),
+            'status_label': status_labels.get(row['status'], row['status']),
+            'left_label': badge['label'],
+        })
+
+    # Stack dots that would overlap: alternate rows above/below the lane's
+    # centre line; past the last row they may touch.
+    levels = (0, -1, 1, -2, 2)
+    lane_list = []
+    for sev in sorted(lanes, key=lambda s: Ticket.SEVERITY_RANK.get(s, 0), reverse=True):
+        lane = lanes[sev]
+        placed = []
+        for dot in sorted(lane['dots'], key=lambda d: d['pct']):
+            level = next((lv for lv in levels
+                          if not any(p[1] == lv and dot['pct'] - p[0] < 1.4 for p in placed)), 0)
+            placed.append((dot['pct'], level))
+            dot['offset'] = level * 11
+        target = Ticket.OLA_TARGETS.get(sev, Ticket.OLA_TARGETS['Unknown'])[1]
+        target_hours = int(target.total_seconds() // 3600) if target else None
+        lane_list.append({
+            'severity': sev,
+            'label': sev_labels.get(sev, sev),
+            'filled': sev == 'Critical',
+            'target': f'เป้า {target_hours} ชม.' if target_hours else '',
+            'dots': lane['dots'],
+            'far': lane['far'],
+            'count': len(lane['dots']) + lane['far'],
+        })
+
+    base = query.copy()
+    for key in ('page', 'ola'):
+        base.pop(key, None)
+
+    def link(bucket):
+        params = base.copy()
+        if bucket:
+            params['ola'] = bucket
+        encoded = params.urlencode()
+        return ('?' + encoded if encoded else '?') + '#recent-cases'
+
+    bands = [{
+        'key': key, 'label': label, 'count': band_counts[key],
+        'left': _runway_pct(lo), 'width': round(_runway_pct(hi) - _runway_pct(lo), 2),
+        'selected': key == ola_filter,
+        'url': link('' if key == ola_filter else key),
+    } for key, label, lo, hi in _RUNWAY_BANDS]
+    return {
+        'total': len(rows),
+        'late': band_counts[ola_buckets.OVERDUE],
+        'lanes': lane_list,
+        'bands': bands,
+        'ticks': [{'pct': _runway_pct(h), 'label': label, 'minor': minor, 'zero': h == 0}
+                  for h, label, minor in _RUNWAY_TICKS],
+        'zero_pct': _runway_pct(0),
+        'clear_url': link(''),
+        'overdue_url': link(ola_buckets.OVERDUE),
+    }
+
+
+_MONTH_ABBR = ('', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def _response_flow_series(received_qs, completed_qs, first_day, last_day):
+    """Running totals of requests received vs completed across the period.
+
+    The same two counts as the in-vs-out card (received by creation date,
+    completed by the date they moved to DONE), just spread over time so the
+    card can show whether the gap is new or has been widening. Days are the
+    bucket up to ~2 months; longer spans group by week (Monday start).
+
+    ``first_day`` None means "from the first dated request"; ``last_day`` None
+    means today. Returns None when the period is a single day (no trend to
+    draw) or there is nothing to count.
+    """
+    def by_date(qs, field):
+        return {
+            row['d']: row['c']
+            for row in qs.order_by().annotate(d=TruncDate(field))
+            .values('d').annotate(c=Count('pk'))
+            if row['d'] is not None
+        }
+
+    received = by_date(received_qs, 'created_at')
+    completed = by_date(completed_qs, 'status_changed_at')
+    dated = list(received) + list(completed)
+    if not dated:
+        return None                     # two flat zero lines say nothing
+    if first_day is None:
+        first_day = min(dated)
+    today = timezone.localdate()
+    last_day = min(last_day or today, today)   # no flat line into the future
+    if last_day <= first_day:
+        return None
+
+    weekly = (last_day - first_day).days + 1 > 62
+    if weekly:
+        def bucket(day):
+            return day - timedelta(days=day.weekday())
+        step = timedelta(days=7)
+    else:
+        def bucket(day):
+            return day
+        step = timedelta(days=1)
+
+    starts = []
+    day = bucket(first_day)
+    while day <= last_day:
+        starts.append(day)
+        day += step
+    index = {start: i for i, start in enumerate(starts)}
+    rec_counts = [0] * len(starts)
+    com_counts = [0] * len(starts)
+    for counts, source in ((rec_counts, received), (com_counts, completed)):
+        for day, count in source.items():
+            i = index.get(bucket(day))
+            if i is not None:
+                counts[i] += count
+
+    def running(counts):
+        total, out = 0, []
+        for count in counts:
+            total += count
+            out.append(total)
+        return out
+
+    def short(day):
+        return f'{day.day} {_MONTH_ABBR[day.month]}'
+
+    rec_cum, com_cum = running(rec_counts), running(com_counts)
+    titles = [('สัปดาห์ ' if weekly else '') + f'{short(d)} {d.year}' for d in starts]
+    return {
+        'unit': 'week' if weekly else 'day',
+        'unit_label': 'รายสัปดาห์' if weekly else 'รายวัน',
+        'labels': [short(d) for d in starts],
+        'titles': titles,
+        'received': rec_counts,
+        'completed': com_counts,
+        'received_cum': rec_cum,
+        'completed_cum': com_cum,
+        # For the visually-hidden table behind the chart.
+        'rows': [
+            {'label': t, 'received': r, 'completed': c, 'received_cum': rc, 'completed_cum': cc}
+            for t, r, c, rc, cc in zip(titles, rec_counts, com_counts, rec_cum, com_cum)
+        ],
+    }
 
 
 @login_required
@@ -1376,6 +1617,22 @@ def executive_dashboard(request):
         'completed_pct': round(response_totals['completed'] / flow_max * 100),
     }
     response_flow['abs_diff'] = abs(response_flow['diff'])
+    # The same two counts over time. 'today' is one bucket — no trend — so the
+    # card keeps its two bars there.
+    flow_first = flow_last = None
+    if date_range == 'week':
+        flow_first = week_start.date()
+    elif date_range == 'month':
+        flow_first = month_start.date()
+    elif date_range == 'custom':
+        flow_first, flow_last = date_from, date_to
+    response_flow_series = None
+    if date_range != 'today':
+        response_flow_series = _response_flow_series(
+            response_qs.filter(response_date_q),
+            response_qs.filter(completed_date_q, status=TicketSubtask.STATUS_DONE),
+            flow_first, flow_last,
+        )
 
     # Open High/Critical Tickets in the range — the same rows the detail table
     # shows with ?sev=hc, which is where the card's link lands.
@@ -1466,6 +1723,7 @@ def executive_dashboard(request):
         'response_status_counts': response_status_counts,
         'response_top': response_top,
         'response_flow': response_flow,
+        'response_flow_series': response_flow_series,
         'level_counts': level_counts,
         'active_total': active_total,
         'ola_overdue': ola_overdue,

@@ -51,6 +51,73 @@
 
     /* Headline KPIs use the shared quiet strip (.kpi-strip, base.html). */
 
+    /* ── Containment runway: one dot per case, placed by time to the contain
+       deadline. Positions are % across the track (piecewise axis, view). ── */
+    .runway { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); row-gap: 0; }
+    .runway-plot { position: relative; }
+    .runway-axis-title { font-size: 11px; font-weight: 700; color: var(--ui-muted); letter-spacing: .02em; padding: 2px 0; }
+    .runway-dir { display: flex; justify-content: space-between; font-size: 11px; color: var(--ui-muted); padding: 2px 0; }
+    .runway-dir span:first-child { color: #b02a37; }
+    html[data-theme="dark"] .runway-dir span:first-child { color: #f1aeb5; }
+    /* Instant hover card (the browser's title tooltip waits ~1s). */
+    .runway-tip { position: absolute; z-index: 5; max-width: 320px; padding: 6px 10px; pointer-events: none;
+                  background: var(--ui-surface); color: var(--ui-text); border: 1px solid var(--ui-border);
+                  border-radius: 6px; box-shadow: 0 4px 14px rgba(16, 24, 40, .14); font-size: 12px; line-height: 1.45; }
+    .runway-tip .tip-title { font-weight: 700; }
+    .runway-tip .tip-meta { color: var(--ui-muted); }
+    .runway-tip .tip-left { font-weight: 700; }
+    .runway-tip .tip-left.is-late { color: #b02a37; }
+    html[data-theme="dark"] .runway-tip .tip-left.is-late { color: #f1aeb5; }
+    .runway-lane-label { display: flex; flex-direction: column; justify-content: center; font-size: 13px;
+                         line-height: 1.3; border-top: 1px dashed var(--ui-border); }
+    .runway-lane-label .lane-sev { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ui-text-strong); }
+    .runway-lane-label .lane-target { font-size: 11px; color: var(--ui-muted); }
+    .runway-track { position: relative; height: 68px; border-top: 1px dashed var(--ui-border); }
+    .runway-tint { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+    .runway-tint.is-overdue { background: rgba(176, 42, 55, .06); }
+    .runway-tint.is-due_1h { background: rgba(180, 83, 9, .07); }
+    .runway-zero { position: absolute; top: 0; bottom: 0; border-left: 1.5px solid #b02a37; pointer-events: none; }
+    .runway-mark { display: inline-block; box-sizing: border-box; width: 11px; height: 11px; border-radius: 50%;
+                   border: 2.5px solid var(--ui-primary); background: var(--ui-surface); }
+    .runway-mark.is-filled { background: var(--ui-primary); }
+    .runway-dot { position: absolute; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%;
+                  box-sizing: border-box; border: 2.5px solid var(--ui-primary); background: var(--ui-surface);
+                  transition: transform .1s; }
+    .runway-dot::before { content: ""; position: absolute; inset: -5px; }   /* bigger hit area */
+    .runway-dot.is-filled { background: var(--ui-primary); }
+    .runway-dot.is-late { border-color: #b02a37; }
+    .runway-dot.is-late.is-filled { background: #b02a37; }
+    .runway-dot.is-dim { opacity: .18; }
+    .runway-dot:hover, .runway-dot:focus-visible { transform: scale(1.35); z-index: 2; }
+    .runway-far { position: absolute; left: 0; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700;
+                  color: #b02a37; background: var(--ui-surface); border: 1px solid rgba(176, 42, 55, .45);
+                  border-radius: 10px; padding: 0 6px; text-decoration: none; white-space: nowrap; z-index: 1; }
+    .runway-axis { position: relative; height: 22px; border-top: 1px solid var(--ui-border); }
+    .runway-tick { position: absolute; top: 3px; transform: translateX(-50%); font-size: 11px; color: var(--ui-muted); white-space: nowrap; }
+    .runway-tick.is-zero { color: #b02a37; font-weight: 700; }
+    .runway-tick:first-child { transform: none; }
+    .runway-tick:last-child { transform: translateX(-100%); }
+    .runway-bands { position: relative; height: 34px; margin-top: 2px; }
+    .runway-band { position: absolute; top: 0; height: 30px; display: flex; align-items: center; justify-content: center;
+                   gap: 4px; font-size: 12px; color: var(--ui-text); text-decoration: none; border-radius: 6px;
+                   border: 1px solid transparent; white-space: nowrap; overflow: hidden; }
+    .runway-band:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
+    .runway-band.is-overdue { color: #b02a37; }
+    .runway-band.is-selected { border: 1.5px solid var(--ui-primary); background: rgba(36, 94, 168, .08); }
+    .runway-band:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 1px; }
+    html[data-theme="dark"] .runway-dot.is-late, html[data-theme="dark"] .runway-zero { border-color: #ea868f; }
+    html[data-theme="dark"] .runway-dot.is-late.is-filled { background: #ea868f; }
+    html[data-theme="dark"] .runway-tick.is-zero, html[data-theme="dark"] .runway-band.is-overdue,
+    html[data-theme="dark"] .runway-far { color: #f1aeb5; }
+    @media (max-width: 767.98px) {
+        .runway { grid-template-columns: 4.5rem minmax(0, 1fr); }
+        .runway-tick.is-minor { display: none; }
+        /* Too narrow for bands under their stretch of axis: wrap as a row. */
+        .runway-bands { height: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+        .runway-band { position: static; left: auto !important; width: auto !important;
+                       padding: 0 8px; border-color: var(--ui-border); font-size: 12px; }
+    }
+
     /* ── Section card / titles ── */
     .panel { background:#fff; border:1px solid #e3e6ea; border-radius:6px; }
     .panel-title { font-size: 13px; font-weight: 700; text-transform: uppercase;
@@ -412,6 +479,75 @@
 
 </div>
 
+<!-- ══ Containment runway — time left before each contain deadline ════════ -->
+{# Same population and buckets as the table's OLA ควบคุม column #}
+{# (apps/incidents/ola.py). Band links filter the Active Cases table (?ola=). #}
+<section class="panel p-3 mb-3" id="containment-runway" data-flash-range aria-labelledby="runway-title">
+    <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
+        <h2 class="panel-title mb-0" id="runway-title">
+            <i class="bi bi-stopwatch me-1"></i>Containment Runway — เวลาที่เหลือก่อนครบกำหนดควบคุม
+        </h2>
+        <span class="scope-note"><span class="live">LIVE</span> · เคสที่ยังไม่ปิดและมีกำหนดควบคุม {{ runway.total|intcomma }} เคส · ตามตัวกรอง</span>
+    </div>
+    {% if runway.total %}
+    <p class="visually-hidden">เคสที่มีกำหนดควบคุม {{ runway.total }} เคส เกินกำหนดแล้ว {{ runway.late }} เคส ใช้ลิงก์ช่วงเวลาด้านล่างเพื่อกรองตาราง Active Cases</p>
+    <div class="runway runway-plot">
+        {# Y axis: one lane per severity, with its case count and contain target. #}
+        <div class="runway-axis-title">ความรุนแรง</div>
+        <div class="runway-dir" aria-hidden="true"><span>← เกินกำหนดมาแล้ว</span><span>ยังเหลือเวลา →</span></div>
+        {% for lane in runway.lanes %}
+        <div class="runway-lane-label">
+            <span class="lane-sev"><span class="runway-mark {% if lane.filled %}is-filled{% endif %}"></span>{{ lane.label }}</span>
+            <span class="lane-target">{{ lane.count|intcomma }} เคส{% if lane.target %} · {{ lane.target }}{% endif %}</span>
+        </div>
+        <div class="runway-track" aria-hidden="true">
+            {% for band in runway.bands %}{% if band.key == 'overdue' or band.key == 'due_1h' %}
+            <span class="runway-tint is-{{ band.key }}" style="left: {{ band.left }}%; width: {{ band.width }}%;"></span>
+            {% endif %}{% endfor %}
+            <span class="runway-zero" style="left: {{ runway.zero_pct }}%;"></span>
+            {% for dot in lane.dots %}
+            <a class="runway-dot {% if lane.filled %}is-filled{% endif %} {% if dot.late %}is-late{% endif %} {% if dot.dim %}is-dim{% endif %}"
+               href="{% url 'ticket_detail' dot.pk %}" tabindex="-1"
+               data-tip-title="#{{ dot.ticket_id }} {{ dot.name }}" data-tip-meta="{{ dot.sev_label }} · {{ dot.status_label }}"
+               data-tip-left="{{ dot.left_label }}" {% if dot.late %}data-tip-late{% endif %}
+               style="left: {{ dot.pct }}%; top: calc(50% + {{ dot.offset }}px);"></a>
+            {% endfor %}
+            {% if lane.far %}
+            <a class="runway-far" href="{{ runway.overdue_url }}" tabindex="-1"
+               data-tip-title="{{ lane.label }} · {{ lane.far }} เคส" data-tip-meta="เกินกำหนดมากกว่า 180 วัน"
+               data-tip-left="คลิกเพื่อกรองตารางเฉพาะเคสเกินกำหนด" data-tip-late>+{{ lane.far }}</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+        <div></div>
+        <div class="runway-axis" aria-hidden="true">
+            {% for tick in runway.ticks %}
+            <span class="runway-tick {% if tick.minor %}is-minor{% endif %} {% if tick.zero %}is-zero{% endif %}" style="left: {{ tick.pct }}%;">{{ tick.label }}</span>
+            {% endfor %}
+        </div>
+        <div></div>
+        <div class="runway-axis-title text-center">เวลาที่เหลือก่อนครบกำหนดควบคุม (ฝั่งซ้ายสุดย่อสเกลเป็นวัน–เดือน)</div>
+        <div class="runway-tip" hidden></div>
+    </div>
+    <div class="runway">
+        <div class="mini-label text-muted align-self-center" style="font-size:12px;">กรองตาราง</div>
+        <nav class="runway-bands" aria-label="กรองตาราง Active Cases ตามเวลาที่เหลือ">
+            {% for band in runway.bands %}
+            <a class="runway-band is-{{ band.key }} {% if band.selected %}is-selected{% endif %}" href="{{ band.url }}"
+               style="left: calc({{ band.left }}% + 2px); width: calc({{ band.width }}% - 4px);"
+               {% if band.selected %}aria-current="true"{% endif %}
+               aria-label="{{ band.label }} {{ band.count }} เคส{% if band.selected %} (กำลังกรอง คลิกเพื่อล้าง){% endif %}">{{ band.label }} <strong>{{ band.count|intcomma }}</strong></a>
+            {% endfor %}
+        </nav>
+    </div>
+    <div class="text-muted mt-1" style="font-size:11px;">
+        แต่ละจุดคือ 1 เคส · จุดทึบ = Critical · วงแหวน = ระดับอื่น · สีแดง = เกินกำหนดแล้ว · ชี้ที่จุดเพื่อดูเคส คลิกเพื่อเปิด Ticket · +N = เกินกำหนดมากกว่า 180 วัน
+    </div>
+    {% else %}
+    <p class="text-muted mb-0" style="font-size:13px;">ไม่มีเคสที่ยังไม่ปิดและมีกำหนดควบคุมตามตัวกรองนี้ (Medium/Low ไม่มีกำหนดควบคุม)</p>
+    {% endif %}
+</section>
+
 <!-- ══ ROW 3: Detail table — active cases (full width) ═══════════════ -->
 <style>
     /* Recent-cases detail table — explicit dark header so it can never render
@@ -430,9 +566,15 @@
         {# data-flash-scope: its own sort headers and pagination re-render #}
         {# it in place, keep it where it is on screen and ring it.         #}
         <div class="panel" id="recent-cases" data-flash-range data-flash-scope
-             data-flash-label="Active Cases · {{ recent_total|intcomma }} เคส{% if recent_page.has_other_pages %} · หน้า {{ recent_page.number }}/{{ recent_page.paginator.num_pages }}{% endif %}">
-            <div class="p-3 pb-2 panel-title">
-                <i class="bi bi-list-ul me-1"></i>Active Cases — รายละเอียดเคส
+             data-flash-label="Active Cases{% if ola_filter_label %} · OLA ควบคุม {{ ola_filter_label }}{% endif %} · {{ recent_total|intcomma }} เคส{% if recent_page.has_other_pages %} · หน้า {{ recent_page.number }}/{{ recent_page.paginator.num_pages }}{% endif %}">
+            <div class="p-3 pb-2 d-flex flex-wrap align-items-center gap-2">
+                <span class="panel-title"><i class="bi bi-list-ul me-1"></i>Active Cases — รายละเอียดเคส</span>
+                {% if ola_filter %}
+                <span class="ms-auto d-inline-flex align-items-center gap-2" style="font-size:12px;">
+                    <span class="badge text-bg-primary">กรองตาราง: OLA ควบคุม {{ ola_filter_label }} · {{ recent_total|intcomma }} เคส</span>
+                    <a href="{{ runway.clear_url }}" class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
+                </span>
+                {% endif %}
             </div>
             <div class="table-responsive">
                 <table class="table table-sm detail-table mb-0 align-middle">
@@ -615,6 +757,47 @@ function applyDashboardFilters(filters) {
     params.delete('page');
     dashNav.go('?' + params.toString(), { push: true, flashRange: true });
 }
+
+// ── Containment runway: hover card, shown at once (no title delay) ──
+// Delegated, so dots swapped in by an in-place update keep working. Lines are
+// set with textContent from the dot's data-tip-* attributes.
+function showRunwayTip(dot) {
+    const plot = dot.closest('.runway-plot');
+    const tip = plot && plot.querySelector('.runway-tip');
+    if (!tip) return;
+    tip.replaceChildren();
+    [['tip-title', dot.dataset.tipTitle], ['tip-meta', dot.dataset.tipMeta],
+     ['tip-left' + ('tipLate' in dot.dataset ? ' is-late' : ''), dot.dataset.tipLeft]]
+        .forEach(([cls, text]) => {
+            if (!text) return;
+            const line = document.createElement('div');
+            line.className = cls;
+            line.textContent = text;
+            tip.appendChild(line);
+        });
+    tip.hidden = false;
+    const box = plot.getBoundingClientRect();
+    const d = dot.getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let left = d.left + d.width / 2 - box.left - w / 2;
+    left = Math.max(0, Math.min(left, box.width - w));
+    let top = d.top - box.top - h - 8;
+    if (top < 0) top = d.bottom - box.top + 8;      // no room above: show below
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+}
+function hideRunwayTip(dot) {
+    const tip = dot.closest('.runway-plot')?.querySelector('.runway-tip');
+    if (tip) tip.hidden = true;
+}
+document.addEventListener('mouseover', (e) => {
+    const dot = e.target.closest && e.target.closest('#dash-root .runway-dot, #dash-root .runway-far');
+    if (dot) showRunwayTip(dot);
+});
+document.addEventListener('mouseout', (e) => {
+    const dot = e.target.closest && e.target.closest('#dash-root .runway-dot, #dash-root .runway-far');
+    if (dot && !dot.contains(e.relatedTarget)) hideRunwayTip(dot);
+});
 
 // ── Analyst Workload: expand a row to reveal its status breakdown ──
 // Delegated, so rows swapped in by an in-place update keep working.

@@ -68,6 +68,10 @@
     .flow-bars .num { text-align: right; font-weight: 700; }
     .flow-headline { font-size: 1rem; font-weight: 500; line-height: 1.4; }
     .flow-headline strong { font-weight: 700; }
+    .flow-chart-wrap { position: relative; height: 210px; }
+    .answer-card .card-link { padding: 0 .25rem; margin: -.25rem -.25rem -.25rem 0; border-radius: 4px; }
+    .answer-card .card-link:hover .card-chevron { color: var(--ui-primary); }
+    .answer-card .card-link:focus-visible { outline: 2px solid var(--ui-primary); outline-offset: 1px; }
 
     /* Closure: closed share in the accent, the open remainder as the track. */
     .progress-split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--ui-border-subtle); }
@@ -307,10 +311,10 @@
     </div>
 
     <div class="col-12 col-lg-6 d-flex flex-column gap-3">
-        <!-- Q3: are requests arriving faster than they are completed -->
-        <a class="panel answer-card flex-grow-1" data-flash-range
-           href="?{{ range_query|safe }}&response_status=RECEIVED#response-requests">
-            <span class="card-head"><span class="card-q">งานเข้า เทียบ งานเสร็จ</span><span class="scope-note ms-auto">{{ filters.range_label }}</span><i class="bi bi-chevron-right card-chevron" aria-hidden="true"></i></span>
+        <!-- Q3: are requests arriving faster than they are completed. A section,
+             not a link: the chart inside takes hover; the chevron links out. -->
+        <section class="panel answer-card flex-grow-1" data-flash-range aria-labelledby="flow-title">
+            <span class="card-head"><h2 class="card-q m-0" id="flow-title">งานเข้า เทียบ งานเสร็จ</h2><span class="scope-note ms-auto">{{ filters.range_label }}{% if response_flow_series %} · {{ response_flow_series.unit_label }}{% endif %}</span><a class="card-link" href="?{{ range_query|safe }}&response_status=RECEIVED#response-requests" aria-label="ดูคำขอที่รับเข้าในช่วงนี้"><i class="bi bi-chevron-right card-chevron" aria-hidden="true"></i></a></span>
             {% if not response_totals.received and not response_totals.completed %}
             <span class="flow-headline text-muted">ไม่มีคำขอรับเข้าหรือส่งงานในช่วงเวลานี้</span>
             {% elif response_flow.diff > 0 %}
@@ -320,12 +324,33 @@
             {% else %}
             <span class="flow-headline">รับเข้าและส่งงานเท่ากัน</span>
             {% endif %}
+            {% if response_flow_series %}
+            {{ response_flow_series|json_script:"flow-series-exec" }}
+            <div class="flow-chart-wrap">
+                <canvas id="chartFlowExec" role="img"
+                        aria-label="กราฟเส้นสะสม{{ response_flow_series.unit_label }}: รับเข้า {{ response_totals.received }} คำขอ ส่งงาน {{ response_totals.completed }} คำขอ"></canvas>
+            </div>
+            <span class="card-note">พื้นที่ระหว่างสองเส้น = รับเข้ามากกว่าส่งงาน (สะสมตั้งแต่ต้นช่วง) · ชี้ที่กราฟเพื่อดูค่า{{ response_flow_series.unit_label }}</span>
+            <div class="visually-hidden">
+            <table>
+                <caption>คำขอรับเข้าและส่งงาน {{ response_flow_series.unit_label }} พร้อมยอดสะสม</caption>
+                <thead><tr><th>ช่วง</th><th>รับเข้า</th><th>ส่งงาน</th><th>รับเข้าสะสม</th><th>ส่งงานสะสม</th></tr></thead>
+                <tbody>
+                    {% for row in response_flow_series.rows %}
+                    <tr><td>{{ row.label }}</td><td>{{ row.received }}</td><td>{{ row.completed }}</td><td>{{ row.received_cum }}</td><td>{{ row.completed_cum }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
             <span class="flow-bars">
                 <span>รับเข้า</span><span class="bar-track"><span class="bar-in" style="width: {{ response_flow.received_pct }}%;"></span></span><span class="num">{{ response_totals.received|intcomma }}</span>
                 <span>ส่งงาน</span><span class="bar-track"><span class="bar-out" style="width: {{ response_flow.completed_pct }}%;"></span></span><span class="num">{{ response_totals.completed|intcomma }}</span>
             </span>
+            {% if filters.date_range == 'today' %}<span class="card-note">ช่วง “วันนี้” สั้นเกินกว่าจะเห็นแนวโน้ม จึงแสดงเป็นยอดรวม</span>{% endif %}
+            {% endif %}
             <span class="card-note">หน่วย: คำขอ ทุกฟังก์ชัน · รับเข้านับตามวันที่สร้าง ส่งงานนับตามวันที่เสร็จสิ้น</span>
-        </a>
+        </section>
 
         <!-- Q4: which High/Critical tickets need follow-up -->
         <a class="panel answer-card flex-grow-1" data-flash-range href="?{{ range_query|safe }}&sev=hc#detail-table">
@@ -685,6 +710,7 @@
 <script nonce="{{ request.csp_nonce }}">
 (function () {
     let initPipelineChart = () => {};
+    let initFlowChart = () => {};
     // If the shared script failed to load (e.g. collectstatic not run yet),
     // fall back to plain page loads so the chart still draws.
     const nav = !window.DashboardInplace ? {
@@ -696,7 +722,7 @@
         sections: { 'exec-crit': 'crit', 'response-progress': 'resp', 'exec-tickets': 'tickets' },
         liveRegionId: 'exec-live',
         // New data can only come from a date change; otherwise redraw still.
-        onSwap: (opts) => initPipelineChart(!!opts.flashRange),
+        onSwap: (opts) => { initPipelineChart(!!opts.flashRange); initFlowChart(!!opts.flashRange); },
     });
     const withOpenSections = nav.withOpenSections;
     const swapTo = nav.go;
@@ -831,9 +857,103 @@
             plugins: [totalLabelPlugin],
         });
     };
+    // ── Requests in vs out, running totals (line chart) ─────────────────── //
+    // Same counts as the headline, spread over the period: the shaded gap
+    // between the lines is how far intake has pulled ahead of delivery.
+    let flowChart = null;
+    initFlowChart = function (animate) {
+        if (flowChart) { flowChart.destroy(); flowChart = null; }
+        const canvas = document.getElementById('chartFlowExec');
+        const dataEl = document.getElementById('flow-series-exec');
+        if (!window.Chart || !canvas || !dataEl) return;
+
+        const s = JSON.parse(dataEl.textContent);
+        const mutedColor = cssVar('--ui-muted', '#6c757d');
+        const gridColor = cssVar('--ui-border', '#e9ecef');
+        const primary = cssVar('--ui-primary', '#245ea8');
+        const unitWord = s.unit === 'week' ? 'สัปดาห์' : 'วัน';
+        const last = s.labels.length - 1;
+
+        // Label each line at its end instead of a legend; nudge apart when close.
+        const endLabels = {
+            id: 'flowEndLabels',
+            afterDatasetsDraw(chart) {
+                const { ctx } = chart;
+                const pts = [0, 1].map(i => chart.getDatasetMeta(i).data[last]);
+                if (!pts[0] || !pts[1]) return;
+                let yr = pts[0].y, yc = pts[1].y;
+                if (Math.abs(yc - yr) < 16) { const mid = (yr + yc) / 2; yr = mid - 8; yc = mid + 8; }
+                ctx.save();
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillStyle = primary;
+                ctx.fillText('รับเข้า ' + s.received_cum[last], pts[0].x + 8, yr);
+                ctx.fillStyle = mutedColor;
+                ctx.fillText('ส่งงาน ' + s.completed_cum[last], pts[1].x + 8, yc);
+                ctx.restore();
+            },
+        };
+
+        flowChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: s.labels,
+                datasets: [
+                    {
+                        label: 'รับเข้าสะสม', data: s.received_cum,
+                        borderColor: primary, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4,
+                        pointBackgroundColor: primary,
+                        fill: { target: '+1', above: 'rgba(36, 94, 168, 0.10)', below: 'transparent' },
+                    },
+                    {
+                        label: 'ส่งงานสะสม', data: s.completed_cum,
+                        borderColor: mutedColor, borderWidth: 2, borderDash: [6, 4],
+                        pointRadius: 0, pointHoverRadius: 4, pointBackgroundColor: mutedColor, fill: false,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                ...(animate === false ? { animation: false } : {}),
+                interaction: { mode: 'index', intersect: false },
+                layout: { padding: { right: 84, top: 6 } },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: mutedColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 7, font: { size: 11 } },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: gridColor },
+                        ticks: { precision: 0, color: mutedColor, maxTicksLimit: 5, font: { size: 11 } },
+                    },
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: items => s.titles[items[0].dataIndex],
+                            label: item => `${item.dataset.label}: ${item.parsed.y}`,
+                            footer: items => {
+                                const i = items[0].dataIndex;
+                                return [
+                                    'ส่วนต่าง: ' + (s.received_cum[i] - s.completed_cum[i]),
+                                    `เฉพาะ${unitWord}นั้น: รับ ${s.received[i]} · ส่ง ${s.completed[i]}`,
+                                ];
+                            },
+                        },
+                    },
+                },
+            },
+            plugins: [endLabels],
+        });
+    };
+
     initPipelineChart(true);
+    initFlowChart(true);
     // Light/dark switch: redraw with the new theme colours.
-    new MutationObserver(() => initPipelineChart(false))
+    new MutationObserver(() => { initPipelineChart(false); initFlowChart(false); })
         .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
 </script>
