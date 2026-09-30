@@ -6,99 +6,222 @@
 {% block content %}
 
 <style>
-    /* Shared visual language with dashboard.html (page-scoped styles). */
+    /* Page-scoped styles. Surfaces use .panel/.stat-card so base.html's dark
+       theme overrides apply; accents are translucent so they read on both. */
     .exec-filterbar {
         position: sticky;
         top: var(--header-height);
         z-index: 1020;
-        background: #f4f6f9;
+        background: var(--ui-page-bg);
         padding: 0.5rem 0;
         margin: -0.25rem 0 1rem;
-        border-bottom: 1px solid #e3e6ea;
+        border-bottom: 1px solid var(--ui-border);
     }
     .exec-filterbar .btn-group .btn { font-size: 13px; }
     .mini-label { font-size: 13px; }
+    .custom-range > summary { list-style: none; }
+    .custom-range > summary::-webkit-details-marker { display: none; }
 
-    .stat-card {
-        background: #fff;
-        border: 1px solid #e3e6ea;
-        border-top-width: 3px;
-        border-radius: 6px;
-        padding: 0.7rem 0.9rem;
-        height: 100%;
+    .panel { background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: 8px; }
+    .panel-title { font-size: 13px; font-weight: 700; color: var(--ui-text-strong); }
+
+    /* Visual rules for this page: one accent (--ui-primary); red only as an
+       alert (a count > 0 that needs action); no green "all good"; scope is a
+       quiet grey caption, never a coloured pill. */
+    .scope-note { font-size: 12px; color: var(--ui-muted); white-space: nowrap; }
+    .scope-note .live { font-weight: 700; letter-spacing: .03em; color: var(--ui-text-strong); }
+
+    /* Answer cards */
+    .answer-card { display: flex; flex-direction: column; gap: .5rem; height: 100%;
+                   padding: .85rem 1rem; color: var(--ui-text); text-decoration: none; }
+    a.answer-card:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
+    a.answer-card:focus-visible, a.kpi-cell:focus-visible,
+    .exec-details > summary:focus-visible, .criteria-row:focus-visible {
+        outline: 2px solid var(--ui-primary); outline-offset: -2px; }
+    .answer-card .card-head { display: flex; align-items: baseline; gap: .5rem; }
+    .answer-card .card-q { font-size: 13px; font-weight: 600; color: var(--ui-text-strong); }
+    .answer-card .card-value { font-size: 1.75rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
+    .answer-card .card-unit { font-size: 13px; font-weight: 500; color: var(--ui-muted); }
+    .answer-card .card-line { font-size: 13px; }
+    .answer-card .card-note { font-size: 12px; color: var(--ui-muted); }
+    .card-chevron, .kpi-chevron { color: var(--ui-muted); font-size: 12px; }
+    a.answer-card:hover .card-chevron, a.kpi-cell:hover .kpi-chevron { color: var(--ui-primary); }
+
+    /* Headline KPI strip — one panel, four cells split by hairlines (2×2 on
+       narrow screens). Numbers stay in the text colour; a cell turns red
+       only while its count needs action. */
+    .kpi-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; }
+    .kpi-cell { display: flex; flex-direction: column; gap: .15rem; padding: .85rem 1.1rem;
+                color: var(--ui-text); text-decoration: none; min-width: 0; }
+    .kpi-cell + .kpi-cell { border-left: 1px solid var(--ui-border); }
+    a.kpi-cell:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
+    .kpi-cell .kpi-label { display: flex; align-items: center; gap: .4rem; font-size: 13px; font-weight: 600;
+                           color: var(--ui-text-strong); line-height: 1.35; }
+    .kpi-cell .kpi-chevron { margin-left: auto; }
+    .kpi-cell .kpi-value { white-space: nowrap; font-size: 1.75rem; font-weight: 600; line-height: 1.2;
+                           margin-top: .1rem; font-variant-numeric: tabular-nums; }
+    .kpi-cell .kpi-unit { font-size: 13px; font-weight: 500; color: var(--ui-muted); }
+    .kpi-cell .kpi-caption { font-size: 12px; color: var(--ui-muted); }
+    .kpi-cell .kpi-caption .live { font-weight: 700; letter-spacing: .03em; color: var(--ui-text-strong); }
+    .kpi-cell .alert-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: #b02a37; flex-shrink: 0; }
+    .kpi-cell.is-alert .alert-dot { display: inline-block; }
+    .kpi-cell.is-alert .kpi-value { color: #b02a37; }
+    .kpi-delta-up { color: #b02a37; font-weight: 600; }
+    html[data-theme="dark"] .kpi-cell.is-alert .kpi-value,
+    html[data-theme="dark"] .kpi-delta-up { color: #f1aeb5; }
+    html[data-theme="dark"] .kpi-cell .alert-dot { background: #f1aeb5; }
+    @media (max-width: 991.98px) {
+        .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .kpi-cell:nth-child(3) { border-left: 0; }
+        .kpi-cell:nth-child(n+3) { border-top: 1px solid var(--ui-border); }
     }
-    .stat-card.b-blue   { border-top-color: #0d6efd; }
-    .stat-card.b-orange { border-top-color: #fd7e14; }
-    .stat-card.b-green  { border-top-color: #198754; }
-    .stat-card.b-red    { border-top-color: #dc3545; }
-    .stat-card .stat-value { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
-    .stat-card .stat-label { font-size: 13px; color: #6c757d; font-weight: 600; }
-    .stat-card .stat-sub   { font-size: 13px; margin-top: 0.15rem; }
-
-    .panel { background:#fff; border:1px solid #e3e6ea; border-radius:6px; }
-    .panel-title { font-size: 13px; font-weight: 700; text-transform: uppercase;
-                   letter-spacing: .02em; color:#495057; }
-
-    /* Closure progress bar (green = closed, red = in progress) */
-    .progress-split {
-        display: flex; height: 34px; border-radius: 6px;
-        overflow: hidden; border: 1px solid #e3e6ea;
-    }
-    .progress-split .seg-closed { background: #198754; }
-    .progress-split .seg-open   { background: #dc3545; flex: 1; }
-    .progress-legend { font-size: 12px; color: #495057; }
-    .progress-legend .dot {
-        display: inline-block; width: 10px; height: 10px;
-        border-radius: 50%; margin-right: 4px; vertical-align: baseline;
+    @media (max-width: 575.98px) {
+        .kpi-cell { padding: .7rem .75rem; }
+        /* Labels may wrap to two lines here; reserve both so the numbers in
+           a row still line up. */
+        .kpi-cell .kpi-label { min-height: 2.7em; align-items: flex-start; }
+        .kpi-cell .alert-dot { margin-top: .5em; }
+        .kpi-cell .kpi-value { font-size: 1.45rem; white-space: normal; }
     }
 
-    /* Executive summary verdict box — scales to fill the card height */
-    .verdict-box {
-        border-radius: 8px; text-align: center;
-        padding: 1.25rem 0.75rem; height: 100%;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 0.4rem;
-    }
-    .verdict-box i { font-size: 3.4rem; line-height: 1; }
-    .verdict-box .verdict-label { font-size: 1.75rem; font-weight: 700; letter-spacing: .06em; }
-    .verdict-box .verdict-sub { font-size: 0.9rem; font-weight: 600; opacity: 0.85; }
-    .verdict-good    { background: rgba(25,135,84,0.10);  color: #198754; }
-    .verdict-waiting { background: rgba(255,193,7,0.15);  color: #b58800; }
-    .verdict-warning { background: rgba(220,53,69,0.10);  color: #dc3545; }
+    .mini-bars { display: flex; flex-direction: column; gap: 4px; }
+    .mini-bar { display: grid; grid-template-columns: 8rem minmax(0, 1fr) 1.8rem; gap: .5rem;
+                align-items: center; font-size: 12px; color: var(--ui-muted); }
+    .mini-bar .bar-track { height: 10px; }
+    .mini-bar.is-top { color: var(--ui-text); font-weight: 700; }
+    .mini-bar .num { text-align: right; font-weight: 700; color: var(--ui-text); }
+    .bar-track { height: 8px; border-radius: 3px; overflow: hidden; display: flex; background: var(--ui-border-subtle); }
+    .bar-fresh { background: #aab4c3; }
+    .bar-aged  { background: #b45309; }
+    .bar-in    { background: var(--ui-primary); }
+    .bar-out   { background: var(--ui-muted); }
+    .bar-closed { background: var(--ui-primary); }
+    .bar-crit  { background: #b02a37; }
+    .bar-high  { background: #fd7e14; }
+    .legend-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: baseline; }
+    .flow-bars { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) 2.2rem; gap: .4rem .5rem;
+                 align-items: center; font-size: 13px; }
+    .flow-bars .bar-track { height: 13px; }
+    .flow-bars .num { text-align: right; font-weight: 700; }
+    .flow-headline { font-size: 1rem; font-weight: 500; line-height: 1.4; }
+    .flow-headline strong { font-weight: 700; }
 
-    /* Criteria checklist — rows are links that filter the detail table.
-       Rows spread to fill the card height (justify-content on the column). */
-    .criteria-list { gap: 0.35rem; }
-    .criteria-row {
-        display: flex; align-items: center; gap: 0.7rem;
-        padding: 0.55rem 0.65rem; border-radius: 6px;
-        font-size: 15px; line-height: 1.3; color: #212529; text-decoration: none;
-    }
-    .criteria-row:hover { background: #f1f3f5; color: #212529; }
-    .criteria-row i { font-size: 1.4rem; flex-shrink: 0; }
-    .criteria-row .crit-count { font-size: 1.05rem; font-weight: 700; min-width: 1.5em; text-align: right; flex-shrink: 0; }
+    /* Closure: closed share in the accent, the open remainder as the track. */
+    .progress-split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--ui-border-subtle); }
+    .progress-split .seg-closed { background: var(--ui-primary); }
 
-    /* Detail table */
+
+    /* Collapsible detail sections */
+    .exec-details > summary { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+                              padding: .85rem 1rem; cursor: pointer; list-style: none; }
+    .exec-details > summary::-webkit-details-marker { display: none; }
+    .exec-details > summary .sec-title { font-size: 15px; font-weight: 700; }
+    .exec-details > summary .sec-summary { font-size: 13px; color: var(--ui-muted); }
+    .exec-details > summary .bi-chevron-down { margin-left: auto; transition: transform .15s; }
+    .exec-details[open] > summary .bi-chevron-down { transform: rotate(180deg); }
+    .exec-details > .sec-body { padding: 0 1rem 1rem; }
+    .exec-details { scroll-margin-top: 110px; }
+
+    .criteria-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem 1.25rem; }
+    .criteria-row { display: grid; grid-template-columns: 1.3rem 2.2rem minmax(0, 1fr); gap: .6rem; align-items: center;
+                    padding: .45rem .6rem; border-radius: 6px; border: 1px solid var(--ui-border-subtle);
+                    color: var(--ui-text); text-decoration: none; font-size: 14px; line-height: 1.35; }
+    .criteria-row:hover { background: var(--ui-surface-hover); color: var(--ui-text); }
+    .criteria-row .crit-count { font-size: 1.05rem; font-weight: 800; text-align: right; }
+    .criteria-row .crit-unit { display: block; font-size: 11px; color: var(--ui-muted); }
+
+    /* Pipeline chart (Chart.js, horizontal stacked bars) */
+    .pipeline-chart-wrap { position: relative; height: 360px; }
+    @media (max-width: 767.98px) { .pipeline-chart-wrap { height: 320px; } }
+
+    /* Tables */
     .detail-table { font-size: 13px; }
     .detail-table thead th { background:#212529; color:#fff; font-size: 13px; white-space: nowrap; }
     .detail-table td { vertical-align: middle; }
     .detail-table .case-age { white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .status-pill { font-size:12px; font-weight:600; padding:1px 8px;
-                   border-radius:10px; color:#fff; white-space:nowrap; }
-    .priority-pill { font-size:12px; font-weight:700; padding:2px 8px;
-                     border-radius:10px; white-space:nowrap; }
+    html[data-theme="dark"] .detail-table,
+    html[data-theme="dark"] .response-function-table {
+        --bs-table-bg: var(--ui-surface); --bs-table-color: var(--ui-text);
+        --bs-table-border-color: var(--ui-border);
+    }
+    html[data-theme="dark"] .priority-normal { background: var(--ui-surface-subtle); color: var(--ui-muted); }
+    .ticket-table .t-title { font-weight: 600; }
+    .status-pill { font-size:12px; font-weight:600; padding:1px 8px; border-radius:10px; color:#fff; white-space:nowrap; }
+    .priority-pill { font-size:12px; font-weight:700; padding:2px 8px; border-radius:10px; white-space:nowrap; }
     .priority-emergency { background:#dc3545; color:#fff; }
     .priority-normal { background:#e9ecef; color:#495057; }
-    .response-metric { display:block; color:inherit; text-decoration:none; }
-    .response-metric:hover { color:inherit; background:#f8f9fa; }
-    .response-metric:focus-visible, .response-link:focus-visible { outline:2px solid #0d6efd; outline-offset:2px; }
+    .flag-ola { display:inline-block; margin-top:4px; font-size:11px; font-weight:700; padding:0 6px; border-radius:8px;
+                background: rgba(220,53,69,.10); color:#842029; border:1px solid rgba(220,53,69,.35); }
+    html[data-theme="dark"] .flag-ola { color:#f1aeb5; }
+    .holder-role { font-size: 12px; color: var(--ui-muted); }
     .response-function-table { font-size:13px; }
-    .response-function-table th { color:#6c757d; font-weight:600; white-space:nowrap; }
+    .response-function-table th { color: var(--ui-muted); font-weight:600; white-space:nowrap; }
     .response-function-table td { vertical-align:middle; }
-    .response-function-table .is-selected { background:#eaf2ff; }
+    .response-function-table .is-selected { background: rgba(36,94,168,.08); }
     .response-function-table .response-link { font-weight:600; text-decoration:none; }
-    #response-progress, #response-requests { scroll-margin-top:110px; }
+    .response-function-table .is-legacy td { border-top: 1px dashed var(--ui-border); }
+    .response-function-table .active-cell { display:grid; grid-template-columns: 1.8rem minmax(0,1fr); gap:.5rem; align-items:center; min-width: 9rem; }
+    .response-function-table .bar-track { height: 10px; }
+    .response-link:focus-visible { outline:2px solid #0d6efd; outline-offset:2px; }
+    #response-requests, #detail-table { scroll-margin-top:110px; }
+    .empty-state { padding: 1.75rem 1rem; text-align: center; }
+    .empty-state .empty-title { font-size: 15px; font-weight: 700; color: var(--ui-text); }
+    .empty-state .empty-hint { font-size: 13px; color: var(--ui-muted); margin: .25rem auto .75rem; max-width: 36rem; }
+
+    /* Phone: the tables become labelled cards (labels come from CSS so the
+       markup stays one table for every screen size). */
+    @media (max-width: 767.98px) {
+        .criteria-grid { grid-template-columns: minmax(0, 1fr); }
+        .stack-table thead { display: none; }
+        .stack-table, .stack-table tbody, .stack-table tr, .stack-table td { display: block; width: 100%; }
+        .stack-table tr { border: 1px solid var(--ui-border); border-radius: 8px; margin-bottom: .5rem; padding: .35rem .6rem; }
+        .stack-table td { border: 0 !important; padding: .15rem 0 !important; }
+        .stack-table td::before { display: block; font-size: 11px; font-weight: 700; color: var(--ui-muted); }
+        .stack-table tr.empty-row td::before { content: none; }
+        .req-table td:nth-child(1)::before, .ticket-table td:nth-child(1)::before { content: "เลขที่ Ticket"; }
+        .req-table td:nth-child(2)::before, .ticket-table td:nth-child(2)::before { content: "ชื่อเรื่อง"; }
+        .req-table td:nth-child(3)::before, .ticket-table td:nth-child(3)::before { content: "ความรุนแรง"; }
+        .req-table td:nth-child(4)::before { content: "ฟังก์ชัน"; }
+        .req-table td:nth-child(5)::before { content: "ผู้รับผิดชอบ"; }
+        .req-table td:nth-child(6)::before { content: "สถานะ"; }
+        .req-table td:nth-child(7)::before { content: "อายุคำขอ"; }
+        .req-table td:nth-child(8)::before { content: "รับเข้า / ส่งงาน"; }
+        .ticket-table td:nth-child(4)::before { content: "สรุปเหตุการณ์"; }
+        .ticket-table td:nth-child(5)::before { content: "ผู้รับผิดชอบ"; }
+        .ticket-table td:nth-child(6)::before { content: "สถานะ Emergency"; }
+        .ticket-table td:nth-child(7)::before { content: "สถานะ"; }
+        .ticket-table td:nth-child(8)::before { content: "อยู่สถานะนี้"; }
+        .ticket-table td:nth-child(9)::before { content: "อัปเดตล่าสุด"; }
+        .exec-filterbar .btn-group .btn, .exec-filterbar .custom-range > summary { min-height: 44px; display: inline-flex; align-items: center; }
+    }
+    /* In-place updates: dim while the next view loads, then ring whatever
+       the filter changed so the eye knows where to look. */
+    #exec-root[aria-busy="true"] { opacity: .6; transition: opacity .15s; pointer-events: none; }
+    .exec-flash { position: relative; border-radius: 8px; animation: exec-flash 2.2s ease-out; }
+    .exec-flash-tag {
+        position: absolute; top: -.7rem; left: .75rem; z-index: 2;
+        padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+        background: var(--ui-primary); color: #fff; box-shadow: var(--ui-shadow-sm);
+        pointer-events: none; animation: exec-flash-tag 2.2s ease-out forwards;
+    }
+    html[data-theme="dark"] .exec-flash-tag { color: #0f141c; }
+    @keyframes exec-flash {
+        0%, 45% { box-shadow: 0 0 0 3px var(--ui-primary), 0 0 0 9px rgba(36,94,168,.18); }
+        100%    { box-shadow: 0 0 0 3px transparent, 0 0 0 9px transparent; }
+    }
+    @keyframes exec-flash-tag { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+        #exec-root[aria-busy="true"] { transition: none; }
+        /* No pulse: a steady ring that simply goes away. */
+        .exec-flash { animation: none; box-shadow: 0 0 0 3px var(--ui-primary); }
+        .exec-flash-tag { animation: none; }
+    }
 </style>
+
+<div class="visually-hidden" role="status" aria-live="polite" id="exec-live"></div>
+{# Everything inside #exec-root is swapped in place when a filter changes #}
+{# (see the script at the bottom), so the page keeps its scroll position. #}
+<div id="exec-root">
 
 <!-- ── Header + last-updated timestamp ──────────────────────────────────── -->
 <div class="page-header">
@@ -125,326 +248,399 @@
     </div>
 </div>
 
-<!-- ── Time range filter for charting/detail sections ──────────────────── -->
+<!-- ── Time range filter ─────────────────────────────────────────────────── -->
 <div class="exec-filterbar">
-    <div class="d-flex flex-wrap align-items-center gap-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
         <span class="mini-label fw-semibold text-muted">
             <i class="bi bi-calendar3 me-1"></i>ช่วงเวลา
         </span>
         <div class="btn-group btn-group-sm" role="group" aria-label="ช่วงเวลา">
-            <a href="?date_range=today{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}">วันนี้</a>
-            <a href="?date_range=week{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}">สัปดาห์นี้</a>
-            <a href="?date_range=month{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}">เดือนนี้</a>
-            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
-               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}">ทั้งหมด</a>
+            <a href="?date_range=today{{ keep_query|safe }}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'today' %}active{% endif %}"
+               {% if filters.date_range == 'today' %}aria-current="true"{% endif %}>วันนี้</a>
+            <a href="?date_range=week{{ keep_query|safe }}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'week' %}active{% endif %}"
+               {% if filters.date_range == 'week' %}aria-current="true"{% endif %}>สัปดาห์นี้</a>
+            <a href="?date_range=month{{ keep_query|safe }}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'month' %}active{% endif %}"
+               {% if filters.date_range == 'month' %}aria-current="true"{% endif %}>เดือนนี้</a>
+            <a href="?date_range=all{{ keep_query|safe }}"
+               class="btn btn-outline-secondary {% if filters.date_range == 'all' or not filters.date_range %}active{% endif %}"
+               {% if filters.date_range == 'all' %}aria-current="true"{% endif %}>ทั้งหมด</a>
         </div>
-
-        <div class="vr d-none d-md-block"></div>
-
-        <!-- Custom from–to range (overrides the presets when applied) -->
-        <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-0">
-            {% if filter_f %}<input type="hidden" name="f" value="{{ filter_f }}">{% endif %}
-            {% if response_type %}<input type="hidden" name="response_type" value="{{ response_type }}">{% endif %}
-            <input type="hidden" name="response_status" value="{{ response_status }}">
-            <span class="mini-label text-muted">กำหนดเอง</span>
-            <input type="date" name="date_from" value="{{ filters.date_from }}"
-                   class="form-control form-control-sm" style="width:150px;"
-                   aria-label="ตั้งแต่วันที่">
-            <span class="mini-label text-muted">–</span>
-            <input type="date" name="date_to" value="{{ filters.date_to }}"
-                   class="form-control form-control-sm" style="width:150px;"
-                   aria-label="ถึงวันที่">
-            <button type="submit" class="btn btn-sm btn-primary">ใช้ช่วงเวลา</button>
-            {% if filters.date_range == 'custom' %}
-            <a href="?date_range=all{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}"
-               class="btn btn-sm btn-outline-secondary">ล้าง</a>
-            {% endif %}
-        </form>
-    </div>
-</div>
-
-<!-- ══ ROW 1: Verdict-first stats (left) · Pipeline (right) ═══════════════ -->
-<div class="row g-3 mb-3">
-
-    <!-- LEFT — summary read first, then KPI cards, then closure progress -->
-    <div class="col-lg-5">
-        <div class="d-flex flex-column gap-3 h-100">
-
-            <!-- Executive summary — the hero glance -->
-            <div class="panel p-3 d-flex flex-column flex-grow-1">
-            <div class="panel-title mb-2">
-                <i class="bi bi-clipboard-check me-1"></i>สรุปสถานการณ์ของทีม SOC
-                <span class="badge text-bg-light ms-1">คิวปัจจุบัน · ทุกช่วงเวลา</span>
-            </div>
-            <div class="row g-3 align-items-stretch flex-grow-1">
-                <div class="col-5">
-                    {% if overall_status == 'GOOD' %}
-                    <div class="verdict-box verdict-good">
-                        <i class="bi bi-check-lg" aria-hidden="true"></i>
-                        <div class="verdict-label">ปกติ</div>
-                        <div class="verdict-sub">ไม่มี Incident ค้าง</div>
-                    </div>
-                    {% elif overall_status == 'WAITING' %}
-                    <div class="verdict-box verdict-waiting">
-                        <i class="bi bi-hourglass-split" aria-hidden="true"></i>
-                        <div class="verdict-label">รอดำเนินการ</div>
-                        <div class="verdict-sub">มี Incident ที่รอดำเนินการ</div>
-                    </div>
-                    {% else %}
-                    <div class="verdict-box verdict-warning">
-                        <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
-                        <div class="verdict-label">ต้องเฝ้าระวัง</div>
-                        <div class="verdict-sub">มี Incident ที่ต้องจัดการทันที</div>
-                    </div>
-                    {% endif %}
-                </div>
-                <div class="col-7 d-flex flex-column justify-content-evenly criteria-list">
-                    {% for c in summary_criteria %}
-                    <a class="criteria-row" href="?date_range=all&f={{ c.filter|urlencode }}#detail-table"
-                       title="เปิดรายการคิวปัจจุบัน">
-                        {% if c.level == 'good' %}
-                        <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
-                        {% elif c.level == 'waiting' %}
-                        <i class="bi bi-hourglass-split text-warning" aria-hidden="true"></i>
-                        {% else %}
-                        <i class="bi bi-exclamation-circle-fill text-danger" aria-hidden="true"></i>
-                        {% endif %}
-                        <span class="crit-count">{{ c.count|intcomma }}</span>
-                        <span>{{ c.label }}</span>
-                    </a>
-                    {% endfor %}
-                </div>
-            </div>
-            </div>
-            <!-- end executive summary panel -->
-
-            <!-- KPI cards -->
-            <div class="row g-3">
-                <div class="col-6">
-                    <div class="stat-card b-blue">
-                        <div class="stat-value">{{ total_hc|intcomma }}</div>
-                        <div class="stat-label">เคสทั้งหมด (High/Critical) · ทุกช่วงเวลา</div>
-                        {% if total_hc_delta > 0 %}
-                        <div class="stat-sub text-danger">↑{{ total_hc_delta|intcomma }} เทียบช่วงเดียวกันเดือนก่อน</div>
-                        {% elif total_hc_delta < 0 %}
-                        <div class="stat-sub text-success">↓{{ total_hc_delta|intcomma|slice:"1:" }} เทียบช่วงเดียวกันเดือนก่อน</div>
-                        {% else %}
-                        <div class="stat-sub text-muted">เท่ากับช่วงเดียวกันเดือนก่อน</div>
-                        {% endif %}
-                    </div>
-                </div>
-                <div class="col-6">
-                    <div class="stat-card b-orange">
-                        {% if mttr_n %}
-                        <div class="stat-value text-warning">{{ mttr_median }} ชม.</div>
-                        <div class="stat-label">มัธยฐานเวลาในการแก้ไข (MTTR)</div>
-                        <div class="stat-sub text-muted">
-                            ค่าเฉลี่ย {{ mttr_mean }} ชม. · n={{ mttr_n|intcomma }} · 30 วันล่าสุด
-                        </div>
-                        {% else %}
-                        <div class="stat-value text-muted">–</div>
-                        <div class="stat-label">มัธยฐานเวลาในการแก้ไข (MTTR)</div>
-                        <div class="stat-sub text-muted">ไม่มีเคสที่ปิดใน 30 วันล่าสุด</div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <!-- High/Critical closure progress -->
-            <div class="panel p-3">
-                <div class="panel-title mb-2">
-                    <i class="bi bi-bar-chart-steps me-1"></i>ความคืบหน้าการปิดเคส / Close Case (High/Critical)
-                    <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
-                </div>
-                {% if hc_total %}
-                <div class="d-flex align-items-center gap-3 flex-wrap">
-                    <div class="flex-grow-1" style="min-width:150px;">
-                        <div class="progress-split" role="img"
-                             aria-label="ปิดแล้ว {{ hc_closed }} จาก {{ hc_total }} เคส ({{ hc_progress_pct }}%)">
-                            <div class="seg-closed" style="width: {{ hc_progress_pct }}%;"></div>
-                            <div class="seg-open"></div>
-                        </div>
-                        <div class="text-center fw-bold mt-1">{{ hc_progress_pct }}%</div>
-                    </div>
-                    <div class="progress-legend">
-                        <div><span class="dot" style="background:#198754;"></span>ปิดเคสแล้ว (Close Case) ({{ hc_closed|intcomma }})</div>
-                        <div><span class="dot" style="background:#dc3545;"></span>กำลังดำเนินการ ({{ hc_open|intcomma }})</div>
-                    </div>
-                </div>
-                {% else %}
-                <div class="text-muted" style="font-size:13px;">ยังไม่มีเคส High/Critical</div>
+        <details class="custom-range" {% if filters.date_range == 'custom' %}open{% endif %}>
+            <summary class="btn btn-sm {% if filters.date_range == 'custom' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                <i class="bi bi-sliders me-1" aria-hidden="true"></i>กำหนดเอง
+            </summary>
+            <form method="get" class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                {% if filter_f %}<input type="hidden" name="f" value="{{ filter_f }}">{% endif %}
+                {% if response_type %}<input type="hidden" name="response_type" value="{{ response_type }}">{% endif %}
+                {% if response_status != 'ACTIVE' %}<input type="hidden" name="response_status" value="{{ response_status }}">{% endif %}
+                {% if hc_only %}<input type="hidden" name="sev" value="hc">{% endif %}
+                {% if open_sections %}<input type="hidden" name="open" value="{{ open_sections|join:',' }}">{% endif %}
+                <input type="date" name="date_from" value="{{ filters.date_from }}"
+                       class="form-control form-control-sm" style="width:150px;" aria-label="ตั้งแต่วันที่">
+                <span class="mini-label text-muted">–</span>
+                <input type="date" name="date_to" value="{{ filters.date_to }}"
+                       class="form-control form-control-sm" style="width:150px;" aria-label="ถึงวันที่">
+                <button type="submit" class="btn btn-sm btn-primary">ใช้ช่วงเวลา</button>
+                {% if filters.date_range == 'custom' %}
+                <a href="?date_range=all{{ keep_query|safe }}" class="btn btn-sm btn-outline-secondary">ล้าง</a>
                 {% endif %}
-            </div>
-
-        </div>
-    </div>
-
-    <!-- RIGHT — Ticket pipeline (horizontal; click a bar to filter the table) -->
-    <div class="col-lg-7">
-        <div class="panel p-3 h-100 d-flex flex-column">
-            <div class="panel-title mb-2">
-                <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด (Pipeline)
-                <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
-            </div>
-            <div class="flex-grow-1" style="min-height:360px;">
-                <canvas id="chartPipelineExec" role="img"
-                        aria-label="จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency ในแต่ละสถานะ"></canvas>
-            </div>
-            <div class="text-muted mt-1" style="font-size:11px;">
-                <span class="badge bg-danger me-1">E</span>ชื่อสถานะสีแดง = มีเคส Emergency · ดูจำนวนใน tooltip
-            </div>
-            <div class="visually-hidden">
-            <table>
-                <caption>จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency</caption>
-                <thead>
-                    <tr>
-                        <th>ความรุนแรง</th>
-                        {% for slug, display in pipeline_by_severity.statuses %}
-                        <th>{{ display }}</th>
-                        {% endfor %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in pipeline_rows %}
-                    <tr>
-                        <td>{{ row.severity }}</td>
-                        {% for cell in row.cells %}
-                        <td>{{ cell }}</td>
-                        {% endfor %}
-                    </tr>
-                    {% endfor %}
-                    <tr>
-                        <td>ความฉุกเฉิน</td>
-                        {% for cell in pipeline_emergency_row %}
-                        <td>{{ cell }}</td>
-                        {% endfor %}
-                    </tr>
-                </tbody>
-            </table>
-            </div>
-        </div>
+            </form>
+        </details>
+        <span class="scope-note ms-md-auto">ช่วงเวลา: <span class="scope-range fw-semibold">{{ filters.range_label }}</span>
+            · <span class="live">LIVE</span> = คิวปัจจุบัน ไม่ขึ้นกับช่วงเวลา</span>
     </div>
 </div>
 
-<!-- ══ Response Request progress: live queue + period activity ══════════ -->
-<section class="panel p-3 mb-3" id="response-progress" aria-labelledby="response-progress-title">
-    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-        <div>
-            <h2 class="panel-title mb-1" id="response-progress-title">
-                <i class="bi bi-shield-check me-1"></i>ความคืบหน้าทีมตอบสนองเหตุการณ์
-            </h2>
-            <div class="text-muted" style="font-size:12px;">งานค้างเป็นคิวปัจจุบัน · รับเข้าและส่งงานอิงช่วงเวลา {{ filters.range_label }}</div>
-        </div>
-        <a href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_status=ACTIVE#response-requests"
-           class="btn btn-sm btn-outline-primary">ดูคำขอที่ค้างทั้งหมด <i class="bi bi-arrow-right ms-1"></i></a>
-    </div>
 
-    <div class="row g-2 mb-3">
-        <div class="col-6 col-lg-3"><a class="stat-card b-blue response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=ACTIVE#response-requests">
-            <div class="stat-value">{{ response_totals.active|intcomma }}</div><div class="stat-label">คำขอที่ค้างอยู่</div>
-            <div class="stat-sub text-muted">{{ response_totals.aged|intcomma }} คำขอค้างเกิน 7 วัน</div>
-        </a></div>
-        <div class="col-6 col-lg-3"><a class="stat-card b-orange response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=RECEIVED#response-requests">
-            <div class="stat-value">{{ response_totals.received|intcomma }}</div><div class="stat-label">รับเข้าช่วงเวลานี้</div>
-            <div class="stat-sub text-muted">วันที่สร้างคำขอ</div>
-        </a></div>
-        <div class="col-6 col-lg-3"><a class="stat-card b-green response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=DONE#response-requests">
-            <div class="stat-value">{{ response_totals.completed|intcomma }}</div><div class="stat-label">ส่งงานช่วงเวลานี้</div>
-            <div class="stat-sub text-muted">วันที่เปลี่ยนเป็นเสร็จสิ้น</div>
-        </a></div>
-        <div class="col-6 col-lg-3"><a class="stat-card b-red response-metric" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=HIGH_CRIT#response-requests">
-            <div class="stat-value">{{ response_hc_tickets|intcomma }}</div><div class="stat-label">Ticket High/Critical ที่รอทีมตอบสนอง</div>
-            <div class="stat-sub text-muted">นับ Ticket ไม่ซ้ำ</div>
-        </a></div>
-    </div>
-
-    <div class="table-responsive mb-3">
-        <table class="table table-sm response-function-table mb-0">
-            <thead><tr><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้จัดการที่กำหนด</th>
-                <th scope="col" class="text-end">ค้างอยู่</th><th scope="col" class="text-end">เกิน 7 วัน</th>
-                <th scope="col" class="text-end">รับเข้า</th><th scope="col" class="text-end">ส่งงาน</th></tr></thead>
-            <tbody>
-                {% for row in response_functions %}
-                <tr class="{% if response_type == row.type %}is-selected{% endif %}">
-                    <td><a class="response-link" {% if response_type == row.type %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status={{ response_status|urlencode }}#response-requests">{{ row.label }}</a></td>
-                    <td>{{ row.manager }}</td>
-                    <td class="text-end"><a aria-label="{{ row.label }} ค้างอยู่ {{ row.active }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=ACTIVE#response-requests">{{ row.active|intcomma }}</a></td>
-                    <td class="text-end"><a aria-label="{{ row.label }} ค้างเกิน 7 วัน {{ row.aged }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=AGED#response-requests">{{ row.aged|intcomma }}</a></td>
-                    <td class="text-end"><a aria-label="{{ row.label }} รับเข้า {{ row.received }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=RECEIVED#response-requests">{{ row.received|intcomma }}</a></td>
-                    <td class="text-end"><a aria-label="{{ row.label }} ส่งงาน {{ row.completed }} คำขอ" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ row.type|urlencode }}&response_status=DONE#response-requests">{{ row.completed|intcomma }}</a></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <div id="response-requests">
-        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-            <div class="panel-title">รายการคำขอ <span class="badge text-bg-light">{{ response_page_obj.paginator.count|intcomma }}</span></div>
-            <div class="d-flex flex-wrap gap-1" role="group" aria-label="กรองคำขอทีมตอบสนอง">
-                <a class="btn btn-sm {% if response_status == 'ACTIVE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'ACTIVE' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=ACTIVE#response-requests">ค้างทั้งหมด</a>
-                <a class="btn btn-sm {% if response_status == 'OPEN' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'OPEN' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=OPEN#response-requests">รอรับงาน</a>
-                <a class="btn btn-sm {% if response_status == 'IN_PROGRESS' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'IN_PROGRESS' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=IN_PROGRESS#response-requests">กำลังทำ</a>
-                <a class="btn btn-sm {% if response_status == 'DONE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'DONE' %}aria-current="true"{% endif %} href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status=DONE#response-requests">ส่งงานแล้ว</a>
-                {% if response_type %}<a class="btn btn-sm btn-outline-primary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_status={{ response_status|urlencode }}#response-requests">ทุกฟังก์ชัน ×</a>{% endif %}
-            </div>
-        </div>
-        {% if response_status == 'AGED' %}<div class="small text-muted mb-2">แสดงคำขอที่ค้างเกิน 7 วันนับจากวันที่สร้าง</div>{% endif %}
-        {% if response_status == 'HIGH_CRIT' %}<div class="small text-muted mb-2">แสดงคำขอที่ค้างของ Ticket High/Critical</div>{% endif %}
-        {% if response_status == 'RECEIVED' %}<div class="small text-muted mb-2">แสดงคำขอที่สร้างในช่วงเวลา {{ filters.range_label }} รวมคำขอที่เสร็จหรือยกเลิกแล้ว</div>{% endif %}
-        <div class="table-responsive">
-            <table class="table table-sm detail-table mb-0">
-                <thead><tr><th scope="col">เลขที่ Ticket</th><th scope="col">ชื่อเรื่อง</th><th scope="col">ความรุนแรง</th><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้รับผิดชอบ</th><th scope="col">สถานะ</th><th scope="col">อายุคำขอ</th><th scope="col">รับเข้า / ส่งงาน</th></tr></thead>
-                <tbody>
-                {% for item in response_requests %}
-                    <tr>
-                        <td class="font-monospace fw-semibold text-nowrap">#{{ item.ticket.ticket_id }}</td>
-                        <td>{{ item.ticket.display_name }}</td>
-                        <td>{{ item.ticket.get_severity_display }}</td>
-                        <td>{{ item.get_subtask_type_display }}</td>
-                        <td>{% if item.assigned_to %}{{ item.assigned_to.get_full_name|default:item.assigned_to.username }}{% else %}<span class="text-muted">ยังไม่กำหนด</span>{% endif %}</td>
-                        <td>{{ item.get_status_display }}</td>
-                        <td>{{ item.age_days }} วัน</td>
-                        <td class="text-nowrap">{{ item.created_at|date:"d M Y" }}{% if item.status == 'DONE' %}<span class="text-success"> / {{ item.status_changed_at|date:"d M Y" }}</span>{% endif %}</td>
-                    </tr>
-                {% empty %}<tr><td colspan="8" class="text-center text-muted py-3">ไม่มีคำขอในตัวกรองนี้</td></tr>{% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% if response_page_obj.paginator.num_pages > 1 %}
-        <nav class="d-flex justify-content-end align-items-center gap-2 mt-2" aria-label="หน้ารายการคำขอทีมตอบสนอง">
-            {% if response_page_obj.has_previous %}<a class="btn btn-sm btn-outline-secondary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.previous_page_number }}#response-requests">ก่อนหน้า</a>{% endif %}
-            <span class="small text-muted">{{ response_page_obj.number }} / {{ response_page_obj.paginator.num_pages }}</span>
-            {% if response_page_obj.has_next %}<a class="btn btn-sm btn-outline-secondary" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.next_page_number }}#response-requests">ถัดไป</a>{% endif %}
-        </nav>
+<!-- ══ 2a. Headline KPIs — one strip, four cells ═════════════════════════ -->
+<section class="panel kpi-strip mb-3" aria-label="ตัวชี้วัดหลัก">
+    <a class="kpi-cell {% if emergency_active %}is-alert{% endif %}"
+       href="?date_range=all&f=EMERGENCY#detail-table"
+       aria-label="เคสฉุกเฉินที่ยังไม่ปิด {{ emergency_active }} เคส — ดูรายการ">
+        <span class="kpi-label"><span class="alert-dot" aria-hidden="true"></span>เคสฉุกเฉินที่ยังไม่ปิด<i class="bi bi-chevron-right kpi-chevron" aria-hidden="true"></i></span>
+        <span class="kpi-value">{{ emergency_active|intcomma }} <span class="kpi-unit">เคส</span></span>
+        <span class="kpi-caption"><span class="live">LIVE</span> · {% if emergency_active %}ต้องตัดสินใจทันที{% else %}ไม่มีเคสฉุกเฉินค้าง{% endif %}</span>
+    </a>
+    <a class="kpi-cell {% if ola_overdue %}is-alert{% endif %}"
+       href="?date_range=all&f=OLA_OVERDUE#detail-table"
+       aria-label="Ticket เกินกำหนด OLA {{ ola_overdue }} รายการ — ดูรายการ">
+        <span class="kpi-label"><span class="alert-dot" aria-hidden="true"></span>Ticket เกินกำหนด OLA<i class="bi bi-chevron-right kpi-chevron" aria-hidden="true"></i></span>
+        <span class="kpi-value">{{ ola_overdue|intcomma }} <span class="kpi-unit">Ticket</span></span>
+        <span class="kpi-caption"><span class="live">LIVE</span> · เกินกำหนดควบคุม (contain)</span>
+    </a>
+    <div class="kpi-cell">
+        <span class="kpi-label" title="มัธยฐานเวลาในการแก้ไข">MTTR (มัธยฐาน)</span>
+        {% if mttr_n %}
+        <span class="kpi-value">{{ mttr_median }} <span class="kpi-unit">ชม.</span></span>
+        <span class="kpi-caption">30 วันล่าสุด · {% if mttr_median >= 48 %}≈ {% widthratio mttr_median 24 1 %} วัน · {% endif %}ค่าเฉลี่ย {{ mttr_mean }} ชม. · n={{ mttr_n|intcomma }}</span>
+        {% else %}
+        <span class="kpi-value text-muted">–</span>
+        <span class="kpi-caption">ไม่มีเคสที่ปิดใน 30 วันล่าสุด</span>
         {% endif %}
+    </div>
+    <div class="kpi-cell">
+        <span class="kpi-label">เคสทั้งหมด (High/Critical)</span>
+        <span class="kpi-value">{{ total_hc|intcomma }} <span class="kpi-unit">เคส</span></span>
+        <span class="kpi-caption">ทุกช่วงเวลา ·
+            {% if total_hc_delta > 0 %}<span class="kpi-delta-up">↑{{ total_hc_delta|intcomma }}</span> เทียบช่วงเดียวกันเดือนก่อน
+            {% elif total_hc_delta < 0 %}↓{{ total_hc_delta|intcomma|slice:"1:" }} เทียบช่วงเดียวกันเดือนก่อน
+            {% else %}เท่ากับช่วงเดียวกันเดือนก่อน{% endif %}</span>
     </div>
 </section>
 
-<!-- ══ ROW 3: Ticket detail table ════════════════════════════════════════ -->
-<div class="row g-3">
-    <div class="col-12">
-        <div class="panel" id="detail-table">
-            <div class="d-flex flex-wrap align-items-center gap-2 p-3 pb-2">
-                <span class="panel-title mb-0">
-                    <i class="bi bi-list-ul me-1"></i>รายละเอียด Ticket
-                    <span class="badge text-bg-light ms-1">{{ filters.range_label }}</span>
-                </span>
-                {% if filter_f %}
-                <span class="badge text-bg-primary">ตัวกรอง: {{ filter_label }}</span>
-                <a href="{% url 'executive_dashboard' %}?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}#detail-table"
-                   class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
+<!-- ══ 2b. Where work is stuck — function card | flow + open H/C ═════════ -->
+<div class="row g-3 mb-3">
+    <!-- Q2: which response function is holding up work -->
+    <div class="col-12 col-lg-6">
+        {% if response_top %}
+        <a class="panel answer-card"
+           href="?{{ range_query|safe }}&response_type={{ response_top.type|urlencode }}&response_status=ACTIVE#response-requests">
+        {% else %}
+        <a class="panel answer-card" href="?{{ range_query|safe }}&open=resp#response-progress">
+        {% endif %}
+            <span class="card-head"><span class="card-q">ฟังก์ชันที่ทำให้งานค้าง</span><span class="scope-note ms-auto"><span class="live">LIVE</span></span><i class="bi bi-chevron-right card-chevron" aria-hidden="true"></i></span>
+            <span class="d-flex flex-wrap align-items-baseline gap-2">
+                {% if response_top %}
+                <span class="card-value">{{ response_top.label }}</span>
+                <span class="card-line">ค้าง {{ response_top.active|intcomma }} คำขอ · เกิน 7 วัน {{ response_top.aged|intcomma }} คำขอ</span>
+                {% else %}
+                <span class="card-value">ไม่มีงานค้าง</span>
                 {% endif %}
+            </span>
+            <span class="card-note">รวมทุกฟังก์ชัน {{ response_totals.active|intcomma }} คำขอค้าง · กระทบ Ticket High/Critical {{ response_hc_tickets|intcomma }} Ticket</span>
+            <span class="mini-bars">
+                {% for row in response_functions %}
+                <span class="mini-bar {% if response_top and row.type == response_top.type %}is-top{% endif %}">
+                    <span>{{ row.label }}</span>
+                    <span class="bar-track"><span class="bar-fresh" style="width: {{ row.fresh_pct }}%;"></span><span class="bar-aged" style="width: {{ row.aged_pct }}%;"></span></span>
+                    <span class="num">{{ row.active|intcomma }}</span>
+                </span>
+                {% endfor %}
+            </span>
+            <span class="card-note mt-auto"><span class="legend-swatch bar-fresh"></span>ค้างไม่เกิน 7 วัน <span class="legend-swatch bar-aged ms-2"></span>ค้างเกิน 7 วัน (อายุคำขอ ไม่ใช่การเกิน OLA)</span>
+        </a>
+    </div>
+
+    <div class="col-12 col-lg-6 d-flex flex-column gap-3">
+        <!-- Q3: are requests arriving faster than they are completed -->
+        <a class="panel answer-card flex-grow-1" data-flash-range
+           href="?{{ range_query|safe }}&response_status=RECEIVED#response-requests">
+            <span class="card-head"><span class="card-q">งานเข้า เทียบ งานเสร็จ</span><span class="scope-note ms-auto">{{ filters.range_label }}</span><i class="bi bi-chevron-right card-chevron" aria-hidden="true"></i></span>
+            {% if not response_totals.received and not response_totals.completed %}
+            <span class="flow-headline text-muted">ไม่มีคำขอรับเข้าหรือส่งงานในช่วงเวลานี้</span>
+            {% elif response_flow.diff > 0 %}
+            <span class="flow-headline">งานเข้าเร็วกว่างานเสร็จ <strong>{{ response_flow.abs_diff|intcomma }}</strong> คำขอ</span>
+            {% elif response_flow.diff < 0 %}
+            <span class="flow-headline">ทีมส่งงานทัน (มากกว่ารับเข้า <strong>{{ response_flow.abs_diff|intcomma }}</strong> คำขอ)</span>
+            {% else %}
+            <span class="flow-headline">รับเข้าและส่งงานเท่ากัน</span>
+            {% endif %}
+            <span class="flow-bars">
+                <span>รับเข้า</span><span class="bar-track"><span class="bar-in" style="width: {{ response_flow.received_pct }}%;"></span></span><span class="num">{{ response_totals.received|intcomma }}</span>
+                <span>ส่งงาน</span><span class="bar-track"><span class="bar-out" style="width: {{ response_flow.completed_pct }}%;"></span></span><span class="num">{{ response_totals.completed|intcomma }}</span>
+            </span>
+            <span class="card-note">หน่วย: คำขอ ทุกฟังก์ชัน · รับเข้านับตามวันที่สร้าง ส่งงานนับตามวันที่เสร็จสิ้น</span>
+        </a>
+
+        <!-- Q4: which High/Critical tickets need follow-up -->
+        <a class="panel answer-card flex-grow-1" data-flash-range href="?{{ range_query|safe }}&sev=hc#detail-table">
+            <span class="card-head"><span class="card-q">High/Critical ที่ยังไม่ปิด</span><span class="scope-note ms-auto">{{ filters.range_label }}</span><i class="bi bi-chevron-right card-chevron" aria-hidden="true"></i></span>
+            <span class="d-flex flex-wrap align-items-baseline gap-3">
+                <span><span class="card-value">{{ hc_open_tickets|intcomma }}</span> <span class="card-unit">Ticket</span></span>
+                {% if hc_total %}
+                <span class="card-line">ปิดแล้ว <strong>{{ hc_progress_pct }}%</strong> · {{ hc_closed|intcomma }} จาก {{ hc_total|intcomma }} เคส</span>
+                {% else %}
+                <span class="card-line text-muted">ยังไม่มีเคส High/Critical ในช่วงเวลานี้</span>
+                {% endif %}
+            </span>
+            {% if hc_total %}
+            <span class="progress-split" role="img"
+                  aria-label="ปิดแล้ว {{ hc_closed }} จาก {{ hc_total }} เคส ({{ hc_progress_pct }}%)"><span class="seg-closed" style="width: {{ hc_progress_pct }}%;"></span></span>
+            <span class="card-note"><span class="legend-swatch bar-closed"></span>ปิดแล้ว · ส่วนที่เหลือยังดำเนินการ · Project Incident หลายระบบนับเป็น 1 เคส</span>
+            {% endif %}
+        </a>
+    </div>
+</div>
+
+<!-- ══ 3. Ticket pipeline (horizontal; click a bar to filter the table) ═══ -->
+<section class="panel p-3 mb-3 d-flex flex-column" data-flash-range aria-labelledby="pipeline-title">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h2 class="panel-title mb-0" id="pipeline-title">
+            <i class="bi bi-diagram-3 me-1"></i>สถานะ Ticket ทั้งหมด (Pipeline)
+        </h2>
+        <span class="scope-note">{{ filters.range_label }}</span>
+        {% if filter_f and phase_hc_count is not None %}
+        <span class="ms-auto d-inline-flex align-items-center gap-2" style="font-size:12px;">
+            <span class="badge text-bg-primary">กำลังกรองตาราง: {{ filter_label }}</span>
+            <a href="?{{ range_query|safe }}{% if hc_only %}&sev=hc{% endif %}#detail-table" class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
+        </span>
+        {% endif %}
+    </div>
+    {# Chart.js reads these; they sit inside #exec-root so an in-place update refreshes them. #}
+    {{ pipeline_by_severity|json_script:"pipeline-by-severity-exec" }}
+    <div class="pipeline-chart-wrap">
+        <canvas id="chartPipelineExec" role="img"
+                data-range-query="{{ range_query }}" data-selected="{{ filter_f }}"
+                data-hc-only="{% if hc_only %}1{% endif %}"
+                aria-label="จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency ในแต่ละสถานะ"></canvas>
+    </div>
+    <div class="text-muted mt-1" style="font-size:11px;">
+        <span class="badge bg-danger me-1">E</span>ชื่อสถานะสีแดง = มีเคส Emergency · ดูจำนวนใน tooltip · คลิกแท่งเพื่อกรองตาราง Ticket
+    </div>
+    <div class="visually-hidden">
+    <table>
+        <caption>จำนวน Ticket Critical และ High แยกตามสถานะ พร้อมจำนวน Emergency</caption>
+        <thead>
+            <tr>
+                <th>ความรุนแรง</th>
+                {% for slug, display in pipeline_by_severity.statuses %}
+                <th>{{ display }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in pipeline_rows %}
+            <tr>
+                <td>{{ row.severity }}</td>
+                {% for cell in row.cells %}
+                <td>{{ cell }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+            <tr>
+                <td>ความฉุกเฉิน</td>
+                {% for cell in pipeline_emergency_row %}
+                <td>{{ cell }}</td>
+                {% endfor %}
+            </tr>
+        </tbody>
+    </table>
+    </div>
+</section>
+
+<!-- ══ 4. Details (open any number) ══════════════════════════════════════ -->
+<div class="d-flex align-items-center gap-2 mb-2">
+    <span class="mini-label fw-semibold text-muted">รายละเอียดเพิ่มเติม</span>
+    <span class="text-muted" style="font-size:12px;">เปิดได้หลายส่วนพร้อมกัน</span>
+    {# Script-only controls: without JS each section still opens on its own. #}
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" data-details-all="open" hidden>
+        <i class="bi bi-arrows-expand me-1" aria-hidden="true"></i>ขยายทั้งหมด
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-details-all="close" hidden>
+        <i class="bi bi-arrows-collapse me-1" aria-hidden="true"></i>ย่อทั้งหมด
+    </button>
+</div>
+
+<!-- A. Summary criteria -->
+<details class="panel exec-details mb-2" id="exec-crit" {% if "crit" in open_sections %}open{% endif %}>
+    <summary>
+        <span class="sec-title">เกณฑ์สรุปสถานการณ์</span>
+        <span class="sec-summary">{% if overall_status == 'WARNING' %}ต้องเฝ้าระวัง{% elif overall_status == 'WAITING' %}รอดำเนินการ{% else %}ปกติ{% endif %} · เตือน {{ level_counts.warning }} · รอดำเนินการ {{ level_counts.waiting }} · ปกติ {{ level_counts.good }}</span>
+        <span class="scope-note"><span class="live">LIVE</span></span>
+        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+    </summary>
+    <div class="sec-body">
+        <p class="text-muted mb-2" style="font-size:12px;">คลิกรายการเพื่อกรองตาราง Ticket · ช่วงเวลาจะเปลี่ยนเป็น “ทั้งหมด” ให้ตรงกับคิวปัจจุบัน</p>
+        <div class="criteria-grid">
+            {% for c in summary_criteria %}
+            <a class="criteria-row" href="?date_range=all&f={{ c.filter|urlencode }}#detail-table">
+                {% if c.level == 'good' %}
+                <i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i>
+                {% elif c.level == 'waiting' %}
+                <i class="bi bi-hourglass-split text-warning" aria-hidden="true"></i>
+                {% else %}
+                <i class="bi bi-exclamation-circle-fill text-danger" aria-hidden="true"></i>
+                {% endif %}
+                <span class="crit-count">{{ c.count|intcomma }}</span>
+                <span>{{ c.label }}<span class="crit-unit">{% if c.filter == 'EMERGENCY' %}นับเป็นเคส{% elif c.filter == 'RESPONSE_PENDING' %}นับเป็น Ticket · ซ้อนกับกลุ่มอื่นได้{% else %}นับเป็น Ticket{% endif %}</span></span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</details>
+
+<!-- B. Response teams -->
+<details class="panel exec-details mb-2" id="response-progress" {% if "resp" in open_sections %}open{% endif %}>
+    <summary>
+        <span class="sec-title">ทีมตอบสนองเหตุการณ์ แยกตามฟังก์ชัน</span>
+        <span class="sec-summary">{{ response_totals.active|intcomma }} คำขอค้าง (LIVE) · รับเข้า {{ response_totals.received|intcomma }} / ส่งงาน {{ response_totals.completed|intcomma }} คำขอ ({{ filters.range_label }})</span>
+        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+    </summary>
+    <div class="sec-body">
+        <div class="table-responsive mb-3">
+            <table class="table table-sm response-function-table mb-0">
+                <thead><tr><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้จัดการที่กำหนด</th>
+                    <th scope="col">ค้างอยู่ (คำขอ · LIVE)</th><th scope="col" class="text-end">เกิน 7 วัน (LIVE)</th>
+                    <th scope="col" class="text-end">รับเข้า ({{ filters.range_label }})</th><th scope="col" class="text-end">ส่งงาน ({{ filters.range_label }})</th></tr></thead>
+                <tbody>
+                    {% for row in response_functions %}
+                    <tr class="{% if response_type == row.type %}is-selected{% endif %}{% if row.type == 'VA_PT' or row.type == 'INFRA_SEC' %} is-legacy{% endif %}">
+                        <td><a class="response-link" {% if response_type == row.type %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ row.type|urlencode }}&response_status={{ response_status|urlencode }}#response-requests">{{ row.label }}</a>
+                            {% if row.type == 'VA_PT' or row.type == 'INFRA_SEC' %}<span class="badge text-bg-light border ms-1">ประเภทเดิม</span>{% endif %}</td>
+                        <td>{% if row.manager == 'ยังไม่กำหนด' %}<span class="text-warning-emphasis fw-semibold">{{ row.manager }}</span>{% else %}{{ row.manager }}{% endif %}</td>
+                        <td><a class="active-cell text-decoration-none" aria-label="{{ row.label }} ค้างอยู่ {{ row.active }} คำขอ ในนั้นเกิน 7 วัน {{ row.aged }} คำขอ" href="?{{ range_query|safe }}&response_type={{ row.type|urlencode }}&response_status=ACTIVE#response-requests">
+                            <span class="text-end fw-bold">{{ row.active|intcomma }}</span>
+                            <span class="bar-track"><span class="bar-fresh" style="width: {{ row.fresh_pct }}%;"></span><span class="bar-aged" style="width: {{ row.aged_pct }}%;"></span></span>
+                        </a></td>
+                        <td class="text-end"><a aria-label="{{ row.label }} ค้างเกิน 7 วัน {{ row.aged }} คำขอ" href="?{{ range_query|safe }}&response_type={{ row.type|urlencode }}&response_status=AGED#response-requests">{{ row.aged|intcomma }}</a></td>
+                        <td class="text-end"><a aria-label="{{ row.label }} รับเข้า {{ row.received }} คำขอ" href="?{{ range_query|safe }}&response_type={{ row.type|urlencode }}&response_status=RECEIVED#response-requests">{{ row.received|intcomma }}</a></td>
+                        <td class="text-end"><a aria-label="{{ row.label }} ส่งงาน {{ row.completed }} คำขอ" href="?{{ range_query|safe }}&response_type={{ row.type|urlencode }}&response_status=DONE#response-requests">{{ row.completed|intcomma }}</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="text-muted mt-1" style="font-size:11px;">
+                <span class="legend-swatch bar-fresh"></span>ค้างไม่เกิน 7 วัน
+                <span class="legend-swatch bar-aged ms-3"></span>ค้างเกิน 7 วัน — อายุคำขอนับจากวันที่สร้าง ไม่ใช่การเกิน OLA
+            </div>
+        </div>
+
+        <div id="response-requests" data-flash-label="{{ requests_flash }}">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <h3 class="panel-title mb-0">รายการคำขอ <span class="badge text-bg-light">{{ response_page_obj.paginator.count|intcomma }} คำขอ</span></h3>
+                {% if response_type %}<a class="btn btn-sm btn-outline-primary" href="?{{ range_query|safe }}&response_status={{ response_status|urlencode }}#response-requests">ฟังก์ชัน: {% for row in response_functions %}{% if row.type == response_type %}{{ row.label }}{% endif %}{% endfor %} ×</a>{% endif %}
+            </div>
+            <div class="d-flex flex-wrap gap-1 mb-2" role="group" aria-label="กรองคำขอทีมตอบสนอง">
+                {% if response_status == 'OPEN' or response_status == 'IN_PROGRESS' %}
+                <span class="btn btn-sm btn-primary" aria-current="true">{% if response_status == 'OPEN' %}รอรับงาน{% else %}กำลังทำ{% endif %} (LIVE)</span>
+                {% endif %}
+                <a class="btn btn-sm {% if response_status == 'ACTIVE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'ACTIVE' %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status=ACTIVE#response-requests">ค้างทั้งหมด (LIVE) <span class="badge text-bg-light">{{ response_status_counts.ACTIVE|intcomma }}</span></a>
+                <a class="btn btn-sm {% if response_status == 'AGED' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'AGED' %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status=AGED#response-requests">ค้างเกิน 7 วัน (LIVE) <span class="badge text-bg-light">{{ response_status_counts.AGED|intcomma }}</span></a>
+                <a class="btn btn-sm {% if response_status == 'HIGH_CRIT' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'HIGH_CRIT' %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status=HIGH_CRIT#response-requests">ของ Ticket High/Critical (LIVE) <span class="badge text-bg-light">{{ response_status_counts.HIGH_CRIT|intcomma }}</span></a>
+                <a class="btn btn-sm {% if response_status == 'RECEIVED' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'RECEIVED' %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status=RECEIVED#response-requests">รับเข้า · {{ filters.range_label }} <span class="badge text-bg-light">{{ response_status_counts.RECEIVED|intcomma }}</span></a>
+                <a class="btn btn-sm {% if response_status == 'DONE' %}btn-primary{% else %}btn-outline-secondary{% endif %}" {% if response_status == 'DONE' %}aria-current="true"{% endif %} href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status=DONE#response-requests">ส่งงาน · {{ filters.range_label }} <span class="badge text-bg-light">{{ response_status_counts.DONE|intcomma }}</span></a>
+            </div>
+            <div class="small text-muted mb-2">
+                {% if response_status == 'AGED' %}แสดงคำขอที่ค้างเกิน 7 วันนับจากวันที่สร้าง (อายุคำขอ ไม่ใช่การเกิน OLA)
+                {% elif response_status == 'HIGH_CRIT' %}แสดงคำขอที่ค้างของ Ticket High/Critical · นับเป็นคำขอ (1 Ticket อาจมีหลายคำขอ)
+                {% elif response_status == 'RECEIVED' %}แสดงคำขอที่สร้างในช่วงเวลา {{ filters.range_label }} รวมคำขอที่เสร็จหรือยกเลิกแล้ว
+                {% elif response_status == 'DONE' %}แสดงคำขอที่เปลี่ยนเป็นเสร็จสิ้นในช่วงเวลา {{ filters.range_label }} · ล่าสุดก่อน
+                {% else %}High/Critical และคำขอที่เก่ากว่าขึ้นก่อน{% endif %}
             </div>
             <div class="table-responsive">
-                <table class="table table-sm detail-table mb-0 align-middle">
+                <table class="table table-sm detail-table req-table stack-table mb-0">
+                    <thead><tr><th scope="col">เลขที่ Ticket</th><th scope="col">ชื่อเรื่อง</th><th scope="col">ความรุนแรง</th><th scope="col">ฟังก์ชัน</th><th scope="col">ผู้รับผิดชอบ</th><th scope="col">สถานะ</th><th scope="col">อายุคำขอ</th><th scope="col">รับเข้า / ส่งงาน</th></tr></thead>
+                    <tbody>
+                    {% for item in response_requests %}
+                        <tr>
+                            <td class="font-monospace fw-semibold text-nowrap">#{{ item.ticket.ticket_id }}</td>
+                            <td>{{ item.ticket.display_name }}</td>
+                            <td>{{ item.ticket.get_severity_display }}</td>
+                            <td>{{ item.get_subtask_type_display }}</td>
+                            <td>{% if item.assigned_to %}{{ item.assigned_to.get_full_name|default:item.assigned_to.username }}{% else %}<span class="text-muted">ยังไม่กำหนด</span>{% endif %}</td>
+                            <td>{{ item.get_status_display }}</td>
+                            <td class="text-nowrap">{{ item.age_days }} วัน{% if item.status != 'DONE' and item.status != 'CANCELLED' and item.age_days > 7 %} <span class="badge text-bg-warning">เกิน 7 วัน</span>{% endif %}</td>
+                            <td class="text-nowrap">{{ item.created_at|date:"d M Y" }}{% if item.status == 'DONE' %}<span class="text-success"> / {{ item.status_changed_at|date:"d M Y" }}</span>{% endif %}</td>
+                        </tr>
+                    {% empty %}
+                        <tr class="empty-row"><td colspan="8" class="empty-state">
+                            {% if response_status == 'DONE' %}
+                            <div class="empty-title">ไม่มีคำขอที่ส่งงานในช่วงเวลา {{ filters.range_label }}</div>
+                            <div class="empty-hint">ตัวกรองนี้อิงช่วงเวลา · คำขอที่ค้างเป็นคิวปัจจุบันและยังมี {{ response_totals.active|intcomma }} คำขอ ({{ response_totals.aged|intcomma }} คำขอค้างเกิน 7 วัน)</div>
+                            {% elif response_status == 'RECEIVED' %}
+                            <div class="empty-title">ไม่มีคำขอที่รับเข้าในช่วงเวลา {{ filters.range_label }}</div>
+                            <div class="empty-hint">ตัวกรองนี้อิงช่วงเวลา · คำขอที่ค้างเป็นคิวปัจจุบันและยังมี {{ response_totals.active|intcomma }} คำขอ</div>
+                            {% else %}
+                            <div class="empty-title">ไม่มีคำขอในตัวกรองนี้</div>
+                            {% endif %}
+                            {% if response_status != 'ACTIVE' %}<a class="btn btn-sm btn-primary" href="?{{ range_query|safe }}&response_status=ACTIVE#response-requests">ดูคำขอที่ค้างทั้งหมด (LIVE)</a>{% endif %}
+                        </td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if response_page_obj.paginator.num_pages > 1 %}
+            <nav class="d-flex justify-content-between align-items-center gap-2 mt-2" aria-label="หน้ารายการคำขอทีมตอบสนอง">
+                <span class="small text-muted">แสดง {{ response_page_obj.start_index }}–{{ response_page_obj.end_index }} จาก {{ response_page_obj.paginator.count|intcomma }} คำขอ</span>
+                <span class="d-flex align-items-center gap-2">
+                    {% if response_page_obj.has_previous %}<a class="btn btn-sm btn-outline-secondary" href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.previous_page_number }}#response-requests">ก่อนหน้า</a>{% endif %}
+                    <span class="small text-muted">{{ response_page_obj.number }} / {{ response_page_obj.paginator.num_pages }}</span>
+                    {% if response_page_obj.has_next %}<a class="btn btn-sm btn-outline-secondary" href="?{{ range_query|safe }}&response_type={{ response_type|urlencode }}&response_status={{ response_status|urlencode }}&response_page={{ response_page_obj.next_page_number }}#response-requests">ถัดไป</a>{% endif %}
+                </span>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</details>
+
+<!-- ══ ROW 3: Ticket detail ══════════════════════════════════════════════ -->
+<details class="panel exec-details mb-2" id="exec-tickets" {% if "tickets" in open_sections %}open{% endif %}>
+    <summary>
+        <span class="sec-title">รายละเอียด Ticket</span>
+        <span class="sec-summary">{{ page_obj.paginator.count|intcomma }} Ticket{% if filter_f or hc_only %} ในตัวกรอง{% else %} ยังไม่ปิด{% endif %} ({{ filters.range_label }})</span>
+        <i class="bi bi-chevron-down" aria-hidden="true"></i>
+    </summary>
+    <div class="sec-body">
+        <div id="detail-table" data-flash-range data-flash-label="{{ tickets_flash }}">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <h3 class="panel-title mb-0"><i class="bi bi-list-ul me-1"></i>รายละเอียด Ticket
+                    <span class="badge text-bg-light ms-1">{{ page_obj.paginator.count|intcomma }} Ticket</span></h3>
+                {% if filter_f %}
+                <span class="badge text-bg-primary">ตัวกรอง: {{ filter_label }}</span>
+                <a href="?{{ range_query|safe }}{% if hc_only %}&sev=hc{% endif %}&open=tickets#detail-table"
+                   class="btn btn-sm btn-outline-secondary py-0">ล้างตัวกรอง</a>
+                {% endif %}
+                <a class="btn btn-sm {% if hc_only %}btn-primary{% else %}btn-outline-secondary{% endif %} ms-auto"
+                   {% if hc_only %}aria-current="true"{% endif %}
+                   href="?{{ range_query|safe }}{% if filter_f %}&f={{ filter_f|urlencode }}{% endif %}{% if not hc_only %}&sev=hc{% endif %}&open=tickets#detail-table">
+                    <i class="bi {% if hc_only %}bi-toggle-on{% else %}bi-toggle-off{% endif %} me-1" aria-hidden="true"></i>เฉพาะ High/Critical
+                </a>
+            </div>
+            {% if phase_hc_count is not None and not hc_only and page_obj.paginator.count != phase_hc_count %}
+            <div class="alert alert-warning py-1 px-2 mb-2" style="font-size:12px;">
+                Pipeline นับเฉพาะ High/Critical ({{ phase_hc_count|intcomma }}) · ตารางแสดงทุกความรุนแรงในระยะนี้ ({{ page_obj.paginator.count|intcomma }}) — เลือก “เฉพาะ High/Critical” เพื่อให้ตรงกัน
+            </div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table table-sm detail-table ticket-table stack-table mb-0 align-middle">
                     <thead>
                         <tr>
                             <th>เลขที่ Ticket</th>
                             <th>ชื่อเรื่อง</th>
+                            <th>ความรุนแรง</th>
                             <th>สรุปเหตุการณ์</th>
                             <th>ผู้รับผิดชอบ</th>
                             <th>สถานะ Emergency</th>
@@ -457,41 +653,19 @@
                         {% for t in table_tickets %}
                         <tr>
                             <td>
-                                <a href="{% url 'ticket_detail' t.pk %}"
-                                   class="font-monospace fw-bold text-decoration-none text-nowrap">#{{ t.ticket_id }}</a>
-                                {# The rows stay ticket-grain, so flag which ones are #}
-                                {# members of one multi-system incident — the KPI     #}
-                                {# counts above collapse them, this table does not.   #}
+                                {# Executives are read-only and cannot open ticket pages, #}
+                                {# so the reference is plain text, not a link.            #}
+                                <span class="font-monospace fw-bold text-nowrap">#{{ t.ticket_id }}</span>
+                                {# Rows stay ticket-grain: flag members of one multi-system #}
+                                {# incident — the KPI counts collapse them, this table not. #}
                                 {% if t.project_incident_id %}
-                                <div class="mt-1"><a href="{% url 'project_incident_detail' t.project_incident_id %}" class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="เปิดภาพรวม Project Incident"><i class="bi bi-diagram-3 me-1"></i>Project · {{ t.bundle_ref }}</a></div>
+                                <div class="mt-1"><span class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle"><i class="bi bi-diagram-3 me-1"></i>Project · {{ t.bundle_ref }}</span></div>
                                 {% endif %}
                             </td>
                             <td>{{ t.display_name }}</td>
+                            <td>{% if t.severity == 'Critical' %}<span class="signal-badge signal-critical">{% elif t.severity == 'High' %}<span class="signal-badge signal-high">{% elif t.severity == 'Medium' %}<span class="signal-badge signal-medium">{% elif t.severity == 'Low' %}<span class="signal-badge signal-low">{% else %}<span class="signal-badge signal-neutral">{% endif %}{{ t.get_severity_display }}</span></td>
                             <td>{{ t.event_summary|default:t.issue_description|truncatechars:70 }}</td>
-                            <td>
-                                {# Whoever actually holds the ticket right now, per     #}
-                                {# Ticket.ALLOWED_TRANSITIONS — not always the opening  #}
-                                {# analyst. The SOC Manager and Tier 2 are pools (no    #}
-                                {# assigned-manager field), so those stages show the    #}
-                                {# role rather than a person.                           #}
-                                {% if t.status == 'AWAITING_CONTAINMENT' and t.assigned_admin %}
-                                    {{ t.assigned_admin.get_full_name|default:t.assigned_admin.username }}
-                                    <span class="text-muted" style="font-size:12px;">(ผู้ดูแลระบบ)</span>
-                                {% elif t.status == 'PENDING_MGR_TRIAGE' or t.status == 'PENDING_MANAGER' %}
-                                    ผู้จัดการ SOC
-                                    <span class="text-muted" style="font-size:12px;">(รอตรวจ)</span>
-                                {% elif t.status == 'ESCALATED_T2' or t.status == 'CONTAINMENT_REPORTED' or t.status == 'PENDING_T2_REVIEW' %}
-                                    Tier 2
-                                    <span class="text-muted" style="font-size:12px;">(รอตรวจ)</span>
-                                {% elif t.status == 'AWAITING_OWNER' or t.status == 'OWNER_REMEDIATED' %}
-                                    {{ t.asset_owner|default:"เจ้าของระบบ" }}
-                                    <span class="text-muted" style="font-size:12px;">(เจ้าของระบบ)</span>
-                                {% elif t.assigned_to %}
-                                    {{ t.assigned_to.get_full_name|default:t.assigned_to.username }}
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
-                            </td>
+                            <td>{% include 'dashboard/_exec_ticket_holder.html' %}</td>
                             <td>
                                 {% if t.is_emergency %}
                                 <span class="priority-pill priority-emergency">
@@ -504,18 +678,27 @@
                             <td>
                                 {# Colors from Ticket.STATUS_PILL_COLORS (single source of truth). #}
                                 <span class="status-pill" style="{{ t.status_pill_css }}">{{ t.get_status_display }}</span>
+                                {% if t.is_ola_contain_breached %}<div><span class="flag-ola">เกิน OLA</span></div>{% endif %}
                             </td>
                             <td class="case-age" title="สถานะนี้ตั้งแต่ {{ t.status_started_at|date:'d M Y H:i' }} ICT">{{ t.status_age_label }}</td>
                             <td class="text-nowrap">{{ t.updated_at|date:"d M Y H:i" }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="8" class="text-center text-muted py-4">ไม่มีรายการ</td></tr>
+                        <tr class="empty-row"><td colspan="9" class="empty-state">
+                            {% if filter_f or hc_only %}
+                            <div class="empty-title">ไม่มี Ticket ในตัวกรองนี้</div>
+                            {% else %}
+                            <div class="empty-title">ไม่มี Ticket ที่ยังไม่ปิดซึ่งเปิดในช่วงเวลา {{ filters.range_label }}</div>
+                            {% endif %}
+                            <div class="empty-hint">สถานะด้านบนยังเป็นคิวปัจจุบัน · มี Ticket ที่ยังไม่ปิดทั้งหมด {{ active_total|intcomma }} รายการ</div>
+                            {% if filters.date_range != 'all' %}<a class="btn btn-sm btn-primary" href="?date_range=all{{ keep_query|safe }}">ดูทุกช่วงเวลา</a>{% endif %}
+                        </td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             {% if page_obj.paginator.num_pages > 1 %}
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-3 py-2">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 pt-2">
                 <div class="text-muted" style="font-size:13px;">
                     แสดง {{ page_obj.start_index }}–{{ page_obj.end_index }} จาก {{ page_obj.paginator.count|intcomma }} รายการ
                 </div>
@@ -523,7 +706,7 @@
                     <ul class="pagination pagination-sm mb-0">
                         {% if page_obj.has_previous %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="ก่อนหน้า">«</a>
+                            <a class="page-link" href="?{{ range_query|safe }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}{% if hc_only %}sev=hc&{% endif %}page={{ page_obj.previous_page_number }}#detail-table" aria-label="ก่อนหน้า">«</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">«</span></li>
@@ -533,7 +716,7 @@
                         </li>
                         {% if page_obj.has_next %}
                         <li class="page-item">
-                            <a class="page-link" href="?date_range={{ filters.date_range }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="ถัดไป">»</a>
+                            <a class="page-link" href="?{{ range_query|safe }}&{% if filter_f %}f={{ filter_f|urlencode }}&{% endif %}{% if hc_only %}sev=hc&{% endif %}page={{ page_obj.next_page_number }}#detail-table" aria-label="ถัดไป">»</a>
                         </li>
                         {% else %}
                         <li class="page-item disabled"><span class="page-link" aria-hidden="true">»</span></li>
@@ -544,11 +727,361 @@
             {% endif %}
         </div>
     </div>
-</div>
+</details>
 
-<!-- Quiet auto-refresh, same behavior as the management dashboard. -->
+<p class="text-muted mt-3 mb-0" style="font-size:12px;">ผู้บริหารมีสิทธิ์ดูอย่างเดียว · เลขที่ Ticket แสดงเป็นข้อความ ไม่เปิดหน้ารายละเอียด</p>
+</div>{# /#exec-root #}
+
+<!-- Quiet auto-refresh + in-place filtering.
+     Every filter on this page is a plain ?query link, so without script it
+     still works as a normal page load. With script, the next view is fetched
+     and swapped into #exec-root instead: the page keeps its scroll position,
+     keeps every section the viewer opened, and rings the results that
+     changed so the eye knows where to look. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script nonce="{{ request.csp_nonce }}">
 (function () {
+    const ROOT_ID = 'exec-root';
+    const SECTION_KEYS = { 'exec-crit': 'crit', 'response-progress': 'resp', 'exec-tickets': 'tickets' };
+    const SECTION_ORDER = ['crit', 'resp', 'tickets'];
+    const FLASH_MS = 2300;
+    const live = document.getElementById('exec-live');
+    const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let inflight = null;
+
+    // ── Open sections ────────────────────────────────────────────────── //
+    // Sections are independent: the viewer may open any number, and every
+    // update sends exactly that set (?open=crit,tickets) so none gets closed
+    // behind their back. A link into a closed section opens it too.
+    function sectionOf(id) {
+        const el = id && document.getElementById(id);
+        const box = el && el.closest('details.exec-details');
+        return box ? SECTION_KEYS[box.id] || '' : '';
+    }
+
+    function openSections(extra) {
+        const keys = [...document.querySelectorAll('#' + ROOT_ID + ' details.exec-details[open]')]
+            .map(d => SECTION_KEYS[d.id]);
+        if (extra) keys.push(extra);
+        return SECTION_ORDER.filter(k => keys.includes(k));
+    }
+
+    function withOpenSections(href, hash) {
+        const u = new URL(href, window.location.href);
+        u.searchParams.set('open', openSections(sectionOf(hash)).join(','));
+        return u;
+    }
+
+    // Keep the address bar in step when a section is opened or closed by
+    // hand, so reload, back/forward and auto-refresh keep it the same way.
+    function syncOpenParam() {
+        const u = new URL(window.location.href);
+        u.searchParams.set('open', openSections().join(','));
+        history.replaceState(history.state, '', u.href);
+        refreshToggleAll();
+    }
+
+    function refreshToggleAll() {
+        const all = document.querySelectorAll('#' + ROOT_ID + ' details.exec-details');
+        const open = document.querySelectorAll('#' + ROOT_ID + ' details.exec-details[open]');
+        document.querySelectorAll('[data-details-all]').forEach(btn => {
+            btn.hidden = false;
+            btn.disabled = btn.dataset.detailsAll === 'open'
+                ? open.length === all.length : open.length === 0;
+        });
+    }
+
+    // ── Focus effect ─────────────────────────────────────────────────── //
+    function flash(el, label) {
+        el.classList.remove('exec-flash');
+        el.querySelectorAll(':scope > .exec-flash-tag').forEach(t => t.remove());
+        void el.offsetWidth;  // restart the animation if it is still running
+        el.classList.add('exec-flash');
+        if (label) {
+            const tag = document.createElement('span');
+            tag.className = 'exec-flash-tag';
+            tag.setAttribute('aria-hidden', 'true');  // the live region reads it
+            tag.textContent = label;
+            el.prepend(tag);
+        }
+        setTimeout(() => {
+            el.classList.remove('exec-flash');
+            el.querySelectorAll(':scope > .exec-flash-tag').forEach(t => t.remove());
+        }, FLASH_MS);
+    }
+
+    // Rendered (not inside a closed section) and at least partly on screen.
+    function onScreen(el) {
+        if (!el) return false;
+        const closed = el.closest('details:not([open])');
+        if (closed && closed !== el) return false;
+        const r = el.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+    }
+
+    function rendered(el) {
+        const closed = el.closest('details:not([open])');
+        return !closed || closed === el;
+    }
+
+    // ── In-place navigation ──────────────────────────────────────────── //
+    async function swapTo(url, opts) {
+        opts = opts || {};
+        const target = new URL(url, window.location.href);
+        const hash = target.hash.slice(1);
+        target.hash = '';
+        const root = document.getElementById(ROOT_ID);
+        if (!root) { window.location.href = url; return; }
+
+        // Remember where the destination sits on screen now, so it can stay put.
+        const before = hash ? document.getElementById(hash) : null;
+        const anchorOffset = onScreen(before) ? before.getBoundingClientRect().top : null;
+        const scrollY = window.scrollY;
+
+        if (inflight) inflight.abort();
+        inflight = new AbortController();
+        root.setAttribute('aria-busy', 'true');
+        // Anything unexpected (session expired → login redirect, error page)
+        // falls back to a normal page load so the browser shows it properly.
+        const fullLoad = () => { window.location.href = target.href + (hash ? '#' + hash : ''); };
+        let res;
+        try {
+            res = await fetch(target.href, {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                signal: inflight.signal,
+            });
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            root.removeAttribute('aria-busy');
+            // Network down: a background refresh just tries again next time.
+            if (!opts.quiet) fullLoad();
+            return;
+        }
+        const fresh = res.ok && new URL(res.url).pathname === target.pathname
+            ? new DOMParser().parseFromString(await res.text(), 'text/html').getElementById(ROOT_ID)
+            : null;
+        if (!fresh) { fullLoad(); return; }
+        root.replaceWith(fresh);
+        // New data can only come from a date change; otherwise redraw still.
+        initPipelineChart(!!opts.flashRange);
+        if (opts.push) history.pushState({ exec: true }, '', target.href);
+        refreshToggleAll();
+
+        // Bootstrap sets `scroll-behavior: smooth` on :root, so the corrective
+        // scrolls must say 'instant' or the page visibly glides after a swap.
+        const after = hash ? document.getElementById(hash) : null;
+        if (after && anchorOffset !== null) {
+            // Same region was already on screen: keep it exactly where it was.
+            window.scrollBy({ top: after.getBoundingClientRect().top - anchorOffset, behavior: 'instant' });
+        } else if (after && !opts.keepScroll) {
+            // The link points somewhere that was off-screen or collapsed: go there.
+            window.scrollTo({ top: scrollY, behavior: 'instant' });
+            after.scrollIntoView({ behavior: reducedMotion() ? 'instant' : 'smooth', block: 'start' });
+        } else {
+            window.scrollTo({ top: scrollY, behavior: 'instant' });
+        }
+
+        // Point the eye at what changed: the link's destination, or — for a
+        // date change — every period-scoped block that is showing.
+        let message = '';
+        if (!opts.quiet) {
+            if (after) {
+                message = after.dataset.flashLabel || '';
+                flash(after, message);
+            } else if (opts.flashRange) {
+                const scope = fresh.querySelector('.exec-filterbar .scope-range');
+                message = scope ? 'ช่วงเวลา: ' + scope.textContent.trim() : '';
+                // The sticky bar's range badge is always on screen: ring it too.
+                if (scope) flash(scope, '');
+                const blocks = [...fresh.querySelectorAll('[data-flash-range]')].filter(rendered);
+                const firstVisible = blocks.find(onScreen);
+                blocks.forEach(el => flash(el, el === firstVisible ? message : ''));
+            }
+            if (live) live.textContent = 'อัปเดตแล้ว' + (message ? ': ' + message : '');
+        }
+
+        // Keyboard users keep their place: refocus the equivalent control.
+        if (opts.focusHref) {
+            const same = [...fresh.querySelectorAll('a[href]')]
+                .find(a => a.getAttribute('href') === opts.focusHref);
+            if (same) same.focus({ preventScroll: true });
+            else if (after) { after.setAttribute('tabindex', '-1'); after.focus({ preventScroll: true }); }
+        }
+    }
+
+    document.addEventListener('click', (e) => {
+        const allBtn = e.target.closest('[data-details-all]');
+        if (allBtn) {
+            const open = allBtn.dataset.detailsAll === 'open';
+            document.querySelectorAll('#' + ROOT_ID + ' details.exec-details').forEach(d => { d.open = open; });
+            syncOpenParam();
+            return;
+        }
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const a = e.target.closest('#' + ROOT_ID + ' a[href^="?"]');
+        if (!a || a.target) return;
+        e.preventDefault();
+        const raw = a.getAttribute('href');
+        const hash = raw.includes('#') ? raw.split('#')[1] : '';
+        const next = withOpenSections(raw, hash);
+        swapTo(next.href, { push: true, focusHref: raw, flashRange: !hash && !!a.closest('.exec-filterbar') });
+    });
+
+    document.addEventListener('submit', (e) => {
+        const form = e.target.closest('#' + ROOT_ID + ' .exec-filterbar form');
+        if (!form) return;
+        e.preventDefault();
+        const params = new URLSearchParams(new FormData(form));
+        swapTo(withOpenSections('?' + params.toString()).href, { push: true, flashRange: true });
+    });
+
+    // `toggle` does not bubble, so listen in the capture phase.
+    document.addEventListener('toggle', (e) => {
+        if (e.target.matches && e.target.matches('#' + ROOT_ID + ' details.exec-details')) syncOpenParam();
+    }, true);
+
+    window.addEventListener('popstate', () => swapTo(window.location.href, { keepScroll: true, quiet: true }));
+
+    // ── Pipeline chart (stacked bars, click-to-filter) ───────────────── //
+    // Same chart as before the redesign; it now filters in place and takes
+    // its colours from the page theme.
+    if (window.Chart) {
+        Chart.defaults.font.size = 13;
+        Chart.defaults.maintainAspectRatio = false;
+    }
+    let pipelineChart = null;
+    const cssVar = (name, fallback) =>
+        getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
+    function initPipelineChart(animate) {
+        if (pipelineChart) { pipelineChart.destroy(); pipelineChart = null; }
+        const canvas = document.getElementById('chartPipelineExec');
+        const dataEl = document.getElementById('pipeline-by-severity-exec');
+        if (!window.Chart || !canvas || !dataEl) return;
+
+        const pbs = JSON.parse(dataEl.textContent);
+        const statuses   = pbs.statuses;    // [[slug, display], ...] workflow order
+        const severities = pbs.severities;  // Critical/High only, highest rank first
+        const matrix     = pbs.matrix;
+        const emergencyByStatus = pbs.emergency_by_status || {};
+        const selected = canvas.dataset.selected || '';
+        const textColor = cssVar('--ui-text', '#343a40');
+        const mutedColor = cssVar('--ui-muted', '#6c757d');
+        const gridColor = cssVar('--ui-border', '#e9ecef');
+        const primary = cssVar('--ui-primary', '#245ea8');
+
+        const SEV_COLOR = { 'Critical': '#dc3545', 'High': '#fd7e14' };
+        // The phase the table is filtered to gets a marker, so the chart
+        // shows which bar the list below belongs to.
+        const labels = statuses.map(s => (s[0] === selected ? '▶ ' : '') + s[1]);
+        const datasets = severities.map(([sevSlug, sevDisplay]) => ({
+            label: sevDisplay,
+            data: statuses.map(([stSlug]) => matrix[sevSlug][stSlug]),
+            backgroundColor: SEV_COLOR[sevSlug] || '#adb5bd',
+            borderRadius: 3,
+        }));
+        const totals = statuses.map((_, i) =>
+            datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
+        const emergencyCounts = statuses.map(([stSlug]) => emergencyByStatus[stSlug] || 0);
+        const maxTotal = Math.max(0, ...totals);
+
+        const totalLabelPlugin = {
+            id: 'pipelineTotalsExec',
+            afterDatasetsDraw(chart) {
+                const { ctx, scales: { x, y } } = chart;
+                ctx.save();
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillStyle = textColor;
+                // Horizontal bars: draw the stack total just past the bar end.
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                totals.forEach((t, i) => {
+                    if (t === 0) return;
+                    ctx.fillText(t, x.getPixelForValue(t) + 6, y.getPixelForValue(i));
+                });
+                ctx.restore();
+            }
+        };
+
+        pipelineChart = new Chart(canvas, {
+            type: 'bar',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                ...(animate === false ? { animation: false } : {}),
+                indexAxis: 'y',
+                layout: { padding: { right: 28 } },
+                color: mutedColor,
+                // Click a bar → filter the detail table to that phase within range.
+                onClick: (evt, els) => {
+                    if (!els.length) return;
+                    const slug = statuses[els[0].index][0];
+                    const href = '?' + canvas.dataset.rangeQuery +
+                        '&f=' + encodeURIComponent(slug) +
+                        (canvas.dataset.hcOnly ? '&sev=hc' : '');
+                    const next = withOpenSections(href, 'detail-table');
+                    next.hash = 'detail-table';
+                    swapTo(next.href, { push: true });
+                },
+                onHover: (evt, els) => {
+                    evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+                },
+                scales: {
+                    // Category axis (phase labels) — emergency phases in red/bold,
+                    // the filtered phase in the page's primary colour.
+                    y: {
+                        stacked: true,
+                        grid: { display: false },
+                        ticks: {
+                            color: tick => statuses[tick.index][0] === selected ? primary
+                                : emergencyCounts[tick.index] ? '#dc3545' : mutedColor,
+                            font: tick => ({
+                                size: 12,
+                                weight: (emergencyCounts[tick.index] || statuses[tick.index][0] === selected) ? '700' : '400',
+                            }),
+                            autoSkip: false,
+                        },
+                    },
+                    // Value axis (case count).
+                    x: {
+                        stacked: true, beginAtZero: true,
+                        suggestedMax: maxTotal + 1,
+                        grid: { color: gridColor },
+                        ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined, color: mutedColor },
+                        title: { display: true, text: 'จำนวนเคส High/Critical', font: { size: 13 }, color: mutedColor },
+                    }
+                },
+                plugins: {
+                    legend: { position: 'top', labels: { font: { size: 13 }, color: textColor } },
+                    tooltip: {
+                        callbacks: {
+                            title: items => statuses[items[0].dataIndex][1],
+                            label: item => `${item.dataset.label}: ${item.parsed.x}`,
+                            footer: items => {
+                                const i = items[0].dataIndex;
+                                return [
+                                    'รวม High/Critical: ' + totals[i],
+                                    'Emergency: ' + emergencyCounts[i],
+                                    'คลิกเพื่อกรองตาราง',
+                                ];
+                            },
+                        }
+                    }
+                },
+            },
+            plugins: [totalLabelPlugin],
+        });
+    }
+    initPipelineChart(true);
+    // Light/dark switch: redraw with the new theme colours.
+    new MutationObserver(() => initPipelineChart(false))
+        .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    refreshToggleAll();
+
+    // Quiet auto-refresh, same idle rules as the management dashboard, but
+    // refreshed in place so the viewer's scroll position and sections stay.
     const AUTO_REFRESH_MS = 300000;
     const IDLE_GRACE_MS = 15000;
     let userActiveUntil = 0;
@@ -561,124 +1094,8 @@
         if (document.visibilityState !== 'visible') return;
         if (Date.now() < userActiveUntil) return;
         if (navigator.onLine === false) return;
-        window.location.reload();
+        swapTo(withOpenSections(window.location.href).href, { keepScroll: true, quiet: true });
     }, AUTO_REFRESH_MS);
-})();
-</script>
-
-<!-- ── Chart.js: pipeline (stacked bar, click-to-filter) ─────────────────── -->
-{{ pipeline_by_severity|json_script:"pipeline-by-severity-exec" }}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script nonce="{{ request.csp_nonce }}">
-Chart.defaults.font.size = 13;
-Chart.defaults.maintainAspectRatio = false;
-
-(function () {
-    const pbs = JSON.parse(
-        document.getElementById('pipeline-by-severity-exec').textContent);
-    const dateRange = '{{ filters.date_range|escapejs }}';
-    const dateFrom = '{{ filters.date_from|escapejs }}';
-    const dateTo = '{{ filters.date_to|escapejs }}';
-    const statuses   = pbs.statuses;    // [[slug, display], ...] workflow order
-    const severities = pbs.severities;  // Critical/High only, highest rank first
-    const matrix     = pbs.matrix;
-    const emergencyByStatus = pbs.emergency_by_status || {};
-
-    const SEV_COLOR = {
-        'Critical': '#dc3545', 'High': '#fd7e14',
-    };
-    const labels = statuses.map(s => s[1]);
-    const datasets = severities.map(([sevSlug, sevDisplay]) => ({
-        label: sevDisplay,
-        data: statuses.map(([stSlug]) => matrix[sevSlug][stSlug]),
-        backgroundColor: SEV_COLOR[sevSlug] || '#adb5bd',
-        borderRadius: 3,
-    }));
-    const totals = statuses.map((_, i) =>
-        datasets.reduce((sum, d) => sum + (d.data[i] || 0), 0));
-    const emergencyCounts = statuses.map(([stSlug]) => emergencyByStatus[stSlug] || 0);
-    const maxTotal = Math.max(0, ...totals);
-
-    const totalLabelPlugin = {
-        id: 'pipelineTotalsExec',
-        afterDatasetsDraw(chart) {
-            const { ctx, scales: { x, y } } = chart;
-            ctx.save();
-            ctx.font = 'bold 12px sans-serif';
-            ctx.fillStyle = '#343a40';
-            // Horizontal bars: draw the stack total just past the bar end.
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            totals.forEach((t, i) => {
-                if (t === 0) return;
-                ctx.fillText(t, x.getPixelForValue(t) + 6, y.getPixelForValue(i));
-            });
-            ctx.restore();
-        }
-    };
-
-    new Chart(document.getElementById('chartPipelineExec'), {
-        type: 'bar',
-        data: { labels, datasets },
-        options: {
-            responsive: true,
-            indexAxis: 'y',
-            layout: { padding: { right: 28 } },
-            // Click a bar → filter the detail table to that status within range.
-            onClick: (evt, els) => {
-                if (els.length) {
-                    const slug = statuses[els[0].index][0];
-                    window.location =
-                        '?date_range=' + encodeURIComponent(dateRange) +
-                        '&date_from=' + encodeURIComponent(dateFrom) +
-                        '&date_to=' + encodeURIComponent(dateTo) +
-                        '&f=' + encodeURIComponent(slug) + '#detail-table';
-                }
-            },
-            onHover: (evt, els) => {
-                evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
-            },
-            scales: {
-                // Category axis (status labels) — emergency statuses in red/bold.
-                y: {
-                    stacked: true,
-                    grid: { display: false },
-                    ticks: { color: tick => emergencyCounts[tick.index] ? '#dc3545' : '#6c757d',
-                             font: tick => ({
-                                 size: 12,
-                                 weight: emergencyCounts[tick.index] ? '700' : '400',
-                             }),
-                             autoSkip: false },
-                },
-                // Value axis (case count).
-                x: {
-                    stacked: true, beginAtZero: true,
-                    suggestedMax: maxTotal + 1,
-                    grid: { color: '#e9ecef' },
-                    ticks: { precision: 0, stepSize: maxTotal < 10 ? 1 : undefined },
-                    title: { display: true, text: 'จำนวนเคส High/Critical', font: { size: 13 } },
-                }
-            },
-            plugins: {
-                legend: { position: 'top', labels: { font: { size: 13 } } },
-                tooltip: {
-                    callbacks: {
-                        title: items => items[0].label,
-                        label: item => `${item.dataset.label}: ${item.parsed.x}`,
-                        footer: items => {
-                            const i = items[0].dataIndex;
-                            return [
-                                'รวม High/Critical: ' + totals[i],
-                                'Emergency: ' + emergencyCounts[i],
-                                'คลิกเพื่อกรองตาราง',
-                            ];
-                        },
-                    }
-                }
-            },
-        },
-        plugins: [totalLabelPlugin],
-    });
 })();
 </script>
 {% endblock %}

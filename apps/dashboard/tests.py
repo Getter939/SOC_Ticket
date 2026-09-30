@@ -169,6 +169,39 @@ class ExecutiveResponseProgressTest(TestCase):
         self.assertEqual({item.pk for item in invalid.context['response_requests']},
                          {va.pk, pentest.pk})
 
+    def test_top_function_card_picks_most_aged_then_most_outstanding(self):
+        now = timezone.now()
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        for _ in range(3):
+            self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        self._request(ticket, TicketSubtask.TYPE_PENTEST, TicketSubtask.STATUS_OPEN,
+                      created_at=now - timedelta(days=9))
+
+        ctx = self.client.get(EXECUTIVE_URL).context
+        # PenTest has fewer requests but the only one older than 7 days.
+        self.assertEqual(ctx['response_top']['type'], TicketSubtask.TYPE_PENTEST)
+        rows = {row['type']: row for row in ctx['response_functions']}
+        self.assertEqual(rows[TicketSubtask.TYPE_VA]['fresh_pct'], 100)
+        self.assertEqual(rows[TicketSubtask.TYPE_PENTEST]['aged_pct'], 33)
+
+    def test_top_function_card_is_empty_without_outstanding_requests(self):
+        self.assertIsNone(self.client.get(EXECUTIVE_URL).context['response_top'])
+
+    def test_flow_and_pill_counts_reuse_period_totals(self):
+        now = timezone.now()
+        ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
+        self._request(ticket, TicketSubtask.TYPE_HARDENING, TicketSubtask.STATUS_DONE,
+                      changed_at=now)
+
+        ctx = self.client.get(EXECUTIVE_URL, {'date_range': 'today'}).context
+        self.assertEqual(ctx['response_flow']['diff'], 2)   # 3 received − 1 completed
+        self.assertEqual(ctx['response_flow']['completed_pct'], 33)
+        self.assertEqual(ctx['response_status_counts']['ACTIVE'], 2)
+        self.assertEqual(ctx['response_status_counts']['RECEIVED'], 3)
+        self.assertEqual(ctx['response_status_counts']['DONE'], 1)
+
     def test_response_section_stays_on_executive_page(self):
         ticket = _make_ticket(status=Ticket.STATUS_PENDING_MANAGER)
         self._request(ticket, TicketSubtask.TYPE_VA, TicketSubtask.STATUS_OPEN)
@@ -849,7 +882,8 @@ class ExecutiveDashboardViewTest(TestCase):
         self.assertEqual(response.context['mttr_mean'], 3.0)
         self.assertEqual(response.context['mttr_n'], 2)
         html = response.content.decode()
-        self.assertIn('3.0 ชม.', html)
+        # MTTR is a full-size headline KPI card, not a footnote.
+        self.assertIn('<span class="kpi-value">3.0 <span class="kpi-unit">ชม.</span></span>', html)
         self.assertIn('n=2', html)
         self.assertIn('30 วันล่าสุด', html)
         self.assertNotIn('อยู่ระหว่างรวบรวมข้อมูล', html)
@@ -1141,13 +1175,133 @@ class ExecutiveDashboardViewTest(TestCase):
 
         self.assertIn('date_range=today', html)
         self.assertIn('date_range=month', html)
-        self.assertIn("const dateRange = 'week';", html)
-        self.assertIn("'?date_range=' + encodeURIComponent(dateRange)", html)
+        # The pipeline is the Chart.js horizontal stacked bar chart; its bar
+        # clicks build ?<range>&f=<phase> from the canvas data attributes.
+        self.assertIn('chart.umd.min.js', html)
+        self.assertIn('id="chartPipelineExec"', html)
+        self.assertIn('data-range-query="date_range=week&amp;date_from=&amp;date_to="', html)
+        self.assertIn('id="pipeline-by-severity-exec"', html)
         self.assertIn('pipelineTotalsExec', html)
-        self.assertIn('color: tick => emergencyCounts', html)
-        self.assertNotIn('roundedRect(ctx', html)
-        self.assertNotIn('pipelineLabelsExec', html)
-        self.assertNotIn('pipelineAnnotationsExec', html)
+        self.assertIn("indexAxis: 'y'", html)
+        self.assertIn("'&f=' + encodeURIComponent(slug)", html)
+
+    def test_chart_marks_the_phase_the_table_is_filtered_to(self):
+        self._ticket(status=Ticket.STATUS_NEW)
+        html = self._get(f='PREPARATION').content.decode()
+        self.assertIn('data-selected="PREPARATION"', html)
+        self.assertIn('กำลังกรองตาราง: Preparation', html)
+        # A court filter is not a pipeline phase: no chart-side filter chip.
+        html = self._get(f='COURT_SOC').content.decode()
+        self.assertNotIn('กำลังกรองตาราง:', html)
+
+    def test_date_links_keep_active_filters(self):
+        html = self._get(f='COURT_SOC', sev='hc').content.decode()
+        self.assertIn('?date_range=today&f=COURT_SOC&sev=hc&open=tickets', html)
+
+    # ── Glance layer (2026-09-30 redesign) ───────────────────────────────── #
+
+    def test_hc_only_toggle_narrows_the_detail_table(self):
+        self._ticket(severity='High')
+        self._ticket(severity='Medium')
+
+        self.assertEqual(self._get().context['page_obj'].paginator.count, 2)
+        hc = self._get(sev='hc')
+        self.assertTrue(hc.context['hc_only'])
+        self.assertEqual(hc.context['page_obj'].paginator.count, 1)
+
+    def test_phase_filter_reports_its_high_critical_count(self):
+        self._ticket(status=Ticket.STATUS_NEW, severity='High')
+        self._ticket(status=Ticket.STATUS_NEW, severity='Low')
+
+        resp = self._get(f='PREPARATION')
+        self.assertEqual(resp.context['phase_hc_count'], 1)
+        self.assertEqual(resp.context['page_obj'].paginator.count, 2)
+        self.assertContains(resp, 'Pipeline นับเฉพาะ High/Critical (1)')
+        self.assertIsNone(self._get().context['phase_hc_count'])
+
+    def test_open_high_critical_card_counts_active_hc_tickets_in_range(self):
+        for _ in range(3):
+            self._ticket(severity='High')
+        self._ticket(severity='Critical', created_at=timezone.now() - timedelta(days=40))
+        self._ticket(severity='Medium')
+        self._ticket(status=Ticket.STATUS_APPROVED, severity='Critical')
+
+        self.assertEqual(self._get().context['hc_open_tickets'], 4)
+        self.assertEqual(self._get(date_range='week').context['hc_open_tickets'], 3)
+
+    def test_no_per_ticket_list_above_the_fold(self):
+        # Removed 2026-09-30: an executive does not chase individual tickets.
+        self._ticket(severity='Critical')
+        html = self._get().content.decode()
+        self.assertNotIn('High/Critical ที่ค้างนานที่สุด', html)
+        self.assertNotIn('focus-table', html)
+
+    def test_no_verdict_banner_and_verdict_lives_in_criteria_summary(self):
+        self._ticket(status=Ticket.STATUS_NEW)
+        resp = self._get()
+        self.assertEqual(resp.context['overall_status'], 'WAITING')
+        self.assertEqual(resp.context['level_counts'], {'warning': 0, 'waiting': 1, 'good': 6})
+        html = resp.content.decode()
+        self.assertNotIn('exec-verdict', html)
+        self.assertIn('รอดำเนินการ · เตือน 0 · รอดำเนินการ 1 · ปกติ 6', html)
+
+    def test_live_scope_reads_live_as_a_quiet_caption(self):
+        html = self._get().content.decode()
+        # Scope is a grey caption, not a coloured pill (2026-09-30 restyle).
+        self.assertIn('<span class="kpi-caption"><span class="live">LIVE</span> · ', html)
+        self.assertIn('ค้างทั้งหมด (LIVE)', html)
+        self.assertNotIn('>สด<', html)
+        self.assertNotIn('(สด)', html)
+        self.assertNotIn('scope-live', html)
+        self.assertNotIn('kpi-card', html)
+
+    def test_kpi_cells_turn_red_only_while_a_count_needs_action(self):
+        html = self._get().content.decode()
+        self.assertEqual(html.count('class="kpi-cell is-alert"'), 0)
+
+        self._ticket(status=Ticket.STATUS_NEW, emergency=True)
+        html = self._get().content.decode()
+        # Emergency > 0 → alert; OLA is still 0 → plain.
+        self.assertEqual(html.count('class="kpi-cell is-alert"'), 1)
+        self.assertIn('href="?date_range=all&f=EMERGENCY#detail-table"', html)
+
+    def test_open_sections_follow_the_active_filters_when_not_given(self):
+        self.assertEqual(self._get().context['open_sections'], [])
+        self.assertEqual(self._get(f='EMERGENCY').context['open_sections'], ['tickets'])
+        self.assertEqual(self._get(page=2).context['open_sections'], ['tickets'])
+        self.assertEqual(self._get(response_status='AGED').context['open_sections'], ['resp'])
+        # Filtering both areas opens both — sections are independent.
+        self.assertEqual(
+            self._get(response_status='AGED', f='EMERGENCY').context['open_sections'],
+            ['resp', 'tickets'])
+
+    def test_explicit_open_list_is_taken_as_is(self):
+        # The page's script sends exactly what the viewer has open.
+        self.assertEqual(
+            self._get(open='tickets,crit', f='EMERGENCY').context['open_sections'],
+            ['crit', 'tickets'])
+        self.assertEqual(self._get(open='', f='EMERGENCY').context['open_sections'], [])
+        self.assertEqual(self._get(open='bogus').context['open_sections'], [])
+        html = self._get(open='crit,resp').content.decode()
+        self.assertEqual(html.count('class="panel exec-details mb-2" id="exec-crit" open'), 1)
+        self.assertEqual(html.count('id="response-progress" open'), 1)
+        self.assertNotIn('id="exec-tickets" open', html)
+        self.assertNotIn('name="exec-detail"', html)   # no longer exclusive
+        self.assertIn('&open=crit,resp', html)          # date links carry the set
+
+    def test_results_carry_a_flash_label_describing_the_filter(self):
+        self._ticket(severity='High')
+        self._ticket(severity='Medium')
+        html = self._get(f='PREPARATION', sev='hc').content.decode()
+        self.assertIn(
+            'data-flash-label="Preparation · เฉพาะ High/Critical · 1 Ticket"', html)
+        self.assertIn('data-flash-label="ค้างทั้งหมด · 0 คำขอ"', html)
+
+    def test_ticket_references_are_not_links_for_executives(self):
+        ticket = self._ticket(severity='Critical')
+        html = self._get().content.decode()
+        self.assertIn(ticket.ticket_id, html)
+        self.assertNotIn(reverse('ticket_detail', args=[ticket.pk]), html)
 
     def test_detail_pagination_preserves_filter(self):
         for _ in range(11):

@@ -29,6 +29,57 @@ release (tag) dates.
     Manager Queue doesn't get it.
 
 ### Changed
+- **Executive dashboard simplified to four answers first.** The page used to
+  show every metric at once. It now opens with:
+  - four equal headline KPI cards: Emergency cases open, Tickets past OLA,
+    MTTR (median, 30 days, with the rough day count) and all-time
+    High/Critical cases with the month-over-month change;
+  - then the response function holding up the most work, beside requests
+    received vs completed in the period stacked over open High/Critical
+    Tickets with the closure bar (both columns end level — no empty space);
+  - then the pipeline chart.
+
+  There is deliberately no per-ticket list up top: chasing individual
+  tickets is the SOC Manager's job, and the full table is one click away.
+
+  The seven criteria, the response-team table and request list, and the
+  pipeline with the full Ticket table moved into collapsible sections; the
+  active filter decides which one opens. The big verdict banner was dropped;
+  the verdict (ปกติ / รอดำเนินการ / ต้องเฝ้าระวัง) now leads the criteria
+  section's summary. No metric changed: live vs period scope ("LIVE" badge),
+  request vs Ticket counts and "เกิน 7 วัน = request age, not OLA" are
+  labelled on every figure.
+  - The pipeline chart is unchanged (horizontal stacked Critical/High bars,
+    totals, red labels for phases with an Emergency, tooltip) and stays on
+    the main page under the answer cards. Clicking a bar still filters the
+    Ticket table, now in place: the table opens and is highlighted, and the
+    chart marks the filtered phase with ▶. It follows the light/dark theme.
+  - The Ticket table gained a ความรุนแรง column, a "เกิน OLA" tag and a
+    "เฉพาะ High/Critical" toggle (`?sev=hc`). A phase drill-down now says when
+    the table (all severities) and the pipeline (High/Critical only) differ.
+  - Ticket numbers and Project badges are plain text: executives cannot open
+    ticket pages, and the old links led there.
+  - Request filters show counts. "รอรับงาน" / "กำลังทำ" lost their buttons but
+    old links still work.
+  - Range labels are Thai (วันนี้ / สัปดาห์นี้ / เดือนนี้ / ทุกช่วงเวลา).
+  - On phones the tables become labelled cards.
+  - Filters update the page in place instead of reloading it, so the page no
+    longer jumps to the top and back down to the section on every click. The
+    part you were looking at stays where it was; a link to a closed or
+    off-screen section scrolls there. Back/forward and the 5-minute
+    auto-refresh work the same way. Without JavaScript, or if the session
+    has expired, links fall back to a normal page load.
+  - After a filter, the results it changed get a brief blue ring and a label
+    saying what they now show (e.g. "ค้างเกิน 7 วัน · 6 คำขอ"); a date change
+    rings every period-based block on screen and the range badge. Screen
+    readers hear the same label. Reduced-motion users get a steady ring.
+  - The detail sections are independent: open any number, and filtering keeps
+    them open (`?open=crit,resp,tickets`). "ขยายทั้งหมด" / "ย่อทั้งหมด" open or
+    close all three.
+  - The Executive manual (`user-manual-executive.th.docx`) was rewritten and
+    rebuilt to match: sections 4–8 now walk the new layout, the LIVE badge,
+    the in-place highlight and the Ticket / case / request units. Its cover
+    date is 30 Sep 2026; the other seven manuals were not changed.
 - **Account emails are now in Thai.** The password-reset and password-changed
   emails were translated. The system name stays "SOC Support System", as in the
   other emails.

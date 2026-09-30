@@ -158,10 +158,20 @@ images in, embed them via `ImageRun` in place of the `shot()` placeholder (see
      `templates/dashboard/dashboard.html` (the **SOC** dashboard). Executives can open
      it (it is their landing page), but it is built for the manager's daily work, so
      the redesign is documented in the **manager** manual; the executive manual only
-     names it. `executive.html` only got Thai labels in v1.7.1. On `executive.html`,
-     the situation panel and the High/Critical KPI are **all-time** (their badges say
-     ทุกช่วงเวลา); only the closure bar, the phase pipeline and the table follow the
-     date filter.
+     names it. `executive.html` only got Thai labels in v1.7.1.
+- **Executive dashboard layout (Unreleased, 2026-09-30).** `executive.html` was
+  simplified and `build-exec.js` §4–§8 rewritten to match. On screen, top to bottom:
+  four KPI cards (เคสฉุกเฉินที่ยังไม่ปิด, Ticket เกินกำหนด OLA, MTTR (มัธยฐาน), เคสทั้งหมด
+  (High/Critical)) → a row with ฟังก์ชันที่ทำให้งานค้าง beside งานเข้า เทียบ งานเสร็จ over
+  High/Critical ที่ยังไม่ปิด → the Chart.js Pipeline → **รายละเอียดเพิ่มเติม**, three
+  independent collapsible sections (เกณฑ์สรุปสถานการณ์, ทีมตอบสนองเหตุการณ์ แยกตามฟังก์ชัน,
+  รายละเอียด Ticket) with ขยายทั้งหมด / ย่อทั้งหมด. Live figures carry a **LIVE** badge
+  (not สด). Things removed **on purpose** — do not document them back: the big verdict
+  banner (the verdict word now leads the เกณฑ์สรุปสถานการณ์ summary), the small
+  ตัวชี้วัดอ้างอิง strip, and the top-5 "High/Critical ที่ค้างนานที่สุด" list (executives
+  don't chase individual tickets). Ticket numbers are plain text now, not dead links.
+  Filters update the page in place with a blue highlight (§5.6). This manual passes
+  its own `updatedTh` (30 Sep 2026); the others keep the shared 25 Sep date.
   2. The RCA report has **no upload** anywhere. The workspace is retired; a Forensics /
      RCA request's update form takes a report number and an optional note, no file. The
      finished report is handed to the SOC Manager as a physical document and the system
@@ -216,7 +226,7 @@ Figures are still dashed placeholders. Current `SHOT:` ids, by manual:
 | SOC Manager | `MGR-login`, `MGR-sidebar`, `MGR-dashboard`, `MGR-list-filter-bar`, `MGR-triage`, `MGR-response-request`, `MGR-approve`, `MGR-step-back`, `MGR-cancel-decision`, `MGR-ticket-edit`, `MGR-ioc-search`, `MGR-project-add-member`, `MGR-acting-tier-banner`, `MGR-rca-report-number` |
 | System Admin | `ADM-login`, `ADM-active-tickets`, `ADM-containment-form`, `ADM-ioc-search` |
 | System Owner | `OWN-login`, `OWN-my-tickets` |
-| Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-situation-panel`, `EXE-kpi-cards`, `EXE-pipeline-chart`, `EXE-response-progress`, `EXE-ticket-table` |
+| Executive | `EXE-login`, `EXE-dashboard`, `EXE-filter-bar`, `EXE-kpi-cards`, `EXE-backlog-row`, `EXE-pipeline-chart`, `EXE-details`, `EXE-response-progress`, `EXE-ticket-table` |
 | Forensic Analyst | `FOR-login`, `FOR-queue`, `FOR-list-filter-bar`, `FOR-my-request`, `FOR-my-request-submit`, `FOR-ioc-database`, `FOR-ioc-manual-add` |
 | Red Team Manager | `RED-login`, `RED-queue`, `RED-list-filter-bar`, `RED-my-request`, `RED-my-request-submit` |
 

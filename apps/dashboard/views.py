@@ -1,4 +1,5 @@
 from datetime import timedelta
+from urllib.parse import urlencode
 from statistics import mean as _mean, median as _median
 
 from django.contrib.auth.decorators import login_required
@@ -854,6 +855,16 @@ def executive_dashboard(request):
     ?f=<court group | IR phase | status slug | EMERGENCY | OLA_OVERDUE> —
     a single filter, last click wins. date_range scopes the charting/detail
     sections, while the executive verdict stays a live current-posture summary.
+
+    Layout (2026-09-30): four headline KPI cards (Emergency, OLA overdue,
+    MTTR, all-time High/Critical), then the response function holding up
+    work beside requests in vs out and open High/Critical, then the pipeline
+    chart; the criteria, response-team detail and ticket table sit in
+    collapsible sections (?open=crit,resp,… or the active filter picks which
+    start open; several may be open). The glance layer only re-arranges
+    figures computed here — it defines no new metric. No per-ticket list sits
+    above the fold on purpose: chasing individual tickets is the SOC
+    Manager's job, not the executive's.
     """
     profile = getattr(request.user, 'profile', None)
     if not request.user.is_superuser and not (
@@ -913,10 +924,10 @@ def executive_dashboard(request):
                 day=1, hour=0, minute=0, second=0, microsecond=0)
             range_tickets = range_tickets.filter(created_at__gte=month_start)
         range_label = {
-            'today': 'Today',
-            'week': 'This Week',
-            'month': 'This Month',
-            'all': 'All Time',
+            'today': 'วันนี้',
+            'week': 'สัปดาห์นี้',
+            'month': 'เดือนนี้',
+            'all': 'ทุกช่วงเวลา',
         }[date_range]
     range_active_qs = range_tickets.exclude(status__in=terminal)
 
@@ -1015,23 +1026,37 @@ def executive_dashboard(request):
         'ACTIVE', 'OPEN', 'IN_PROGRESS', 'DONE', 'RECEIVED', 'AGED', 'HIGH_CRIT',
     }:
         response_status = 'ACTIVE'
-    response_detail_qs = response_qs.select_related('ticket', 'assigned_to')
-    if response_type:
-        response_detail_qs = response_detail_qs.filter(subtask_type=response_type)
+    def _response_filtered(status):
+        """Requests behind one status filter (and the selected function)."""
+        qs = response_qs
+        if response_type:
+            qs = qs.filter(subtask_type=response_type)
+        if status == 'DONE':
+            return qs.filter(status=TicketSubtask.STATUS_DONE).filter(completed_date_q)
+        if status == 'RECEIVED':
+            return qs.filter(response_date_q)
+        qs = qs.filter(active_response_q)
+        if status in {'OPEN', 'IN_PROGRESS'}:
+            qs = qs.filter(status=status)
+        elif status == 'AGED':
+            qs = qs.filter(created_at__lt=aged_before)
+        elif status == 'HIGH_CRIT':
+            qs = qs.filter(ticket__severity__in=('Critical', 'High'))
+        return qs
+
+    # Counts for the filter pills the page shows. OPEN / IN_PROGRESS stay
+    # valid URL values (older links) but no longer get a pill of their own.
+    response_status_counts = {
+        status: _response_filtered(status).count()
+        for status in ('ACTIVE', 'AGED', 'HIGH_CRIT', 'RECEIVED', 'DONE')
+    }
+    response_detail_qs = _response_filtered(response_status).select_related(
+        'ticket', 'assigned_to')
     if response_status == 'DONE':
-        response_detail_qs = response_detail_qs.filter(
-            status=TicketSubtask.STATUS_DONE).filter(completed_date_q)
         response_detail_qs = response_detail_qs.order_by('-status_changed_at', '-pk')
     elif response_status == 'RECEIVED':
-        response_detail_qs = response_detail_qs.filter(response_date_q).order_by('-created_at', '-pk')
+        response_detail_qs = response_detail_qs.order_by('-created_at', '-pk')
     else:
-        response_detail_qs = response_detail_qs.filter(active_response_q)
-        if response_status in {'OPEN', 'IN_PROGRESS'}:
-            response_detail_qs = response_detail_qs.filter(status=response_status)
-        elif response_status == 'AGED':
-            response_detail_qs = response_detail_qs.filter(created_at__lt=aged_before)
-        elif response_status == 'HIGH_CRIT':
-            response_detail_qs = response_detail_qs.filter(ticket__severity__in=('Critical', 'High'))
         # High/Critical and older outstanding requests surface first.
         response_detail_qs = response_detail_qs.annotate(
             severity_rank=Case(
@@ -1189,6 +1214,13 @@ def executive_dashboard(request):
     else:
         overall_status = 'GOOD'
 
+    # Criteria tallies for the collapsed summary of the criteria section.
+    active_total = sum(court_counts.values())
+    level_counts = {
+        level: sum(1 for c in summary_criteria if c['level'] == level)
+        for level in ('warning', 'waiting', 'good')
+    }
+
     # ── Pipeline — executive view tracks only High/Critical cases, grouped by
     # SANS-IR phase: several workflow statuses collapse into one phase column.
     # Emergency counts are a subset overlay per phase, not an extra segment.
@@ -1272,6 +1304,15 @@ def executive_dashboard(request):
     else:
         f = ''
         table_qs = range_active_qs
+    # Optional High/Critical-only view of whatever the filter selected. Phase
+    # drill-downs otherwise list every severity while the pipeline counts only
+    # High/Critical, so this is how the two line up.
+    hc_only = request.GET.get('sev') == 'hc'
+    if hc_only:
+        table_qs = table_qs.filter(severity__in=HIGH_CRIT)
+    phase_hc_count = None
+    if f in phase_statuses:
+        phase_hc_count = sum(pipeline_matrix[sev][f] for sev in severity_order)
     table_qs = (
         # project_incident is needed for the bundle badge — Ticket.bundle_ref
         # dereferences it, so without this the table costs a query per row.
@@ -1291,7 +1332,93 @@ def executive_dashboard(request):
             0, int((now - ticket.status_started_at).total_seconds() // 60))
         ticket.status_age_label = humanize_minutes(status_age_minutes)
 
+    # ── Glance layer (headline + answer cards) ────────────────────────── #
+    # Presentation only: every figure is one computed above, re-arranged so
+    # the page answers "what now / which function / in vs out / which
+    # High/Critical" before any detail is opened.
+    max_function_active = max(
+        (row['active'] for row in response_functions), default=0) or 1
+    for row in response_functions:
+        row['fresh_pct'] = round(
+            (row['active'] - row['aged']) / max_function_active * 100)
+        row['aged_pct'] = round(row['aged'] / max_function_active * 100)
+    # The function holding up the most work: most requests older than 7 days,
+    # then most outstanding. Ties keep the canonical function order.
+    response_top = (
+        max(response_functions, key=lambda row: (row['aged'], row['active']))
+        if response_totals['active'] else None
+    )
+    flow_max = max(response_totals['received'], response_totals['completed']) or 1
+    response_flow = {
+        'diff': response_totals['received'] - response_totals['completed'],
+        'received_pct': round(response_totals['received'] / flow_max * 100),
+        'completed_pct': round(response_totals['completed'] / flow_max * 100),
+    }
+    response_flow['abs_diff'] = abs(response_flow['diff'])
+
+    # Open High/Critical Tickets in the range — the same rows the detail table
+    # shows with ?sev=hc, which is where the card's link lands.
+    hc_open_tickets = range_active_qs.filter(severity__in=HIGH_CRIT).count()
+
+    # Which detail sections start open — any number of them. ?open=crit,resp
+    # is taken as-is when present (the page's script sends exactly what the
+    # viewer has open, plus the section a link points into); without it, open
+    # whichever sections the URL is filtering.
+    section_keys = ('crit', 'resp', 'tickets')
+    if 'open' in request.GET:
+        requested = set(request.GET.get('open', '').split(','))
+        open_sections = [key for key in section_keys if key in requested]
+    else:
+        open_sections = []
+        if {'response_type', 'response_status', 'response_page'} & set(request.GET):
+            open_sections.append('resp')
+        if f or hc_only or 'page' in request.GET:
+            open_sections.append('tickets')
+
+    # Query-string pieces the template reuses. range_query is always the three
+    # date keys in this order; keep_query carries the non-default filters so a
+    # date change does not drop them. Values are whitelisted or ISO dates.
+    range_query = urlencode([
+        ('date_range', date_range),
+        ('date_from', date_from.isoformat() if date_from else ''),
+        ('date_to', date_to.isoformat() if date_to else ''),
+    ])
+    keep_params = []
+    if f:
+        keep_params.append(('f', f))
+    if response_type:
+        keep_params.append(('response_type', response_type))
+    if response_status != 'ACTIVE':
+        keep_params.append(('response_status', response_status))
+    if hc_only:
+        keep_params.append(('sev', 'hc'))
+    if open_sections:
+        keep_params.append(('open', ','.join(open_sections)))
+    keep_query = ('&' + urlencode(keep_params, safe=',')) if keep_params else ''
+
+    # Short "what you are looking at" labels the page flashes on the results
+    # after a filter changes them.
+    response_status_label = {
+        'ACTIVE': 'ค้างทั้งหมด', 'OPEN': 'รอรับงาน', 'IN_PROGRESS': 'กำลังทำ',
+        'AGED': 'ค้างเกิน 7 วัน', 'HIGH_CRIT': 'ของ Ticket High/Critical',
+        'RECEIVED': f'รับเข้า · {range_label}', 'DONE': f'ส่งงาน · {range_label}',
+    }[response_status]
+    response_type_label = dict(response_types).get(response_type, '')
+    requests_flash = ' · '.join(filter(None, [
+        response_status_label, response_type_label,
+        f'{response_page_obj.paginator.count:,} คำขอ',
+    ]))
+    tickets_flash = ' · '.join(filter(None, [
+        filter_label or f'Ticket ที่ยังไม่ปิด · {range_label}',
+        'เฉพาะ High/Critical' if hc_only else '',
+        f'{paginator.count:,} Ticket',
+    ]))
+
     return render(request, 'dashboard/executive.html', {
+        'requests_flash': requests_flash,
+        'tickets_flash': tickets_flash,
+        'range_query': range_query,
+        'keep_query': keep_query,
         'cancelled_count': range_tickets.filter(status=Ticket.STATUS_CANCELLED).count(),
         'now': now,
         'wazuh_ingest_freshness': _wazuh_ingest_freshness(now),
@@ -1315,6 +1442,16 @@ def executive_dashboard(request):
         'response_status': response_status,
         'response_requests': response_requests,
         'response_page_obj': response_page_obj,
+        'response_status_counts': response_status_counts,
+        'response_top': response_top,
+        'response_flow': response_flow,
+        'level_counts': level_counts,
+        'active_total': active_total,
+        'ola_overdue': ola_overdue,
+        'hc_open_tickets': hc_open_tickets,
+        'phase_hc_count': phase_hc_count,
+        'hc_only': hc_only,
+        'open_sections': open_sections,
         'table_tickets': table_tickets,
         'page_obj': page_obj,
         'filter_f': f,
