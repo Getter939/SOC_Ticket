@@ -596,14 +596,17 @@ class ResponseTeamUiTest(TestCase):
         self.assertNotContains(resp, 'id="new-response-request"')
 
     def test_spawn_card_emits_assignee_filter_data(self):
-        # The client-side per-type assignee filter needs the routing map, each
-        # member's role, and the two stable select ids.
+        # The client-side script shows one assignee picker per ticked type, so
+        # it needs the type checkboxes, a picker row per type, and the
+        # eligible-assignee map.
         t = self._ticket()
         self.client.force_login(self.manager)
         resp = self.client.get(reverse('ticket_detail', args=[t.pk]))
         self.assertContains(resp, 'resp-type-select')
-        self.assertContains(resp, 'resp-assignee-select')
         self.assertContains(resp, 'resp-eligible-assignees-data')
+        for subtask_type in TicketSubtask.NEW_RESPONSE_TYPES:
+            self.assertContains(resp, f'data-response-assignee-row="{subtask_type}"')
+            self.assertContains(resp, f'data-response-assignee-type="{subtask_type}"')
         # The picker must carry the new request types and eligible manager.
         self.assertContains(resp, TicketSubtask.TYPE_FORENSIC_RCA)
         self.assertContains(resp, TicketSubtask.TYPE_PENTEST)

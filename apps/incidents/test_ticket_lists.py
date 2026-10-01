@@ -7,7 +7,8 @@ close date it shows. Active Tickets: an optional วันที่แจ้ง 
 presets that the Manager Queue (same renderer) does not get.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
+from unittest import mock
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -19,6 +20,7 @@ from apps.accounts.testing import MFATestCase as TestCase
 from apps.incidents.models import Ticket, TicketLog
 from apps.incidents.test_ticket_workflow import _ticket, _user
 from apps.incidents.ticket_workflow import cancellation_action
+from apps.incidents.views._helpers import _date_presets, _date_range_label
 
 
 def _days_ago(days):
@@ -229,6 +231,13 @@ class ActiveTicketsDateFilterTests(TestCase):
         self.assertEqual([p['active'] for p in presets], [True, False, False, False])
         # Preset links keep the other filters.
         self.assertIn('severity=High', response.content.decode())
+
+    def test_this_month_wins_when_30_days_is_the_same_range(self):
+        # On the last day of a 30-day month both presets are the 1st → today.
+        with mock.patch('django.utils.timezone.localdate', return_value=date(2026, 9, 30)):
+            presets = _date_presets('2026-09-01', '2026-09-30')
+        self.assertEqual([p['active'] for p in presets], [False, False, False, True])
+        self.assertEqual(_date_range_label('2026-09-01', '2026-09-30', presets), 'เดือนนี้')
 
     def test_pagination_keeps_the_date_range(self):
         for _ in range(26):

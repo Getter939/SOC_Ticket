@@ -8,6 +8,18 @@ release (tag) dates.
 
 ## [Unreleased]
 
+### Fixed
+- **Date presets on the last day of a 30-day month.** On days like 30 Sep, "30
+  วัน" and "เดือนนี้" cover the same dates, so both chips lit up on Ticket
+  History and Active Tickets and the range label could read "30 วัน" instead
+  of History's default "เดือนนี้". Now only one preset is active at a time, and
+  "เดือนนี้" wins.
+- **Two tests caught up with the v1.7.8 Red Team split.** The Red Team Manager
+  now receives VA, PenTest and Hardening requests as well as the legacy types,
+  and the spawn card shows one assignee picker per ticked type. The tests still
+  expected the old routing and the single picker. Tests only; no behaviour
+  change.
+
 ## [v1.8.1] — 2026-10-01
 
 ### Added

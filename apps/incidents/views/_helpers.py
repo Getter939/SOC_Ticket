@@ -284,6 +284,10 @@ def _date_presets(start_str, end_str):
 
     'เดือนนี้' runs to the last day of the month, not today, so it matches the
     Ticket History default and shows as active there.
+
+    At most one preset is active. On the last day of a 30-day month '30 วัน'
+    and 'เดือนนี้' are the same range; 'เดือนนี้' wins so History's default
+    chip keeps its name.
     """
     today = timezone.localdate()
     month_end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
@@ -293,13 +297,14 @@ def _date_presets(start_str, end_str):
         ('30 วัน', today - timedelta(days=29), today),
         ('เดือนนี้', today.replace(day=1), month_end),
     )
-    presets = []
-    for label, start, end in ranges:
-        start_iso, end_iso = start.isoformat(), end.isoformat()
-        presets.append({
-            'label': label, 'start': start_iso, 'end': end_iso,
-            'active': start_str == start_iso and end_str == end_iso,
-        })
+    presets = [
+        {'label': label, 'start': start.isoformat(), 'end': end.isoformat(), 'active': False}
+        for label, start, end in ranges
+    ]
+    for preset in reversed(presets):
+        if start_str == preset['start'] and end_str == preset['end']:
+            preset['active'] = True
+            break
     return presets
 
 

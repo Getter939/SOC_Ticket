@@ -348,7 +348,10 @@ class TicketVisibilityQuerysetTest(TestCase):
     def test_types_for_role_is_the_inverse_of_response_routing(self):
         self.assertEqual(
             TicketSubtask.types_for_role(UserProfile.ROLE_REDTEAM_MANAGER),
-            frozenset({TicketSubtask.TYPE_VA_PT, TicketSubtask.TYPE_INFRA_SEC}),
+            frozenset({
+                TicketSubtask.TYPE_VA, TicketSubtask.TYPE_PENTEST, TicketSubtask.TYPE_HARDENING,
+                TicketSubtask.TYPE_VA_PT, TicketSubtask.TYPE_INFRA_SEC,
+            }),
         )
         self.assertEqual(
             TicketSubtask.types_for_role(UserProfile.ROLE_FORENSIC),
