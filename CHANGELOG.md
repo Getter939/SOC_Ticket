@@ -8,25 +8,9 @@ release (tag) dates.
 
 ## [Unreleased]
 
+## [v1.8.1] — 2026-10-01
+
 ### Added
-- **Bulk PDF export from Active Tickets and Ticket History.** A "ส่งออก PDF (N)"
-  menu in the results bar downloads the incident reports of every ticket the
-  list currently shows, across all pages, in the list's sort order.
-  - It's a ZIP with one PDF per ticket, the same file and name as the single
-    export on the ticket page.
-  - It has the same two options: hide empty fields (on) and include signatures
-    (off).
-  - Each ticket's report provenance (who generated it, when, the stale-report
-    badge) is recorded just like a single export.
-  - The limit is 100 tickets per export; over that, the menu asks you to narrow
-    the filters.
-  - The ZIP streams while it builds, so a large batch doesn't hit the proxy
-    timeout. A report that fails to render is skipped and named in a text file
-    inside the ZIP.
-  - SOC Manager and Tier 2 only. Tier 1 keeps the one-report export on the
-    ticket page, but a bulk export restamps up to 100 tickets' report provenance
-    and pulls their full reports into one file, so it gets a narrower rule. The
-    Manager Queue doesn't get it.
 - **Two new dashboard charts.**
   - Executive: the "งานเข้า เทียบ งานเสร็จ" card now draws running totals of
     requests received vs completed across the period (daily up to ~2 months,
@@ -68,6 +52,12 @@ release (tag) dates.
     incidents the same way.
   - Rollout steps: `docs/operations/reporting-layer-operations.md` §3G. Plan and
     the dashboard ideas built on this: `docs/architecture/reporting-layer-next-steps.md`.
+  - **Deploying it:** run `migrate`, add `REPORTING_ALERT_EMAILS` to `.env`, and
+    register the `SOC-Check-Reporting` task under the same account as
+    `SOC-Refresh-Reporting`. Done on PROD 2026-10-01: test alert email
+    delivered, first watchdog run clean.
+
+## [v1.8.0] — 2026-09-30
 
 ### Changed
 - **Executive dashboard simplified to four answers first.** The page used to
@@ -146,18 +136,7 @@ release (tag) dates.
     rebuilt to match: sections 4–8 now walk the new layout, the LIVE badge,
     the in-place highlight and the Ticket / case / request units. Its cover
     date is 30 Sep 2026. The SOC Manager manual §4.1 was also updated (quiet
-    strip, "แสดง:" line, Containment Runway); the other six manuals were not
-    changed.
-- **Account emails are now in Thai.** The password-reset and password-changed
-  emails were translated. The system name stays "SOC Support System", as in the
-  other emails.
-- **New users get their own welcome email.** A user created in the admin used to
-  get the password-reset email ("We received a request to reset…"). They now get
-  a welcome email with their username, a set-password link (valid for 1 hour, one
-  use only), and the sign-in URL. It also says what to do if the link expires, and
-  mentions MFA setup when MFA is on. Setting that first password no longer
-  triggers the "your password was changed" email; any account that has never
-  signed in skips it.
+    strip, "แสดง:" line); the other six manuals were not changed.
 - **Role manuals re-audited against the code (edition 1.6).** All eight Thai
   manuals were rebuilt after an audit found claims the system doesn't match:
   - Executive: they land on the SOC dashboard and see two menu items. The
@@ -181,6 +160,40 @@ release (tag) dates.
   `profile` after the `{% with %}` block that defines it had closed, so only
   superusers ever saw it; managers had to type `/admin/`. A regression test covers
   it.
+
+## [v1.7.9] — 2026-09-25
+
+### Added
+- **Bulk PDF export from Active Tickets and Ticket History.** A "ส่งออก PDF (N)"
+  menu in the results bar downloads the incident reports of every ticket the
+  list currently shows, across all pages, in the list's sort order.
+  - It's a ZIP with one PDF per ticket, the same file and name as the single
+    export on the ticket page.
+  - It has the same two options: hide empty fields (on) and include signatures
+    (off).
+  - Each ticket's report provenance (who generated it, when, the stale-report
+    badge) is recorded just like a single export.
+  - The limit is 100 tickets per export; over that, the menu asks you to narrow
+    the filters.
+  - The ZIP streams while it builds, so a large batch doesn't hit the proxy
+    timeout. A report that fails to render is skipped and named in a text file
+    inside the ZIP.
+  - SOC Manager and Tier 2 only. Tier 1 keeps the one-report export on the
+    ticket page, but a bulk export restamps up to 100 tickets' report provenance
+    and pulls their full reports into one file, so it gets a narrower rule. The
+    Manager Queue doesn't get it.
+
+### Changed
+- **Account emails are now in Thai.** The password-reset and password-changed
+  emails were translated. The system name stays "SOC Support System", as in the
+  other emails.
+- **New users get their own welcome email.** A user created in the admin used to
+  get the password-reset email ("We received a request to reset…"). They now get
+  a welcome email with their username, a set-password link (valid for 1 hour, one
+  use only), and the sign-in URL. It also says what to do if the link expires, and
+  mentions MFA setup when MFA is on. Setting that first password no longer
+  triggers the "your password was changed" email; any account that has never
+  signed in skips it.
 
 ## [v1.7.8] — 2026-09-25
 

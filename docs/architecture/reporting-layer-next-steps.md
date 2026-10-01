@@ -1,6 +1,6 @@
 # Reporting mart: groundwork now, dashboard uses later
 
-> **Audience:** developers · **Status:** Part A built 2026-10-01 (uncommitted; PROD rollout pending — ops doc §3G) · Part B design only · **Last updated:** 2026-10-01
+> **Audience:** developers · **Status:** Part A built and rolled out to PROD 2026-10-01 (ops doc §3G) · Part B design only · **Last updated:** 2026-10-01
 >
 > Companion to [reporting-layer-design.md](reporting-layer-design.md) and [../operations/reporting-layer-operations.md](../operations/reporting-layer-operations.md).
 

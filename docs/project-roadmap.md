@@ -245,7 +245,7 @@ repoint Django + log in).
   (`detection_rows: 31`). Retention scheduled too: `SOC-Purge-Wazuh` daily 04:00, 90-day
   window (confirm with compliance within the runway). CSV historical import deferred by
   the owner (idempotent, run any time).
-- [ ] **Roll out the 2026-10-01 mart additions** (built, uncommitted): migration
+- [x] **Roll out the 2026-10-01 mart additions** — *done 2026-10-01.* Migration
   `reporting 0006` (alert-funnel history before the 90-day purge removes it, three
   more nightly snapshots), `REPORTING_ALERT_EMAILS` in `.env`, and the 07:00
   `SOC-Check-Reporting` watchdog task. Steps: `docs/operations/reporting-layer-operations.md`

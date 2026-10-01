@@ -25,8 +25,11 @@ for the *as-built* record see [../architecture/reporting-layer-build.md](../arch
 > before the 90-day purge removes raw alerts; three more nightly snapshots record
 > the KPI figures, who holds each open case, and the response-request backlog; a
 > failed run emails `REPORTING_ALERT_EMAILS` and exits non-zero, and a 07:00
-> watchdog (`check_reporting_freshness`) catches a night that never ran. **Rollout
-> on PROD: §3G.** Background and the dashboard ideas that build on it:
+> watchdog (`check_reporting_freshness`) catches a night that never ran. **Rolled
+> out on PROD 2026-10-01** (§3G): migration applied, manual run clean,
+> `SOC-Check-Reporting` registered under the same account as
+> `SOC-Refresh-Reporting` — first run `LastTaskResult 0`, "reporting mart is
+> fresh". The first nightly run on the new code is 2026-10-02 00:20. Background and the dashboard ideas that build on it:
 > [../architecture/reporting-layer-next-steps.md](../architecture/reporting-layer-next-steps.md).
 
 ## 1. What it is, in one paragraph
