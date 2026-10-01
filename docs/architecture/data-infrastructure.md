@@ -21,7 +21,7 @@ flowchart TB
     subgraph PGS["PostgreSQL server"]
         subgraph TD["ticketdata — system of record"]
             OP["public schema · ② OPERATIONAL<br/>tickets · logs · triage · users<br/>wazuh_ingest_wazuhalert"]
-            MART["mart schema · ③ REPORTING<br/>fact_ticket · fact_alert · agg_*<br/>snapshot_queue_daily · agg_detection_daily<br/>dim_severity_map"]
+            MART["mart schema · ③ REPORTING<br/>fact_ticket · fact_alert · agg_*<br/>hist_alert_daily · snapshot_*_daily<br/>agg_detection_daily · dim_severity_map"]
         end
         SD["socdata<br/><i>dead prototype — retire (Phase 5)</i>"]
     end
@@ -82,12 +82,17 @@ Solid = live flow · dashed = legacy / future / dead · thick = backup.
 - **`ingest_wazuh_alerts`** — pulls rule.level ≥ 10 alerts from the Indexer into
   `wazuh_ingest_wazuhalert` (the in-app triage slice — *not* a copy of all telemetry).
 - **`refresh_reporting`** — refreshes the `mart` facts/aggregates from `public`,
-  writes the daily queue snapshot, and captures per-day detection volume from the
-  Indexer. Run it *after* the ingest.
+  copies the alert funnel into `hist_alert_daily` before the raw-alert purge can
+  shrink it, writes the nightly snapshots (queue, KPI, workload, response
+  requests), and captures per-day detection volume from the Indexer. Run it
+  *after* the ingest. On any error it emails `REPORTING_ALERT_EMAILS` and exits
+  non-zero; `check_reporting_freshness` (07:00) catches a night it never ran.
 - **Backup** — nightly encrypted `pg_dump` of `ticketdata` + a media tar; tiered
   retention; restore-verified. See [../operations/backup-and-restore.md](../operations/backup-and-restore.md).
-- **Presentation** — the in-app dashboard reads `mart` (Phase 4 repoints Grafana
-  from the Indexer onto `mart` via `reporting_ro`).
+- **Presentation** — the in-app dashboards read the **live** operational tables
+  (`public`); nothing in the app reads `mart` yet. Ideas for mart-fed trends, each
+  needing sign-off, are in [reporting-layer-next-steps.md](reporting-layer-next-steps.md).
+  Phase 4 repoints Grafana from the Indexer onto `mart` via `reporting_ro`.
 
 ---
 
@@ -101,7 +106,7 @@ protects the whole picture:
 |---|---|
 | ① Detection (Indexer) | **Out of scope** — separate system, own retention |
 | ② Operational (`public` + media) | **Fully backed up** — the irreplaceable core |
-| ③ Reporting (`mart`) | **In the dump, but split:** derived views/matviews *recompute* (`refresh_reporting`); only `snapshot_queue_daily`, `dim_severity_map`, `agg_detection_daily` genuinely need it |
+| ③ Reporting (`mart`) | **In the dump, but split:** derived views/matviews *recompute* (`refresh_reporting`); only `snapshot_queue_daily`, `snapshot_kpi_daily`, `snapshot_workload_daily`, `snapshot_response_daily`, `hist_alert_daily`, `agg_detection_daily`, `dim_severity_map` genuinely need it |
 | ④ Presentation | **Nothing to back up** — stateless |
 
 Because the Indexer expires (~3 months), the `agg_detection_daily` capture is

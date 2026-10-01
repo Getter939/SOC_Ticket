@@ -245,6 +245,11 @@ repoint Django + log in).
   (`detection_rows: 31`). Retention scheduled too: `SOC-Purge-Wazuh` daily 04:00, 90-day
   window (confirm with compliance within the runway). CSV historical import deferred by
   the owner (idempotent, run any time).
+- [ ] **Roll out the 2026-10-01 mart additions** (built, uncommitted): migration
+  `reporting 0006` (alert-funnel history before the 90-day purge removes it, three
+  more nightly snapshots), `REPORTING_ALERT_EMAILS` in `.env`, and the 07:00
+  `SOC-Check-Reporting` watchdog task. Steps: `docs/operations/reporting-layer-operations.md`
+  §3G. Time-sensitive: first loss = PROD `min(wazuh_ingest_wazuhalert.timestamp)` + 90 days.
 - [ ] **Reporting Phase 4** — create the `reporting_ro` role
   (`docs/operations/reporting-ro-setup.sql`) and repoint Grafana at `mart`
   instead of the Indexer.
@@ -275,7 +280,7 @@ return to email.
 
 | Cadence | Task |
 |---|---|
-| Daily | Backup job succeeded; ingest watermark advancing; `refresh_reporting` ran |
+| Daily | Backup job succeeded; ingest watermark advancing; `refresh_reporting` ran (no "SOC reporting" email from it or from the 07:00 freshness check) |
 | Weekly | Review OLA breaches and stuck tickets; skim error logs |
 | Monthly | Restore drill; Django + dependency security updates; disk headroom on both VMs |
 | Quarterly | Failover rehearsal (promote the standby); review roles and accounts; revisit the deferred backlog |

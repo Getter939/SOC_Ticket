@@ -219,7 +219,11 @@ class FactAlert(models.Model):
 class AggAlertDaily(models.Model):
     """Daily alert-triage funnel, grain = (local alert date × severity_band).
     Backed by the ``mart.agg_alert_daily`` materialized view; refresh with
-    ``manage.py refresh_reporting``."""
+    ``manage.py refresh_reporting``.
+
+    Recomputed from raw alerts that ``purge_wazuh_alerts`` deletes after the
+    retention window, so its older days shrink over time. For history, read
+    ``HistAlertDaily`` (``mart.hist_alert_daily``) instead — never this view."""
 
     pk = models.CompositePrimaryKey('day', 'severity_band')
     day = models.DateField()
@@ -239,3 +243,138 @@ class AggAlertDaily(models.Model):
         db_table = 'mart"."agg_alert_daily'
         verbose_name = 'Alert daily aggregate'
         verbose_name_plural = 'Alert daily aggregates'
+
+
+# ── Phase 3b: history that cannot be rebuilt later (2026-10-01) ─────────── #
+
+class HistAlertDaily(models.Model):
+    """Stored copy of the alert-triage funnel, one row per (local day ×
+    severity_band). MANAGED and append-only in spirit.
+
+    Why it exists: ``agg_alert_daily`` is a materialized view recomputed from the
+    raw ``wazuh_ingest_wazuhalert`` rows, and ``purge_wazuh_alerts`` deletes those
+    rows after ``WAZUH_RETENTION_DAYS``. Without this table every refresh after a
+    purge would silently shrink or drop the purged days.
+
+    ``refresh_reporting`` upserts only days still inside the retention window
+    (minus a safety margin, see ``refresh_reporting.HIST_ALERT_MARGIN_DAYS``);
+    older days are frozen — never overwritten, never deleted. Anything reading
+    the alert funnel over time reads THIS table, not the materialized view."""
+
+    day = models.DateField()
+    severity_band = models.CharField(max_length=10)
+
+    ingested_count = models.BigIntegerField()
+    triaged_count = models.BigIntegerField()
+    true_positive_count = models.BigIntegerField()
+    false_positive_count = models.BigIntegerField()
+    escalated_count = models.BigIntegerField()
+    became_ticket_count = models.BigIntegerField()
+    triage_ola_applicable = models.BigIntegerField()
+    triage_ola_met = models.BigIntegerField()
+    captured_at = models.DateTimeField()
+
+    COUNT_FIELDS = [
+        'ingested_count', 'triaged_count', 'true_positive_count',
+        'false_positive_count', 'escalated_count', 'became_ticket_count',
+        'triage_ola_applicable', 'triage_ola_met',
+    ]
+
+    class Meta:
+        db_table = 'mart"."hist_alert_daily'
+        verbose_name = 'Alert funnel history (daily)'
+        verbose_name_plural = 'Alert funnel history (daily)'
+        constraints = [
+            models.UniqueConstraint(fields=['day', 'severity_band'],
+                                    name='uq_hist_alert_grain'),
+        ]
+
+
+class SnapshotKpiDaily(models.Model):
+    """One row per night: the open-queue figures the live dashboards show that
+    ``snapshot_queue_daily`` cannot give (it has no assignee, emergency flag or
+    response requests). Point-in-time, so it cannot be rebuilt later."""
+
+    snapshot_date = models.DateField(unique=True)
+    open_tickets = models.PositiveIntegerField()
+    unassigned_open = models.PositiveIntegerField()
+    emergency_open_tickets = models.PositiveIntegerField()
+    # Incident grain (a Project Incident bundle counts once), the same rule as
+    # the executive dashboard's Emergency KPI — TicketQuerySet.incident_count.
+    emergency_open_incidents = models.PositiveIntegerField()
+    oldest_open_hours = models.PositiveIntegerField(null=True)   # null = queue empty
+    # Open response requests (Forensic / Red Team), same rule as the executive
+    # dashboard: OPEN or IN_PROGRESS on a ticket that is not closed.
+    response_open = models.PositiveIntegerField()
+    response_aged_7d = models.PositiveIntegerField()
+    captured_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'mart"."snapshot_kpi_daily'
+        verbose_name = 'KPI snapshot (daily)'
+        verbose_name_plural = 'KPI snapshots (daily)'
+
+
+class SnapshotWorkloadDaily(models.Model):
+    """Who held the open queue each night. Assignment is overwritten in place on
+    the ticket and not logged anywhere, so this is the only workload history.
+
+    Grain: (snapshot_date × kind × user_id × status × severity).
+    ``kind='assigned'`` follows ``Ticket.assigned_to`` (user null = unassigned);
+    ``kind='t2_claimed'`` follows ``Ticket.t2_claimed_by`` — the two holders the
+    SOC dashboard's Analyst Workload heatmap counts. ``username`` is copied so a
+    deleted account's history still reads. PERSONAL DATA: per-person rows — think
+    before granting this table to an external read role (``reporting_ro``).
+
+    The unique constraint cannot catch two unassigned (NULL user) rows for the
+    same grain — PostgreSQL treats NULLs as distinct unless NULLS NOT DISTINCT
+    (v15+) is available — so the writer guarantees one row per grain."""
+
+    KIND_ASSIGNED = 'assigned'
+    KIND_T2_CLAIMED = 't2_claimed'
+
+    snapshot_date = models.DateField()
+    kind = models.CharField(max_length=12)
+    user_id = models.IntegerField(null=True)
+    username = models.CharField(max_length=150, blank=True)
+    status = models.CharField(max_length=30)
+    severity = models.CharField(max_length=10)
+    open_count = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = 'mart"."snapshot_workload_daily'
+        verbose_name = 'Workload snapshot (daily)'
+        verbose_name_plural = 'Workload snapshots (daily)'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['snapshot_date', 'kind', 'user_id', 'status', 'severity'],
+                name='uq_workload_grain'),
+        ]
+        indexes = [models.Index(fields=['snapshot_date'], name='ix_workload_date')]
+
+
+class SnapshotResponseDaily(models.Model):
+    """Open response requests (Forensic / Red Team) each night.
+
+    Grain: (snapshot_date × subtask_type × status × aged_7d × hc_ticket).
+    "Open" = OPEN or IN_PROGRESS on a ticket that is not closed (the executive
+    dashboard's rule); ``aged_7d`` = created more than 7 days before the run;
+    ``hc_ticket`` = the parent ticket is High or Critical."""
+
+    snapshot_date = models.DateField()
+    subtask_type = models.CharField(max_length=20)
+    status = models.CharField(max_length=20)
+    aged_7d = models.BooleanField()
+    hc_ticket = models.BooleanField()
+    open_count = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = 'mart"."snapshot_response_daily'
+        verbose_name = 'Response-request snapshot (daily)'
+        verbose_name_plural = 'Response-request snapshots (daily)'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['snapshot_date', 'subtask_type', 'status', 'aged_7d', 'hc_ticket'],
+                name='uq_response_snapshot_grain'),
+        ]
+        indexes = [models.Index(fields=['snapshot_date'], name='ix_response_snapshot_date')]

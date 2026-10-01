@@ -796,26 +796,11 @@ def dashboard(request):
 # the same status the other way, under the analyst, because it asks a different
 # question: "what must this analyst chase?".
 def _incident_count(qs):
-    """Count real-world incidents, not ticket rows.
-
-    A Project Incident fans one incident out into N member tickets — one per
-    affected system — so a raw .count() reports a 5-system bundle as 5
-    incidents. Members of the same bundle collapse to one; unbundled tickets
-    stay 1:1 because their own pk is the distinct key.
-
-    Used ONLY for "how many incidents" figures. Status-grain counts (whose
-    court, OLA pressure, the pipeline matrix) deliberately keep ticket grain:
-    a bundle spans several statuses at once, so collapsing it there is
-    meaningless — and five systems really are five units of work.
-    """
-    return (
-        qs.annotate(
-            _incident_key=Coalesce('project_incident_id', F('pk') * -1),
-        )
-        .values('_incident_key')
-        .distinct()
-        .count()
-    )
+    """Count real-world incidents, not ticket rows (a Project Incident bundle
+    counts once). The definition lives on the queryset —
+    ``TicketQuerySet.incident_count`` — so the reporting mart's daily snapshot
+    counts exactly the same way."""
+    return qs.incident_count()
 
 
 _EXEC_COURT_GROUPS = {

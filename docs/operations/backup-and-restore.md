@@ -75,8 +75,12 @@ prove backups are restorable. A real restore to a live DB follows the same steps
 5. **Restore media** — extract `media.tar.gz` back into `MEDIA_ROOT`.
 6. **Rebuild the reporting matviews** — run `manage.py refresh_reporting`. The
    `mart` matviews are in the dump but recompute from the restored operational
-   tables anyway; the `snapshot_queue_daily` history and `dim_severity_map` edits
-   restore as-is (they are the only non-recomputable reporting data).
+   tables anyway. The non-recomputable reporting tables restore as-is: the nightly
+   snapshots (`snapshot_queue_daily`, `snapshot_kpi_daily`,
+   `snapshot_workload_daily`, `snapshot_response_daily`), the alert-funnel history
+   `hist_alert_daily`, `agg_detection_daily` and `dim_severity_map` edits. The
+   nights between the backup and the restore are missing from them for good; the
+   07:00 `check_reporting_freshness` task emails until a run lands.
 7. **⚠ Reset the id sequences.** A full custom-format `pg_restore` (§3.3) carries
    sequence state, so this is a harmless verify there. But any load that writes
    rows with their ids already set — a Django `loaddata` fixture, a **data-only**
@@ -101,8 +105,7 @@ Backup priority follows the **derived-vs-snapshot** line (full picture in
 
 - **Covered:** the operational store (`ticketdata.public`) + attachment evidence
   (media) — the irreplaceable core; and the non-recomputable reporting data
-  (`snapshot_queue_daily`, `dim_severity_map`, `agg_detection_daily`), which ride
-  along in the same DB dump.
+  (`snapshot_queue_daily`, `snapshot_kpi_daily`, `snapshot_workload_daily`, `snapshot_response_daily`, `hist_alert_daily`, `agg_detection_daily`, `dim_severity_map`), which ride along in the same DB dump.
 - **In the dump but redundant:** the derived reporting views/matviews — they
   rebuild from the operational tables via `refresh_reporting`.
 - **NOT covered — by design or gap:**

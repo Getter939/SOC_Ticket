@@ -56,6 +56,7 @@ reading the source.
 | [data-infrastructure.md](architecture/data-infrastructure.md) | Current | The whole data picture — every store, the flows between them, the four-layer model, and how backup fits (with a mermaid diagram) |
 | reporting-layer-design.md 🚫 | Current | Reporting layer (Layer ③ `mart` schema) design spec — grains, metric definitions, severity normalization, phased rollout |
 | reporting-layer-build.md 🚫 | As-built | As-built record of the reporting layer (Phases 1–3 built, committed, scheduled): objects, migrations, privilege model, decisions |
+| [reporting-layer-next-steps.md](architecture/reporting-layer-next-steps.md) | Plan | 2026-10-01 mart groundwork (Part A built: alert-funnel history before the 90-day purge, failure emails + 07:00 watchdog, extra nightly snapshots) and Part B, ideas for mart-fed trends on the SOC and Executive dashboards (design only, each needs sign-off) |
 | [../ti-platform-inventory.md](ti-platform-inventory.md) | Current | The **IOC Database** feature (v1.3.0) — indicators unified from tickets and the Forensic Analyst's own research, reviewed against MISP; structured IOCs on tickets |
 
 ## adr/ — Architecture decision records 📌
@@ -83,7 +84,7 @@ area they cover — they record *why*, which the code cannot.
 | [postgresql-standby-handbook.md](operations/postgresql-standby-handbook.md) | Procedure | Generic PostgreSQL streaming-standby reference (platform-neutral) backing the Windows handbook's Phase 3 |
 | [backup-and-restore.md](operations/backup-and-restore.md) ⚠️ | Partial (concepts Current, mechanism Historical) | Backup *concepts* — archive contents, the roles/grants-not-in-the-dump gap, 3-2-1 strategy. Mechanism is Docker/Linux; the concepts still apply |
 | [backup-storage-decision-brief.md](operations/backup-storage-decision-brief.md) | Current | One-page brief for the CISO / data-governance decision on backup storage location & retention (mechanism live; policy still open) |
-| [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Procedure / Current | Running & deploying the reporting layer: `refresh_reporting`, scheduling (live 2026-08-26), readiness checklist, verification, rollback |
+| [reporting-layer-operations.md](operations/reporting-layer-operations.md) | Procedure / Current | Running & deploying the reporting layer: `refresh_reporting`, the `check_reporting_freshness` watchdog and failure emails, scheduling (live 2026-08-26; 2026-10-01 additions §3G), readiness checklist, verification, rollback |
 | [reporting-ro-setup.sql](operations/reporting-ro-setup.sql) | Procedure | One-time superuser SQL creating the read-only `reporting_ro` role for Grafana/BI (run at Phase 4; takes `-v owner=<DB_USER>` — `ticket_prod` in prod) |
 | grafana-wazuh-wall.md 🚫 | Local-sensitive / Current | The "Wazuh SOC Wall" big-screen board. Reads **directly** from the Wazuh Indexer (OpenSearch), not this app's PostgreSQL |
 | [two-factor-authentication.md](operations/two-factor-authentication.md) | Current | TOTP two-factor enrolment/verification. Switchable via `MFA_ENABLED` (v1.2.2); **off in production** for now, tables and enrolled devices retained |

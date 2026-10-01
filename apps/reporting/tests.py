@@ -4,21 +4,27 @@ Covers the ``mart.fact_ticket`` view logic (detection clock, durations, OLA
 flags, Asia/Bangkok date bucketing) and the ``mart.agg_ticket_daily``
 materialized view refreshed by ``refresh_reporting``.
 """
-from datetime import datetime, timedelta, timezone as py_tz
+from datetime import date, datetime, timedelta, timezone as py_tz
 from io import StringIO
 from unittest.mock import patch
 
+from django.contrib.auth.models import User
+from django.core import mail
 from django.core.management import call_command
-from django.test import TestCase, TransactionTestCase
+from django.core.management.base import CommandError
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.incidents import ola
-from apps.incidents.models import Ticket
+from apps.incidents.models import ProjectIncident, Ticket, TicketSubtask
 from apps.wazuh_ingest.models import WazuhAlert
 from apps.reporting import detection, snapshot
+from apps.reporting.management.commands.check_reporting_freshness import find_problems
+from apps.reporting.management.commands.refresh_reporting import hist_alert_window_start
 from apps.reporting.models import (
     AggAlertDaily, AggDetectionDaily, AggTicketDaily, DimSeverityMap,
-    FactAlert, FactTicket, SnapshotQueueDaily,
+    FactAlert, FactTicket, HistAlertDaily, SnapshotKpiDaily, SnapshotQueueDaily,
+    SnapshotResponseDaily, SnapshotWorkloadDaily,
 )
 
 UTC = py_tz.utc
@@ -346,8 +352,10 @@ class DetectionCaptureTests(TestCase):
         out = StringIO()
         with patch('apps.reporting.detection.fetch_detection_daily',
                    side_effect=RuntimeError('indexer down')):
-            call_command('refresh_reporting', '--no-concurrently', stdout=out)
-        # Detection failed but the snapshot still ran.
+            # The run now ends non-zero so the failure is visible…
+            with self.assertRaises(CommandError):
+                call_command('refresh_reporting', '--no-concurrently', stdout=out)
+        # …but detection failing still didn't stop the snapshot.
         self.assertIn('Detection capture failed', out.getvalue())
         self.assertEqual(AggDetectionDaily.objects.count(), 0)
         self.assertTrue(SnapshotQueueDaily.objects.exists())
@@ -448,3 +456,212 @@ class AggAlertDailyTests(TestCase):
         self.assertEqual(row.false_positive_count, 1)
         self.assertEqual(row.triage_ola_applicable, 2)
         self.assertEqual(row.triage_ola_met, 2)
+
+
+# ── Phase 3b (2026-10-01): history that cannot be rebuilt later ─────────── #
+
+ALERT_RUN = ('refresh_reporting', '--no-concurrently', '--skip-snapshot', '--skip-detection')
+SNAPSHOT_RUN = ('refresh_reporting', '--no-concurrently', '--skip-detection')
+
+
+def _local_noon(days_ago):
+    """An aware timestamp at local noon ``days_ago`` days back."""
+    day = timezone.localdate() - timedelta(days=days_ago)
+    return timezone.make_aware(datetime.combine(day, datetime.min.time()).replace(hour=12))
+
+
+class AlertHistoryTests(TestCase):
+    """mart.hist_alert_daily keeps the alert funnel after the raw-alert purge."""
+
+    def test_window_starts_two_days_inside_retention(self):
+        self.assertEqual(hist_alert_window_start(date(2026, 10, 1), 90), date(2026, 7, 5))
+        self.assertEqual(hist_alert_window_start(date(2026, 10, 1), 1), date(2026, 9, 30))
+
+    def test_copies_the_funnel_and_reruns_do_not_duplicate(self):
+        _make_alert(opensearch_id='h1', rule_level=13, timestamp=_local_noon(3),
+                    triage_status=WazuhAlert.TRIAGE_TRUE_POSITIVE,
+                    triaged_at=_local_noon(3) + timedelta(hours=1))
+        _make_alert(opensearch_id='h2', rule_level=13, timestamp=_local_noon(3))
+        for _ in range(2):
+            call_command(*ALERT_RUN)
+        row = HistAlertDaily.objects.get(
+            day=timezone.localdate() - timedelta(days=3), severity_band='High')
+        self.assertEqual(HistAlertDaily.objects.count(), 1)
+        self.assertEqual(row.ingested_count, 2)
+        self.assertEqual(row.triaged_count, 1)
+        self.assertEqual(row.true_positive_count, 1)
+
+    def test_recent_day_follows_late_triage(self):
+        alert = _make_alert(opensearch_id='late', rule_level=13, timestamp=_local_noon(2))
+        call_command(*ALERT_RUN)
+        WazuhAlert.objects.filter(pk=alert.pk).update(
+            triage_status=WazuhAlert.TRIAGE_FALSE_POSITIVE,
+            triaged_at=_local_noon(1))
+        call_command(*ALERT_RUN)
+        row = HistAlertDaily.objects.get(day=timezone.localdate() - timedelta(days=2))
+        self.assertEqual(row.triaged_count, 1)
+        self.assertEqual(row.false_positive_count, 1)
+
+    def test_frozen_day_keeps_its_counts_after_the_purge(self):
+        old_day = timezone.localdate() - timedelta(days=100)
+        HistAlertDaily.objects.create(
+            day=old_day, severity_band='High', captured_at=timezone.now(),
+            **{f: 5 for f in HistAlertDaily.COUNT_FIELDS})
+        # What the purge left behind: one linked alert on that day.
+        _make_alert(opensearch_id='survivor', rule_level=13, timestamp=_local_noon(100))
+        call_command(*ALERT_RUN)
+        self.assertEqual(
+            HistAlertDaily.objects.get(day=old_day, severity_band='High').ingested_count, 5)
+
+    def test_first_run_backfills_every_day_present(self):
+        _make_alert(opensearch_id='ancient', rule_level=13, timestamp=_local_noon(100))
+        call_command(*ALERT_RUN)
+        self.assertTrue(HistAlertDaily.objects.filter(
+            day=timezone.localdate() - timedelta(days=100)).exists())
+
+
+@override_settings(REPORTING_ALERT_EMAILS=['ops@example.com'])
+class ReportingAlertTests(TestCase):
+    """A failed or missed night is emailed and ends non-zero."""
+
+    def test_an_error_emails_once_and_exits_non_zero(self):
+        with patch('apps.reporting.detection.fetch_detection_daily',
+                   side_effect=RuntimeError('indexer down')):
+            with self.assertRaises(CommandError):
+                call_command('refresh_reporting', '--no-concurrently', stdout=StringIO())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('refresh_reporting failed', mail.outbox[0].subject)
+        self.assertIn('indexer down', mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].to, ['ops@example.com'])
+
+    def test_a_clean_run_sends_nothing(self):
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(REPORTING_ALERT_EMAILS=[])
+    def test_no_recipients_still_fails_the_run(self):
+        with patch('apps.reporting.detection.fetch_detection_daily',
+                   side_effect=RuntimeError('indexer down')):
+            with self.assertRaises(CommandError):
+                call_command('refresh_reporting', '--no-concurrently', stdout=StringIO())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_broken_mail_server_does_not_hide_the_failure(self):
+        with patch('apps.reporting.detection.fetch_detection_daily',
+                   side_effect=RuntimeError('indexer down')), \
+                patch('apps.reporting.alerts.send_mail', side_effect=OSError('smtp down')):
+            with self.assertRaises(CommandError):
+                call_command('refresh_reporting', '--no-concurrently', stdout=StringIO())
+
+    @override_settings(OPENSEARCH_HOST='')
+    def test_watchdog_flags_a_night_that_never_ran(self):
+        with self.assertRaises(CommandError):
+            call_command('check_reporting_freshness', stdout=StringIO(), stderr=StringIO())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('No nightly snapshot', mail.outbox[0].body)
+
+    @override_settings(OPENSEARCH_HOST='')
+    def test_watchdog_is_quiet_after_a_good_night(self):
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+        out = StringIO()
+        call_command('check_reporting_freshness', stdout=out)
+        self.assertIn('fresh', out.getvalue())
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(OPENSEARCH_HOST='')
+    def test_watchdog_flags_missing_alert_history(self):
+        SnapshotKpiDaily.objects.create(
+            snapshot_date=timezone.localdate(), open_tickets=0, unassigned_open=0,
+            emergency_open_tickets=0, emergency_open_incidents=0, oldest_open_hours=None,
+            response_open=0, response_aged_7d=0, captured_at=timezone.now())
+        _make_alert(opensearch_id='yday', rule_level=13, timestamp=_local_noon(1))
+        problems = find_problems()
+        self.assertEqual(len(problems), 1)
+        self.assertIn('alert funnel history', problems[0])
+
+    @override_settings(OPENSEARCH_HOST='indexer.example')
+    def test_watchdog_flags_stale_detection_when_the_indexer_is_wired(self):
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+        self.assertTrue(any('Detection capture' in p for p in find_problems()))
+
+
+class ExtraSnapshotTests(TestCase):
+    """snapshot_kpi_daily / snapshot_workload_daily / snapshot_response_daily."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.analyst = User.objects.create_user('snap_analyst', password='pw')
+        cls.t2 = User.objects.create_user('snap_t2', password='pw')
+
+    def test_kpi_row_counts_the_open_queue(self):
+        project = ProjectIncident.objects.create(title='bundle')
+        for _ in range(2):
+            t = _make_ticket(severity='Critical', is_emergency=True)
+            t.project_incident = project
+            t.save(update_fields=['project_incident'])
+        _make_ticket(severity='High', is_emergency=True, assigned_to=self.analyst)
+        _make_ticket(severity='High', status=Ticket.STATUS_APPROVED, is_emergency=True)
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+
+        kpi = SnapshotKpiDaily.objects.get(snapshot_date=timezone.localdate())
+        self.assertEqual(kpi.open_tickets, 3)
+        self.assertEqual(kpi.unassigned_open, 2)
+        self.assertEqual(kpi.emergency_open_tickets, 3)
+        self.assertEqual(kpi.emergency_open_incidents, 2)     # bundle counts once
+        self.assertIsNotNone(kpi.oldest_open_hours)
+
+    def test_workload_keeps_assignee_unassigned_and_t2_claims(self):
+        _make_ticket(severity='High', assigned_to=self.analyst)
+        _make_ticket(severity='High', assigned_to=self.analyst)
+        _make_ticket(severity='Medium', t2_claimed_by=self.t2)        # unassigned
+        _make_ticket(severity='High', assigned_to=self.analyst, status=Ticket.STATUS_APPROVED)
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+
+        rows = SnapshotWorkloadDaily.objects.filter(snapshot_date=timezone.localdate())
+        mine = rows.get(kind='assigned', user_id=self.analyst.pk)
+        self.assertEqual(mine.open_count, 2)
+        self.assertEqual(mine.username, 'snap_analyst')
+        unassigned = rows.get(kind='assigned', user_id__isnull=True)
+        self.assertEqual(unassigned.open_count, 1)
+        claimed = rows.get(kind='t2_claimed')
+        self.assertEqual((claimed.user_id, claimed.open_count), (self.t2.pk, 1))
+
+    def test_response_rows_use_the_dashboard_open_rule(self):
+        hc = _make_ticket(severity='Critical')
+        low = _make_ticket(severity='Low')
+        closed = _make_ticket(severity='High', status=Ticket.STATUS_APPROVED)
+        aged = TicketSubtask.objects.create(ticket=hc, subtask_type=TicketSubtask.TYPE_PENTEST,
+                                            title='p', status=TicketSubtask.STATUS_OPEN)
+        TicketSubtask.objects.filter(pk=aged.pk).update(
+            created_at=timezone.now() - timedelta(days=9))
+        TicketSubtask.objects.create(ticket=low, subtask_type=TicketSubtask.TYPE_VA,
+                                     title='v', status=TicketSubtask.STATUS_IN_PROGRESS)
+        TicketSubtask.objects.create(ticket=low, subtask_type=TicketSubtask.TYPE_VA,
+                                     title='done', status=TicketSubtask.STATUS_DONE)
+        TicketSubtask.objects.create(ticket=closed, subtask_type=TicketSubtask.TYPE_VA,
+                                     title='orphan', status=TicketSubtask.STATUS_OPEN)
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+
+        rows = {(r.subtask_type, r.status, r.aged_7d, r.hc_ticket): r.open_count
+                for r in SnapshotResponseDaily.objects.filter(snapshot_date=timezone.localdate())}
+        self.assertEqual(rows, {
+            (TicketSubtask.TYPE_PENTEST, TicketSubtask.STATUS_OPEN, True, True): 1,
+            (TicketSubtask.TYPE_VA, TicketSubtask.STATUS_IN_PROGRESS, False, False): 1,
+        })
+        kpi = SnapshotKpiDaily.objects.get(snapshot_date=timezone.localdate())
+        self.assertEqual((kpi.response_open, kpi.response_aged_7d), (2, 1))
+
+    def test_same_night_rerun_rewrites_instead_of_doubling(self):
+        _make_ticket(severity='High', assigned_to=self.analyst)
+        for _ in range(2):
+            call_command(*SNAPSHOT_RUN, stdout=StringIO())
+        today = timezone.localdate()
+        self.assertEqual(SnapshotKpiDaily.objects.filter(snapshot_date=today).count(), 1)
+        self.assertEqual(
+            SnapshotWorkloadDaily.objects.get(snapshot_date=today, kind='assigned').open_count, 1)
+
+    def test_empty_queue_still_marks_the_night(self):
+        call_command(*SNAPSHOT_RUN, stdout=StringIO())
+        kpi = SnapshotKpiDaily.objects.get(snapshot_date=timezone.localdate())
+        self.assertEqual(kpi.open_tickets, 0)
+        self.assertIsNone(kpi.oldest_open_hours)

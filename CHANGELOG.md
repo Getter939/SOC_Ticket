@@ -46,6 +46,28 @@ release (tag) dates.
   - Executive and SOC Manager manuals describe both and are rebuilt; the
     screenshot checklist gains `MGR-runway` and asks for `EXE-backlog-row` and
     `MGR-dashboard` to be re-captured.
+- **Reporting mart keeps history that can't be rebuilt, and says when a night
+  fails** (migration `reporting 0006`; nothing on the dashboards changes yet).
+  - Alert-funnel history: `mart.hist_alert_daily` stores each day's alert
+    counts (ingested, triaged, true/false positive, escalated, became a Ticket,
+    triage OLA). `agg_alert_daily` is recomputed from raw alerts, which the
+    90-day purge deletes, so it would have lost those days. Days near the purge
+    edge are frozen so a half-purged day never overwrites good numbers. The first
+    run copies every day still present.
+  - Three new nightly snapshots: the KPI figures (open, unassigned, emergency
+    Tickets and incidents, oldest open case, response requests and how many are
+    over 7 days), who holds each open case (assignee and Tier 2 claim), and the
+    response-request backlog by function. None of these can be rebuilt for a
+    past night.
+  - A run with any error now emails `REPORTING_ALERT_EMAILS` (new `.env`
+    setting) and exits non-zero. A new `check_reporting_freshness` command,
+    meant for a 07:00 `SOC-Check-Reporting` task, emails when the night's data
+    never arrived.
+  - The Project-Incident-aware incident count moved from the dashboard view to
+    `Ticket.objects.incident_count()`, so the mart and the dashboards count
+    incidents the same way.
+  - Rollout steps: `docs/operations/reporting-layer-operations.md` §3G. Plan and
+    the dashboard ideas built on this: `docs/architecture/reporting-layer-next-steps.md`.
 
 ### Changed
 - **Executive dashboard simplified to four answers first.** The page used to

@@ -319,6 +319,13 @@ DEFAULT_FROM_EMAIL = config(
     'DEFAULT_FROM_EMAIL', default=config('EMAIL_HOST_USER', default='')
 )
 
+# Who is emailed when the nightly reporting job (refresh_reporting) or its
+# 07:00 watchdog (check_reporting_freshness) finds a problem. Comma-separated;
+# empty = log only. A missed night of mart snapshots can't be recaptured.
+REPORTING_ALERT_EMAILS = [
+    a.strip() for a in config('REPORTING_ALERT_EMAILS', default='').split(',') if a.strip()
+]
+
 # ── Site URL (used in email notification links) ────────────────────────────
 # Set to your public hostname in production, e.g. https://soc.example.com
 SITE_URL = config('SITE_URL', default='http://localhost:8088')

@@ -1398,7 +1398,11 @@ Use this if both databases are lost, or if the failure is logical (bad migration
    Check `manifest.json` for what it contains, and its timestamp against when
    you last changed production's configuration.
 4. Restore media: extract `media.zip` from the archive back into `MEDIA_ROOT`.
-5. Rebuild reporting matviews: `python manage.py refresh_reporting`.
+5. Rebuild reporting matviews: `python manage.py refresh_reporting`. It also
+   writes today's nightly snapshots. If it exits non-zero, read the errors it
+   printed (and emailed to `REPORTING_ALERT_EMAILS`) before carrying on; the
+   07:00 `SOC-Check-Reporting` task emails until a run lands. See
+   [reporting-layer-operations.md](reporting-layer-operations.md) §7.
 6. Repoint the app (`.env`: `DB_HOST`, `DB_PORT`, `ALLOWED_HOSTS`, `SITE_URL`),
    start the pre-staged IIS site and Waitress service (§2.8), then update DNS.
 7. **Reconnect ingestion and fix the watermark.** Check `OPENSEARCH_*`
